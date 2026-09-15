@@ -10,6 +10,7 @@ import { DEFAULT_TIMEZONE, partsInZone } from "@/lib/format/timezones";
 import type { ResolveContext, BoardDay, ContextRun } from "@/lib/command/resolve";
 import { voiceServiceUrl, readSentence, type Reader } from "@/lib/voice/readSentence";
 import { browserRecognizer, type Recognizer } from "@/lib/voice/recognizer";
+import { localRecognizer, whisperServiceUrl, withFallback } from "@/lib/voice/localRecognizer";
 import { operatorViewFor, productViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useAbsences } from "./hooks/useAbsences";
@@ -71,8 +72,20 @@ const COMMAND_BAR_READER: Reader | null = voiceServiceUrl() ? readSentence : nul
 /** S46-a: computed once at module level, beside `COMMAND_BAR_READER` --
  *  `browserRecognizer()` only reads `window` for the constructor, so this
  *  makes no request and starts no session; `null` (no browser recogniser)
- *  leaves the bar's `recognizer` prop at its own default, unchanged. */
-const BOARD_RECOGNIZER: Recognizer | null = browserRecognizer();
+ *  leaves the bar's `recognizer` prop at its own default, unchanged.
+ *
+ * S57-a (brief §4, design-plan §19.102 / D131 §3): `VITE_WHISPER_URL` set
+ * picks the local (whisper.cpp) recogniser first, falling back once to the
+ * browser's own if the service does not answer; unset leaves this exactly
+ * as S46-a left it. Computing `browserRecognizer()` unconditionally (not
+ * only when there is no local one) keeps that fallback available even when
+ * a local URL is configured. */
+const WHISPER_URL = whisperServiceUrl();
+const BROWSER_RECOGNIZER: Recognizer | null = browserRecognizer();
+const BOARD_RECOGNIZER: Recognizer | null =
+  WHISPER_URL !== null
+    ? withFallback(localRecognizer(WHISPER_URL), BROWSER_RECOGNIZER)
+    : BROWSER_RECOGNIZER;
 
 /**
  * The board (brief P1-4a read-only + P1-4b interactions + P1-4c responsive
@@ -915,6 +928,15 @@ export default function BoardPage() {
                   });
                 }
               }}
+              // S58 / R-415 (D132 item 4): a headcount sentence writes one
+              // existing field, never a create or a re-time -- through the
+              // SAME `updateRunFields` mutation the job panel's own
+              // headcount field uses (`saveRunFields`'s own door, no second
+              // one), keyed on the run and number the resolver already
+              // found.
+              onSetHeadcount={(resolved) =>
+                dragApi.setHeadcountFromCommand(resolved.runId, resolved.headcount)
+              }
               // S47 / R-395: told what is in question -- drawn on the board
               // through `HighlightProvider` below.
               onHighlight={setHighlight}

@@ -279,6 +279,11 @@ describe("VR8: the schema matches the four canonical forms field for field", () 
     { sentence: "cover Sam with Ana on Cell 1 today", intent: "replace" },
     { sentence: "swap Sam and Ana on Cell 1 tomorrow", intent: "swap" },
     { sentence: "copy Monday to Tuesday for Cell 1", intent: "copy" },
+    // S58 (D132 items 2 and 4): split and headcount join the walk -- same
+    // field-for-field check, same $defs indirection, neither ever inside a
+    // several (D132's own words for headcount; D130 item 2 for split).
+    { sentence: "split Sam on Cell 1 at 12 today", intent: "split" },
+    { sentence: "make the Housing A job on Cell 1 4 people", intent: "headcount" },
   ];
 
   for (const { sentence, intent } of cases) {
@@ -824,12 +829,20 @@ describe("VR18 (S55): a week kind is garbled everywhere except a copy's from/to"
 
     // Every branch with a `day` (and unassign's own `until`) points at
     // `day_word` alone -- `week_word` never appears there -- so the served
-    // model is physically unable to emit a week kind on any of them.
-    for (const name of ["assign", "book", "unassign", "move", "replace", "swap"]) {
+    // model is physically unable to emit a week kind on any of them. S58:
+    // assign and book are the one exception, gaining `repeat_day_word`
+    // alongside `day_word` (R-416) -- `week_word` still never reaches them.
+    for (const name of ["unassign", "move", "replace", "swap"]) {
       const branch = root.$defs[name];
       const dayProp = branch.properties?.day as { oneOf?: JsonSchemaNode[] } | undefined;
       const refs = (dayProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
       expect(refs, `${name}.day`).toEqual(["#/$defs/day_word"]);
+    }
+    for (const name of ["assign", "book"]) {
+      const branch = root.$defs[name];
+      const dayProp = branch.properties?.day as { oneOf?: JsonSchemaNode[] } | undefined;
+      const refs = (dayProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
+      expect(refs, `${name}.day`).toEqual(["#/$defs/day_word", "#/$defs/repeat_day_word"]);
     }
     const untilProp = root.$defs.unassign.properties?.until as
       { oneOf?: JsonSchemaNode[] } | undefined;
@@ -939,5 +952,367 @@ describe("VR19 (S55, D130 item 2): a several never holds replace/swap/copy", () 
     if (!copyParsed.ok) return;
     const copyForm: unknown = JSON.parse(JSON.stringify(copyParsed.command));
     expect(decodeCommand({ intent: "several", commands: [validInnerAssign, copyForm] })).toBeNull();
+  });
+});
+
+// S58 (docs/agent-briefs/s58-c-decoder-brief.md, R-412, design section
+// 19.103/D132 item 1): a re-time by one edge -- `MoveCommand.adjust`, now
+// REQUIRED. Non-null implies `toPlace`, `span` and `shift` are all null.
+describe("VR20 (S58, R-412): move's adjust decodes", () => {
+  it('VR20: a "by" adjust ("extend Sam\'s block by an hour") round-trips through decodeCommand', () => {
+    const parsed = parseCommand("extend Sam's block by an hour");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.command.intent).toBe("move");
+    if (parsed.command.intent === "move") {
+      expect(parsed.command.adjust).toEqual({ edge: "end", by: 60 });
+    }
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it('VR20: an "at" adjust ("move Sam\'s start to 9") round-trips through decodeCommand', () => {
+    const parsed = parseCommand("move Sam's start to 9");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.command.intent).toBe("move");
+    if (parsed.command.intent === "move") {
+      expect(parsed.command.adjust).toEqual({ edge: "start", at: { hour: 9, minute: 0 } });
+    }
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR20: an ordinary move's adjust is null and round-trips through decodeCommand", () => {
+    const parsed = parseCommand("move Sam on Cell 1 in Line 1 to Cell 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.command.intent !== "move") return;
+    expect(parsed.command.adjust).toBeNull();
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR20: a missing adjust key is garbled", () => {
+    const parsed = parseCommand("move Sam on Cell 1 in Line 1 to Cell 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    delete valid.adjust;
+    expect(decodeCommand(valid)).toBeNull();
+  });
+
+  it("VR20: an adjust with span also set is garbled", () => {
+    const parsed = parseCommand("extend Sam's block by an hour");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const both = {
+      ...(parsed.command as unknown as Record<string, unknown>),
+      span: { start: { hour: 10, minute: 0 }, end: { hour: 12, minute: 0 } },
+    };
+    expect(decodeCommand(both)).toBeNull();
+  });
+
+  it("VR20: an adjust with shift also set is garbled", () => {
+    const parsed = parseCommand("extend Sam's block by an hour");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const both = { ...(parsed.command as unknown as Record<string, unknown>), shift: "2" };
+    expect(decodeCommand(both)).toBeNull();
+  });
+
+  it("VR20: an adjust with toPlace also set is garbled (AJ16: an adjust never carries a destination)", () => {
+    const parsed = parseCommand("extend Sam's block by an hour");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const both = {
+      ...(parsed.command as unknown as Record<string, unknown>),
+      toPlace: ["Cell 2"],
+    };
+    expect(decodeCommand(both)).toBeNull();
+  });
+
+  it("VR20: by = 0 is garbled (AJ5: never a no-op)", () => {
+    const parsed = parseCommand("move Sam on Cell 1 in Line 1 to Cell 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const zero = {
+      ...(parsed.command as unknown as Record<string, unknown>),
+      toPlace: null,
+      adjust: { edge: "end", by: 0 },
+    };
+    expect(decodeCommand(zero)).toBeNull();
+  });
+
+  it("VR20: an adjust naming both by and at, or neither, is garbled", () => {
+    const parsed = parseCommand("move Sam on Cell 1 in Line 1 to Cell 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const base = { ...(parsed.command as unknown as Record<string, unknown>), toPlace: null };
+    expect(
+      decodeCommand({ ...base, adjust: { edge: "end", by: 60, at: { hour: 9, minute: 0 } } }),
+    ).toBeNull();
+    expect(decodeCommand({ ...base, adjust: { edge: "end" } })).toBeNull();
+  });
+
+  it("VR20: move's schema branch requires adjust, and $defs.adjust is the two-variant union (by non-zero, at a clock_time)", () => {
+    type JsonSchemaNode = {
+      $ref?: string;
+      properties?: Record<string, unknown>;
+      required?: string[];
+      oneOf?: JsonSchemaNode[];
+    };
+    const root = formSchema as { $defs: Record<string, JsonSchemaNode> };
+    expect(root.$defs.move.required).toContain("adjust");
+    expect(root.$defs.move.properties?.adjust).toEqual({
+      oneOf: [{ type: "null" }, { $ref: "#/$defs/adjust" }],
+    });
+    const variants = root.$defs.adjust.oneOf ?? [];
+    expect(variants).toHaveLength(2);
+    const byVariant = variants.find((v) => v.required?.includes("by"));
+    const atVariant = variants.find((v) => v.required?.includes("at"));
+    expect(byVariant?.properties?.by).toEqual({ type: "integer", not: { const: 0 } });
+    expect(atVariant?.properties?.at).toEqual({ $ref: "#/$defs/clock_time" });
+  });
+});
+
+// S58 (R-413, design section 19.103/D132 item 2): "split Sam's block at
+// noon" -- board-answered like replace/swap/copy, never inside a several.
+describe("VR21 (S58, R-413): split decodes", () => {
+  it('VR21: a well-formed split ("split Sam on Cell 1 at 12 today") round-trips through decodeCommand', () => {
+    const parsed = parseCommand("split Sam on Cell 1 at 12 today");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.command.intent).toBe("split");
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it('VR21: place may be empty ("split Sam\'s block at noon")', () => {
+    const parsed = parseCommand("split Sam's block at noon");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.command.intent !== "split") return;
+    expect(parsed.command.place).toEqual([]);
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR21: a missing at is garbled", () => {
+    const parsed = parseCommand("split Sam's block at noon");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    delete valid.at;
+    expect(decodeCommand(valid)).toBeNull();
+  });
+
+  it("VR21: extra top-level keys are ignored on a split", () => {
+    const parsed = parseCommand("split Sam's block at noon");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    const withExtras = { ...valid, unexpectedTopLevel: "surprise" };
+    expect(decodeCommand(withExtras)).toEqual(parsed.command);
+  });
+
+  it("VR21: a split inside a several garbles the whole several (D130 item 2, widened by S58)", () => {
+    const assignParsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(assignParsed.ok).toBe(true);
+    const splitParsed = parseCommand("split Sam's block at noon");
+    expect(splitParsed.ok).toBe(true);
+    if (!assignParsed.ok || !splitParsed.ok) return;
+    const assignForm: unknown = JSON.parse(JSON.stringify(assignParsed.command));
+    const splitForm: unknown = JSON.parse(JSON.stringify(splitParsed.command));
+    expect(decodeCommand({ intent: "several", commands: [assignForm, splitForm] })).toBeNull();
+  });
+});
+
+// S58 (R-415, design section 19.103/D132 item 4): "make the Housing A job on
+// Cell 1 4 people" -- one existing write, never inside a several.
+describe("VR22 (S58, R-415): headcount decodes", () => {
+  it('VR22: a well-formed headcount ("make the Housing A job on Cell 1 4 people") round-trips through decodeCommand', () => {
+    const parsed = parseCommand("make the Housing A job on Cell 1 4 people");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.command.intent).toBe("headcount");
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR22: a headcount naming a span and a shift both round-trip through decodeCommand", () => {
+    const spanParsed = parseCommand("make the Housing A job on Cell 1 today from 8 to 4 4 people");
+    expect(spanParsed.ok).toBe(true);
+    if (spanParsed.ok) {
+      const roundTripped: unknown = JSON.parse(JSON.stringify(spanParsed.command));
+      expect(decodeCommand(roundTripped)).toEqual(spanParsed.command);
+    }
+
+    const shiftParsed = parseCommand("make the Housing A job on Cell 1 for shift 2 3 people");
+    expect(shiftParsed.ok).toBe(true);
+    if (shiftParsed.ok) {
+      const roundTripped: unknown = JSON.parse(JSON.stringify(shiftParsed.command));
+      expect(decodeCommand(roundTripped)).toEqual(shiftParsed.command);
+    }
+  });
+
+  it("VR22: headcount 0 and headcount 100 are both garbled (HC6/HC7's own bound)", () => {
+    const parsed = parseCommand("make the Housing A job on Cell 1 4 people");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, headcount: 0 })).toBeNull();
+    expect(decodeCommand({ ...valid, headcount: 100 })).toBeNull();
+  });
+
+  it("VR22: a missing headcount key is garbled", () => {
+    const parsed = parseCommand("make the Housing A job on Cell 1 4 people");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    delete valid.headcount;
+    expect(decodeCommand(valid)).toBeNull();
+  });
+
+  it("VR22: naming both a span and a shift is garbled", () => {
+    const parsed = parseCommand("make the Housing A job on Cell 1 4 people");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const both = {
+      ...(parsed.command as unknown as Record<string, unknown>),
+      span: { start: { hour: 8, minute: 0 }, end: { hour: 16, minute: 0 } },
+      shift: "2",
+    };
+    expect(decodeCommand(both)).toBeNull();
+  });
+
+  it("VR22: an empty place is garbled (a headcount always names the run's own cell)", () => {
+    const parsed = parseCommand("make the Housing A job on Cell 1 4 people");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const empty = { ...(parsed.command as unknown as Record<string, unknown>), place: [] };
+    expect(decodeCommand(empty)).toBeNull();
+  });
+
+  it("VR22: a headcount inside a several garbles the whole several (never part of a lot)", () => {
+    const assignParsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(assignParsed.ok).toBe(true);
+    const headcountParsed = parseCommand("make the Housing A job on Cell 1 4 people");
+    expect(headcountParsed.ok).toBe(true);
+    if (!assignParsed.ok || !headcountParsed.ok) return;
+    const assignForm: unknown = JSON.parse(JSON.stringify(assignParsed.command));
+    const headcountForm: unknown = JSON.parse(JSON.stringify(headcountParsed.command));
+    expect(decodeCommand({ intent: "several", commands: [assignForm, headcountForm] })).toBeNull();
+  });
+
+  it("VR22: the headcount schema branch bounds headcount 1-99 and requires exactly the form's keys", () => {
+    type JsonSchemaNode = { properties?: Record<string, unknown>; required?: string[] };
+    const root = formSchema as { $defs: Record<string, JsonSchemaNode> };
+    const branch = root.$defs.headcount;
+    expect(branch.properties?.headcount).toEqual({ type: "integer", minimum: 1, maximum: 99 });
+    expect([...(branch.required ?? [])].sort()).toEqual(
+      ["day", "headcount", "intent", "place", "product", "shift", "span"].sort(),
+    );
+  });
+});
+
+// S58 (R-416, design section 19.103/D132 item 5): "every weekday this week" /
+// "every day next week" -- two REPEAT day kinds, legal ONLY on an assign's or
+// a book's own `day` (the house rule the brief calls out explicitly: the
+// schema is the fence, and must be exactly as strict as the decoder).
+describe("VR23 (S58, R-416): a repeat day word decodes only on assign/book's own day", () => {
+  it('VR23: "weekdays" on an assign round-trips through decodeCommand', () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 every weekday this week 8 to 4");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.command.intent !== "assign") return;
+    expect(parsed.command.day).toEqual({ kind: "weekdays", week: "this_week" });
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it('VR23: "every_day" on a book round-trips through decodeCommand', () => {
+    const parsed = parseCommand("book Housing A on Cell 2 every day next week 6 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.command.intent !== "book") return;
+    expect(parsed.command.day).toEqual({ kind: "every_day", week: "next_week" });
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it("VR23: a repeat day on an unassign's day is garbled", () => {
+    const parsed = parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, day: { kind: "weekdays", week: "this_week" } })).toBeNull();
+  });
+
+  it("VR23: a repeat day on an unassign's until is garbled", () => {
+    const parsed = parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, until: { kind: "every_day", week: "this_week" } })).toBeNull();
+  });
+
+  it("VR23: a repeat day on a move's, a replace's, a swap's or a split's day is garbled", () => {
+    const moveParsed = parseCommand("move Sam on Cell 1 in Line 1 to Cell 2");
+    expect(moveParsed.ok).toBe(true);
+    if (moveParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(moveParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, day: { kind: "weekdays", week: "next_week" } })).toBeNull();
+    }
+
+    const replaceParsed = parseCommand("cover Sam with Ana on Cell 1 today");
+    expect(replaceParsed.ok).toBe(true);
+    if (replaceParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(replaceParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, day: { kind: "every_day", week: "this_week" } })).toBeNull();
+    }
+
+    const swapParsed = parseCommand("swap Sam and Ana");
+    expect(swapParsed.ok).toBe(true);
+    if (swapParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(swapParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, day: { kind: "weekdays", week: "this_week" } })).toBeNull();
+    }
+
+    const splitParsed = parseCommand("split Sam on Cell 1 at 12 today");
+    expect(splitParsed.ok).toBe(true);
+    if (splitParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(splitParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, day: { kind: "every_day", week: "next_week" } })).toBeNull();
+    }
+  });
+
+  it("VR23: the schema itself admits repeat_day_word only on assign.day and book.day -- week_word never joins it there", () => {
+    type JsonSchemaNode = {
+      $ref?: string;
+      properties?: Record<string, unknown>;
+      oneOf?: JsonSchemaNode[];
+    };
+    const root = formSchema as { $defs: Record<string, JsonSchemaNode> };
+
+    const repeatKinds = (root.$defs.repeat_day_word.oneOf ?? [])
+      .map((n) => (n.properties?.kind as { const?: string } | undefined)?.const)
+      .sort();
+    expect(repeatKinds).toEqual(["every_day", "weekdays"]);
+
+    for (const name of ["assign", "book"]) {
+      const dayProp = root.$defs[name].properties?.day as { oneOf?: JsonSchemaNode[] } | undefined;
+      const refs = (dayProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
+      expect(refs, `${name}.day`).toEqual(["#/$defs/day_word", "#/$defs/repeat_day_word"]);
+    }
+    for (const name of ["unassign", "move", "replace", "swap", "split"]) {
+      const dayProp = root.$defs[name].properties?.day as { oneOf?: JsonSchemaNode[] } | undefined;
+      const refs = (dayProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
+      expect(refs, `${name}.day`).toEqual(["#/$defs/day_word"]);
+    }
+    const untilProp = root.$defs.unassign.properties?.until as
+      { oneOf?: JsonSchemaNode[] } | undefined;
+    const untilRefs = (untilProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
+    expect(untilRefs).toEqual(["#/$defs/day_word"]);
   });
 });

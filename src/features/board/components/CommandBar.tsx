@@ -24,6 +24,7 @@ import type {
   ResolvedBook,
   ResolvedUnassign,
   ResolvedMove,
+  ResolvedHeadcount,
   Question,
   Candidate,
 } from "@/lib/command/resolve";
@@ -246,6 +247,15 @@ export interface CommandBarProps {
    *  the create pop-up preset under `presetMove`. */
   onMove: (resolved: ResolvedMove, anchor: { x: number; y: number }) => void;
   /**
+   * S58 / R-415 (D132 item 4): a "job's headcount" sentence resolved to one
+   * existing run and one existing write -- the caller commits it through the
+   * SAME field-edit mutation the job panel's own headcount field uses (no
+   * second door), then the bar shows the readout `resolveHeadcountCommand`
+   * already wrote. Never part of a lot (`ResolvedHeadcount` is not a member
+   * of `ResolvedAny` below -- a headcount can never reach `onRunLot`).
+   */
+  onSetHeadcount: (resolved: ResolvedHeadcount, anchor: { x: number; y: number }) => void;
+  /**
    * S51 / R-400 (design §19.98/D127): a sentence that reads as SEVERAL
    * commands resolves them one at a time (below) and, on the lot's single
    * "yes", calls this once with every resolved command IN ORDER -- the
@@ -331,6 +341,23 @@ function failureToStatus(failure: ParseFailure): Status {
   ) {
     return { kind: "shape", message: `I could not read "${failure.text}". ${shape}` };
   }
+  // S58 (R-412/R-413/R-415, D132): the grammar's own three group-2 failures
+  // -- never the offending text (brief §3): `which_job` (S58-a's "make it 4
+  // people" -- the bar keeps no memory of "it") has no text at all to name,
+  // and `bad_adjust`/`no_split_time`'s own `text` is not what a person needs
+  // to hear back; a plain "say it this way" is plainer.
+  if (failure.kind === "which_job") {
+    return {
+      kind: "shape",
+      message: `Say which job — "make the Housing A job on Cell 1 4 people".`,
+    };
+  }
+  if (failure.kind === "bad_adjust") {
+    return { kind: "shape", message: `Say how much — "by an hour", or "at 3".` };
+  }
+  if (failure.kind === "no_split_time") {
+    return { kind: "shape", message: `Say where to split — "at noon".` };
+  }
   return { kind: "shape", message: shape };
 }
 
@@ -344,6 +371,7 @@ export function CommandBar({
   onRetimeRun,
   onUnassign,
   onMove,
+  onSetHeadcount,
   onRunLot,
   reader = null,
   recognizer = null,
@@ -507,6 +535,10 @@ export function CommandBar({
         // `resolved.target.kind` (keep the types honest: never build a
         // ResolvedCommand-shaped call to reach onRetime from here).
         onMove(resolved, anchorOfInput());
+      } else if (resolved.intent === "headcount") {
+        // S58 (R-415, D132 item 4): one existing write, never a create or a
+        // re-time -- see `onSetHeadcount`'s own doc above.
+        onSetHeadcount(resolved, anchorOfInput());
       } else {
         if (resolved.target.kind === "retime") {
           onRetime(resolved, anchorOfInput());
@@ -552,6 +584,33 @@ export function CommandBar({
     const command = lot.commands[lot.index];
     const resolution = resolveCommand(command, ctx);
     if (resolution.ok) {
+      // S58: `resolveCommand`'s per-shape overloads do not cover the
+      // `SingleCommand` union directly (TypeScript overload resolution does
+      // not distribute over a union argument unless one signature's
+      // parameter equals it exactly), so this call falls through to the
+      // generic `Command` overload and its return type now includes
+      // `ResolvedHeadcount` -- a shape `SingleCommand` can never actually
+      // produce THROUGH THE RULES (`HeadcountCommand` is not a member of
+      // that union; `expandCommand` always hands a headcount back
+      // UNCHANGED, never wrapped in a `several`, so it never reaches a
+      // lot's own commands array by that path). The MODEL path has no such
+      // guarantee (brief §3, reviewer scenario 6): `decode.ts` owns keeping
+      // a `headcount` form out of a decoded several's own commands, but a
+      // garbled answer that slips one in anyway must not leave the bar
+      // silently stuck on whatever status was showing before this ran (a
+      // bare `return` here used to do exactly that -- "Reading…" frozen on
+      // screen forever, indistinguishable from a hang). Reviewer fix
+      // (S58-d lane review, 14 Sept): drop the lot and say so in plain
+      // words, the same shape `several_unsupported` already reports for a
+      // several the resolver refuses outright.
+      if (resolution.resolved.intent === "headcount") {
+        lotRef.current = null;
+        setStatus({
+          kind: "shape",
+          message: "I could not read that as several commands. Say them one at a time.",
+        });
+        return;
+      }
       lotRef.current = {
         ...lot,
         done: [...lot.done, resolution.resolved],
@@ -1001,6 +1060,48 @@ export function CommandBar({
       return {
         kind: "question",
         message: `No shift on ${question.cell} covers ${question.time}.`,
+        candidates: [],
+      };
+    }
+    // S58 (R-412 to R-415, D132/brief §3): the bar's own words for the five
+    // new group-2 `expandCommand`/resolver questions -- plainer, or with
+    // fields `describeQuestion`'s generic sentence does not carry, than the
+    // resolver's own wording (which still backs the resolver-defensive
+    // `bad_adjust`/`bad_repeat_day` kinds below, unchanged). No candidates on
+    // any of these: a cancel word or fresh typing clears them exactly as any
+    // other question does.
+    if (question.kind === "adjust_inverts") {
+      return {
+        kind: "question",
+        message: `${question.person}'s ${question.block} block would end before it starts; say a smaller change.`,
+        candidates: [],
+      };
+    }
+    if (question.kind === "adjust_off_day") {
+      return {
+        kind: "question",
+        message: `${question.person}'s ${question.block} block would leave the day; say a time inside it.`,
+        candidates: [],
+      };
+    }
+    if (question.kind === "split_outside") {
+      return {
+        kind: "question",
+        message: `${question.at} is outside ${question.person}'s block${question.blocks.length > 1 ? "s" : ""} (${question.blocks.join(", ")}); say a time inside one.`,
+        candidates: [],
+      };
+    }
+    if (question.kind === "no_job") {
+      return {
+        kind: "question",
+        message: `There is no ${question.product} job on ${question.cell} ${question.when}; book it first, or say the hours.`,
+        candidates: [],
+      };
+    }
+    if (question.kind === "which_job") {
+      return {
+        kind: "question",
+        message: `${question.product} runs more than once on ${question.cell}: ${question.runs.join(", ")}. Say the hours.`,
         candidates: [],
       };
     }

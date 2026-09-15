@@ -1,11 +1,39 @@
 {
   "$defs": {
+    "adjust": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "by": { "type": "integer", "not": { "const": 0 } },
+            "edge": { "enum": ["end", "start"] }
+          },
+          "required": ["by", "edge"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "at": { "$ref": "#/$defs/clock_time" },
+            "edge": { "enum": ["end", "start"] }
+          },
+          "required": ["at", "edge"]
+        }
+      ]
+    },
     "assign": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "attach": { "type": "null" },
-        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "day": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/day_word" },
+            { "$ref": "#/$defs/repeat_day_word" }
+          ]
+        },
         "end": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] },
         "existing": { "type": "null" },
         "intent": { "const": "assign" },
@@ -32,7 +60,13 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "day": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/day_word" },
+            { "$ref": "#/$defs/repeat_day_word" }
+          ]
+        },
         "end": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] },
         "existing": { "type": "null" },
         "headcount": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
@@ -114,10 +148,25 @@
         }
       ]
     },
+    "headcount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "headcount": { "type": "integer", "minimum": 1, "maximum": 99 },
+        "intent": { "const": "headcount" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "product": { "type": "string" },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+      },
+      "required": ["day", "headcount", "intent", "place", "product", "shift", "span"]
+    },
     "move": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "adjust": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/adjust" }] },
         "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
         "existing": { "type": "null" },
         "intent": { "const": "move" },
@@ -132,7 +181,39 @@
           ]
         }
       },
-      "required": ["day", "existing", "intent", "operator", "place", "shift", "span", "toPlace"]
+      "required": [
+        "adjust",
+        "day",
+        "existing",
+        "intent",
+        "operator",
+        "place",
+        "shift",
+        "span",
+        "toPlace"
+      ]
+    },
+    "repeat_day_word": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "weekdays" },
+            "week": { "enum": ["next_week", "this_week"] }
+          },
+          "required": ["kind", "week"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "every_day" },
+            "week": { "enum": ["next_week", "this_week"] }
+          },
+          "required": ["kind", "week"]
+        }
+      ]
     },
     "replace": {
       "type": "object",
@@ -156,6 +237,18 @@
         "start": { "$ref": "#/$defs/clock_time" }
       },
       "required": ["end", "start"]
+    },
+    "split": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "at": { "$ref": "#/$defs/clock_time" },
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "intent": { "const": "split" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 }
+      },
+      "required": ["at", "day", "intent", "operator", "place"]
     },
     "swap": {
       "type": "object",
@@ -217,6 +310,8 @@
     { "$ref": "#/$defs/replace" },
     { "$ref": "#/$defs/swap" },
     { "$ref": "#/$defs/copy" },
+    { "$ref": "#/$defs/split" },
+    { "$ref": "#/$defs/headcount" },
     {
       "type": "object",
       "additionalProperties": false,

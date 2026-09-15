@@ -64,6 +64,16 @@ export interface ClockTime {
  * `today`/`tomorrow` already is -- and three WEEK kinds, legal ONLY on a
  * `CopyCommand`'s `from`/`to`: on every other form (assign, book, unassign,
  * move, replace, swap) the grammar never produces one.
+ *
+ * S58 (docs/agent-briefs/s58-a-grammar-brief.md, R-416, design §19.103/D132
+ * item 5) adds two REPEAT kinds -- "every weekday"/"weekdays" (`weekdays`)
+ * and "every day" (`every_day`), each carrying which week ("this week" said
+ * or implied, or "next week"). Produced ONLY on an assign or a booking
+ * (`parseCommand`'s own `extractRepeatDayClause`/`applyRepeatDay`, stripped
+ * from the sentence before any verb dispatch runs and reattached to the
+ * finished command only when its intent allows it); on every other intent a
+ * repeat phrase is `bad_day` -- the resolver has no lot machinery here (D130
+ * built that for the BOARD's own expansion, not the grammar's).
  */
 export type DayWord =
   | { kind: "today" }
@@ -73,7 +83,9 @@ export type DayWord =
   | { kind: "date"; iso: string } // "2026-09-04"
   | { kind: "this_week" }
   | { kind: "next_week" }
-  | { kind: "last_week" };
+  | { kind: "last_week" }
+  | { kind: "weekdays"; week: "this_week" | "next_week" }
+  | { kind: "every_day"; week: "this_week" | "next_week" };
 
 /**
  * R-383 (the maintainer, 11 Sept): when the span lands inside a job already
@@ -89,8 +101,19 @@ export type Attach = { kind: "run"; runId: string } | { kind: "direct" };
  * and cell the person is already on, with overlapping hours, the bar ASKS — change that
  * block's hours, or add a separate block. The answer travels here. `null` = not asked
  * yet (every fresh parse). `formatCommand` never prints it.
+ *
+ * S58-e (R-413, docs/agent-briefs/s58-e-split-separate-brief.md): `separate_from` is
+ * `expandSplit`'s own answer for the second half of a split -- "add a separate block,
+ * and the block with this id is the one I already know about (the one being cut)".
+ * `resolveAssignCommand`'s own-block step treats it like `null` EXCEPT that the named
+ * block is removed from the overlap check first, so a genuine second overlapping block
+ * still asks `block_exists` (naming that other block), while the block being split out
+ * of never trips the question against itself.
  */
-export type Existing = { kind: "retime"; assignmentId: string } | { kind: "separate" };
+export type Existing =
+  | { kind: "retime"; assignmentId: string }
+  | { kind: "separate" }
+  | { kind: "separate_from"; assignmentId: string };
 
 export interface AssignCommand {
   intent: "assign";
@@ -167,6 +190,18 @@ export interface BookCommand {
 }
 
 /**
+ * S58 (docs/agent-briefs/s58-a-grammar-brief.md, R-412, design §19.103/D132
+ * item 1): a re-time by ONE edge -- "extend Sam's block by an hour", "end
+ * Sam early at 3", "move Sam's start to 9". `by` is signed minutes (+60 = an
+ * hour later); `at` is a new clock time for that edge, read through the same
+ * workday rule a lone edge always gets (`applyLoneEdgeRule`: an hour under 7
+ * with no explicit meridiem reads as pm). Never both, never neither -- the
+ * union has no third member on purpose.
+ */
+export type Adjust =
+  { edge: "start" | "end"; by: number } | { edge: "start" | "end"; at: ClockTime };
+
+/**
  * S41-c (docs/agent-briefs/s41-c-move-brief.md §3): "Move Sam on Cell 1 to
  * Cell 2 in Line 1" moves an EXISTING block to another cell and/or other
  * hours -- never a create. `toPlace: null` means a move in time only (R-385's
@@ -194,6 +229,11 @@ export interface MoveCommand {
    *  `no_move` when `shift` is ALSO null: a shift with no destination cell is
    *  a move in time (R-389's "new hours" satisfied by the shift's name). */
   shift: string | null;
+  /** S58 (R-412): a re-time by one edge -- non-null implies `span`, `shift`
+   *  and `toPlace` are all null (the block is the move's own, "wherever the
+   *  person is", never a destination -- AJ16: "move Sam's start to 9 to Cell
+   *  2" is `bad_adjust`, an adjust never carries one). */
+  adjust: Adjust | null;
 }
 
 /** The four intents that name a single block/job/removal/move -- what
@@ -267,11 +307,52 @@ export interface CopyCommand {
   to: DayWord;
 }
 
-/** The three board-answered intents -- D130 item 2's own name for the group. */
-export type BoardCommand = ReplaceCommand | SwapCommand | CopyCommand;
+/**
+ * S58 (docs/agent-briefs/s58-a-grammar-brief.md, R-413, design §19.103/D132
+ * item 2): "split Sam's block at noon" -- a shorten plus an assign, but the
+ * GRAMMAR only ever needs the four fields below; `resolve.ts`'s own
+ * `expandCommand` (D130's board-answered machinery) writes the two inner
+ * commands. Board-answered like `ReplaceCommand`/`SwapCommand`/`CopyCommand`:
+ * never appears inside a `SeveralCommand`.
+ */
+export interface SplitCommand {
+  intent: "split";
+  operator: string;
+  place: string[];
+  day: DayWord | null;
+  at: ClockTime;
+}
+
+/** The four board-answered intents -- D130 item 2's own name for the group,
+ *  widened by S58's `SplitCommand` (R-413). */
+export type BoardCommand = ReplaceCommand | SwapCommand | CopyCommand | SplitCommand;
+
+/**
+ * S58 (R-415, design §19.103/D132 item 4): "make the Housing A job on Cell 1
+ * 4 people" -- one existing write, the run's own planned headcount, never a
+ * create. `shift`/`span` name WHICH run when the day carries more than one
+ * (R-402's invariant: at most one of the two is non-null). Never part of a
+ * `SeveralCommand` (D132: "never part of a lot" -- there is nothing here for
+ * the board's own lot machinery to expand).
+ */
+export interface HeadcountCommand {
+  intent: "headcount";
+  product: string;
+  place: string[];
+  day: DayWord | null;
+  span: { start: ClockTime; end: ClockTime } | null;
+  shift: string | null;
+  headcount: number;
+}
 
 export type Command =
-  AssignCommand | BookCommand | UnassignCommand | MoveCommand | SeveralCommand | BoardCommand;
+  | AssignCommand
+  | BookCommand
+  | UnassignCommand
+  | MoveCommand
+  | SeveralCommand
+  | BoardCommand
+  | HeadcountCommand;
 
 export type ParseFailure =
   | { kind: "empty" }
@@ -309,7 +390,17 @@ export type ParseFailure =
   | { kind: "copy_mismatch"; from: string; to: string }
   /** R-408 (S55): `from` and `to` named the same day (or week) -- a copy
    *  that would do nothing. */
-  | { kind: "copy_same" };
+  | { kind: "copy_same" }
+  /** R-412 (S58): an adjust clause said no distance and no time at all, said
+   *  a distance of zero, or (AJ16) tried to carry a destination -- an adjust
+   *  never guesses which edge or by how much. */
+  | { kind: "bad_adjust"; text: string }
+  /** R-415 (S58): "make it 4 people" -- the bar keeps no memory of the last
+   *  thing it did, so there is nothing "it" can name; the grammar asks for
+   *  the job's own name rather than guess. */
+  | { kind: "which_job" }
+  /** R-413 (S58): "split Sam" -- a split with no "at <time>" clause at all. */
+  | { kind: "no_split_time" };
 
 export type ParseResult = { ok: true; command: Command } | { ok: false; failure: ParseFailure };
 
@@ -336,6 +427,20 @@ const QUOTE_CLOSE = "";
  * R-402's own shift clause), but the first-word rule already keeps a shift
  * clause or any other mid-sentence use of the word out of the verb's way --
  * only the FIRST word of the sentence is ever tried against a verb list.
+ *
+ * R-415 (S58, brief §3 HC9): "set" is the one documented EXCEPTION to "every
+ * verb in exactly one list" -- it stays in `ASSIGN_VERBS` below (unchanged)
+ * AND is exported again in `HEADCOUNT_VERBS` (the data lane's own template
+ * verb for a headcount sentence). The developer's decision (brief §3, "choose,
+ * say which"): the HEADCOUNT dispatch is tried FIRST, at the very top of
+ * `parseCommand`, and claims a "make"/"set" sentence only when it structurally
+ * matches "the <product> job/run ... <n> people"; anything else -- HC9: "set
+ * Sam on Housing A on Cell 1 8 to 4" -- makes `parseHeadcountRest` return
+ * `null`, and dispatch falls all the way through to the ordinary assign
+ * pipeline below, which still finds "set" in `ASSIGN_VERBS` exactly as it
+ * always did. No "second look" plumbing was needed because "set" was never
+ * actually removed -- the two readings simply never overlap in shape (one
+ * needs "the ... job/run", the other never has it).
  */
 export const ASSIGN_VERBS = [
   "assign",
@@ -382,6 +487,39 @@ export const MOVE_VERBS = [
 ] as const;
 
 /**
+ * S58 (docs/agent-briefs/s58-a-grammar-brief.md, R-412, design §19.103/D132
+ * item 1): a re-time by one edge. Its own list, never joining `MOVE_VERBS` --
+ * these five name only the END edge (`extend`/`lengthen`/`shorten` always a
+ * distance, `end`/`finish` a distance or a new time); the START edge, and a
+ * distance/time on the END edge said a different way, are read through
+ * `MOVE_VERBS`' own possessive-edge tail ("move Sam's start to 9", "shift
+ * Sam's end an hour later") instead -- two doors to the same `adjust` field,
+ * never two lists sharing one verb (R-391 still holds: none of these five
+ * appear in any other list).
+ */
+export const ADJUST_VERBS = ["extend", "lengthen", "shorten", "end", "finish"] as const;
+
+/**
+ * S58 (R-415, design §19.103/D132 item 4): "make"/"set" a job's headcount.
+ * See the R-391 comment above `ASSIGN_VERBS` for "set"'s one documented
+ * exception to the one-verb-one-list rule.
+ */
+export const HEADCOUNT_VERBS = ["make", "set"] as const;
+
+/**
+ * S58 (R-416, design §19.103/D132 item 5): "every weekday this week", "every
+ * day next week", "weekdays next week" -- stripped from the sentence by
+ * `extractRepeatDayClause` before any verb dispatch runs (so every existing
+ * grammar's own day-word reading never sees it), then reattached by
+ * `applyRepeatDay` once the intent is known: legal only on an assign or a
+ * booking, `bad_day` everywhere else. "every weekday" and "weekdays" are the
+ * same `DayWord` kind (`weekdays`); "every day" is the other one
+ * (`every_day`); either with no "this week"/"next week" said defaults to
+ * "this week" (RW4).
+ */
+export const REPEAT_WORDS = ["every weekday", "every day", "weekdays"] as const;
+
+/**
  * S55 (brief §1, R-406): "cover"/"replace" the two REPLACE_VERBS, "swap"/
  * "exchange" the two SWAP_VERBS -- one canonical word each, first in its own
  * list, so `formatCommand` prints "cover"/"swap" the same way the other four
@@ -405,7 +543,13 @@ export const EVERYONE = "everyone";
 export const ALL_DAY = "all day";
 export const END_OF_SHIFT = "end of shift";
 export const END_OF_DAY = "end of day";
-export const BOUNDARY_SHIFTS = [ALL_DAY, END_OF_SHIFT, END_OF_DAY] as const;
+/** S58 (R-414, design §19.103/D132 item 3): "the job's hours" -- the fourth
+ *  reserved shift name. Read only from "the <product> job"/"the <product>
+ *  run" on the ASSIGN grammar (`tryJobHoursAssign`, below); the resolver
+ *  finds that part's own run on that cell and day and takes its hours,
+ *  never the clock. */
+export const JOB_HOURS = "the job";
+export const BOUNDARY_SHIFTS = [ALL_DAY, END_OF_SHIFT, END_OF_DAY, JOB_HOURS] as const;
 
 /** R-404 (S55, D130 item 3): "after T" on a removal ends here -- the one
  *  value `ClockTime` can hold for midnight; the resolver reads it as such. */
@@ -449,6 +593,14 @@ const SAME_AS_RE = /^same\s+as\s+/i;
 
 /** The first word decides move vs everything else. Built from `MOVE_VERBS`. */
 const MOVE_VERB_RE = new RegExp(`^(${MOVE_VERBS.join("|")})\\b\\s*`, "i");
+
+/** S58: the first word decides adjust/split/headcount vs everything else. */
+const ADJUST_VERB_RE = new RegExp(`^(${ADJUST_VERBS.join("|")})\\b\\s*`, "i");
+/** R-413: "split" is its own first word -- it joins no verb list (it names
+ *  no other intent), so the first-word dispatch tries it directly rather
+ *  than building it from an exported array of one. */
+const SPLIT_RE = /^split\b\s*/i;
+const HEADCOUNT_VERB_RE = new RegExp(`^(${HEADCOUNT_VERBS.join("|")})\\b\\s*`, "i");
 
 const WEEKDAY_ALTS =
   "mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?";
@@ -727,6 +879,27 @@ function extractShiftOrBoundaryClause(text: string, quotes: string[]): ShiftOrBo
  *  one. `'s`/`’s` (a real apostrophe, typed or spoken correctly) still
  *  apply to any name -- there the intent is unambiguous. */
 const POSSESSIVE_TIMING_TAIL_RE = /\s*(?:'s|’s|(?<=\d)s)\s+(?:timing|hours|time|schedule|slot)$/i;
+
+/** S58 (R-412, brief §2 AJ1/AJ5): "Sam's block" on the `ADJUST_VERBS`
+ *  grammar reads as the person, exactly the way the move grammar's own
+ *  possessive TIMING tail does -- same apostrophe/dropped-apostrophe shapes,
+ *  a different trailing word. Anchored at the end of the OPERATOR segment
+ *  only (the adjust clause itself is already stripped by the time this
+ *  runs). */
+const POSSESSIVE_BLOCK_TAIL_RE = /\s*(?:'s|’s|(?<=\d)s)\s+block$/i;
+
+/** S58 (R-412, brief §1): a trailing possessive EDGE tail on the move
+ *  grammar's operator segment -- "Sam's start", "Sam's end", "Sam's finish"
+ *  -- names the person AND which edge to adjust; UNANCHORED (there is always
+ *  more sentence after it: a new time or a distance), unlike
+ *  `POSSESSIVE_TIMING_TAIL_RE`/`POSSESSIVE_BLOCK_TAIL_RE` which sit at the
+ *  very end of their own segment. A quoted operator ("Sam's start" typed as
+ *  one literal name) never reaches this regex at all -- its apostrophe is
+ *  already hidden inside a quote placeholder token by the time
+ *  `parseMoveRest`'s caller runs this (brief §3, "quoted names ... stay
+ *  atomic"), so `tryMoveEdgeAdjust` finds nothing and the ordinary move
+ *  grammar reads the whole quoted string as the person's name, unchanged. */
+const POSSESSIVE_EDGE_TAIL_RE = /(?:'s|’s|(?<=\d)s)\s+(start|end|finish)\b/i;
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -1985,6 +2158,7 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
       span,
       existing: null,
       shift,
+      adjust: null,
     }));
     return { ok: true, command: { intent: "several", commands } };
   }
@@ -2006,6 +2180,500 @@ function parseMoveRest(rest: string, quotes: string[]): ParseResult {
       span,
       existing: null,
       shift,
+      adjust: null,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// S58 (docs/agent-briefs/s58-a-grammar-brief.md, R-412, design §19.103/D132
+// item 1): a re-time by one edge -- two doors to the same `Adjust` field.
+// `tryMoveEdgeAdjust` is the possessive-edge-tail door ("move Sam's start to
+// 9"), tried by `parseCommand` right after `MOVE_VERBS` strips its own verb,
+// before the ordinary `parseMoveRest` ever runs. `parseAdjustRest` is the
+// dedicated-verb door ("extend Sam's block by an hour"), dispatched on its
+// own five-verb list (`ADJUST_VERBS`).
+// ---------------------------------------------------------------------------
+
+/** One inline clock-time token, or "noon"/"midnight" -- `parseTimeToken`
+ *  already reads both specially; this just lets the adjust regexes below
+ *  spot one without needing digits. */
+const ADJUST_TIME_ALT = `(?:noon|midnight|${TIME_TOKEN_INLINE})`;
+
+/** R-412: "to <time>", captured with whatever comes after it (AJ16's own
+ *  destination check reads group 2: non-empty means the sentence tried to
+ *  carry a destination too, which an adjust never does). */
+const ADJUST_AT_DEST_RE = new RegExp(`^to\\s+(${ADJUST_TIME_ALT})\\s*(.*)$`, "i");
+
+/**
+ * S58 (R-412, brief §1 AJ12-AJ16): tries the possessive-edge-tail form of an
+ * adjust on the MOVE grammar's own `rest` (already past its verb). `null`
+ * when `rest` carries no such tail at all -- the quoted-name escape (see
+ * `POSSESSIVE_EDGE_TAIL_RE`'s own comment) falls out of this for free, since
+ * the regex then finds nothing and the caller runs the ordinary
+ * `parseMoveRest` unchanged.
+ */
+/**
+ * Reviewer fix (S58 review): the possessive-edge-tail door had no place
+ * clause at all -- "move Sam's end to 3 pm on Cell 1" fell into the
+ * destination check below and failed `bad_adjust` naming "on Cell 1" as
+ * though it were a second destination, even though the dedicated-verb door
+ * (`parseAdjustRest`) already supports a place clause on the very same field
+ * (AJ3: "lengthen Sam on Cell 1 by 2 hours today"). `leftover` is whatever
+ * text remains after the "to <time>"/"by <duration>"/"<duration>
+ * earlier|later" clause is read off; `""` is fine (no place), a leading
+ * on/at/from is a place clause, anything else (AJ16's "to Cell 2") is still
+ * the destination violation R-412 refuses.
+ */
+function adjustPlaceFromLeftover(
+  leftover: string,
+  quotes: string[],
+): { ok: true; place: string[] } | { ok: false; failure: ParseFailure } {
+  const t = leftover.trim();
+  if (t === "") return { ok: true, place: [] };
+  const m = t.match(/^(?:on|at|from)\s+(.+)$/i);
+  if (!m) return { ok: false, failure: { kind: "bad_adjust", text: t } };
+  return { ok: true, place: splitProductPlaces(m[1]).map((p) => restoreQuotes(p, quotes)) };
+}
+
+function tryMoveEdgeAdjust(rest: string, quotes: string[]): ParseResult | null {
+  const tailMatch = rest.match(POSSESSIVE_EDGE_TAIL_RE);
+  if (!tailMatch || tailMatch.index === undefined) return null;
+
+  const operatorPart = rest.slice(0, tailMatch.index).trim();
+  if (operatorPart === "") return { ok: false, failure: { kind: "empty" } };
+  const edge: "start" | "end" = tailMatch[1].toLowerCase() === "start" ? "start" : "end";
+  const afterEdge = rest.slice(tailMatch.index + tailMatch[0].length);
+
+  const dayResult = extractDayWord(afterEdge);
+  if (!dayResult.ok) return dayResult;
+  const clauseText = dayResult.rest.trim();
+
+  let adjust: Adjust;
+  let leftover = "";
+  const toMatch = clauseText.match(ADJUST_AT_DEST_RE);
+  if (toMatch) {
+    // F-146: an END spelled "midnight"/"12 am"/"24:00" writes DAY_END, the
+    // same as every other END position in this file -- a START spelled
+    // "midnight" stays the literal {0,0} (`isDayEndSpelling`'s own comment).
+    if (edge === "end" && isDayEndSpelling(toMatch[1])) {
+      adjust = { edge, at: DAY_END };
+    } else {
+      const token = parseTimeToken(toMatch[1]);
+      if (!token) return { ok: false, failure: { kind: "bad_time", text: toMatch[1].trim() } };
+      adjust = { edge, at: applyLoneEdgeRule(token) };
+    }
+    leftover = toMatch[2];
+  } else {
+    // Reviewer fix (S58 review): the same lookahead-bounded shape as
+    // `parseAdjustRest`'s own "by"/"earlier"/"later" clauses (see its
+    // comments) -- a short match is only accepted when a place clause or
+    // the end of the clause follows it, so "by an hour and a half" (not a
+    // shape `DURATION_VALUE` knows) still fails together instead of
+    // matching "an hour" and leaving "and a half" as an unexplained
+    // `bad_adjust` leftover. `clauseText` is anchored at `^` here (unlike
+    // `parseAdjustRest`'s `text`) because the operator was already sliced
+    // off before this function ever built it.
+    const byMatch = clauseText.match(
+      new RegExp(`^by\\s+(${DURATION_VALUE})(?=\\s*(?:on|at|from)\\b|\\s*$)`, "i"),
+    );
+    if (byMatch) {
+      // AJ14: "a bare 'by' is later" -- always positive, never a sign word.
+      const minutes = parseDurationMinutes(byMatch[1]);
+      if (minutes === null || minutes === 0) {
+        return { ok: false, failure: { kind: "bad_adjust", text: byMatch[1].trim() } };
+      }
+      adjust = { edge, by: minutes };
+      leftover = removeMatch(clauseText, byMatch);
+    } else {
+      const elMatch = clauseText.match(
+        new RegExp(`^(${DURATION_VALUE})\\s+(earlier|later)(?=\\s*(?:on|at|from)\\b|\\s*$)`, "i"),
+      );
+      if (elMatch) {
+        const minutes = parseDurationMinutes(elMatch[1]);
+        if (minutes === null || minutes === 0) {
+          return { ok: false, failure: { kind: "bad_adjust", text: elMatch[1].trim() } };
+        }
+        adjust = { edge, by: elMatch[2].toLowerCase() === "earlier" ? -minutes : minutes };
+        leftover = removeMatch(clauseText, elMatch);
+      } else {
+        // Neither bounded form matched -- fall back to the unbounded
+        // catch-all (pre-review shape) purely to surface a sensible
+        // `bad_adjust` text for genuinely unrecognised trailing text,
+        // exactly as `parseAdjustRest`'s own fallback does.
+        const rawBy = clauseText.match(/^by\s+(.+)$/i);
+        if (rawBy) return { ok: false, failure: { kind: "bad_adjust", text: rawBy[1].trim() } };
+        const rawEl = clauseText.match(/^(.+?)\s+(earlier|later)$/i);
+        if (rawEl) return { ok: false, failure: { kind: "bad_adjust", text: rawEl[1].trim() } };
+        return { ok: false, failure: { kind: "bad_adjust", text: clauseText || edge } };
+      }
+    }
+  }
+
+  const placeResult = adjustPlaceFromLeftover(leftover, quotes);
+  if (!placeResult.ok) return placeResult;
+
+  return {
+    ok: true,
+    command: {
+      intent: "move",
+      operator: restoreQuotes(operatorPart, quotes),
+      place: placeResult.place,
+      toPlace: null,
+      day: dayResult.day,
+      span: null,
+      existing: null,
+      shift: null,
+      adjust,
+    },
+  };
+}
+
+/**
+ * S58 (R-412, brief §1 AJ1-AJ11): the dedicated-verb door. `verb` is already
+ * lower-cased by the caller. `extend`/`lengthen` always add, `shorten`
+ * always subtracts (both need a "by <duration>" clause, trailing once the
+ * day word is gone -- AJ6/AJ11-style: none found is `bad_adjust`); `end`/
+ * `finish` read an "(early) at <time>" clause found ANYWHERE (AJ8: the place
+ * clause can follow it) or a trailing "<duration> earlier"/"<duration>
+ * later". All five always adjust the END edge -- there is no verb-led door
+ * to the START edge (that is `tryMoveEdgeAdjust`'s own, R-412's "two doors").
+ */
+function parseAdjustRest(verb: string, rest: string, quotes: string[]): ParseResult {
+  const dayResult = extractDayWord(rest);
+  if (!dayResult.ok) return dayResult;
+  let text = dayResult.rest;
+  const day = dayResult.day;
+
+  let adjust: Adjust;
+  if (verb === "extend" || verb === "lengthen" || verb === "shorten") {
+    // Reviewer fix (S58 review): bounded to a recognised duration shape
+    // (`DURATION_VALUE`, the same set `parseDurationMinutes` accepts) rather
+    // than a greedy `.+$` to the very end of the sentence -- the old regex
+    // swallowed a trailing place clause into the duration text and failed
+    // `bad_adjust` on the whole lot ("extend Sam by 90 minutes on Cell 1"
+    // read "90 minutes on Cell 1" as the duration and refused it). The
+    // lookahead only accepts the short match when a place clause or the end
+    // of the sentence follows it -- NOT bare `\b`, which would also accept
+    // "an hour" as a short match inside "by an hour and a half" and leave
+    // "and a half" dangling as part of the operator (a worse bug than the
+    // one this fixes: a wrong SUCCESS instead of a clean failure). When the
+    // lookahead can't be satisfied, the second, unbounded regex is tried
+    // exactly as before this review -- so unrecognised duration text still
+    // fails `bad_adjust` as one clause, never a partial match.
+    const boundedM = text.match(
+      new RegExp(`\\s+by\\s+(${DURATION_VALUE})(?=\\s*(?:on|at|from)\\b|\\s*$)`, "i"),
+    );
+    const m = boundedM ?? text.match(/\s+by\s+(.+)$/i);
+    if (!m) return { ok: false, failure: { kind: "bad_adjust", text: text.trim() || verb } };
+    const minutes = parseDurationMinutes(m[1]);
+    if (minutes === null || minutes === 0) {
+      return { ok: false, failure: { kind: "bad_adjust", text: m[1].trim() } };
+    }
+    adjust = { edge: "end", by: verb === "shorten" ? -minutes : minutes };
+    text = removeMatch(text, m);
+  } else {
+    // "end"/"finish".
+    const atRe = new RegExp(`\\b(?:early\\s+at|at)\\s+(${ADJUST_TIME_ALT})\\b`, "i");
+    const atMatch = text.match(atRe);
+    if (atMatch) {
+      // F-146: an END spelled "midnight"/"12 am"/"24:00" writes DAY_END, the
+      // same as every other END position in this file.
+      if (isDayEndSpelling(atMatch[1])) {
+        adjust = { edge: "end", at: DAY_END };
+      } else {
+        const token = parseTimeToken(atMatch[1]);
+        if (!token) return { ok: false, failure: { kind: "bad_time", text: atMatch[1].trim() } };
+        adjust = { edge: "end", at: applyLoneEdgeRule(token) };
+      }
+      text = removeMatch(text, atMatch);
+    } else {
+      // Reviewer fix (S58 review): bounded the same way as the "by" clause
+      // above (lookahead, with the same unbounded fallback) -- "end Sam an
+      // hour earlier on Cell 1" now leaves "on Cell 1" in `text` for the
+      // place split below instead of failing to match at all, without
+      // risking a short, wrong split of unrecognised duration text.
+      const boundedEl = text.match(
+        new RegExp(
+          `\\s+(${DURATION_VALUE})\\s+(earlier|later)(?=\\s*(?:on|at|from)\\b|\\s*$)`,
+          "i",
+        ),
+      );
+      const elMatch = boundedEl ?? text.match(/\s+(.+?)\s+(earlier|later)$/i);
+      if (!elMatch) {
+        return { ok: false, failure: { kind: "bad_adjust", text: text.trim() || verb } };
+      }
+      const minutes = parseDurationMinutes(elMatch[1]);
+      if (minutes === null || minutes === 0) {
+        return { ok: false, failure: { kind: "bad_adjust", text: elMatch[1].trim() } };
+      }
+      adjust = { edge: "end", by: elMatch[2].toLowerCase() === "earlier" ? -minutes : minutes };
+      text = removeMatch(text, elMatch);
+    }
+  }
+
+  const { operator: opPart, placesText } = splitMoveOperatorPlaces(text);
+  const operator = opPart.replace(POSSESSIVE_BLOCK_TAIL_RE, "").trim();
+  if (operator === "") return { ok: false, failure: { kind: "empty" } };
+  const place =
+    placesText === "" ? [] : splitProductPlaces(placesText).map((p) => restoreQuotes(p, quotes));
+
+  return {
+    ok: true,
+    command: {
+      intent: "move",
+      operator: restoreQuotes(operator, quotes),
+      place,
+      toPlace: null,
+      day,
+      span: null,
+      existing: null,
+      shift: null,
+      adjust,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// S58 (R-413, brief §2 SP1-SP5, design §19.103/D132 item 2): "split Sam's
+// block at noon" -- a shorten plus an assign, written by the board
+// (`resolve.ts`'s own `expandCommand`); the grammar only needs the block
+// (operator/place/day) and the split point.
+// ---------------------------------------------------------------------------
+
+/** R-413: "at <time>", found ANYWHERE (SP2: the place clause can follow it,
+ *  same shape as the adjust grammar's own "end"/"finish" at-clause). No
+ *  "early" alternative here -- split has no earlier/later reading at all. */
+const SPLIT_AT_RE = new RegExp(`\\bat\\s+(${ADJUST_TIME_ALT})\\b`, "i");
+
+function parseSplitRest(rest: string, quotes: string[]): ParseResult {
+  const atMatch = rest.match(SPLIT_AT_RE);
+  if (!atMatch) return { ok: false, failure: { kind: "no_split_time" } };
+  const token = parseTimeToken(atMatch[1]);
+  if (!token) return { ok: false, failure: { kind: "bad_time", text: atMatch[1].trim() } };
+  // SP3: the same workday rule every other lone edge in this file gets.
+  const at = applyLoneEdgeRule(token);
+  let text = removeMatch(rest, atMatch);
+
+  const dayResult = extractDayWord(text);
+  if (!dayResult.ok) return dayResult;
+  text = dayResult.rest;
+
+  const { operator: opPart, placesText } = splitMoveOperatorPlaces(text);
+  const operator = opPart.replace(POSSESSIVE_BLOCK_TAIL_RE, "").trim();
+  if (operator === "") return { ok: false, failure: { kind: "empty" } };
+  const place =
+    placesText === "" ? [] : splitProductPlaces(placesText).map((p) => restoreQuotes(p, quotes));
+
+  return {
+    ok: true,
+    command: {
+      intent: "split",
+      operator: restoreQuotes(operator, quotes),
+      place,
+      day: dayResult.day,
+      at,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// S58 (R-415, brief §2 HC1-HC9, design §19.103/D132 item 4): a job's
+// headcount -- one existing write, never a create, never part of a lot.
+// ---------------------------------------------------------------------------
+
+/** Shared by `tryJobHoursAssign` (R-414) and `parseHeadcountRest` (R-415):
+ *  "the <product> job"/"the <product> run", non-greedy so a quoted product
+ *  (a single opaque token) is captured exactly. */
+const JOB_HOURS_PRODUCT_RE = /^the\s+(\S.*?)\s+(?:job|run)\b\s*(.*)$/i;
+
+/** R-415: "<n> people", with an optional leading "to" (HC2's "set ... to 4
+ *  people") -- always the sentence's very last clause.
+ *
+ *  Reviewer fix (S58 review): `(?:^|\s+)` -- not a bare `\s+` -- before the
+ *  optional "to"/digits: "make the Housing A job 4 people" (HC-family, no
+ *  place at all) has NOTHING before "4 people" to satisfy a required
+ *  leading whitespace, so the old pattern never matched, `parseHeadcountRest`
+ *  returned `null` (not headcount-shaped) instead of the promised
+ *  `no_place`, and the sentence fell through to the ordinary assign
+ *  pipeline and failed `no_time` -- a case D132 item 4 explicitly names
+ *  ("no place" on a job's headcount). Every existing case still had a place
+ *  (or "on"/"at"/"in") word before this clause, so `\s+` still matches
+ *  there unchanged; `^` only ever fires on the newly-supported empty case. */
+const HEADCOUNT_TRAILING_RE = /(?:^|\s+)(?:to\s+)?(\d+)\s+people\s*$/i;
+
+/**
+ * S58 (R-415, brief §2 HC1-HC9): `verb` is already lower-cased ("make" or
+ * "set"). Returns `null` -- not a failure -- when `rest` does not name "the
+ * <product> job/run" at all and does not start with "it": HC9's own escape,
+ * "set Sam on Housing A on Cell 1 8 to 4" is not headcount-shaped, so
+ * `parseCommand` falls all the way through to the ordinary assign pipeline,
+ * which still has "set" in `ASSIGN_VERBS` (see the R-391 comment's own
+ * account of this decision).
+ */
+function parseHeadcountRest(rest: string, quotes: string[]): ParseResult | null {
+  const jobMatch = rest.match(JOB_HOURS_PRODUCT_RE);
+  if (!jobMatch) {
+    // HC5: "make it 4 people" -- nothing for "it" to name.
+    if (/^it\b/i.test(rest.trim())) return { ok: false, failure: { kind: "which_job" } };
+    return null;
+  }
+  const product = restoreQuotes(jobMatch[1], quotes);
+  const tail = jobMatch[2];
+
+  const countMatch = tail.match(HEADCOUNT_TRAILING_RE);
+  if (!countMatch) return null;
+  const n = Number(countMatch[1]);
+  if (!Number.isInteger(n) || n < 1 || n > 99) {
+    return { ok: false, failure: { kind: "bad_headcount", text: countMatch[1] } };
+  }
+  let body = tail.slice(0, countMatch.index).trim();
+  body = body.replace(/^(?:on|at|in)\s+/i, "");
+
+  const boundary = extractShiftOrBoundaryClause(body, quotes);
+  const shift = boundary.isAllDay ? null : boundary.shift;
+  body = boundary.rest;
+
+  const tc = extractOptionalTimeClause(body);
+  if (!tc.ok) return tc;
+  if (shift !== null && tc.span !== null) {
+    return { ok: false, failure: { kind: "shift_and_hours" } };
+  }
+  body = tc.rest;
+
+  const dayResult = extractDayWord(body);
+  if (!dayResult.ok) return dayResult;
+  const merged = mergeDay(
+    { day: dayResult.day, word: dayResult.word },
+    { day: tc.trailingDay, word: tc.trailingWord },
+  );
+  if (!merged.ok) return merged;
+
+  const placeText = dayResult.rest;
+  const placePieces = placeText === "" ? [] : splitProductPlaces(placeText);
+  if (placePieces.length === 0) return { ok: false, failure: { kind: "no_place" } };
+
+  return {
+    ok: true,
+    command: {
+      intent: "headcount",
+      product,
+      place: placePieces.map((p) => restoreQuotes(p, quotes)),
+      day: merged.day,
+      span: tc.span,
+      shift,
+      headcount: n,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// S58 (R-414, brief §2 JB1-JB7, design §19.103/D132 item 3): "the job's
+// hours" -- the ASSIGN grammar only, tried before the mandatory time clause
+// (a "the ... job" sentence has no hours of its own to find).
+// ---------------------------------------------------------------------------
+
+/**
+ * S58 (R-414): mirrors `parseAssignRest`'s own leading-verb/operator split
+ * (brief item 3) up to the point where the product would normally be read,
+ * then looks for "the <product> job/run" there instead of an hours clause.
+ * `null` -- not a failure -- when `norm` does not have that shape at all
+ * (JB7: "add Sam to Housing A on Cell 1 8 to 4" falls through to the
+ * ordinary assign pipeline, unchanged).
+ */
+function tryJobHoursAssign(norm: string, quotes: string[]): ParseResult | null {
+  let rest = norm;
+  const verbMatch = rest.match(new RegExp(`^(${ASSIGN_VERBS.join("|")})\\s+`, "i"));
+  if (verbMatch) rest = rest.slice(verbMatch[0].length);
+
+  const sepMatch = rest.match(/ to work on | to | on /i);
+  let operatorPart: string;
+  let productPlaces: string;
+  if (!sepMatch || sepMatch.index === undefined) {
+    operatorPart = rest.trim();
+    productPlaces = "";
+  } else {
+    operatorPart = rest.slice(0, sepMatch.index).trim();
+    productPlaces = rest.slice(sepMatch.index + sepMatch[0].length).trim();
+  }
+  if (operatorPart === "" || productPlaces === "") return null;
+
+  const jobMatch = productPlaces.match(JOB_HOURS_PRODUCT_RE);
+  if (!jobMatch) return null;
+  const product = restoreQuotes(jobMatch[1], quotes);
+
+  let tail = jobMatch[2].trim();
+  tail = tail.replace(/^(?:on|at|in)\s+/i, "");
+
+  const dayResult = extractDayWord(tail);
+  if (!dayResult.ok) return dayResult;
+
+  // JB4: hours said alongside "the ... job" -- never a guess which wins.
+  const tc = extractOptionalTimeClause(dayResult.rest);
+  if (!tc.ok) return tc;
+  if (tc.span !== null) {
+    return { ok: false, failure: { kind: "shift_and_hours" } };
+  }
+
+  // Reviewer fix (S58 review): the SAME conflict as JB4's plain hours, said
+  // through a duration clause ("for 4 hours") or a named shift/boundary
+  // clause ("for shift 2", "this afternoon", "all day") instead -- checked
+  // here, now that this function is tried before both of those in
+  // `parseCommand` (see the reviewer note at the call site), so neither one
+  // gets a chance to swallow "the <product> job" as literal text first. Not
+  // itself a hard failure to surface (`extractDurationClause`'s own
+  // `bad_duration` is a real syntax problem in the duration, not this
+  // conflict) -- the conflict is that a second hours-source was said at all.
+  if (extractDurationClause(tc.rest) !== null) {
+    return { ok: false, failure: { kind: "shift_and_hours" } };
+  }
+  if (extractShiftOrBoundaryClause(tc.rest, quotes).shift !== null) {
+    return { ok: false, failure: { kind: "shift_and_hours" } };
+  }
+
+  const placeText = tc.rest;
+  const placePieces = placeText === "" ? [] : splitProductPlaces(placeText);
+  if (placePieces.length === 0) return { ok: false, failure: { kind: "no_place" } };
+
+  const operatorList = detectAndList(operatorPart, true);
+  if (operatorList.kind === "bad")
+    return { ok: false, failure: { kind: "bad_list", text: operatorPart } };
+  const placeList = detectAndList(placePieces[0], false);
+  if (placeList.kind === "bad")
+    return { ok: false, failure: { kind: "bad_list", text: placePieces[0] } };
+
+  if (operatorList.kind === "list" || placeList.kind === "list") {
+    const operatorItems = operatorList.kind === "list" ? operatorList.items : [operatorPart];
+    const placeItems = placeList.kind === "list" ? placeList.items : [placePieces[0]];
+    const combined = combineLists(operatorItems, placeItems, (op, pl) => ({
+      intent: "assign" as const,
+      operator: restoreQuotes(op, quotes),
+      product,
+      place: [pl, ...placePieces.slice(1)].map((p) => restoreQuotes(p, quotes)),
+      day: dayResult.day,
+      start: null,
+      end: null,
+      attach: null,
+      existing: null,
+      shift: JOB_HOURS,
+    }));
+    if (!combined.ok) return combined;
+    return { ok: true, command: { intent: "several", commands: combined.items } };
+  }
+
+  return {
+    ok: true,
+    command: {
+      intent: "assign",
+      operator: restoreQuotes(operatorPart, quotes),
+      product,
+      place: placePieces.map((p) => restoreQuotes(p, quotes)),
+      day: dayResult.day,
+      start: null,
+      end: null,
+      attach: null,
+      existing: null,
+      shift: JOB_HOURS,
     },
   };
 }
@@ -2646,76 +3314,160 @@ export function parseCommand(text: string): ParseResult {
   if (norm.endsWith(".")) norm = norm.slice(0, -1).trim();
   if (norm === "") return { ok: false, failure: { kind: "empty" } };
 
-  // R-409: the absence grammar has no leading verb at all -- checked first,
-  // before every verb dispatch below. AB10 is the escape: with no
-  // ABSENCE_WORD right after "is", this simply does not match.
-  const absenceMatch = norm.match(ABSENCE_RE);
-  if (absenceMatch) {
-    return parseAbsenceRest(absenceMatch[1], absenceMatch[3], quotes);
-  }
+  // R-416 (S58): "every weekday"/"every day"/"weekdays" [this week|next
+  // week] is stripped from the sentence HERE, before any dispatch, so every
+  // grammar below reads exactly the sentence it always has -- none of them
+  // needs to know this phrase exists. `applyRepeatDay`, at the very end,
+  // decides whether the finished command may carry it (assign/book only) or
+  // must fail `bad_day`.
+  const repeat = extractRepeatDayClause(norm);
+  const workingNorm = repeat ? repeat.rest : norm;
 
-  // S41-b: decided before the mandatory-time-clause path runs -- the
-  // unassign grammar's time clause is OPTIONAL, so it cannot share
-  // `parseTimeAndDay`'s "no_time" requirement.
-  const unassignVerbMatch = norm.match(UNASSIGN_VERB_RE);
-  if (unassignVerbMatch) {
-    return parseUnassignRest(
-      norm.slice(unassignVerbMatch[0].length),
-      quotes,
-      unassignVerbMatch[1].toLowerCase(),
-    );
-  }
+  const result = dispatch(workingNorm, quotes);
+  return repeat ? applyRepeatDay(result, repeat) : result;
 
-  // S41-c: decided before the mandatory-time-clause path runs too -- the
-  // move grammar's time clause is OPTIONAL, exactly like unassign's.
-  const moveVerbMatch = norm.match(MOVE_VERB_RE);
-  if (moveVerbMatch) {
-    return parseMoveRest(norm.slice(moveVerbMatch[0].length), quotes);
-  }
+  /** The rest of the grammar's own first-word dispatch, unchanged from
+   *  before S58 except for the four new branches marked S58 below --
+   *  `extractRepeatDayClause` above already removed the one clause none of
+   *  this needs to see. */
+  function dispatch(norm: string, quotes: string[]): ParseResult {
+    // R-409: the absence grammar has no leading verb at all -- checked first,
+    // before every verb dispatch below. AB10 is the escape: with no
+    // ABSENCE_WORD right after "is", this simply does not match.
+    const absenceMatch = norm.match(ABSENCE_RE);
+    if (absenceMatch) {
+      return parseAbsenceRest(absenceMatch[1], absenceMatch[3], quotes);
+    }
 
-  // R-406: cover/replace and swap/exchange, decided the same way.
-  const replaceVerbMatch = norm.match(REPLACE_VERB_RE);
-  if (replaceVerbMatch) {
-    return parseReplaceRest(norm.slice(replaceVerbMatch[0].length), quotes);
-  }
-  const swapVerbMatch = norm.match(SWAP_VERB_RE);
-  if (swapVerbMatch) {
-    return parseSwapRest(norm.slice(swapVerbMatch[0].length), quotes);
-  }
+    // S41-b: decided before the mandatory-time-clause path runs -- the
+    // unassign grammar's time clause is OPTIONAL, so it cannot share
+    // `parseTimeAndDay`'s "no_time" requirement.
+    const unassignVerbMatch = norm.match(UNASSIGN_VERB_RE);
+    if (unassignVerbMatch) {
+      return parseUnassignRest(
+        norm.slice(unassignVerbMatch[0].length),
+        quotes,
+        unassignVerbMatch[1].toLowerCase(),
+      );
+    }
 
-  // R-408: "same as ..." (no destination said) or copy/repeat <a> [to] <b>.
-  const sameAsMatch = norm.match(SAME_AS_RE);
-  if (sameAsMatch) {
-    return parseCopySameAs(norm.slice(sameAsMatch[0].length), quotes);
-  }
-  const copyVerbMatch = norm.match(COPY_VERB_RE);
-  if (copyVerbMatch) {
-    return parseCopyExplicit(norm.slice(copyVerbMatch[0].length), quotes);
-  }
+    // S41-c: decided before the mandatory-time-clause path runs too -- the
+    // move grammar's time clause is OPTIONAL, exactly like unassign's.
+    const moveVerbMatch = norm.match(MOVE_VERB_RE);
+    if (moveVerbMatch) {
+      const moveRest = norm.slice(moveVerbMatch[0].length);
+      // S58 (R-412): the possessive-edge-tail door ("move Sam's start to
+      // 9") -- tried before the ordinary move grammar; `null` when there is
+      // no such tail at all (every move sentence before S58, unaffected).
+      const edgeAdjust = tryMoveEdgeAdjust(moveRest, quotes);
+      if (edgeAdjust) return edgeAdjust;
+      return parseMoveRest(moveRest, quotes);
+    }
 
-  // R-405: no verb from any of the six lists above matched the first word --
-  // tried against the word-order grammar before falling to the ordinary
-  // "no verb" assign reading (brief §3).
-  const hasLeadingVerb = ASSIGN_VERB_RE.test(norm) || BOOK_VERB_RE.test(norm);
-  if (!hasLeadingVerb) {
-    const wordOrder = tryWordOrder(norm, quotes);
-    if (wordOrder) return wordOrder;
-  }
+    // S58 (R-412): the dedicated-verb door -- extend/lengthen/shorten/end/
+    // finish, its own list (never joining MOVE_VERBS, see the comment above
+    // `ADJUST_VERBS`).
+    const adjustVerbMatch = norm.match(ADJUST_VERB_RE);
+    if (adjustVerbMatch) {
+      return parseAdjustRest(
+        adjustVerbMatch[1].toLowerCase(),
+        norm.slice(adjustVerbMatch[0].length),
+        quotes,
+      );
+    }
 
-  // R-404: a duration clause ("from 8 for 4 hours") stands in for the
-  // mandatory time clause on assign/book -- tried BEFORE the headcount,
-  // product-last and shift/boundary clauses (brief §3: the unit word makes
-  // it unambiguous).
-  const duration = extractDurationClause(norm);
-  if (duration) {
-    if (!duration.ok) return duration;
-    const dayResult = extractDayWord(duration.rest);
-    if (!dayResult.ok) return dayResult;
+    // S58 (R-413): "split" is its own first word (brief §2, "add it to no
+    // verb list; the first-word dispatch handles it").
+    const splitMatch = norm.match(SPLIT_RE);
+    if (splitMatch) {
+      return parseSplitRest(norm.slice(splitMatch[0].length), quotes);
+    }
 
-    const bookVerbMatch = dayResult.rest.match(BOOK_VERB_RE);
-    if (bookVerbMatch) {
-      return parseBookRest(
-        dayResult.rest.slice(bookVerbMatch[0].length),
+    // R-406: cover/replace and swap/exchange, decided the same way.
+    const replaceVerbMatch = norm.match(REPLACE_VERB_RE);
+    if (replaceVerbMatch) {
+      return parseReplaceRest(norm.slice(replaceVerbMatch[0].length), quotes);
+    }
+    const swapVerbMatch = norm.match(SWAP_VERB_RE);
+    if (swapVerbMatch) {
+      return parseSwapRest(norm.slice(swapVerbMatch[0].length), quotes);
+    }
+
+    // R-408: "same as ..." (no destination said) or copy/repeat <a> [to] <b>.
+    const sameAsMatch = norm.match(SAME_AS_RE);
+    if (sameAsMatch) {
+      return parseCopySameAs(norm.slice(sameAsMatch[0].length), quotes);
+    }
+    const copyVerbMatch = norm.match(COPY_VERB_RE);
+    if (copyVerbMatch) {
+      return parseCopyExplicit(norm.slice(copyVerbMatch[0].length), quotes);
+    }
+
+    // S58 (R-415): "make"/"set" a job's headcount, claimed FIRST (HC9's own
+    // decision, see the R-391 comment above `ASSIGN_VERBS`) -- `null` when
+    // the sentence is not headcount-shaped at all, so a plain "set ..."
+    // falls all the way through to the ordinary assign pipeline below.
+    const headcountVerbMatch = norm.match(HEADCOUNT_VERB_RE);
+    if (headcountVerbMatch) {
+      const headcount = parseHeadcountRest(norm.slice(headcountVerbMatch[0].length), quotes);
+      if (headcount) return headcount;
+    }
+
+    // R-405: no verb from any of the lists above matched the first word --
+    // tried against the word-order grammar before falling to the ordinary
+    // "no verb" assign reading (brief §3).
+    const hasLeadingVerb = ASSIGN_VERB_RE.test(norm) || BOOK_VERB_RE.test(norm);
+    if (!hasLeadingVerb) {
+      const wordOrder = tryWordOrder(norm, quotes);
+      if (wordOrder) return wordOrder;
+    }
+
+    // S58 (R-414): "the <product> job/run" -- ASSIGN only (a booking already
+    // names an existing run's own hours, never borrows another's).
+    //
+    // Reviewer fix (S58 review): moved here, BEFORE the duration clause and
+    // the shift/boundary clause checks below -- both of those search the
+    // WHOLE sentence unconditionally, and when "the <product> job" sat next
+    // to a "for shift 2" or a "for 4 hours" clause they matched it FIRST and
+    // returned an ordinary assign with "the Housing A job" read as a literal
+    // (nonsense) product name, `tryJobHoursAssign` never even called ("add
+    // Sam to the Housing A job on Cell 1 for shift 2" used to parse `ok`,
+    // product "the Housing A job", shift "2" -- silently wrong). Tried here
+    // first, this function sees its own shape before either one can steal
+    // the sentence, and now refuses the same conflict itself
+    // (`shift_and_hours`, the failure JB4 already gives for ordinary hours;
+    // see the reviewer note inside `tryJobHoursAssign`). `null` -- not a
+    // failure -- when the sentence has no such shape at all (JB7), so it
+    // falls through to the duration/boundary/canonical paths exactly as
+    // before.
+    if (!BOOK_VERB_RE.test(norm)) {
+      const jobHours = tryJobHoursAssign(norm, quotes);
+      if (jobHours) return jobHours;
+    }
+
+    // R-404: a duration clause ("from 8 for 4 hours") stands in for the
+    // mandatory time clause on assign/book -- tried BEFORE the headcount,
+    // product-last and shift/boundary clauses (brief §3: the unit word makes
+    // it unambiguous).
+    const duration = extractDurationClause(norm);
+    if (duration) {
+      if (!duration.ok) return duration;
+      const dayResult = extractDayWord(duration.rest);
+      if (!dayResult.ok) return dayResult;
+
+      const bookVerbMatch = dayResult.rest.match(BOOK_VERB_RE);
+      if (bookVerbMatch) {
+        return parseBookRest(
+          dayResult.rest.slice(bookVerbMatch[0].length),
+          dayResult.day,
+          duration.start,
+          duration.end,
+          quotes,
+          null,
+        );
+      }
+      return parseAssignRest(
+        dayResult.rest,
         dayResult.day,
         duration.start,
         duration.end,
@@ -2723,55 +3475,55 @@ export function parseCommand(text: string): ParseResult {
         null,
       );
     }
-    return parseAssignRest(
-      dayResult.rest,
-      dayResult.day,
-      duration.start,
-      duration.end,
-      quotes,
-      null,
-    );
-  }
 
-  // DU10: a bare pair immediately followed by a duration clause, with no
-  // "from"/"at" to anchor either one -- never a guess which wins (the
-  // developer's own decision, documented in the brief report).
-  const ambiguousDuration = norm.match(DURATION_AMBIGUOUS_RE);
-  if (ambiguousDuration) {
-    return { ok: false, failure: { kind: "bad_time", text: ambiguousDuration[0].trim() } };
-  }
-
-  // R-404: a shift clause (an ordinary name, a boundary, or a time-of-day
-  // word) stands in for the mandatory hours on assign/book too -- tried
-  // BEFORE `parseTimeAndDay`'s own (mandatory) time clause, since a shift
-  // sentence need not have one at all.
-  const boundary = extractShiftOrBoundaryClause(norm, quotes);
-  if (boundary.shift !== null) {
-    const stillHasTime = parseTimeAndDay(boundary.rest);
-    if (stillHasTime.ok) {
-      // Both a shift and hours were said -- never a guess which wins.
-      return { ok: false, failure: { kind: "shift_and_hours" } };
+    // DU10: a bare pair immediately followed by a duration clause, with no
+    // "from"/"at" to anchor either one -- never a guess which wins (the
+    // developer's own decision, documented in the brief report).
+    const ambiguousDuration = norm.match(DURATION_AMBIGUOUS_RE);
+    if (ambiguousDuration) {
+      return { ok: false, failure: { kind: "bad_time", text: ambiguousDuration[0].trim() } };
     }
-    if (stillHasTime.failure.kind !== "no_time") {
-      // A real time-clause problem, unrelated to the shift -- surface it.
-      return stillHasTime;
-    }
-    const dayResult = extractDayWord(boundary.rest);
-    if (!dayResult.ok) return dayResult;
-    // R-405 (TD7): the time-of-day clause's own implied day is said FIRST in
-    // the sentence (it is read out of the text before the ordinary trailing
-    // day word ever runs) -- leading/trailing order matters for `two_days`'
-    // own `first`/`second` naming (F-133's rule).
-    const merged = mergeDay(
-      { day: boundary.impliedDay, word: boundary.impliedDayWord },
-      { day: dayResult.day, word: dayResult.word },
-    );
-    if (!merged.ok) return merged;
 
-    const bookVerbMatch = dayResult.rest.match(BOOK_VERB_RE);
-    if (bookVerbMatch) {
-      return parseBookRest(
-        dayResult.rest.slice(bookVerbMatch[0].length),
+    // R-404: a shift clause (an ordinary name, a boundary, or a time-of-day
+    // word) stands in for the mandatory hours on assign/book too -- tried
+    // BEFORE `parseTimeAndDay`'s own (mandatory) time clause, since a shift
+    // sentence need not have one at all.
+    const boundary = extractShiftOrBoundaryClause(norm, quotes);
+    if (boundary.shift !== null) {
+      const stillHasTime = parseTimeAndDay(boundary.rest);
+      if (stillHasTime.ok) {
+        // Both a shift and hours were said -- never a guess which wins.
+        return { ok: false, failure: { kind: "shift_and_hours" } };
+      }
+      if (stillHasTime.failure.kind !== "no_time") {
+        // A real time-clause problem, unrelated to the shift -- surface it.
+        return stillHasTime;
+      }
+      const dayResult = extractDayWord(boundary.rest);
+      if (!dayResult.ok) return dayResult;
+      // R-405 (TD7): the time-of-day clause's own implied day is said FIRST in
+      // the sentence (it is read out of the text before the ordinary trailing
+      // day word ever runs) -- leading/trailing order matters for `two_days`'
+      // own `first`/`second` naming (F-133's rule).
+      const merged = mergeDay(
+        { day: boundary.impliedDay, word: boundary.impliedDayWord },
+        { day: dayResult.day, word: dayResult.word },
+      );
+      if (!merged.ok) return merged;
+
+      const bookVerbMatch = dayResult.rest.match(BOOK_VERB_RE);
+      if (bookVerbMatch) {
+        return parseBookRest(
+          dayResult.rest.slice(bookVerbMatch[0].length),
+          merged.day,
+          boundary.start,
+          null,
+          quotes,
+          boundary.shift,
+        );
+      }
+      return parseAssignRest(
+        dayResult.rest,
         merged.day,
         boundary.start,
         null,
@@ -2779,31 +3531,73 @@ export function parseCommand(text: string): ParseResult {
         boundary.shift,
       );
     }
-    return parseAssignRest(
-      dayResult.rest,
-      merged.day,
-      boundary.start,
-      null,
-      quotes,
-      boundary.shift,
-    );
+
+    const canonical = parseCanonicalAssign(norm, quotes);
+    if (canonical.ok || canonical.failure.kind !== "no_time") return canonical;
+
+    // R-404 (RM8): "after 2" (or "before"/"until") on an assign or a booking --
+    // those two grammars need BOTH ends said; a lone edge here is
+    // `open_span`, never a silent guess at the other one. Only reached once
+    // the ordinary paired ("from X to Y") and bare-pair readings have both
+    // failed to find hours at all (P21's "from 8 until 4" is a valid PAIR and
+    // never reaches here).
+    const openSpanMatch = norm.match(LONE_EDGE_RE);
+    if (openSpanMatch) {
+      return { ok: false, failure: { kind: "open_span", text: openSpanMatch[0].trim() } };
+    }
+
+    return canonical;
   }
+}
 
-  const canonical = parseCanonicalAssign(norm, quotes);
-  if (canonical.ok || canonical.failure.kind !== "no_time") return canonical;
+/** S58 (R-416): one "every weekday"/"every day"/"weekdays" clause, with an
+ *  optional "this week"/"next week" -- an unanchored search, since it sits
+ *  between the place and the hours (RW1), not necessarily at either end.
+ *  Defaults to "this week" when no week word is said (RW4). */
+const REPEAT_DAY_RE = new RegExp(
+  `\\b(${REPEAT_WORDS.join("|").replace(/ /g, "\\s+")})\\b(?:\\s+(this\\s+week|next\\s+week))?`,
+  "i",
+);
 
-  // R-404 (RM8): "after 2" (or "before"/"until") on an assign or a booking --
-  // those two grammars need BOTH ends said; a lone edge here is
-  // `open_span`, never a silent guess at the other one. Only reached once
-  // the ordinary paired ("from X to Y") and bare-pair readings have both
-  // failed to find hours at all (P21's "from 8 until 4" is a valid PAIR and
-  // never reaches here).
-  const openSpanMatch = norm.match(LONE_EDGE_RE);
-  if (openSpanMatch) {
-    return { ok: false, failure: { kind: "open_span", text: openSpanMatch[0].trim() } };
+function extractRepeatDayClause(text: string): { rest: string; day: DayWord; text: string } | null {
+  const m = text.match(REPEAT_DAY_RE);
+  if (!m || m.index === undefined) return null;
+  const kind: "weekdays" | "every_day" = /^every\s+day$/i.test(m[1]) ? "every_day" : "weekdays";
+  const week: "this_week" | "next_week" = m[2] && /next/i.test(m[2]) ? "next_week" : "this_week";
+  return { rest: removeMatch(text, m), day: { kind, week }, text: m[0].trim() };
+}
+
+/** S58 (R-416): reattaches the repeat-day clause `extractRepeatDayClause`
+ *  stripped, once the finished command's intent is known -- legal ONLY on
+ *  an assign or a booking (D132 item 5); everywhere else, `bad_day`. A
+ *  `several`'s inner commands are always assign or move (S50) or assign or
+ *  book (S41-a's own several), so the same per-command rule is applied to
+ *  each in turn. */
+function applyRepeatDay(result: ParseResult, repeat: { day: DayWord; text: string }): ParseResult {
+  if (!result.ok) return result;
+  if (result.command.intent === "several") {
+    const commands: SingleCommand[] = [];
+    for (const c of result.command.commands) {
+      const applied = applyRepeatDayToSingle(c, repeat);
+      if (!applied.ok) return applied;
+      commands.push(applied.command as SingleCommand);
+    }
+    return { ok: true, command: { intent: "several", commands } };
   }
+  return applyRepeatDayToSingle(result.command, repeat);
+}
 
-  return canonical;
+function applyRepeatDayToSingle(cmd: Command, repeat: { day: DayWord; text: string }): ParseResult {
+  if (cmd.intent !== "assign" && cmd.intent !== "book") {
+    return { ok: false, failure: { kind: "bad_day", text: repeat.text } };
+  }
+  if (cmd.day !== null) {
+    return {
+      ok: false,
+      failure: { kind: "two_days", first: repeat.text, second: dayToCanonicalText(cmd.day) },
+    };
+  }
+  return { ok: true, command: { ...cmd, day: repeat.day } };
 }
 
 /**
@@ -2918,6 +3712,14 @@ function formatEndClock(t: ClockTime): string {
   return `${pad2(t.hour)}:${pad2(t.minute)}`;
 }
 
+/** S58 (R-416): prints "every weekday"/"every day", the week word ALWAYS
+ *  said explicitly (RW7's own pin: "this week" prints even when the input
+ *  left it implied -- the round trip only needs to read back the same
+ *  `DayWord`, not the exact words said). */
+function repeatWeekText(week: "this_week" | "next_week"): string {
+  return week === "next_week" ? "next week" : "this week";
+}
+
 function dayToCanonicalText(day: DayWord): string {
   if (day.kind === "today") return "today";
   if (day.kind === "tomorrow") return "tomorrow";
@@ -2926,7 +3728,18 @@ function dayToCanonicalText(day: DayWord): string {
   if (day.kind === "this_week") return "this week";
   if (day.kind === "next_week") return "next week";
   if (day.kind === "last_week") return "last week";
+  if (day.kind === "weekdays") return `every weekday ${repeatWeekText(day.week)}`;
+  if (day.kind === "every_day") return `every day ${repeatWeekText(day.week)}`;
   return WEEKDAY_ABBR[day.day];
+}
+
+/** S58 (R-416, RW7): true for the two REPEAT `DayWord` kinds -- printed
+ *  WITHOUT the ordinary "on" prefix (`formatAssignCommand`/
+ *  `formatBookCommand`'s own day clause), so the printed clause matches
+ *  exactly what `extractRepeatDayClause` looks for and there is no stray
+ *  "on" left dangling before the hours clause that follows it. */
+function isRepeatDay(day: DayWord): boolean {
+  return day.kind === "weekdays" || day.kind === "every_day";
 }
 
 /**
@@ -2936,6 +3749,23 @@ function dayToCanonicalText(day: DayWord): string {
  * `existing`.
  */
 function formatAssignCommand(command: AssignCommand): string {
+  // S58 (R-414, JB6): "the job's hours" prints its own "to the <product>
+  // job" shape -- the reserved word travels IN the product clause, not as
+  // an appended shift/boundary clause the way `ALL_DAY` etc. do, so it
+  // round-trips through `tryJobHoursAssign`'s own "the ... job" reading.
+  if (command.shift === JOB_HOURS) {
+    const parts: string[] = ["assign", quoteIfNeeded(command.operator), "to", "the"];
+    parts.push(quoteIfNeeded(command.product), "job");
+    parts.push("on", quoteIfNeeded(command.place[0]));
+    for (let i = 1; i < command.place.length; i++) {
+      parts.push("in", quoteIfNeeded(command.place[i]));
+    }
+    if (command.day) {
+      parts.push(...(isRepeatDay(command.day) ? [] : ["on"]), dayToCanonicalText(command.day));
+    }
+    return parts.join(" ");
+  }
+
   const parts: string[] = [
     "assign",
     quoteIfNeeded(command.operator),
@@ -2947,7 +3777,7 @@ function formatAssignCommand(command: AssignCommand): string {
     parts.push("in", quoteIfNeeded(command.place[i]));
   }
   if (command.day) {
-    parts.push("on", dayToCanonicalText(command.day));
+    parts.push(...(isRepeatDay(command.day) ? [] : ["on"]), dayToCanonicalText(command.day));
   }
   // R-402/R-404: a shift or boundary clause prints in place of the hours;
   // the invariant (`shift` non-null <=> `start`/`end` null, `ALL_DAY`
@@ -2980,7 +3810,7 @@ function formatBookCommand(command: BookCommand): string {
     parts.push("for", String(command.headcount), "people");
   }
   if (command.day) {
-    parts.push("on", dayToCanonicalText(command.day));
+    parts.push(...(isRepeatDay(command.day) ? [] : ["on"]), dayToCanonicalText(command.day));
   }
   // R-402/R-404: a shift or boundary clause in place of the hours -- same
   // invariant as `formatAssignCommand`.
@@ -3159,7 +3989,105 @@ function formatCopyCommand(command: CopyCommand): string {
  * "from"), so the whole remainder is the operator and there is no
  * destination -- both read back to the same command that was formatted.
  */
+/** S58 (R-412): formats a signed minute count as ["<n>", "<unit>"] -- whole
+ *  hours print as "N hour"/"N hours", anything else as raw minutes. Only
+ *  ever called with the MAGNITUDE (the caller's own verb/word already says
+ *  the sign): `formatAdjustCommand` below, never a negative number here. */
+function formatDurationMinutes(minutes: number): string[] {
+  if (minutes % 60 === 0) {
+    const n = minutes / 60;
+    return [String(n), n === 1 ? "hour" : "hours"];
+  }
+  return [String(minutes), minutes === 1 ? "minute" : "minutes"];
+}
+
+function formatClock(t: ClockTime): string {
+  return `${pad2(t.hour)}:${pad2(t.minute)}`;
+}
+
+/** Reviewer fix (S58 review): `"on <place[0]> [in <place[1]> ...]"`, or `[]`
+ *  when there is none -- shared by `formatAdjustCommand`'s two doors below. */
+function formatAdjustPlace(place: string[]): string[] {
+  if (place.length === 0) return [];
+  const parts: string[] = ["on", quoteIfNeeded(place[0])];
+  for (let i = 1; i < place.length; i++) parts.push("in", quoteIfNeeded(place[i]));
+  return parts;
+}
+
+/**
+ * S58 (R-412, brief §1 AJ17): the canonical sentence for a `MoveCommand`
+ * whose `adjust` is set -- a different shape entirely from the ordinary
+ * move sentence (no destination, no ordinary hours). The END edge always
+ * prints through the dedicated-verb door ("extend"/"end", `at` printing as
+ * "end <op> at HH:MM", a negative `by` as "end <op> N unit earlier"); the
+ * START edge has no dedicated verb, so it always prints through the
+ * possessive-edge-tail door ("move <op>'s start ..."), the same one
+ * `tryMoveEdgeAdjust` reads back.
+ *
+ * Reviewer fix (S58 review): `command.place` was silently dropped here even
+ * though both parse doors already accept it (AJ3's leading place on the
+ * dedicated-verb door, AJ8's trailing place on the same door, and the
+ * possessive-edge-tail door's own leftover place added by this review) --
+ * `formatCommand(parseCommand("lengthen Sam on Cell 1 by 2 hours today"))`
+ * printed "lengthen Sam by 2 hours on today" with the cell silently gone,
+ * and reparsing it lost the place for good. Each door prints place in the
+ * SAME position its own parser already reads it back from unambiguously:
+ * the dedicated-verb door's `by`/`earlier` clauses read a place before OR
+ * after the clause (both `splitMoveOperatorPlaces` calls are unanchored), so
+ * printing it BEFORE the clause matches AJ3's own pinned order; the
+ * possessive-edge-tail door only ever reads a place from the leftover AFTER
+ * its clause, so it is printed there.
+ */
+function formatAdjustCommand(command: MoveCommand): string {
+  const adjust = command.adjust!;
+  const opQ = quoteIfNeeded(command.operator);
+  const placeParts = formatAdjustPlace(command.place);
+  let sentence: string;
+  if (adjust.edge === "end") {
+    if ("at" in adjust) {
+      // F-146 (reviewer fix, S58 review): DAY_END prints as "midnight" here
+      // too, the same as every other END clock in this file -- the parse
+      // side above now writes DAY_END for "end Sam at midnight" and this
+      // must read it back the same way, or the round trip breaks. Place, per
+      // AJ8, prints AFTER the at-clause.
+      sentence = ["end", opQ, "at", formatEndClock(adjust.at), ...placeParts].join(" ");
+    } else if (adjust.by > 0) {
+      sentence = ["extend", opQ, ...placeParts, "by", ...formatDurationMinutes(adjust.by)].join(
+        " ",
+      );
+    } else {
+      sentence = ["end", opQ, ...placeParts, ...formatDurationMinutes(-adjust.by), "earlier"].join(
+        " ",
+      );
+    }
+  } else if ("at" in adjust) {
+    sentence = ["move", `${opQ}'s`, "start", "to", formatClock(adjust.at), ...placeParts].join(" ");
+  } else if (adjust.by > 0) {
+    sentence = [
+      "move",
+      `${opQ}'s`,
+      "start",
+      "by",
+      ...formatDurationMinutes(adjust.by),
+      ...placeParts,
+    ].join(" ");
+  } else {
+    sentence = [
+      "move",
+      `${opQ}'s`,
+      "start",
+      ...formatDurationMinutes(-adjust.by),
+      "earlier",
+      ...placeParts,
+    ].join(" ");
+  }
+  if (command.day) sentence += ` on ${dayToCanonicalText(command.day)}`;
+  return sentence;
+}
+
 function formatMoveCommand(command: MoveCommand): string {
+  if (command.adjust !== null) return formatAdjustCommand(command);
+
   const parts: string[] = ["move", quoteIfNeeded(command.operator)];
   if (command.place.length > 0) {
     parts.push("on", quoteIfNeeded(command.place[0]));
@@ -3192,6 +4120,49 @@ function formatMoveCommand(command: MoveCommand): string {
 }
 
 /**
+ * S58 (R-413): the canonical sentence for a `SplitCommand` -- `split <op>
+ * [on <cell> [in <line>]] [on <day>] at HH:MM`.
+ */
+function formatSplitCommand(command: SplitCommand): string {
+  const parts: string[] = ["split", quoteIfNeeded(command.operator)];
+  if (command.place.length > 0) {
+    parts.push("on", quoteIfNeeded(command.place[0]));
+    for (let i = 1; i < command.place.length; i++) {
+      parts.push("in", quoteIfNeeded(command.place[i]));
+    }
+  }
+  if (command.day) {
+    parts.push("on", dayToCanonicalText(command.day));
+  }
+  parts.push("at", formatClock(command.at));
+  return parts.join(" ");
+}
+
+/**
+ * S58 (R-415): the canonical sentence for a `HeadcountCommand` -- `make the
+ * <product> job on <cell> [in <line>] [on <day>] [from HH:MM to HH:MM | for
+ * shift <name>] <n> people`. Always "make" (never "set", PV4's own
+ * canonical-verb rule applied to the one new list).
+ */
+function formatHeadcountCommand(command: HeadcountCommand): string {
+  const parts: string[] = ["make", "the", quoteIfNeeded(command.product), "job"];
+  parts.push("on", quoteIfNeeded(command.place[0]));
+  for (let i = 1; i < command.place.length; i++) {
+    parts.push("in", quoteIfNeeded(command.place[i]));
+  }
+  if (command.day) {
+    parts.push("on", dayToCanonicalText(command.day));
+  }
+  if (command.shift !== null) {
+    parts.push("for", "shift", quoteShiftIfNeeded(command.shift));
+  } else if (command.span) {
+    parts.push("from", formatClock(command.span.start), "to", formatClock(command.span.end));
+  }
+  parts.push(String(command.headcount), "people");
+  return parts.join(" ");
+}
+
+/**
  * The canonical sentence for a `Command` — the inverse of `parseCommand` for
  * whichever shape the command's `intent` names. The bar rebuilds the input
  * from this after a candidate button is pressed. Never prints `attach` or
@@ -3210,6 +4181,8 @@ export function formatCommand(command: Command): string {
   if (command.intent === "replace") return formatReplaceCommand(command);
   if (command.intent === "swap") return formatSwapCommand(command);
   if (command.intent === "copy") return formatCopyCommand(command);
+  if (command.intent === "split") return formatSplitCommand(command);
+  if (command.intent === "headcount") return formatHeadcountCommand(command);
   return formatAssignCommand(command);
 }
 

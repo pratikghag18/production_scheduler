@@ -2273,6 +2273,44 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [updateRunFields, failWith, runLabelById],
   );
 
+  /**
+   * S58 (R-415, D132 item 4): `CommandBar`'s own headcount write -- "make the
+   * Housing A job on Cell 1 4 people" -- through the SAME `updateRunFields`
+   * mutation `saveRunFields` above sends (no second door), never a popover:
+   * there is nothing here to close, since a headcount sentence never opens
+   * one.
+   *
+   * `edit` requires BOTH fields (`RunFieldEdit`'s own shape, `saveRunFields`'
+   * own call above), so this reads the run's CURRENT `notes` off `index.
+   * runById` first and sends them back unchanged -- a headcount change must
+   * never blank the notes (brief §5). A failure reports through the same
+   * `failWith` toast every other write here uses.
+   *
+   * Reviewer fix (S58-d lane review, 14 Sept): a stale board -- the run in
+   * the resolved command is no longer in `index.runById` -- used to fall
+   * through to `run?.notes ?? null` and send the write ANYWAY with
+   * `notes: null`, which would silently blank a real run's real notes the
+   * moment the runId happened to still exist server-side (the exact shape
+   * CLAUDE.md §4 warns about: a write that reports success can have changed
+   * the wrong thing). `retimeRunFromCommand` above already has the correct
+   * guard for exactly this case (`if (!run) { toast.reverted(...); return; }`,
+   * never reaching its own mutation) -- this mirrors it rather than guessing.
+   */
+  const setHeadcountFromCommand = useCallback(
+    (runId: string, headcount: number) => {
+      const run = index.runById.get(runId);
+      if (!run) {
+        toast.reverted("That job is no longer on the board.");
+        return;
+      }
+      updateRunFields.mutate(
+        { runId, edit: { notes: run.notes, plannedHeadcount: headcount } },
+        { onError: (err) => failWith(err, runLabelById(runId)) },
+      );
+    },
+    [index, toast, updateRunFields, failWith, runLabelById],
+  );
+
   const deleteRunWithMode = useCallback(
     (runId: string, mode: "cascade" | "detach") => {
       deleteRun.mutate({ runId, mode }, { onError: (err) => failWith(err, runLabelById(runId)) });
@@ -2485,8 +2523,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
                 target: r.target,
               });
             }
-          } else {
-            // r.intent === "book"
+          } else if (r.intent === "book") {
             if (r.target.kind === "run_create") {
               await createRunFromCommand({
                 nodeId: r.nodeId,
@@ -2501,6 +2538,16 @@ export function useDragGesture(args: UseDragGestureArgs) {
                 readout: r.readout,
               });
             }
+          } else {
+            // S58 (R-415, D132 item 4): `r` narrows to `never` here -- every
+            // member of `ResolvedAny` is handled above, and `ResolvedHeadcount`
+            // is not one of them (a headcount is never wrapped in a `several`,
+            // so it can never reach `onRunLot` by type). This branch is the
+            // pin: if a future caller ever widens `ResolvedAny` to include a
+            // headcount anyway, this refuses it explicitly rather than
+            // silently falling into the "book" branch above and reading
+            // fields (`target.kind`) it does not have.
+            throw new LotStepRefused("A headcount change cannot be part of a lot.");
           }
           done++;
         } catch (err) {
@@ -2556,6 +2603,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     submitMove,
     runLot,
     saveRunFields,
+    setHeadcountFromCommand,
     deleteRunWithMode,
     saveAssignmentFields,
     reassignAssignment,

@@ -1870,6 +1870,133 @@ describe("useDragGesture", () => {
   });
 
   /**
+   * S58 (R-415, D132 item 4): `CommandBar`'s own headcount write -- through
+   * the SAME `updateRunFields` mutation `saveRunFields`'s own D6/D7/D8/D9
+   * cases above already prove (no second door), never a popover (there is
+   * nothing here to close).
+   */
+  describe("S58: setHeadcountFromCommand -- the command bar's headcount path", () => {
+    it("writes plannedHeadcount and reads the run's OWN notes back unchanged -- a headcount change must never blank them", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateRunFields).mockResolvedValue({} as never);
+      const index = buildIndex([]); // run-1, notes null by default
+      const indexWithNotes: BoardIndex = {
+        ...index,
+        runById: new Map([["run-1", { ...runFixture, notes: "Handle with care" }]]),
+      };
+      const { result } = renderHook(() => useDragGesture(baseArgs(indexWithNotes)), { wrapper });
+
+      act(() => {
+        result.current.setHeadcountFromCommand("run-1", 4);
+      });
+
+      await waitFor(() => expect(api.updateRunFields).toHaveBeenCalledTimes(1));
+      const call = vi.mocked(api.updateRunFields).mock.calls[0];
+      expect(call?.[0]).toBe("run-1");
+      expect(call?.[1]).toEqual({ notes: "Handle with care", plannedHeadcount: 4 });
+    });
+
+    it("a run with no notes at all sends notes: null, never undefined or blank", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateRunFields).mockResolvedValue({} as never);
+      const index = buildIndex([]); // run-1, notes null by default
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.setHeadcountFromCommand("run-1", 6);
+      });
+
+      await waitFor(() => expect(api.updateRunFields).toHaveBeenCalledTimes(1));
+      const call = vi.mocked(api.updateRunFields).mock.calls[0];
+      expect(call?.[0]).toBe("run-1");
+      expect(call?.[1]).toEqual({ notes: null, plannedHeadcount: 6 });
+    });
+
+    it("a mutation failure toasts the same way saveRunFields's own D8-style failure does (failWith, reverted)", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateRunFields).mockRejectedValueOnce({ kind: "WriteRefused" });
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.setHeadcountFromCommand("run-1", 4);
+      });
+
+      await waitFor(() => {
+        const messages = useToastStore.getState().toasts.map((t) => t.message);
+        expect(
+          messages.some(
+            (m) =>
+              m.includes("You don't have permission to change that.") && m.endsWith("— reverted."),
+          ),
+        ).toBe(true);
+      });
+    });
+
+    /**
+     * Reviewer fix (S58-d lane review, 14 Sept): a stale board -- the runId
+     * the command bar resolved is no longer in `index.runById` -- used to
+     * fall through to `run?.notes ?? null` and send the write ANYWAY,
+     * fabricating `notes: null`; had the runId still existed server-side
+     * (this client just has not caught up), that would have silently blanked
+     * its real notes on a "successful" write -- the exact shape D9 above
+     * already guards against for `retimeRunFromCommand`. No crash either
+     * way (`buildIndex([])` still has `run-1`; only the unknown id is new
+     * here), but the write must never leave this function at all.
+     */
+    it("an unknown run id writes nothing and toasts that the job is gone, same as D9's retimeRunFromCommand case", async () => {
+      const api = await import("@/lib/api");
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.setHeadcountFromCommand("does-not-exist", 4);
+      });
+
+      expect(api.updateRunFields).not.toHaveBeenCalled();
+      const messages = useToastStore.getState().toasts.map((t) => t.message);
+      expect(messages).toContain("That job is no longer on the board. — reverted.");
+    });
+  });
+
+  /**
+   * S58 (R-415, D132 item 4): a headcount can never reach a lot by type --
+   * `ResolvedAny` (`CommandBar.tsx`) excludes `ResolvedHeadcount` -- so this
+   * pins the runner's own DEFENSIVE refusal branch, reached only by forcing
+   * a shape past the type system the way a future caller's bug might.
+   */
+  describe("S58: runLot refuses a headcount step it should never receive", () => {
+    it("a headcount-shaped entry in the lot is refused with LotStepRefused's own message, nothing written, nothing else attempted", async () => {
+      const api = await import("@/lib/api");
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      const lot = [
+        {
+          intent: "headcount",
+          runId: "run-1",
+          nodeId: "cell-1",
+          headcount: 4,
+          readout: "Housing A · Cell 1 · 2026-08-24 · 06:00-10:00 · 4 people",
+        },
+        { intent: "unassign", assignmentId: "asg-1", readout: "Removing block 1" },
+      ] as unknown as ResolvedAny[];
+
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot(lot);
+      });
+
+      expect(outcome).toEqual({
+        done: 0,
+        error: "A headcount change cannot be part of a lot.",
+      });
+      expect(api.updateRunFields).not.toHaveBeenCalled();
+      expect(api.deleteAssignment).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * S51 review fix -- blocker 1 (an awaited removal reports the lot's own
    * failure instead of counting a refused write as done) and blocker 2 (a
    * retime that would need a popover's own decision rejects instead of

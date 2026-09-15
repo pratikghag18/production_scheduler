@@ -22,16 +22,19 @@
  * helpers (`resolveCellStep`, `resolvePartStep`, `resolveDaySpanStep`).
  */
 import type {
+  Adjust,
   AssignCommand,
   BookCommand,
   ClockTime,
   Command,
   CopyCommand,
   DayWord,
+  HeadcountCommand,
   MoveCommand,
   ReplaceCommand,
   SeveralCommand,
   SingleCommand,
+  SplitCommand,
   SwapCommand,
   UnassignCommand,
 } from "./parse.ts";
@@ -417,10 +420,56 @@ export type Question =
    *  `resolveCommand` without first going through `expandCommand` -- a
    *  caller's bug, never a crash, the same role `several_unsupported` plays
    *  for an un-run `several`. */
-  | { kind: "expand_first"; intent: string };
+  | { kind: "expand_first"; intent: string }
+  /** S58 (R-412, D132 item 1): an adjust's new end would fall at or before
+   *  its new start -- "shorten Sam's block by 6 hours" on a 4-hour block. */
+  | { kind: "adjust_inverts"; person: string; block: string }
+  /** S58 (R-412): an adjust's new range would reach past the block's own
+   *  day's midnight in either direction -- an adjust never carries the
+   *  block onto another day. */
+  | { kind: "adjust_off_day"; person: string; block: string }
+  /** S58 (R-412): `command.adjust` set alongside `toPlace`/`span`/`shift` --
+   *  a contradiction the grammar never produces (parse.ts's own `bad_adjust`
+   *  ParseFailure catches it first); a caller's bug, never a crash, the same
+   *  role `expand_first` plays for an unexpanded board command. `text` is
+   *  the full one-line message. */
+  | { kind: "bad_adjust"; text: string }
+  /** S58 (R-413, D132 item 2): a split's `at` falls inside none of the
+   *  person's blocks that day -- `blocks` are those blocks' own "<part>
+   *  <hours>" strings, for the message to list (a split is never a button
+   *  pick -- it writes two commands at once, `swap_which`'s own shape). */
+  | { kind: "split_outside"; person: string; at: string; blocks: string[] }
+  /** S58 (R-414/R-415, D132 items 3/4): "the job's hours" (an assign) or a
+   *  headcount sentence named a part/cell/window with no job on it at all. */
+  | { kind: "no_job"; product: string; cell: string; when: string }
+  /** S58 (R-414/R-415, D132 items 3/4): more than one job of that part
+   *  overlaps the window -- `runs` are their own "HH:MM–HH:MM" spans, for
+   *  the message to list (never a button pick -- the sentence named no
+   *  single time to choose by). */
+  | { kind: "which_job"; product: string; cell: string; runs: string[] }
+  /** S58 (R-416, D132 item 5): a `weekdays`/`every_day` repeat day reached
+   *  `resolveDay` on an intent other than assign/book -- the grammar never
+   *  produces one there (parse.ts's own `bad_day` ParseFailure catches it
+   *  first); a caller's bug, never a crash. `text` is the day word's own
+   *  plain-language name (`dayWordLabel`). */
+  | { kind: "bad_repeat_day"; text: string };
+
+export interface ResolvedHeadcount {
+  intent: "headcount";
+  runId: string;
+  nodeId: string;
+  headcount: number;
+  /** "Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 ·
+   *  08:00–16:00 · 4 people" */
+  readout: string;
+}
 
 export type Resolution =
-  | { ok: true; resolved: ResolvedCommand | ResolvedBook | ResolvedUnassign | ResolvedMove }
+  | {
+      ok: true;
+      resolved:
+        ResolvedCommand | ResolvedBook | ResolvedUnassign | ResolvedMove | ResolvedHeadcount;
+    }
   | { ok: false; question: Question };
 
 // ---------------------------------------------------------------------------
@@ -443,6 +492,16 @@ export type Resolution =
 const ALL_DAY = "all day";
 const END_OF_SHIFT = "end of shift";
 const END_OF_DAY = "end of day";
+/** S58 (R-414, D132 item 3): parse.ts's own fourth `BOUNDARY_SHIFTS` member,
+ *  mirrored the same way -- but its resolution mechanism is NOT a band
+ *  lookup like the other three (it finds an existing RUN), so it is never
+ *  added to `boundaryKind`'s own set; `isJobHours` is its own check, tried
+ *  only where the caller also has a `product` to search runs with
+ *  (`resolveShiftSpanStep`'s own `jobProduct` parameter, the assign path
+ *  only). Every other caller never passes one, so "the job" falls through
+ *  to the ordinary band-matching below and refuses `no_shift`, naming it --
+ *  the "no_shift-class refusal" the brief asks for, for free. */
+const JOB_HOURS = "the job";
 const EVERYONE = "everyone";
 /** parse.ts's `DAY_END` ClockTime, `{ hour: 23, minute: 59 }` -- the one
  *  value that type can hold for "the day's end" (R-404). */
@@ -653,6 +712,15 @@ function resolveDay(
     if (found) return { ok: true, dayIndex: found.index };
     return { ok: false, question: { kind: "day_off_board", text: day.iso } };
   }
+  // S58 (R-416, D132 item 5): `weekdays`/`every_day` are legal ONLY on an
+  // assign or a booking, and only BEFORE `expandCommand` turns them into one
+  // `{ kind: "date" }` per written day -- a caller reaching this function
+  // with one still set (any other intent, or an assign/book that skipped
+  // `expandCommand`) is a bug, never a crash. `resolveDay` on these kinds is
+  // the one place the refusal lives; every caller shares it.
+  if (day.kind === "weekdays" || day.kind === "every_day") {
+    return { ok: false, question: { kind: "bad_repeat_day", text: dayWordLabel(day) } };
+  }
   // S55 (D130 item 4): `this_week`/`next_week`/`last_week` are legal ONLY on
   // a `copy`'s own `from`/`to` (parse.ts's own `DayWord` doc) -- resolved by
   // `resolveWeekDays` below, never by this function. Unreachable via the
@@ -663,7 +731,8 @@ function resolveDay(
 
 /** S55 (D130 item 4): a plain-language name for any `DayWord`, for a
  *  `nothing_to_do`/defensive message that must name a day -- "yesterday",
- *  "Monday", "2026-09-04", "this week". */
+ *  "Monday", "2026-09-04", "this week". S58 adds the two repeat kinds
+ *  (`weekdays`/`every_day`), each naming its own week. */
 function dayWordLabel(day: DayWord): string {
   if (day.kind === "today") return "today";
   if (day.kind === "tomorrow") return "tomorrow";
@@ -672,7 +741,10 @@ function dayWordLabel(day: DayWord): string {
   if (day.kind === "date") return day.iso;
   if (day.kind === "this_week") return "this week";
   if (day.kind === "next_week") return "next week";
-  return "last week";
+  if (day.kind === "last_week") return "last week";
+  const week = day.week === "next_week" ? "next week" : "this week";
+  if (day.kind === "weekdays") return `every weekday ${week}`;
+  return `every day ${week}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -787,7 +859,14 @@ function resolveDaySpanStep(
   end: { hour: number; minute: number },
   ctx: ResolveContext,
 ):
-  | { ok: true; dayIndex: number; startMin: number; endMin: number; timeText: string }
+  | {
+      ok: true;
+      dayIndex: number;
+      startMin: number;
+      endMin: number;
+      timeText: string;
+      jobRunId?: string;
+    }
   | { ok: false; question: Question } {
   const dayResolution = resolveDay(day, ctx);
   if (!dayResolution.ok) return { ok: false, question: dayResolution.question };
@@ -876,6 +955,12 @@ function boundaryKind(shiftText: string): "all_day" | "end_of_shift" | "end_of_d
   if (w === END_OF_SHIFT) return "end_of_shift";
   if (w === END_OF_DAY) return "end_of_day";
   return null;
+}
+
+/** S58 (R-414): case-insensitive, exact -- matches `JOB_HOURS` the same way
+ *  `boundaryKind` matches its own three names. */
+function isJobHours(shiftText: string): boolean {
+  return normalizeForMatch(shiftText) === JOB_HOURS;
 }
 
 /** True when `mod` (a plain minute-of-day, 0..1439) falls in `band`'s own
@@ -986,6 +1071,98 @@ function resolveBoundarySpan(
   return finishBoundarySpan(dayIndex, bands[0].startMin, bands[0].endMin, ctx);
 }
 
+/** S58 (R-414/R-415, D132 items 3/4): every run of `product` on `cell`
+ *  overlapping `[windowStart, windowEnd)`, in `ctx.runs`' own (board) order --
+ *  shared by "the job's hours" (the assign path, the whole day as its
+ *  window) and a headcount sentence (its own shift/span-narrowed window). */
+function findJobRuns(
+  cell: { id: string },
+  product: ProductLike,
+  windowStart: number,
+  windowEnd: number,
+  ctx: ResolveContext,
+): ContextRun[] {
+  return ctx.runs.filter(
+    (r) =>
+      r.nodeId === cell.id &&
+      r.productId === product.id &&
+      ctx.overlaps({ startMin: windowStart, endMin: windowEnd }, r),
+  );
+}
+
+/** S58: the shared none/several refusal for `findJobRuns`' own result --
+ *  `null` means exactly one, the caller's own success case. */
+function jobRunsQuestion(
+  runs: readonly ContextRun[],
+  product: ProductLike,
+  cell: { name: string },
+  when: string,
+): Question | null {
+  if (runs.length === 0) return { kind: "no_job", product: product.name, cell: cell.name, when };
+  if (runs.length > 1) {
+    return {
+      kind: "which_job",
+      product: product.name,
+      cell: cell.name,
+      runs: runs.map((r) => r.span),
+    };
+  }
+  return null;
+}
+
+/**
+ * S58 (R-414, D132 item 3): "the job's hours" on an assign -- `resolveShift
+ * SpanStep`'s own `jobProduct` branch. The runs of `product` on `cell`
+ * overlapping the WHOLE DAY (never narrowed by a start -- the sentence gave
+ * none, that is the point of saying "the job"); none/several is `no_job`/
+ * `which_job`; exactly one takes ITS OWN hours as the span (`jobRunId` tells
+ * `resolveAssignCommand` to skip the run-matching step entirely -- the
+ * sentence already named the job, R-383's `run_exists` question would never
+ * make sense here). A misconfigured run shorter than the minimum is refused
+ * the same way a pattern's own too-short band already is (§2's own comment).
+ */
+function resolveJobHoursSpan(
+  dayIndex: number,
+  cell: { id: string; name: string },
+  product: ProductLike,
+  ctx: ResolveContext,
+):
+  | {
+      ok: true;
+      dayIndex: number;
+      startMin: number;
+      endMin: number;
+      timeText: string;
+      jobRunId?: string;
+    }
+  | { ok: false; question: Question } {
+  const dayStart = ctx.wallToOffset(dayIndex, 0);
+  const dayEnd = ctx.wallToOffset(dayIndex, 1440);
+  const runs = findJobRuns(cell, product, dayStart, dayEnd, ctx);
+  const when = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+  const q = jobRunsQuestion(runs, product, cell, when);
+  if (q !== null) return { ok: false, question: q };
+  const run = runs[0];
+  if (run.endMin - run.startMin < ctx.minDurationMinutes) {
+    return {
+      ok: false,
+      question: {
+        kind: "too_short",
+        minutes: run.endMin - run.startMin,
+        min: ctx.minDurationMinutes,
+      },
+    };
+  }
+  return {
+    ok: true,
+    dayIndex,
+    startMin: run.startMin,
+    endMin: run.endMin,
+    timeText: run.span,
+    jobRunId: run.id,
+  };
+}
+
 /**
  * S52-b (R-402, design §19.99/D128): a shift's name resolves to `cell`'s
  * own band for the resolved day, from `ctx.shiftsAt` -- the SAME map
@@ -1004,12 +1181,27 @@ function resolveShiftSpanStep(
   cell: { id: string; name: string },
   ctx: ResolveContext,
   boundary: BoundaryOpts = DEFAULT_BOUNDARY_OPTS,
+  /** S58 (R-414): set ONLY by the assign path's own call -- every other
+   *  caller (book, unassign, move) passes none, so `isJobHours` below never
+   *  fires for them and "the job" falls through to the ordinary band match. */
+  jobProduct: ProductLike | null = null,
 ):
-  | { ok: true; dayIndex: number; startMin: number; endMin: number; timeText: string }
+  | {
+      ok: true;
+      dayIndex: number;
+      startMin: number;
+      endMin: number;
+      timeText: string;
+      jobRunId?: string;
+    }
   | { ok: false; question: Question } {
   const dayResolution = resolveDay(day, ctx);
   if (!dayResolution.ok) return { ok: false, question: dayResolution.question };
   const dayIndex = dayResolution.dayIndex;
+
+  if (jobProduct !== null && isJobHours(shiftText)) {
+    return resolveJobHoursSpan(dayIndex, cell, jobProduct, ctx);
+  }
 
   const kind = boundaryKind(shiftText);
   if (kind !== null) return resolveBoundarySpan(kind, dayIndex, cell, ctx, boundary);
@@ -1201,25 +1393,45 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
   // band for the day (the type's own invariant means `start`/`end` are null
   // exactly when `shift` is not). S55 (R-404): `command.start` carries a
   // start ONLY when `shift` is `END_OF_SHIFT`/`END_OF_DAY`; an assign asks
-  // (`no_start`) when neither it nor "now" supplies one.
+  // (`no_start`) when neither it nor "now" supplies one. S58 (R-414): the
+  // FIFTH argument, `product`, is read only here -- `resolveShiftSpanStep`'s
+  // own `jobProduct` branch, "the job's hours". Every other caller of this
+  // shared step (book, unassign, move) passes none, so "the job" falls
+  // through to an ordinary (failing) band match for them instead.
   const spanResult =
     command.shift !== null
-      ? resolveShiftSpanStep(command.day, command.shift, cell, ctx, {
-          givenStart: command.start,
-          onMissingStart: "ask",
-        })
+      ? resolveShiftSpanStep(
+          command.day,
+          command.shift,
+          cell,
+          ctx,
+          { givenStart: command.start, onMissingStart: "ask" },
+          product,
+        )
       : resolveDaySpanStep(command.day, command.start!, command.end!, ctx);
   if (!spanResult.ok) return { ok: false, question: spanResult.question };
-  const { dayIndex, startMin, endMin, timeText } = spanResult;
+  const { dayIndex, startMin, endMin, timeText, jobRunId } = spanResult;
 
   // 5. The own-block question (R-385).
-  const own = ctx.assignments.filter(
+  // S58-e (R-413): `separate_from` behaves like `null` EXCEPT that the named
+  // block (the one this assign is being split out of, still full-length in
+  // `ctx.assignments` -- D127 means the whole lot resolves before either
+  // half writes) is removed from `own` first. A genuine second overlapping
+  // block of the same person/part/cell still asks `block_exists`, naming
+  // only that other block; if none remains, this falls through to the run
+  // question exactly as `separate` does.
+  const ownAll = ctx.assignments.filter(
     (x) =>
       x.nodeId === cell.id &&
       x.operatorId === operator.id &&
       x.productId === product.id &&
       ctx.overlaps({ startMin, endMin }, x),
   );
+  const existing = command.existing;
+  const own =
+    existing !== null && existing.kind === "separate_from"
+      ? ownAll.filter((x) => x.id !== existing.assignmentId)
+      : ownAll;
   const blockCandidates = (): Candidate[] =>
     own.map((x) => ({ id: x.id, label: x.label, word: "" }));
   const askBlock = (): Resolution => ({
@@ -1235,10 +1447,10 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
     },
   });
   let retime: ContextAssignment | null = null;
-  if (own.length > 0 && command.existing === null) {
+  if (own.length > 0 && (existing === null || existing.kind === "separate_from")) {
     return askBlock();
-  } else if (command.existing !== null && command.existing.kind === "retime") {
-    const wantedId = command.existing.assignmentId;
+  } else if (existing !== null && existing.kind === "retime") {
+    const wantedId = existing.assignmentId;
     const hit = own.find((x) => x.id === wantedId) ?? null;
     if (hit) {
       retime = hit;
@@ -1256,7 +1468,9 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
       };
     }
   }
-  // `existing.kind === "separate"`, or no own block at all: fall through to the run question.
+  // `existing.kind === "separate"`, or `separate_from` with nothing left in
+  // `own` after removing its named block, or no own block at all: fall
+  // through to the run question.
 
   // 6. The run question (R-383) — skipped entirely when re-timing a block: a
   // re-timed block's attachment is decided by the drag's own containment
@@ -1265,6 +1479,10 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
   let hits: ContextRun[] = [];
   if (retime !== null) {
     target = { kind: "retime", assignmentId: retime.id };
+  } else if (jobRunId !== undefined) {
+    // S58 (R-414): "the job's hours" already named the job -- the run
+    // question (R-383) never runs, `attach` is never consulted.
+    target = { kind: "run", runId: jobRunId };
   } else {
     hits = ctx.runs.filter(
       (r) =>
@@ -1311,7 +1529,9 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
   const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
   let readout = `${operator.displayName} → ${product.name} · ${chain} · ${iso} · ${timeText}`;
   if (target.kind === "run") {
-    const runLabel = hits.find((r) => r.id === target.runId)?.label ?? "";
+    // S58: `ctx.runs` (not `hits`, which stays empty on the job-hours
+    // branch) so the readout names the run regardless of which path found it.
+    const runLabel = ctx.runs.find((r) => r.id === target.runId)?.label ?? "";
     readout += ` · joining ${runLabel}`;
   } else if (target.kind === "retime" && retime !== null) {
     readout += ` · changing ${retime.label}`;
@@ -1662,6 +1882,23 @@ function buildDestinationText(command: MoveCommand): string {
 function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resolution {
   const byPath = buildPathIndex(ctx.nodeById);
 
+  // S58 (R-412, D132 item 1): `adjust` set alongside a destination cell, new
+  // hours or a shift is a contradiction the grammar never produces (parse.ts's
+  // own `bad_adjust` ParseFailure catches it first) -- a caller's bug, never
+  // a crash, the same one-line role `expand_first` plays elsewhere.
+  if (
+    command.adjust !== null &&
+    (command.toPlace !== null || command.span !== null || command.shift !== null)
+  ) {
+    return {
+      ok: false,
+      question: {
+        kind: "bad_adjust",
+        text: "An adjust cannot also carry a new cell, span or shift.",
+      },
+    };
+  }
+
   // 1. The current cell -- OPTIONAL (S49: an empty place means "wherever
   // they are").
   let cell: Node | null = null;
@@ -1771,7 +2008,56 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
   let endMin: number;
   let arrow: string;
 
-  if (command.toPlace === null) {
+  if (command.adjust !== null) {
+    // S58 (R-412, D132 item 1): a re-time by ONE edge -- the top-of-function
+    // guard already proved `toPlace`/`span`/`shift` are all null here. `by`
+    // moves the named edge that many minutes from the block's OWN value;
+    // `at` sets it to that wall-clock time on the BLOCK'S day (the day
+    // already resolved above, dayIndex -- the same day the block was found
+    // on, `wallToOffset`).
+    const adjust: Adjust = command.adjust;
+    let newStartMin = blk.startMin;
+    let newEndMin = blk.endMin;
+    const edgeMin =
+      "by" in adjust
+        ? (adjust.edge === "start" ? blk.startMin : blk.endMin) + adjust.by
+        : ctx.wallToOffset(dayIndex, clockToMinuteOfDay(adjust.at));
+    if (adjust.edge === "start") newStartMin = edgeMin;
+    else newEndMin = edgeMin;
+
+    const blockWords = `${blk.productName ?? "block"} ${blk.label}`;
+    // Checks, in order (brief §1): inverted, too short, off the day.
+    if (newEndMin <= newStartMin) {
+      return {
+        ok: false,
+        question: { kind: "adjust_inverts", person: operator.displayName, block: blockWords },
+      };
+    }
+    if (newEndMin - newStartMin < ctx.minDurationMinutes) {
+      return {
+        ok: false,
+        question: {
+          kind: "too_short",
+          minutes: newEndMin - newStartMin,
+          min: ctx.minDurationMinutes,
+        },
+      };
+    }
+    const dayStart = ctx.wallToOffset(dayIndex, 0);
+    const dayEndBound = ctx.wallToOffset(dayIndex, 1440);
+    if (newStartMin < dayStart || newEndMin > dayEndBound) {
+      return {
+        ok: false,
+        question: { kind: "adjust_off_day", person: operator.displayName, block: blockWords },
+      };
+    }
+
+    startMin = newStartMin;
+    endMin = newEndMin;
+    target = { kind: "retime" };
+    targetNodeId = blk.nodeId;
+    arrow = formatSpan(clockOfOffset(newStartMin, ctx), clockOfOffset(newEndMin, ctx));
+  } else if (command.toPlace === null) {
     // Move in time only -- R-385's own retime target (`command.span` is
     // guaranteed non-null here whenever `shift` is null too: parseMoveRest's
     // own R-389/R-402 check never returns toPlace, span AND shift all null
@@ -1850,6 +2136,63 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
   };
 }
 
+/**
+ * S58 (R-415, D132 item 4): "make the Housing A job on Cell 1 4 people" --
+ * one existing write, the run's own planned headcount. Cell, part (shared,
+ * `resolveCellStep`/`resolvePartStep`), then the window (the span or shift
+ * when given, else the whole day -- `resolveWindowForCell`, the same helper
+ * `expandEveryoneUnassign`/`expandEveryoneMove` narrow a cell's window with),
+ * then the run: none/several is `no_job`/`which_job` (shared with "the job's
+ * hours", `findJobRuns`/`jobRunsQuestion`), exactly one is the write. Nothing
+ * here checks `command.headcount` beyond the grammar's own 1-99.
+ */
+function resolveHeadcountCommand(command: HeadcountCommand, ctx: ResolveContext): Resolution {
+  const byPath = buildPathIndex(ctx.nodeById);
+
+  const cellResult = resolveCellStep(command.place, ctx, byPath);
+  if (!cellResult.ok) return { ok: false, question: cellResult.question };
+  const cell = cellResult.cell;
+
+  const partResult = resolvePartStep(command.product, cell, ctx);
+  if (!partResult.ok) return { ok: false, question: partResult.question };
+  const product = partResult.product;
+
+  const dayResult = resolveDay(command.day, ctx);
+  if (!dayResult.ok) return { ok: false, question: dayResult.question };
+  const dayIndex = dayResult.dayIndex;
+  const whenIso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+
+  const window = resolveWindowForCell(
+    command.day,
+    command.span,
+    command.shift,
+    dayIndex,
+    cell,
+    ctx,
+  );
+  if (!window.ok) return window;
+
+  const runsHere = findJobRuns(cell, product, window.startMin, window.endMin, ctx);
+  const q = jobRunsQuestion(runsHere, product, cell, whenIso);
+  if (q !== null) return { ok: false, question: q };
+  const run = runsHere[0];
+
+  const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
+  const chain = [...ancestorNames, cell.name].join(" › ");
+  const readout = `${product.name} · ${chain} · ${whenIso} · ${run.span} · ${command.headcount} people`;
+
+  return {
+    ok: true,
+    resolved: {
+      intent: "headcount",
+      runId: run.id,
+      nodeId: cell.id,
+      headcount: command.headcount,
+      readout,
+    },
+  };
+}
+
 /** Order of resolution: cell, then part, then (assign only) person, then day
  *  and span, then the job/run/own-block question(s) (brief §5, extended by
  *  §3 for `book`, and S41-b for `unassign`). One question at a time.
@@ -1878,6 +2221,10 @@ export function resolveCommand(
   command: MoveCommand,
   ctx: ResolveContext,
 ): { ok: true; resolved: ResolvedMove } | { ok: false; question: Question };
+export function resolveCommand(
+  command: HeadcountCommand,
+  ctx: ResolveContext,
+): { ok: true; resolved: ResolvedHeadcount } | { ok: false; question: Question };
 export function resolveCommand(command: Command, ctx: ResolveContext): Resolution;
 export function resolveCommand(command: Command, ctx: ResolveContext): Resolution {
   // S50 (brief §2 item 4, R-398): a several is read but not yet run -- the
@@ -1893,12 +2240,21 @@ export function resolveCommand(command: Command, ctx: ResolveContext): Resolutio
   // unexpanded too on a caller's bug, and fail naturally -- `resolvePersonStep`
   // finds no operator literally named "everyone", and `until` is simply never
   // read by `resolveUnassignCommand` (§4, pinned by PT tests).
-  if (command.intent === "replace" || command.intent === "swap" || command.intent === "copy") {
+  // S58 (R-413, D132 item 2): `split` joins the board-answered group --
+  // it too is never a single write, `expandCommand` always writes its move
+  // and its assign first.
+  if (
+    command.intent === "replace" ||
+    command.intent === "swap" ||
+    command.intent === "copy" ||
+    command.intent === "split"
+  ) {
     return { ok: false, question: { kind: "expand_first", intent: command.intent } };
   }
   if (command.intent === "book") return resolveBookCommand(command, ctx);
   if (command.intent === "unassign") return resolveUnassignCommand(command, ctx);
   if (command.intent === "move") return resolveMoveCommand(command, ctx);
+  if (command.intent === "headcount") return resolveHeadcountCommand(command, ctx);
   return resolveAssignCommand(command, ctx);
 }
 
@@ -1912,7 +2268,16 @@ export function resolveCommand(command: Command, ctx: ResolveContext): Resolutio
 // ---------------------------------------------------------------------------
 
 export type Expansion =
-  { ok: true; command: SingleCommand | SeveralCommand } | { ok: false; question: Question };
+  | {
+      ok: true;
+      // S58 (R-415, D132 item 4): `HeadcountCommand` is never itself part of
+      // a lot (never wrapped in `several`), but `expandCommand` still hands
+      // one back UNCHANGED (never a lot member, always the caller's own
+      // single write) -- so it must be a member here too, not just of
+      // `Command`.
+      command: SingleCommand | SeveralCommand | HeadcountCommand;
+    }
+  | { ok: false; question: Question };
 
 /** R-407: the reserved operator word, matched the same case/whitespace-blind
  *  way every other word in this module is (`normalizeForMatch`) -- the
@@ -2124,6 +2489,7 @@ function expandEveryoneUnassign(command: UnassignCommand, ctx: ResolveContext): 
         span: hoursOfBlock(outsideStart, outsideEnd, ctx),
         existing: { kind: "move", assignmentId: x.id },
         shift: null,
+        adjust: null,
       });
     } else {
       return {
@@ -2198,6 +2564,7 @@ function expandEveryoneMove(command: MoveCommand, ctx: ResolveContext): Expansio
       span: command.toPlace === null ? command.span : null,
       existing: { kind: "move", assignmentId: x.id },
       shift: command.toPlace === null ? command.shift : null,
+      adjust: null,
     });
   }
   if (commands.length === 0) {
@@ -2871,6 +3238,189 @@ function expandAbsence(command: UnassignCommand, ctx: ResolveContext): Expansion
 }
 
 /**
+ * S58 (R-413, D132 item 2): "split Sam's block at noon" -- the person's block
+ * (placed or anywhere, that day, the same gathering a place-less move/removal
+ * uses); when several of the person's blocks overlap the day, `at` itself
+ * picks the one that CONTAINS it (no button -- unlike a move/removal, a split
+ * has no `existing` field to carry an answer in at all); none contains it is
+ * `split_outside`. Both halves must reach the minimum duration (`too_short`
+ * otherwise). Writes a `move` in time (the block's own first half, `existing`
+ * filled, `adjust` null) and an `assign` (the second half, the block's own
+ * part/cell/attachment, `existing: { kind: "separate_from", assignmentId }` naming the
+ * block it is cut from -- see the comment on that field below, S58-e) -- the move
+ * FIRST, so the lot's own board-order write never has the assign racing the
+ * still-full-length block.
+ */
+function expandSplit(command: SplitCommand, ctx: ResolveContext): Expansion {
+  const byPath = buildPathIndex(ctx.nodeById);
+
+  let cell: Node | null = null;
+  if (command.place.length > 0) {
+    const cellResult = resolveCellStep(command.place, ctx, byPath);
+    if (!cellResult.ok) return { ok: false, question: cellResult.question };
+    cell = cellResult.cell;
+  }
+
+  const personResult = resolvePersonStep(command.operator, ctx);
+  if (!personResult.ok) return { ok: false, question: personResult.question };
+  const operator = personResult.operator;
+
+  const dayResult = resolveDay(command.day, ctx);
+  if (!dayResult.ok) return { ok: false, question: dayResult.question };
+  const dayIndex = dayResult.dayIndex;
+  const dayStart = ctx.wallToOffset(dayIndex, 0);
+  const dayEnd = ctx.wallToOffset(dayIndex, 1440);
+  const whenText = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+
+  const hits =
+    cell === null
+      ? []
+      : ctx.assignments.filter(
+          (x) =>
+            x.nodeId === cell!.id &&
+            x.operatorId === operator.id &&
+            ctx.overlaps({ startMin: dayStart, endMin: dayEnd }, x),
+        );
+  const candidates =
+    hits.length > 0
+      ? hits
+      : gatherElsewhereBlocks(operator.id, { startMin: dayStart, endMin: dayEnd }, ctx);
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      question: {
+        kind: "no_block",
+        person: operator.displayName,
+        cell: cell?.name ?? null,
+        when: whenText,
+      },
+    };
+  }
+
+  const atMin = ctx.wallToOffset(dayIndex, clockToMinuteOfDay(command.at));
+  const containing = candidates.filter((x) => x.startMin <= atMin && atMin < x.endMin);
+  if (containing.length === 0) {
+    return {
+      ok: false,
+      question: {
+        kind: "split_outside",
+        person: operator.displayName,
+        at: formatClockMinuteOfDay(atMin - dayStart),
+        blocks: candidates.map((x) => `${x.productName ?? "block"} ${x.label}`),
+      },
+    };
+  }
+  const blk = containing[0];
+  const blkCell = ctx.nodeById.get(blk.nodeId) as Node;
+
+  const firstMinutes = atMin - blk.startMin;
+  const secondMinutes = blk.endMin - atMin;
+  if (firstMinutes < ctx.minDurationMinutes || secondMinutes < ctx.minDurationMinutes) {
+    return {
+      ok: false,
+      question: {
+        kind: "too_short",
+        minutes: Math.min(firstMinutes, secondMinutes),
+        min: ctx.minDurationMinutes,
+      },
+    };
+  }
+
+  // Reviewer fix (S58-b lane review, 14 Sept): a block legitimately ends
+  // exactly at the day's own 1440th minute (F146: "20:00 to DAY_END" writes
+  // `endMin` at `dayEnd` below, not 1439) -- `hoursOfBlock`'s own
+  // `clockOfOffset` reads THAT through `ctx.wallOf`, whose `minuteOfDay` is
+  // always 0..1439 by contract (never a real `wallOf` output holds 1440), so
+  // a block ending at day's end came back as `{ hour: 0, minute: 0 }` --
+  // midnight of THIS day, not DAY_END -- and the second half's own `end`
+  // silently read as EARLIER than its own `start` once re-resolved
+  // (`resolveDaySpanStep`/`clockToMinuteOfDay`, which never special-cases a
+  // bare `00:00`), surfacing as `too_short` with a negative count instead of
+  // the split completing. `clockFromMinuteOfDay` (already used by `expandCopy`
+  // for exactly this reason) is the correct inverse for a day-relative
+  // minute-of-day, so it is used here whenever the block's own end IS the
+  // day's own end -- `firstHours`' own end (`atMin`) can never reach it (the
+  // containing check above already proved `atMin < blk.endMin <= dayEnd`).
+  const firstHours = hoursOfBlock(blk.startMin, atMin, ctx);
+  const secondHours = {
+    start: clockOfOffset(atMin, ctx),
+    end: blk.endMin === dayEnd ? clockFromMinuteOfDay(24 * 60) : clockOfOffset(blk.endMin, ctx),
+  };
+  const dayWord = dayWordForIndex(dayIndex, ctx);
+  const cellWords = cellWordsOf(blkCell, byPath);
+
+  const moveCommand: MoveCommand = {
+    intent: "move",
+    operator: personWords(operator),
+    place: cellWords,
+    toPlace: null,
+    day: dayWord,
+    span: firstHours,
+    existing: { kind: "move", assignmentId: blk.id },
+    shift: null,
+    adjust: null,
+  };
+  // Reviewer fix (S58-b lane review, 14 Sept), amended S58-e (R-413): D127's
+  // "never write before the yes" means `resolveLotStep` resolves EVERY step
+  // of a lot against the SAME unwritten `ctx` -- so when this second command
+  // reaches `resolveAssignCommand`, `blk` (10:00-14:00, say) is STILL its own
+  // full-length self in `ctx.assignments`; the second half's own new range
+  // (noon-14:00, say) sits entirely inside it, same person/product/cell. The
+  // R-385 own-block step (resolveAssignCommand's own step 5) cannot tell that
+  // apart from a genuine second block and would ask `block_exists` on EVERY
+  // split, defeating the "one yes" (D132 item 2) -- reproduced by SP6 below
+  // with `existing: null`. `existing: { kind: "separate" }` (the S58-b fix)
+  // silenced the question for EVERY overlapping block of the same person,
+  // part and cell, not only `blk` itself -- a genuine second block was never
+  // asked about either (CB-y-9, two S58 reviewers). `separate_from` names
+  // `blk.id` specifically: the own-block step removes only that block before
+  // checking, so a real second block still asks, naming the OTHER block.
+  // `attach` (below) still decides run vs. direct independently.
+  const assignCommand: AssignCommand = {
+    intent: "assign",
+    operator: personWords(operator),
+    product: blk.productName ?? "",
+    place: cellWords,
+    day: dayWord,
+    start: secondHours.start,
+    end: secondHours.end,
+    attach: blk.runId !== null ? { kind: "run", runId: blk.runId } : { kind: "direct" },
+    existing: { kind: "separate_from", assignmentId: blk.id },
+    shift: null,
+  };
+  return wrapMany([moveCommand, assignCommand]);
+}
+
+/**
+ * S58 (R-416, D132 item 5): "every weekday this week" / "every day next
+ * week" -- an assign or a booking whose `day.kind` is `weekdays`/`every_day`.
+ * The week's own seven day indexes, `resolveWeekDays` (D130's copy machinery,
+ * unchanged): `weekdays` takes its own first five (Monday-Friday, the array's
+ * own order); `every_day` all seven. Every day of the WEEK must be on the
+ * board (`resolveWeekDays` already checks that, `day_off_board` naming the
+ * first missing iso) -- the same rule a week-to-week copy uses. One copy of
+ * the command per day, in order, `day: { kind: "date", iso }`; every other
+ * field (`attach`/`existing` included) copied onto each exactly as given.
+ */
+function expandRepeatDay(command: AssignCommand | BookCommand, ctx: ResolveContext): Expansion {
+  const day = command.day as { kind: "weekdays" | "every_day"; week: "this_week" | "next_week" };
+  const weekResult = resolveWeekDays(day.week, ctx);
+  if (!weekResult.ok) return weekResult;
+  const dayIndexes = day.kind === "weekdays" ? weekResult.days.slice(0, 5) : weekResult.days;
+
+  const commands = dayIndexes.map(
+    (idx) => ({ ...command, day: dayWordForIndex(idx, ctx) }) as SingleCommand,
+  );
+  if (commands.length > LOT_CEILING) {
+    return {
+      ok: false,
+      question: { kind: "lot_too_big", count: commands.length, max: LOT_CEILING },
+    };
+  }
+  return wrapMany(commands);
+}
+
+/**
  * S55 (D130 item 1): the board's own expansion step, called ONCE before the
  * bar's `several` intercept so the rules path and a future model path
  * expand the same way. Returns the SAME object for every ordinary form (R-406
@@ -2882,6 +3432,12 @@ export function expandCommand(command: Command, ctx: ResolveContext): Expansion 
   if (command.intent === "replace") return expandReplace(command, ctx);
   if (command.intent === "swap") return expandSwap(command, ctx);
   if (command.intent === "copy") return expandCopy(command, ctx);
+  // S58 (R-413, D132 item 2): a split is a shorten plus an assign, both
+  // written here -- the board's own mechanism, same as replace/swap/copy.
+  if (command.intent === "split") return expandSplit(command, ctx);
+  // S58 (R-415, D132 item 4): a headcount is never part of a lot -- one
+  // existing write, unchanged (`resolveCommand`'s own new branch does it).
+  if (command.intent === "headcount") return { ok: true, command };
   if (command.intent === "unassign") {
     if (command.until !== null) return expandAbsence(command, ctx);
     if (isEveryone(command.operator)) return expandEveryoneUnassign(command, ctx);
@@ -2890,6 +3446,15 @@ export function expandCommand(command: Command, ctx: ResolveContext): Expansion 
   if (command.intent === "move") {
     if (isEveryone(command.operator)) return expandEveryoneMove(command, ctx);
     return { ok: true, command };
+  }
+  // The two remaining members, assign and book: S58 (R-416, D132 item 5)'s
+  // own repeat day -- "every weekday this week" writes one command per day,
+  // in order, before either ever reaches `resolveCommand`.
+  if (
+    command.day !== null &&
+    (command.day.kind === "weekdays" || command.day.kind === "every_day")
+  ) {
+    return expandRepeatDay(command, ctx);
   }
   return { ok: true, command };
 }
@@ -3028,5 +3593,21 @@ export function describeQuestion(q: Question): string {
       return `${q.second} is before ${q.first}; say the later day second.`;
     case "expand_first":
       return `That ${q.intent} has to be worked out before it can run.`;
+    case "adjust_inverts":
+      return `${q.person}'s ${q.block} would end before it starts.`;
+    case "adjust_off_day":
+      return `${q.person}'s ${q.block} would cross midnight; that is not on this board.`;
+    case "bad_adjust":
+      return q.text;
+    case "split_outside":
+      return q.blocks.length > 0
+        ? `${q.person} has no block that covers ${q.at} (has ${q.blocks.join(", ")}).`
+        : `${q.person} has no block that covers ${q.at}.`;
+    case "no_job":
+      return `No ${q.product} job on ${q.cell} ${q.when}.`;
+    case "which_job":
+      return `${q.runs.length} ${q.product} jobs on ${q.cell} (${q.runs.join(", ")}). Say which.`;
+    case "bad_repeat_day":
+      return `${q.text} cannot be used here.`;
   }
 }

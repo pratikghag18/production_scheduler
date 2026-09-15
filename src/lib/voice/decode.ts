@@ -37,18 +37,38 @@
  * these three holds here for free: `decodeSeveral` calls `decodeSingle` on
  * every inner item, which has no case for these three intents and simply
  * refuses them.
+ *
+ * S58 (brief docs/agent-briefs/s58-c-decoder-brief.md, design section 19.103
+ * D132): `MoveCommand` gains `adjust: Adjust | null`, now REQUIRED --
+ * `null`, `{edge, by}` (a non-zero integer) or `{edge, at}` (a `ClockTime`);
+ * when non-null, `toPlace`, `span` and `shift` must all be null (the same
+ * house rule as R-402's shift-vs-hours invariant: never a guess, the decoder
+ * refuses the form outright). Two more top-level decoders, `split` and
+ * `headcount`, dispatched only from `decodeCommand`, never from
+ * `decodeSingle` -- same D130 item 2 reasoning as `replace`/`swap`/`copy`:
+ * neither may sit inside a `several`. `DayWord` also gains two REPEAT kinds,
+ * `weekdays`/`every_day` (each carrying `week: "this_week" | "next_week"`),
+ * legal ONLY on an `assign`'s or a `book`'s own `day` --
+ * `decodeDayWordOrRepeat`, used only by those two, is the one place that
+ * adds them. Every other `day` field in this file (including `unassign`'s
+ * own `until`) stays plain `decodeDayWord`, so a repeat kind there falls
+ * through to `return undefined` and garbles the whole form, the same way a
+ * week kind already does everywhere but a copy's `from`/`to`.
  */
 import type {
+  Adjust,
   AssignCommand,
   BookCommand,
   ClockTime,
   Command,
   CopyCommand,
   DayWord,
+  HeadcountCommand,
   MoveCommand,
   ReplaceCommand,
   SeveralCommand,
   SingleCommand,
+  SplitCommand,
   SwapCommand,
   UnassignCommand,
 } from "../command/parse.ts";
@@ -134,6 +154,25 @@ function decodeDayWord(value: unknown): DayWord | null | undefined {
   return undefined;
 }
 
+/** S58 (R-416, design section 19.103/D132 item 5): the two REPEAT kinds,
+ *  legal ONLY on an assign's or a book's own `day` -- used nowhere else in
+ *  this file (not `until`, not any other form's `day`, not a copy's own
+ *  `from`/`to`). Falls back to plain `decodeDayWord` for the five ordinary
+ *  kinds, so the two never disagree about what a plain day looks like; a
+ *  bad or missing `week` on a `weekdays`/`every_day` kind is `undefined`,
+ *  same as every other malformed shape in this file. */
+function decodeDayWordOrRepeat(value: unknown): DayWord | null | undefined {
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
+  const kind = value.kind;
+  if (kind === "weekdays" || kind === "every_day") {
+    const week = value.week;
+    if (week === "this_week" || week === "next_week") return { kind, week };
+    return undefined;
+  }
+  return decodeDayWord(value);
+}
+
 /** S55 (D130 item 4): `CopyCommand.from`/`to` are the only fields where a
  *  week kind is legal, and they are REQUIRED, non-null `DayWord`s (unlike
  *  every other day field in this file, `null` is not itself a valid answer
@@ -164,9 +203,21 @@ function decodeSpan(value: unknown): { start: ClockTime; end: ClockTime } | null
   return { start, end };
 }
 
-function decodeHeadcount(value: unknown): number | null | undefined {
+/** A booking's own `headcount: number | null` -- "not yet the run's fixed
+ *  count", never to be confused with `HeadcountCommand.headcount` below,
+ *  which is required and range-checked 1-99 (S58, `decodeHeadcountValue`). */
+function decodeOptionalHeadcount(value: unknown): number | null | undefined {
   if (value === null) return null;
   return isInt(value) && value > 0 ? value : undefined;
+}
+
+/** S58 (R-415, design section 19.103/D132 item 4): `HeadcountCommand`'s own
+ *  `headcount` -- REQUIRED, never null, a whole number 1-99 (HC6: 0 people
+ *  is refused; HC7: 100 is refused -- the grammar's own bound, mirrored here
+ *  so the decoder never accepts a count the sentence grammar could not have
+ *  produced). */
+function decodeHeadcountValue(value: unknown): number | undefined {
+  return isInt(value) && value >= 1 && value <= 99 ? value : undefined;
 }
 
 function decodeToPlace(value: unknown): string[] | null | undefined {
@@ -178,7 +229,8 @@ function decodeAssign(obj: Record<string, unknown>): AssignCommand | null {
   if (!isNonEmptyString(obj.operator)) return null;
   if (!isNonEmptyString(obj.product)) return null;
   if (!isNonEmptyStringArray(obj.place)) return null;
-  const day = decodeDayWord(obj.day);
+  // S58 (R-416): assign's own `day` accepts the two REPEAT kinds too.
+  const day = decodeDayWordOrRepeat(obj.day);
   if (day === undefined) return null;
   const shift = decodeShift(obj.shift);
   if (shift === undefined) return null;
@@ -207,9 +259,10 @@ function decodeAssign(obj: Record<string, unknown>): AssignCommand | null {
 function decodeBook(obj: Record<string, unknown>): BookCommand | null {
   if (!isNonEmptyString(obj.product)) return null;
   if (!isNonEmptyStringArray(obj.place)) return null;
-  const headcount = decodeHeadcount(obj.headcount);
+  const headcount = decodeOptionalHeadcount(obj.headcount);
   if (headcount === undefined) return null;
-  const day = decodeDayWord(obj.day);
+  // S58 (R-416): book's own `day` accepts the two REPEAT kinds too.
+  const day = decodeDayWordOrRepeat(obj.day);
   if (day === undefined) return null;
   const shift = decodeShift(obj.shift);
   if (shift === undefined) return null;
@@ -246,8 +299,9 @@ function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
   // S55 (R-409): `until` is REQUIRED -- a missing key (`undefined`) fails
   // `decodeDayWord`'s `isRecord` check and garbles the whole form, the same
   // strictness `shift` got at VR8. Plain `decodeDayWord`, not
-  // `decodeDayOrWeekWord`: a week kind on `until` is garbled too (the
-  // grammar never produces one there -- see `DayWord`'s own doc comment).
+  // `decodeDayOrWeekWord` and not `decodeDayWordOrRepeat`: a week kind or an
+  // S58 repeat kind on `until` is garbled too (the grammar never produces
+  // either there -- see `DayWord`'s own doc comment).
   const until = decodeDayWord(obj.until);
   if (until === undefined) return null;
   return {
@@ -260,6 +314,30 @@ function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
     shift,
     until,
   };
+}
+
+/** S58 (R-412, design section 19.103/D132 item 1): a re-time by one edge --
+ *  `null`, `{edge, by}` (a non-zero signed integer of minutes) or `{edge,
+ *  at}` (a `ClockTime`); never both keys, never neither -- the union has no
+ *  third member and this decoder does not invent one. `by === 0` is refused
+ *  (AJ5: "extend Sam's block by 0 minutes" is `bad_adjust`, never a
+ *  no-op). */
+function decodeAdjust(value: unknown): Adjust | null | undefined {
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
+  const edge = value.edge;
+  if (edge !== "start" && edge !== "end") return undefined;
+  const hasBy = value.by !== undefined;
+  const hasAt = value.at !== undefined;
+  if (hasBy === hasAt) return undefined; // never both, never neither
+  if (hasBy) {
+    const by = value.by;
+    if (!isInt(by) || by === 0) return undefined;
+    return { edge, by };
+  }
+  const at = decodeClockTime(value.at);
+  if (at === null) return undefined;
+  return { edge, at };
 }
 
 function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
@@ -275,10 +353,18 @@ function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
   if (shift === undefined) return null;
   // R-402: never both a shift and hours.
   if (shift !== null && span !== null) return null;
+  // S58 (R-412): `adjust` is REQUIRED -- a missing key garbles the form, the
+  // same strictness `shift`/`until` already have. Non-null implies
+  // `toPlace`, `span` and `shift` are all null (AJ16: "move Sam's start to 9
+  // to Cell 2" is `bad_adjust`-class -- an adjust never carries a
+  // destination, new hours or a shift alongside it).
+  const adjust = decodeAdjust(obj.adjust);
+  if (adjust === undefined) return null;
+  if (adjust !== null && (toPlace !== null || span !== null || shift !== null)) return null;
   // R-389 (parseMoveRest's own `no_move` check, mirrored here), widened by
-  // R-402: a move must give a new cell, new hours, or a shift -- naming none
-  // of the three is nothing to move.
-  if (toPlace === null && span === null && shift === null) return null;
+  // R-402 and S58: a move must give a new cell, new hours, a shift, or an
+  // adjust -- naming none of the four is nothing to move.
+  if (toPlace === null && span === null && shift === null && adjust === null) return null;
   return {
     intent: "move",
     operator: obj.operator,
@@ -288,6 +374,7 @@ function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
     span,
     existing: null,
     shift,
+    adjust,
   };
 }
 
@@ -357,6 +444,56 @@ function decodeCopy(obj: Record<string, unknown>): CopyCommand | null {
   return { intent: "copy", place: obj.place, from, to };
 }
 
+/** S58 (R-413, design section 19.103/D132 item 2): "split Sam's block at
+ *  noon" -- board-answered like `replace`/`swap`/`copy` above, never part of
+ *  a `several`. `place` may be empty ("wherever the operator is", the same
+ *  reading `isStringArray` already gives move/unassign); `at` is REQUIRED
+ *  and never null -- unlike every other clock-time-bearing field in this
+ *  file, `SplitCommand` has no "the block's own hours" reading. Plain
+ *  `decodeDayWord`, not `decodeDayWordOrRepeat`: a repeat kind on a split's
+ *  `day` is garbled too (only assign/book's own `day` admits one). */
+function decodeSplit(obj: Record<string, unknown>): SplitCommand | null {
+  if (!isNonEmptyString(obj.operator)) return null;
+  if (!isStringArray(obj.place)) return null;
+  const day = decodeDayWord(obj.day);
+  if (day === undefined) return null;
+  const at = decodeClockTime(obj.at);
+  if (at === null) return null;
+  return { intent: "split", operator: obj.operator, place: obj.place, day, at };
+}
+
+/** S58 (R-415, design section 19.103/D132 item 4): "make the Housing A job
+ *  on Cell 1 4 people" -- board-answered like `replace`/`swap`/`copy`/
+ *  `split` above, never part of a `several` (there is nothing here for the
+ *  board's own lot machinery to expand). `place` is non-empty (a headcount
+ *  always names the run's own cell, same as an assign or a booking); `span`/
+ *  `shift` follow R-402's own invariant (at most one non-null -- naming
+ *  neither is fine here, unlike assign/book, since a headcount edits an
+ *  EXISTING run rather than creating hours); `headcount` is REQUIRED, 1-99
+ *  (`decodeHeadcountValue`, above). */
+function decodeHeadcountCommand(obj: Record<string, unknown>): HeadcountCommand | null {
+  if (!isNonEmptyString(obj.product)) return null;
+  if (!isNonEmptyStringArray(obj.place)) return null;
+  const day = decodeDayWord(obj.day);
+  if (day === undefined) return null;
+  const span = decodeSpan(obj.span);
+  if (span === undefined) return null;
+  const shift = decodeShift(obj.shift);
+  if (shift === undefined) return null;
+  if (shift !== null && span !== null) return null;
+  const headcount = decodeHeadcountValue(obj.headcount);
+  if (headcount === undefined) return null;
+  return {
+    intent: "headcount",
+    product: obj.product,
+    place: obj.place,
+    day,
+    span,
+    shift,
+    headcount,
+  };
+}
+
 /** Accepts an object whose `intent` is one of the four single shapes and
  *  every field of that intent's interface is present with the right shape;
  *  otherwise `null`. Never throws. Shared by `decodeCommand` (the top level)
@@ -398,14 +535,16 @@ function decodeSeveral(obj: Record<string, unknown>): SeveralCommand | null {
 }
 
 /** Accepts an object whose `intent` is one of the four single shapes,
- *  `"several"` (S50: an array of two or more of them), or one of S55's three
- *  board-answered intents (`replace`/`swap`/`copy`); otherwise `null`. Never
- *  throws. */
+ *  `"several"` (S50: an array of two or more of them), one of S55's three
+ *  board-answered intents (`replace`/`swap`/`copy`), or one of S58's two more
+ *  (`split`/`headcount`); otherwise `null`. Never throws. */
 export function decodeCommand(value: unknown): Command | null {
   if (!isRecord(value)) return null;
   if (value.intent === "several") return decodeSeveral(value);
   if (value.intent === "replace") return decodeReplace(value);
   if (value.intent === "swap") return decodeSwap(value);
   if (value.intent === "copy") return decodeCopy(value);
+  if (value.intent === "split") return decodeSplit(value);
+  if (value.intent === "headcount") return decodeHeadcountCommand(value);
   return decodeSingle(value);
 }

@@ -27,6 +27,10 @@ import {
   type MoveCommand,
   type ReplaceCommand,
   type CopyCommand,
+  type HeadcountCommand,
+  type SingleCommand,
+  type SeveralCommand,
+  type SplitCommand,
 } from "@/lib/command/parse";
 import type {
   ResolveContext,
@@ -34,6 +38,7 @@ import type {
   ResolvedBook,
   ResolvedUnassign,
   ResolvedMove,
+  ResolvedHeadcount,
   ContextRun,
   ContextAssignment,
 } from "@/lib/command/resolve";
@@ -240,6 +245,7 @@ function renderBar(
   const onRetimeRun = vi.fn();
   const onUnassign = vi.fn();
   const onMove = vi.fn();
+  const onSetHeadcount = vi.fn();
   const onHighlight = vi.fn();
   const onRunLot = vi.fn(s51.onRunLot ?? (() => new Promise<LotResult>(() => {})));
   render(
@@ -255,6 +261,7 @@ function renderBar(
       onRetimeRun={onRetimeRun}
       onUnassign={onUnassign}
       onMove={onMove}
+      onSetHeadcount={onSetHeadcount}
       onRunLot={onRunLot}
       onHighlight={onHighlight}
       onConfirmWord={s47.onConfirmWord}
@@ -269,6 +276,7 @@ function renderBar(
     onRetimeRun,
     onUnassign,
     onMove,
+    onSetHeadcount,
     onRunLot,
     onHighlight,
     input,
@@ -1384,6 +1392,10 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
       span: { start: { hour: 10, minute: 0 }, end: { hour: 15, minute: 0 } },
       existing: null,
       shift: null,
+      // S58 (R-412, D132 item 1): every `MoveCommand` now carries `adjust`
+      // -- `null` here is byte-for-byte this case's pre-S58 shape (an
+      // ordinary move in time, not an edge adjust).
+      adjust: null,
     };
     // S51's own note (brief §2 item 1 / design §19.98): a mixed-intent
     // several never comes off the TEXT grammar (each `parseXRest` only ever
@@ -1601,6 +1613,7 @@ function renderXBar(
   const onRetimeRun = vi.fn();
   const onUnassign = vi.fn();
   const onMove = vi.fn();
+  const onSetHeadcount = vi.fn();
   const onHighlight = vi.fn();
   const onRunLot = vi.fn(s51.onRunLot ?? (() => new Promise<LotResult>(() => {})));
   render(
@@ -1615,6 +1628,7 @@ function renderXBar(
       onRetimeRun={onRetimeRun}
       onUnassign={onUnassign}
       onMove={onMove}
+      onSetHeadcount={onSetHeadcount}
       onRunLot={onRunLot}
       onHighlight={onHighlight}
     />,
@@ -1627,6 +1641,7 @@ function renderXBar(
     onRetimeRun,
     onUnassign,
     onMove,
+    onSetHeadcount,
     onRunLot,
     onHighlight,
     input,
@@ -2185,6 +2200,507 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     expect(statusText()).not.toContain("name the same block");
     expect(screen.queryAllByRole("button")).toHaveLength(0);
     expect(onRunLot).not.toHaveBeenCalled();
+  });
+});
+
+/** CB-y-7: a SECOND Housing A job on Cell 1 (xc1), later in the day than
+ *  RUN_X's own 08:00-16:00 -- the fixture "the job's hours" must refuse to
+ *  guess between. */
+const RUN_X2: ContextRun = {
+  id: "runX2",
+  nodeId: "xc1",
+  productId: "ha",
+  startMin: 3 * 1440 + 960,
+  endMin: 3 * 1440 + 1200,
+  label: "Housing A 16:00–20:00",
+  span: "16:00–20:00",
+  productName: "Housing A",
+  headcount: 2,
+};
+
+describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a headcount, every weekday (S58, D132)", () => {
+  it("CB-y-1: 'split Sam's block at noon' is a lot of two (move, then assign), both outlined, one yes runs them in order", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({ assignments: [XSAM], runs: [RUN_X] }, null, { onRunLot });
+
+    fireEvent.change(input, { target: { value: "split Sam's block at noon" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^2 commands ready: /);
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolvedList.map((r) => r.intent)).toEqual(["move", "assign"]);
+  });
+
+  it("CB-y-2: 'assign Sam to Housing A on Cell 1 every weekday this week 8 to 4' is a lot of five", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({}, null, { onRunLot });
+
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 every weekday this week 8 to 4" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^5 commands ready: /);
+    expect(screen.getByRole("button", { name: "Do all 5" })).toBeTruthy();
+  });
+
+  it("CB-y-3: 'extend Sam's block by an hour' is the single move path, readout with the new hours", () => {
+    const { onMove, input } = renderXBar({ assignments: [XSAM] });
+
+    fireEvent.change(input, { target: { value: "extend Sam's block by an hour" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.target).toEqual({ kind: "retime" });
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
+    expect(statusText()).toContain("10:00–14:00 → 10:00–15:00");
+  });
+
+  it("CB-y-4: 'make the Housing A job on Cell 1 4 people' calls onSetHeadcount with the run and the number, and shows the readout", () => {
+    const { onSetHeadcount, input } = renderXBar({ runs: [RUN_X] });
+
+    fireEvent.change(input, { target: { value: "make the Housing A job on Cell 1 4 people" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSetHeadcount).toHaveBeenCalledTimes(1);
+    const [resolved] = onSetHeadcount.mock.calls[0] as [
+      ResolvedHeadcount,
+      { x: number; y: number },
+    ];
+    expect(resolved.runId).toBe("runX");
+    expect(resolved.headcount).toBe(4);
+    expect(statusText()).toContain("4 people");
+  });
+
+  it("CB-y-5: 'make it 4 people' has no memory of \"it\" -- the grammar asks for the job's own name, nothing resolves", () => {
+    const { onSetHeadcount, input } = renderXBar({ runs: [RUN_X] });
+
+    fireEvent.change(input, { target: { value: "make it 4 people" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(`Say which job — "make the Housing A job on Cell 1 4 people".`);
+    expect(onSetHeadcount).not.toHaveBeenCalled();
+  });
+
+  it("CB-y-6: 'add Sam to the Housing A job on Cell 1' resolves an assign with the run target and the run's own hours", () => {
+    const { onOpen, input } = renderXBar({ runs: [RUN_X] });
+
+    fireEvent.change(input, { target: { value: "add Sam to the Housing A job on Cell 1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.target).toEqual({ kind: "run", runId: "runX" });
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 480, endMin: 3 * 1440 + 960 });
+  });
+
+  it("CB-y-7: 'add Sam to the Housing A job on Cell 1' with two such jobs asks which, naming their hours", () => {
+    const { onOpen, input } = renderXBar({ runs: [RUN_X, RUN_X2] });
+
+    fireEvent.change(input, { target: { value: "add Sam to the Housing A job on Cell 1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "Housing A runs more than once on Cell 1: 08:00–16:00, 16:00–20:00. Say the hours.",
+    );
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("CB-y-8: the model path decodes a headcount form and reaches onSetHeadcount, same as the rules", async () => {
+    const headcountForm: HeadcountCommand = {
+      intent: "headcount",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      span: null,
+      shift: null,
+      headcount: 5,
+    };
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: headcountForm,
+      by: "model",
+    }));
+    const { onSetHeadcount, input } = renderXBar({ runs: [RUN_X] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: "make the Housing A job on Cell 1 5 people" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onSetHeadcount).toHaveBeenCalledTimes(1));
+    const [resolved] = onSetHeadcount.mock.calls[0] as [
+      ResolvedHeadcount,
+      { x: number; y: number },
+    ];
+    expect(resolved.runId).toBe("runX");
+    expect(resolved.headcount).toBe(5);
+  });
+
+  /** CB-y-9's own second Sam block, GENUINELY separate from XSAM -- same
+   *  cell, same product, overlapping the split's own SECOND half (noon-14:00)
+   *  but not the split point itself (13:00 is not within XSAM's 10:00-14:00
+   *  test point noon), so `expandSplit`'s own `at`-containment picks XSAM
+   *  unambiguously. */
+  const XSAM_OTHER: ContextAssignment = {
+    id: "xsamOther",
+    nodeId: "xc1",
+    operatorId: "sam",
+    productId: "ha",
+    productName: "Housing A",
+    startMin: 3 * 1440 + 780, // 13:00
+    endMin: 3 * 1440 + 900, // 15:00
+    label: "13:00–15:00",
+    runId: null,
+  };
+
+  it("CB-y-9: a split whose second half overlaps ANOTHER of Sam's own blocks asks block_exists naming that OTHER block, and the answer completes the lot (S58-e, R-413 -- was: existing:'separate' skipped R-385 unconditionally, not only for the split's own shrinking first half; re-pinned to the right behaviour after the fix moved into resolve.ts)", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({ assignments: [XSAM, XSAM_OTHER], runs: [RUN_X] }, null, {
+      onRunLot,
+    });
+
+    fireEvent.change(input, { target: { value: "split Sam's block at noon" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Step 1 (the move, XSAM's own first half) resolves cleanly and the lot
+    // advances on its own to step 2 (the assign), which stops on xsamOther --
+    // a genuine second overlapping block of the same person/part/cell, never
+    // exempted by `separate_from` (only XSAM, the block being split, is).
+    expect(statusText()).toMatch(/^2 of 2: /);
+    expect(statusText()).toContain("13:00–15:00");
+
+    fireEvent.click(screen.getByRole("button", { name: "Separate block" }));
+
+    // The answer re-resolved the LOT's own step 2 -- the lot is now whole.
+    expect(statusText()).toMatch(/^2 commands ready: /);
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolvedList.map((r) => r.intent)).toEqual(["move", "assign"]);
+    const assignStep = resolvedList[1];
+    if (assignStep.intent === "assign") {
+      // Written onto runX, 12:00-14:00, deliberately alongside xsamOther --
+      // the person answered "separate", not silence.
+      expect(assignStep.target).toEqual({ kind: "run", runId: "runX" });
+    } else {
+      throw new Error("expected the second lot step to be an assign");
+    }
+  });
+
+  it("CB-y-10: reviewer scenario 2 -- the split's own move step never asks move_which, even when Sam has TWO blocks on the split's cell, because expandSplit already chose the block by `at`", async () => {
+    // Sam has two Housing A blocks on Cell 1 today: XSAM (10:00-14:00,
+    // contains noon) and a second one that does NOT contain noon -- if
+    // `expandSplit` did not pre-fill `existing` from `at`'s own containment
+    // check, `resolveMoveCommand` would see two hits on this cell and ask
+    // move_which for the FIRST lot step (the shorten) before ever reaching
+    // the second (the assign, built from `blk` -- whichever the answer
+    // implied). Proving that never happens is the point of this pin.
+    const XSAM_LATER: ContextAssignment = {
+      id: "xsamLater",
+      nodeId: "xc1",
+      operatorId: "sam",
+      productId: "ha",
+      productName: "Housing A",
+      startMin: 3 * 1440 + 960, // 16:00
+      endMin: 3 * 1440 + 1140, // 19:00
+      label: "16:00–19:00",
+      runId: "runX",
+    };
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({ assignments: [XSAM, XSAM_LATER], runs: [RUN_X] }, null, {
+      onRunLot,
+    });
+
+    fireEvent.change(input, { target: { value: "split Sam's block at noon" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Straight to the lot's own "2 commands ready" -- no "Move which?"
+    // detour, no numbered "1 of 2: ..." question standing in the way.
+    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).not.toMatch(/move which/i);
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolvedList.map((r) => r.intent)).toEqual(["move", "assign"]);
+    const moveStep = resolvedList[0];
+    if (moveStep.intent === "move") {
+      expect(moveStep.assignmentId).toBe("xsam"); // the block containing noon, not xsamLater
+    } else {
+      throw new Error("expected the first lot step to be a move");
+    }
+  });
+
+  it("CB-y-11: reviewer scenario 3 -- 'extend Sam's block by an hour' with Sam on TWO cells asks move_which naming both, the pick substitutes and the readout shows the new hours", () => {
+    const XSAM2: ContextAssignment = {
+      id: "xsam2",
+      nodeId: "xc2",
+      operatorId: "sam",
+      productId: "ha",
+      productName: "Housing A",
+      startMin: 3 * 1440 + 960, // 16:00
+      endMin: 3 * 1440 + 1200, // 20:00
+      label: "16:00–20:00",
+      runId: null,
+    };
+    const { onMove, input } = renderXBar({ assignments: [XSAM, XSAM2] });
+
+    fireEvent.change(input, { target: { value: "extend Sam's block by an hour" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toContain("Move which?");
+    const button = screen.getByRole("button", { name: /Cell 1.*10:00–14:00/ });
+    fireEvent.click(button);
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.target).toEqual({ kind: "retime" });
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
+    expect(statusText()).toContain("10:00–14:00 → 10:00–15:00");
+  });
+
+  it("CB-y-12: reviewer scenario 4 -- the headcount readout shows immediately on Enter regardless of the async write's own outcome (fire-and-forget, same shape as onRetime/onUnassign/onMove); a later mutation failure surfaces through the toast useDragGesture's own failWith writes, never the bar's status -- ACCEPTABLE, matches every other single-write intent", () => {
+    const { onSetHeadcount, input } = renderXBar({ runs: [RUN_X] });
+
+    fireEvent.change(input, { target: { value: "make the Housing A job on Cell 1 4 people" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // The readout is shown SYNCHRONOUSLY, before `onSetHeadcount`'s own
+    // (async, void) write could possibly have settled either way -- the bar
+    // has no promise to await here, unlike `onRunLot`'s lot path.
+    expect(onSetHeadcount).toHaveBeenCalledTimes(1);
+    expect(statusText()).toContain("4 people");
+    // The input is never cleared for a single (non-lot) write -- success or
+    // failure look identical from here; only `onRunLot`'s own lot path
+    // clears the input on a clean "Done".
+    expect(input.value).toBe("make the Housing A job on Cell 1 4 people");
+  });
+
+  it("CB-y-13: reviewer scenario 5 -- 'make the Housing A job on Cell 1 4 people' typed and run twice is a plain write both times, no dedupe", () => {
+    const { onSetHeadcount, input } = renderXBar({ runs: [RUN_X] });
+
+    fireEvent.change(input, { target: { value: "make the Housing A job on Cell 1 4 people" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "make the Housing A job on Cell 1 4 people" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSetHeadcount).toHaveBeenCalledTimes(2);
+    const [first] = onSetHeadcount.mock.calls[0] as [ResolvedHeadcount, { x: number; y: number }];
+    const [second] = onSetHeadcount.mock.calls[1] as [ResolvedHeadcount, { x: number; y: number }];
+    expect(first).toEqual(second);
+  });
+
+  it("CB-y-14: reviewer scenario 6a -- the model path decodes a 'split' form and reaches the lot, same as the rules (CB-y-1)", async () => {
+    const decodedSplit: SplitCommand = {
+      intent: "split",
+      operator: "Sam",
+      place: [],
+      day: null,
+      at: { hour: 12, minute: 0 },
+    };
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: decodedSplit,
+      by: "model",
+    }));
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({ assignments: [XSAM], runs: [RUN_X] }, fakeReader, { onRunLot });
+
+    fireEvent.change(input, { target: { value: "split Sam's block at noon" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+  });
+
+  it("CB-y-15: reviewer scenario 6b -- the model path decodes a move with `adjust` set and reaches the single move path, same as the rules (CB-y-3)", async () => {
+    const decodedAdjustMove: MoveCommand = {
+      intent: "move",
+      operator: "Sam",
+      place: [],
+      toPlace: null,
+      day: null,
+      span: null,
+      existing: null,
+      shift: null,
+      adjust: { edge: "end", by: 60 },
+    };
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: decodedAdjustMove,
+      by: "model",
+    }));
+    const { onMove, input } = renderXBar({ assignments: [XSAM] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: "extend Sam's block by an hour" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onMove).toHaveBeenCalledTimes(1));
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.target).toEqual({ kind: "retime" });
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
+  });
+
+  it("CB-y-16: reviewer scenario 6c -- a decoded 'headcount' form embedded in a several is garbled: the decoder's own job to prevent, but the bar must not freeze on 'Reading…' if one slips through", async () => {
+    const garbledHeadcountInSeveral = {
+      intent: "several",
+      commands: [
+        {
+          intent: "headcount",
+          product: "Housing A",
+          place: ["Cell 1"],
+          day: null,
+          span: null,
+          shift: null,
+          headcount: 4,
+        } as unknown as SingleCommand,
+      ],
+    } as SeveralCommand;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: garbledHeadcountInSeveral,
+      by: "model",
+    }));
+    const { onSetHeadcount, onRunLot, input } = renderXBar({ runs: [RUN_X] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: "make the Housing A job on Cell 1 4 people" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(statusText()).toBe(
+        "I could not read that as several commands. Say them one at a time.",
+      ),
+    );
+    expect(onSetHeadcount).not.toHaveBeenCalled();
+    expect(onRunLot).not.toHaveBeenCalled();
+  });
+
+  it("CB-y-17: reviewer scenario 7 -- Escape clears each of the five new group-2 questions", () => {
+    // adjust_inverts: shortening past the block's own start.
+    {
+      const { input } = renderXBar({ assignments: [XSAM] });
+      fireEvent.change(input, { target: { value: "shorten Sam's block by 5 hours" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(statusText()).toContain("would end before it starts");
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(statusText()).toBe("");
+    }
+    // adjust_off_day: extending past the day's own end.
+    cleanup();
+    {
+      const { input } = renderXBar({ assignments: [XSAM] });
+      fireEvent.change(input, { target: { value: "extend Sam's block by 20 hours" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(statusText()).toContain("would leave the day");
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(statusText()).toBe("");
+    }
+    // split_outside: a split point not inside any of Sam's blocks.
+    cleanup();
+    {
+      const { input } = renderXBar({ assignments: [XSAM] });
+      fireEvent.change(input, { target: { value: "split Sam's block at 3am" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(statusText()).toContain("is outside");
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(statusText()).toBe("");
+    }
+    // no_job: "the job's hours" with no run of that product on that cell.
+    cleanup();
+    {
+      const { input } = renderXBar({});
+      fireEvent.change(input, {
+        target: { value: "add Sam to the Housing A job on Cell 1" },
+      });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(statusText()).toContain("There is no");
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(statusText()).toBe("");
+    }
+    // which_job: two runs of the same product on the same cell.
+    cleanup();
+    {
+      const { input } = renderXBar({ runs: [RUN_X, RUN_X2] });
+      fireEvent.change(input, {
+        target: { value: "add Sam to the Housing A job on Cell 1" },
+      });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(statusText()).toContain("runs more than once");
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(statusText()).toBe("");
+    }
+  });
+
+  it("CB-y-18: reviewer scenario 8 -- 'add Sam to the Housing A job on Cell 1' when Sam is already in it asks block_exists, and the retime answer works", () => {
+    const { onRetime, input } = renderXBar({ assignments: [XSAM], runs: [RUN_X] });
+
+    fireEvent.change(input, { target: { value: "add Sam to the Housing A job on Cell 1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toContain("already");
+    const changeButton = screen.getByRole("button", { name: /^Change /i });
+    fireEvent.click(changeButton);
+
+    expect(onRetime).toHaveBeenCalledTimes(1);
+    const [resolved] = onRetime.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    if (resolved.target.kind !== "retime") throw new Error("expected a retime target");
+    expect(resolved.target.assignmentId).toBe("xsam");
+    expect(resolved.range).toEqual({ startMin: 3 * 1440 + 480, endMin: 3 * 1440 + 960 });
+  });
+
+  it("CB-y-19: reviewer scenario 11a -- a five-command weekday lot lists all five, no '... and N more'", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({}, null, { onRunLot });
+
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 every weekday this week 8 to 4" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^5 commands ready: /);
+    expect(statusText()).not.toMatch(/and \d+ more/);
+    expect(statusText()).toMatch(/^5 commands ready: 1\. .+; 2\. .+; 3\. .+; 4\. .+; 5\. .+ — say/);
+  });
+
+  it("CB-y-20: reviewer scenario 11b -- a seven-command every-day lot shows five and '… and 2 more'", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({}, null, { onRunLot });
+
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 every day this week 8 to 4" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^7 commands ready: /);
+    expect(statusText()).toContain("… and 2 more");
+    expect(screen.getByRole("button", { name: "Do all 7" })).toBeTruthy();
   });
 });
 

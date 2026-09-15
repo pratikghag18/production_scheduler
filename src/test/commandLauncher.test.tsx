@@ -106,6 +106,9 @@ function renderLauncher(over: Partial<ResolveContext> = {}, recognizer: Recogniz
   const onRetimeRun = vi.fn();
   const onUnassign = vi.fn();
   const onMove = vi.fn();
+  // S58: required on `CommandBarProps`, unused by every case in this file --
+  // none of them types a headcount sentence.
+  const onSetHeadcount = vi.fn();
   const onHighlight = vi.fn();
   // S51: required on `CommandBarProps`, unused by every case in this file --
   // none of them types a several.
@@ -122,11 +125,12 @@ function renderLauncher(over: Partial<ResolveContext> = {}, recognizer: Recogniz
       onRetimeRun={onRetimeRun}
       onUnassign={onUnassign}
       onMove={onMove}
+      onSetHeadcount={onSetHeadcount}
       onRunLot={onRunLot}
       onHighlight={onHighlight}
     />,
   );
-  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, onHighlight };
+  return { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, onSetHeadcount, onHighlight };
 }
 
 function launcherButton() {
