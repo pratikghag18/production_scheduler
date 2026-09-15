@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-15'
-  tip: 'a07fdeb'
+  tip: 'fe2e29d'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2723,7 +2723,7 @@ stages:
   track: core
   num: 59
   title: What the first spoken walk taught — the nearest names to pick, the floor's confirm words, a day one button away, the recogniser told the board's words
-  status: now
+  status: done
   owner: agent
   refs:
   - 'session 174 conversation (the maintainer, 15 Sept, feedback on the nineteen sentences)'
@@ -2749,11 +2749,17 @@ stages:
     left unpinned on purpose: "until end of shift" landing on another end could not be reproduced from
     the board's rows; the maintainer typed it and read the hours back: 02:00–06:00, the rules parser's lone
     start read as 02:00 --- F-151, a fourth lane.
+    **DONE 15 Sept (session 174, fe2e29d).** Five lanes and two reviewers; the second reviewer drove the real bar in a
+    browser. Found and fixed on the way: a mistyped place on a copy getting a dead end, Escape never writing
+    its trace line, the Show-that-day rerun consumable by any board refresh, the trace naming the wrong
+    engine after a fallback, and "right" dropped from the confirm words. Recorded, not changed: "Line 1" said
+    for a cell offers nothing (spelling, not meaning); the served model's schema still admits a
+    punctuation-only name, the decoder is the fence.
 - id: S60
   track: core
   num: 60
   title: Real names on Plant A's demo board, and a sentence with no part asks which
-  status: now
+  status: done
   owner: agent
   refs:
   - 'session 174 conversation (the maintainer, 15 Sept)'
@@ -2771,6 +2777,10 @@ stages:
   state: >-
     **Briefed 15 Sept (session 174).** The rename lane runs now (its files are its own); the which-part
     lane runs after S59's reviewer frees the grammar, resolver, decoder and bar.
+    **DONE 15 Sept (session 174, fe2e29d).** The six people renamed on this machine's database by one idempotent
+    script; the two specs pass with the new names; the role walk unchanged. A sentence with no part asks
+    Which part? with the cell's menu as buttons; spelled digits match their cells. The model path guesses
+    a part for a part-less sentence until the next run's data carries the shape (a note for that run).
 - id: M1
   track: matrix
   num: 1
@@ -11658,9 +11668,13 @@ requirements:
   claim: >-
     When the resolver finds no part, person or place for the words said, it answers the same kind of question an ambiguous word gets: the nearest names, up to four, ranked by closeness (a trailing s stripped first, then shared letters and a common prefix), each a button that puts the real name into the sentence and runs it again; a word close to nothing keeps today's plain answer. The person picks; the board never substitutes on its own. "Common Fasteners" offers Common Fastener; "Housing Pay" offers Housing A (and Housing B, C where the plant makes them); "Operator A" offers the operators whose names begin so.
   verified_by:
-  - kind: manual
-    steps: "pinned by S59's tests when the lanes land; the maintainer says the sentences again"
-  status: uncovered
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "NN1 to NN13 (the plural passes; Housing Pay offers the Housings; a prefix stays an ambiguous list; xyzzy offers nothing; a person and a place; a suggestion's word re-resolves to one thing through every intent; a shared display name re-asks; a mistyped place on a copy or a clear gets suggestions too)"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-unknown-1 to CB-unknown-3 (the Did you mean message with buttons for a person, a part and a place; a pick substitutes and runs; no suggestions leaves the plain answer)"
+  status: covered
   note: >-
     STATED 15 Sept (session 174): "when it can't understand it should give me a list of products and I should be able to select or tell which one of them I want"; design §19.104 (D133 item 1).
 - id: R-419
@@ -11672,9 +11686,10 @@ requirements:
   claim: >-
     The day-off-board question (yesterday, Friday, a date, a week) gains one button, Show that day, that moves the board's window so the day is on it (the window's own start-date and day-count controls, never a second axis) and runs the same sentence again; a week word widens to seven days when the window is narrower. A cancel word or new typing drops the question as any other.
   verified_by:
-  - kind: manual
-    steps: "pinned by S59's tests when the lanes land; the maintainer says the sentences again"
-  status: uncovered
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-showday-1 to CB-showday-6 (the button only on day_off_board; the target for yesterday, Friday and a date; the rerun waits for a window that holds the day and is not consumed by another board refresh; cancel and Escape drop it)"
+  status: covered
   note: >-
     STATED 15 Sept (session 174): "I had to go back a day on the board for it to work" and "it said friday is not on the board, move the board to that day first"; design §19.104 (D133 item 3).
 - id: R-420
@@ -11686,9 +11701,15 @@ requirements:
   claim: >-
     Each clip sent to whisper.cpp carries an initial prompt built from the names on the board window (cells, lines, areas, parts, people, in board order) and the bar's own vocabulary (cell, line, shift, job, people, the digits and the words for them), rebuilt when the window changes and capped at roughly 200 words; the browser's recogniser is unchanged. A quiet or unclear clip still fails as it does today; the hint changes what a near-miss is heard as, never whether something was heard.
   verified_by:
+  - kind: vitest
+    file: src/test/recognizerHint.test.ts
+    cases: "RHINT-1 to RHINT-9 (the vocabulary first, board order, de-duplication, the word-boundary cap, an empty board)"
+  - kind: vitest
+    file: src/test/localRecognizer.test.ts
+    cases: "LREC-15 and LREC-16 (the prompt field sent when a hint is given, absent when not, read at clip time), LREC-17 and LREC-18 (the wrapper reports which engine produced the final)"
   - kind: manual
-    steps: "pinned by S59's tests when the lanes land; the maintainer says the sentences again"
-  status: uncovered
+    steps: "on the container, 15 Sept (session 174): the same clip came back as put operator A3 on housing A on cell 1 (lower case) without the hint and Put Operator A3 on Housing A on Cell 1 with it; Plant A's real board builds a 108-word hint carrying every cell, part and person"
+  status: covered
   note: >-
     STATED 15 Sept (session 174): the recogniser heard "cell" as something else, "A" as "pay" and "4" as "10"; design §19.104 (D133 item 4).
 - id: R-421
@@ -11708,9 +11729,18 @@ requirements:
     is fire-and-forget, and a build without it changes nothing in the bar. The maintainer's word, 15 Sept:
     "put it in a local temporary file instead of me pasting it".
   verified_by:
+  - kind: vitest
+    file: src/test/trace.test.ts
+    cases: "the entry shape and renderLine (the raw answer trimmed)"
+  - kind: vitest
+    file: src/test/traceServer.test.ts
+    cases: "TS-1 to TS-5 (a POST appends one line and answers 204; GET is 405; the folder is made; a non-JSON body is stored as text)"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-t-1 to CB-t-8 (typed and spoken entries with by, the model's raw answer or why it was skipped, the form, the question and answer, the lot's readouts; a failed post swallowed; nothing posted outside DEV; Escape writes the line; the engine read at final time)"
   - kind: manual
-    steps: "pinned by S59's tests when the lane lands; the maintainer's next walk is pasted from it"
-  status: uncovered
+    steps: "the reviewer typed a sentence in the real bar and read the line from data/voice/trace/bar.jsonl; npm run build carries no trace of the endpoint (session 174)"
+  status: covered
   note: >-
     STATED 15 Sept (session 174). Built after lane B so the two do not edit the bar at once.
 - id: R-422
@@ -11722,9 +11752,19 @@ requirements:
   claim: >-
     An assign or a booking that names a place and hours (or a shift) but no part is read with an empty part rather than refused; the resolver, once the cell is known, asks Which part? with the parts offered at that cell as buttons (board order, at most eight, and a note to say the part when there are more); a part word that matches nothing and has no near name gets the same menu after the nearest-name pass (R-418) found nothing. A pick substitutes the part and runs the sentence again. The model was not taught a part-less sentence and will guess one; the readout shows the guess before the yes, and the shape joins the next run's data.
   verified_by:
-  - kind: manual
-    steps: "pinned by S60's tests and specs when the lanes land; the maintainer's next walk"
-  status: uncovered
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "WP1 to WP6 (an assign, a booking and a shift form with no part read with an empty part; no_product still for a sentence with nothing after the person; round trips)"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "RS-WP1 to RS-WP5 (the cell's menu as suggestions, at most eight with a flag; a near-miss word gets the nearest names first; no offerings is the plain answer; a pick re-resolves), RS-PP1 to RS-PP5 (a single word that is a part, not a place, is recognised as the part and asks which cell), NW1 to NW3 (spelled digits)"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-wp-1 to CB-wp-3 (Which part? with the buttons; a pick runs; more than eight shows the tail), CB-pp-1 to CB-pp-4 (a part is a part; which cell? with the cells as buttons, a pick filling both, inside a lot too)"
+  - kind: vitest
+    file: src/test/voiceRead.test.ts
+    cases: "an empty part decodes on assign, book and headcount only"
+  status: covered
   note: >-
     STATED 15 Sept (session 174): "It can also ask what product if I don't give it one to choose from the list of available products for the hierarchy level." Brief docs/agent-briefs/s60-b-which-part-brief.md.
 - id: R-423
@@ -11736,16 +11776,22 @@ requirements:
   claim: >-
     The six demo operators homed on Plant A's cells (employee refs EMP-1001 to EMP-1006) are Sam Patel, Maria Lopez, John Kim, Priya Shah, Tom Baker and Lena Novak, renamed by scripts/demo/rename-plant-a-operators.sql (idempotent, applied by psql through the database container, no seed file creates them); the two e2e specs that name them name the new ones; the role walk is unchanged. The training pools keep their own names.
   verified_by:
+  - kind: e2e
+    file: e2e/linePeople.spec.ts
+    cases: "Plant A's six real names on the line people list"
+  - kind: e2e
+    file: e2e/voiceBar.spec.ts
+    cases: "the bar's own spec names Sam Patel"
   - kind: manual
-    steps: "pinned by S60's tests and specs when the lanes land; the maintainer's next walk"
-  status: uncovered
+    steps: "scripts/demo/rename-plant-a-operators.sql applied through the database container, the six rows read back, a second run changes nothing (session 174)"
+  status: covered
   note: >-
     STATED 15 Sept (session 174): "the operator names being A1, A2, etc is a bit more challenging to understand vs actual people names, should we try modifying plant A with actual people names?" Brief docs/agent-briefs/s60-a-real-names-brief.md.
 findings:
 - id: F-151
   title: From 2 until end of shift read as 02:00, so the block ran to the night shift's end
   tag: One lone-hour rule, applied to some clauses and not others
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S55
   refs:
@@ -11759,14 +11805,14 @@ findings:
     "end Sam early at 3" is 15:00); the start of a boundary clause and of a length clause ("from 2 for 4
     hours") were left out of that rule. The resolver did what it was told.
   fix: >-
-    Open. The grammar applies the same workday rule to a start that stands alone before a boundary or a
+    Session 174 (fe2e29d). A lone start before a boundary or a length reads by the workday rule (LS1 to LS14): "from 2 until end of shift" is 14:00 to 22:00 on Plant A. The rule's edge was then moved for a START: 1 to 5 are the afternoon, 6 stays the morning (every demo plant's first shift starts at 06:00, and the training data said "from 6" meaning it); a lone END keeps 1 to 6. The templates compute their forms by the same rule and the held-out set was regenerated a fourth time on the same seed; the fifth run's score stands against the file as it was, and the sixth run's data carries this. Was: The grammar applies the same workday rule to a start that stands alone before a boundary or a
     length: "from 2 until end of shift" is 14:00, "from 2 for 4 hours" is 14:00–18:00, "from 8 for 4 hours"
     stays 08:00, an explicit am/pm or a 24-hour clock is untouched; pinned as LS1 to LS6 (brief
     docs/agent-briefs/f-151-lone-start-workday-rule-brief.md).
 - id: F-150
   title: Saying yeah is not a yes, and a spoken yes to a lot needed the button
   tag: The confirm words were the developer's, not the floor's
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S51
   refs:
@@ -11777,14 +11823,14 @@ findings:
     button". The bar's universal confirm words were yes, yes please, confirm, do it and ok; the cancel
     words no, cancel, leave it, stop.
   fix: >-
-    Open. Yeah, yep, yup, sure, okay, go ahead, go on, correct and right join the confirm set; nope, nah,
+    Session 174 (fe2e29d). Yeah, yep, yup, sure, okay, go ahead, go on, correct and yes yes confirm; nope, nah, never mind and forget it cancel; punctuation anywhere is stripped before the comparison (CB-confirm cases). "Right" was left out on the reviewer's judgement: a floor filler that would confirm a removal. Was: Yeah, yep, yup, sure, okay, go ahead, go on, correct and right join the confirm set; nope, nah,
     never mind and forget it the cancel set; a transcript is trimmed, lower-cased and stripped of
     punctuation before the comparison so a recogniser's "Yes." is a yes (brief
     docs/agent-briefs/s59-b-bar-brief.md).
 - id: F-149
   title: The model wrote a place named "]," and the decoder took it, so the bar said no cell called "],"
   tag: A name made of punctuation is not a name
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S44
   refs:
@@ -11798,7 +11844,7 @@ findings:
     is ["],"]; the schema fence only says a string, and the decoder accepted it, so the rules parser --
     which reads both sentences right or refuses them cleanly -- never got its turn.
   fix: >-
-    Open. The decoder refuses any name (operator, product, place, toPlace, with, other, shift) that holds
+    Session 174 (fe2e29d). The decoder refuses any name without a letter or digit as garbled (VR24, VR25), so both probes fall back to the rules parser: the first refuses cleanly, the second asks for the job's name. Was: The decoder refuses any name (operator, product, place, toPlace, with, other, shift) that holds
     no letter or digit, as garbled, so the bar falls back to the rules parser as it does for any other
     garbled answer; pinned on both probes (brief docs/agent-briefs/s59-b-bar-brief.md).
 - id: F-148
@@ -15787,6 +15833,34 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 174
+  date: 2026-09-15
+  title: "The first spoken walk: nineteen sentences, seven rules, three findings, real names, a trace on disk (S59, S60, R-418 to R-423, F-149 to F-151)"
+  shipped: [S59, S60]
+  commits: ['fe2e29d']
+  numbers:
+    app_tests: 3812
+    app_test_files: 150
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 15 Sept, after the S59/S60 commit: 3812 tests in 150 files, all passing; tsc, eslint
+    and npm run build clean; the role walk 5 passed and the two renamed specs 2 passed; no migration or RPC changed.
+  summary: >-
+    The maintainer walked nineteen sentences through the bar by voice and keyboard and reported every one.
+    Sorted: the model copies what it hears (right), the resolver's dead end on a near-miss was the gap
+    (R-418); "yeah" was not a yes (F-150); yesterday and Friday off the board (R-419); the recogniser
+    mishearing cell, A and 4 (R-420); the model writing a place named "]," (F-149); a typed "from 2 until
+    end of shift" read as 02:00 (F-151, found by asking the maintainer to type it); two of the tests were
+    the developer's own design mistakes. The maintainer then asked for a temporary log of what was heard,
+    answered and done, and for it to go to a local file rather than a paste (R-421); for real names on
+    Plant A (R-423); and for a sentence with no part to ask which (R-422). Six lanes and three reviewers;
+    the last reviewer drove the real bar in a browser and proved the trace line and the hint. Next: the
+    maintainer's second walk with the new names and the trace on disk; the smoke switch; 6b.
 - id: 173
   date: 2026-09-15
   title: "The fifth run passes at 99.8 / 97.4 with the short prompt and is served; the catalogue's three command groups are taught (S56, R-410, R-417)"
@@ -23239,16 +23313,6 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
-- kind: task
-  stage: S59
-  text: "What the first spoken walk taught --- nearest names to pick, the floor's confirm words, Show that day, the recogniser's hint (S59, R-418 to R-420, F-149, F-150, in progress)"
-  why: >-
-    The maintainer's feedback of 15 Sept (session 174) on nineteen sentences, each item answered by a rule.
-- kind: task
-  stage: S60
-  text: "Real names on Plant A's demo board; a sentence with no part asks which (S60, R-422, R-423, in progress)"
-  why: >-
-    The maintainer's two asks of 15 Sept (session 174) after the first spoken walk.
 - kind: task
   text: "A smoke run for the notebook --- a Settings switch that trains on 50 rows for one epoch and predicts 20, so the whole path from install to GGUF is proved in minutes before a real run"
   why: >-
