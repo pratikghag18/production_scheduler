@@ -11,6 +11,7 @@ import type { ResolveContext, BoardDay, ContextRun } from "@/lib/command/resolve
 import { voiceServiceUrl, readSentence, type Reader } from "@/lib/voice/readSentence";
 import { browserRecognizer, type Recognizer } from "@/lib/voice/recognizer";
 import { localRecognizer, whisperServiceUrl, withFallback } from "@/lib/voice/localRecognizer";
+import { buildRecognizerHint } from "@/lib/voice/recognizerHint";
 import { operatorViewFor, productViewFor } from "./lib/history";
 import { useBoardWindow } from "./hooks/useBoardWindow";
 import { useAbsences } from "./hooks/useAbsences";
@@ -82,10 +83,85 @@ const COMMAND_BAR_READER: Reader | null = voiceServiceUrl() ? readSentence : nul
  * a local URL is configured. */
 const WHISPER_URL = whisperServiceUrl();
 const BROWSER_RECOGNIZER: Recognizer | null = browserRecognizer();
+
+/** S59-c (brief §2-3, design-plan §19.104 / D133 item 4): the current
+ *  recogniser hint, a module-level singleton beside `BOARD_RECOGNIZER`
+ *  itself -- `localRecognizer`'s third argument reads it at clip time
+ *  through the closure below, so the component only ever needs to keep
+ *  THIS assigned (its own `useEffect`, keyed on `commandCtx`); the
+ *  recogniser built once at module load never has to be rebuilt when the
+ *  board window changes. */
+let recognizerHint = "";
+
+/** S60-b (the S59 reviewer, 15 Sept): which engine actually ran the most
+ *  recent clip -- a module-level singleton beside `recognizerHint` above and
+ *  for the same reason (`BOARD_RECOGNIZER` is built once, outside any
+ *  component). Starts at "local" when a local URL is configured (matching
+ *  the OLD static prop's own assumption) or "browser" when it is not (there
+ *  is no local engine to have run); `withFallback`'s own `onEngine` below
+ *  updates it synchronously, per clip, the instant a fallback actually
+ *  happens -- `CommandBar`'s `recognizerName` getter reads `.current` at
+ *  trace time, never a value fixed at render (the bug this fixes: a clip
+ *  that fell back to the browser was traced as "local" regardless). */
+const engineRef: { current: "local" | "browser" } = {
+  current: WHISPER_URL !== null ? "local" : "browser",
+};
+
 const BOARD_RECOGNIZER: Recognizer | null =
   WHISPER_URL !== null
-    ? withFallback(localRecognizer(WHISPER_URL), BROWSER_RECOGNIZER)
+    ? withFallback(
+        localRecognizer(WHISPER_URL, undefined, () => recognizerHint),
+        BROWSER_RECOGNIZER,
+        (engine) => {
+          engineRef.current = engine;
+        },
+      )
     : BROWSER_RECOGNIZER;
+
+/** S59 (R-419, design §19.104/D133 item 3): lowercase weekday full names,
+ *  0=Sunday .. 6=Saturday -- the exact spelling `resolve.ts`'s own private
+ *  `WEEKDAY_FULL_NAMES` writes into a `day_off_board` question's `text`
+ *  (mirrored here, not imported: `resolve.ts` exports no VALUES, only types,
+ *  by design -- CLAUDE.md §4/`commandPurity.test.ts`'s U1). */
+const SHOW_DAY_WEEKDAY_NAMES = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+];
+
+/** Adds `delta` CALENDAR days to an ISO "YYYY-MM-DD" string -- pure
+ *  arithmetic through a UTC-midnight `Date`, the same trick `CommandBar.tsx`'s
+ *  own `renderReadout` already uses for the same reason: an ISO calendar date
+ *  is zone-invariant (D88a is about which day an INSTANT falls on, not this),
+ *  so adding whole days to one needs no real clock read and no `Intl` call. */
+function isoPlusDays(iso: string, delta: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The Monday of the calendar week containing `iso` (Monday-first) -- pure
+ *  arithmetic, same reasoning as `isoPlusDays` above. */
+function mondayIsoOfWeekContaining(iso: string): string {
+  const weekday = new Date(`${iso}T00:00:00Z`).getUTCDay(); // 0=Sun .. 6=Sat
+  const back = weekday === 0 ? 6 : weekday - 1;
+  return isoPlusDays(iso, -back);
+}
+
+/** S59 (R-419, design §19.104/D133 item 3): a week word's own start-of-week
+ *  offset from the week containing the anchor day, in days -- `this_week`'s
+ *  own Monday, or seven either side. Read as `weekWordOffsets[target]` only
+ *  after `target in weekWordOffsets` has already narrowed `target` to one of
+ *  these three keys (`handleShowDay`, below). */
+const SHOW_DAY_WEEK_WORD_OFFSETS: Record<string, number> = {
+  "this week": 0,
+  "next week": 7,
+  "last week": -7,
+};
 
 /**
  * The board (brief P1-4a read-only + P1-4b interactions + P1-4c responsive
@@ -626,6 +702,95 @@ export default function BoardPage() {
     };
   }, [boardQuery.data, index, operatorPool]);
 
+  /**
+   * S59-c (brief §3, design-plan §19.104 / D133 item 4): the same four
+   * sources the resolver itself reads off `commandCtx` -- cells, every node
+   * (for the lines/places above a cell), active parts, active people --
+   * built once per board window and handed to the local recogniser as its
+   * next clip's prompt. `commandCtx.products` is already active-only (the
+   * `active` filter above, at this memo's own top); `commandCtx.operators`
+   * is the raw pool (S52-b's own doc on that field: the resolver itself
+   * filters `active` before matching), so filtered here the same way.
+   */
+  const recognizerHintText = useMemo(() => {
+    if (!commandCtx) return "";
+    return buildRecognizerHint({
+      cells: commandCtx.cells.map((c) => c.name),
+      places: [...commandCtx.nodeById.values()].map((n) => n.name),
+      parts: commandCtx.products.map((p) => p.name),
+      people: commandCtx.operators.filter((o) => o.active).map((o) => o.displayName),
+    });
+  }, [commandCtx]);
+
+  // S59-c (brief §2-3): keeps the module-level `recognizerHint` singleton
+  // (`localRecognizer`'s own closure reads it at clip time) in step with
+  // this window's names -- a plain assignment, not a ref, because
+  // `localRecognizer(...)` was built once at module load, outside any
+  // component instance, and has no ref of its own to read.
+  useEffect(() => {
+    recognizerHint = recognizerHintText;
+  }, [recognizerHintText]);
+
+  /**
+   * S59 / R-419 (design §19.104/D133 item 3): `CommandBar`'s "Show that day"
+   * button hands back `question.text` VERBATIM (that prop's own doc: "the
+   * target is what the question names") -- every shape `resolve.ts`'s
+   * `day_off_board` question can ever carry, read off every place it is
+   * built there: "today", "tomorrow", "yesterday", a lowercase weekday name,
+   * an ISO date, or (defensively -- D130's three week kinds are legal only
+   * on a copy's own `from`/`to`, which resolves through `resolveWeekDays` and
+   * so never reaches `resolveDay`'s own week-kind fallback in practice) a
+   * week word. Every branch below moves the window through the STORE'S OWN
+   * `setWindowStartDate`/`setWindowDayCount`/`shiftWindowByDays`/`goToToday`
+   * -- never a second axis of its own. `CommandBar`'s own effect (keyed on
+   * `ctx`) re-runs the held command once `commandCtx` above recomputes for
+   * the new window.
+   */
+  function handleShowDay(target: string): void {
+    if (!commandCtx || commandCtx.days.length === 0) return;
+    if (target === "today") {
+      goToToday();
+      return;
+    }
+    if (target === "yesterday") {
+      shiftWindowByDays(-1);
+      return;
+    }
+    if (target === "tomorrow") {
+      shiftWindowByDays(1);
+      return;
+    }
+    const weekdayIndex = SHOW_DAY_WEEKDAY_NAMES.indexOf(target);
+    if (weekdayIndex !== -1) {
+      // The nearest occurrence AT OR AFTER the window's own first day --
+      // "move the board to that day" (R-419's own words), never a day
+      // already behind the window someone deliberately opened.
+      const anchor = commandCtx.days[0];
+      const delta = (((weekdayIndex - anchor.weekday) % 7) + 7) % 7;
+      const iso = isoPlusDays(anchor.iso, delta);
+      setWindowStartDate(new Date(`${iso}T00:00:00.000Z`));
+      return;
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+      setWindowStartDate(new Date(`${target}T00:00:00.000Z`));
+      return;
+    }
+    if (target in SHOW_DAY_WEEK_WORD_OFFSETS) {
+      const anchorDay =
+        commandCtx.todayIndex !== null
+          ? commandCtx.days[commandCtx.todayIndex]
+          : commandCtx.days[0];
+      const monday = mondayIsoOfWeekContaining(anchorDay.iso);
+      const iso = isoPlusDays(monday, SHOW_DAY_WEEK_WORD_OFFSETS[target]);
+      setWindowStartDate(new Date(`${iso}T00:00:00.000Z`));
+      setWindowDayCount(Math.max(windowDayCount, 7));
+      return;
+    }
+    // Every other string is defensive only (`resolve.ts`'s own
+    // `bad_repeat_day` wording, "every weekday this week" and the like,
+    // never reaches `day_off_board`) -- a no-op rather than a guess.
+  }
+
   /** A node's ltree path, or `null` when this window does not carry the node. */
   const pathOf = useCallback(
     (nodeId: string | null): string | null =>
@@ -864,6 +1029,7 @@ export default function BoardPage() {
               zone={index.zone}
               reader={COMMAND_BAR_READER}
               recognizer={commandBarLaunch.voice ? BOARD_RECOGNIZER : null}
+              recognizerName={() => engineRef.current}
               onOpen={(resolved, anchor) => {
                 // R-385: a `retime` target is never a create; `onRetime`
                 // below is the caller for that branch of the union.
@@ -940,6 +1106,9 @@ export default function BoardPage() {
               // S47 / R-395: told what is in question -- drawn on the board
               // through `HighlightProvider` below.
               onHighlight={setHighlight}
+              // S59 / R-419: "Show that day" -- see `handleShowDay`'s own
+              // doc above for what each target shape does.
+              onShowDay={handleShowDay}
               // S51 / R-400 (design §19.98/D127): the several-lot's one
               // writer -- runs the resolved commands in order through the
               // SAME doors the props above already use, never a second copy

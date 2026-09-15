@@ -1,10 +1,31 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
+import { handleTraceRequest } from "./src/lib/voice/traceServer";
+
+/**
+ * S59-e (R-421, brief docs/agent-briefs/s59-e-trace-brief.md §3): the bar
+ * posts each finished sentence's trace entry to this dev-only endpoint,
+ * fire-and-forget, only when `import.meta.env.DEV` -- so this plugin exists
+ * only where `configureServer` runs at all (`npm run dev`, and the tester's
+ * own dev server), never in a build. The handler itself is
+ * `src/lib/voice/traceServer.ts`, a plain module `traceServer.test.ts` can
+ * call directly -- this plugin is just the thin wire-up.
+ */
+function voiceTracePlugin(): Plugin {
+  return {
+    name: "voice-trace",
+    configureServer(server) {
+      server.middlewares.use("/__trace", (req, res) => {
+        void handleTraceRequest(req, res);
+      });
+    },
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), voiceTracePlugin()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

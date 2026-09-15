@@ -267,10 +267,29 @@ describe("commandParse: brief §4 worked examples", () => {
     });
   });
 
-  it("P15: no_place -- a product but no place", () => {
+  // Re-pinned (R-422, S60-b, 15 Sept): the contract changed, not a drifted
+  // test -- a single segment after the person, with hours but no separator
+  // ("on"/"at"/"in"/","), used to be ASSUMED a product with no place
+  // (`no_place`); it is now read the other way, as a PLACE with no product
+  // (WP1's own reading, since there is no syntactic way to tell "Housing A"
+  // the product from "Housing A" the cell name here -- see parse.ts's own
+  // comment on this branch). See WP1-WP6 (below) for the new grammar's own
+  // pins.
+  it("P15 (R-422 re-pin): 'assign Sam to Housing A from 10 to 2' -- now a PLACE with no product", () => {
     expect(parseCommand("assign Sam to Housing A from 10 to 2")).toEqual({
-      ok: false,
-      failure: { kind: "no_place" },
+      ok: true,
+      command: {
+        intent: "assign",
+        operator: "Sam",
+        product: "",
+        place: ["Housing A"],
+        day: null,
+        start: { hour: 10, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      },
     });
   });
 
@@ -692,10 +711,22 @@ describe("commandParse: S41-a book-a-job worked examples", () => {
     );
   });
 
-  it("B6: book Housing A from 6 to 2 -- no_place", () => {
+  // Re-pinned (R-422, S60-b, 15 Sept): same contract change as P15 above,
+  // for the book grammar's own single-piece branch.
+  it("B6 (R-422 re-pin): 'book Housing A from 6 to 2' -- now a PLACE with no product", () => {
     expect(parseCommand("book Housing A from 6 to 2")).toEqual({
-      ok: false,
-      failure: { kind: "no_place" },
+      ok: true,
+      command: {
+        intent: "book",
+        product: "",
+        place: ["Housing A"],
+        headcount: null,
+        day: null,
+        start: { hour: 6, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        existing: null,
+        shift: null,
+      },
     });
   });
 
@@ -1106,10 +1137,29 @@ describe("commandParse: R-391 the optional verb widens, one list per sentence", 
     expect(UNASSIGN_VERBS).not.toContain("change");
   });
 
-  it("PV3: 'schedule Housing A on Cell 1 from 6 to 2' is still read as an assign sentence and fails no_place", () => {
+  // Re-pinned (R-422, S60-b, 15 Sept): PV3's real point -- "schedule" reads
+  // as ASSIGN, never as book -- still holds (a book grammar has no operator
+  // field, so "Housing A" could never become one there); the ASSERTION
+  // changes because the single-piece branch it used to fail on now succeeds
+  // with an empty product (same contract change as P15/B6, above). A
+  // successful BOOK reading of this sentence would have `product: "Housing
+  // A"`, never `operator: "Housing A"` -- this pins the ASSIGN reading
+  // specifically, which is the property PV3 always existed to prove.
+  it("PV3 (R-422 re-pin): 'schedule Housing A on Cell 1 from 6 to 2' is still read as an assign sentence (operator 'Housing A', not book's own product)", () => {
     expect(parseCommand("schedule Housing A on Cell 1 from 6 to 2")).toEqual({
-      ok: false,
-      failure: { kind: "no_place" },
+      ok: true,
+      command: {
+        intent: "assign",
+        operator: "Housing A",
+        product: "",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 6, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      },
     });
   });
 
@@ -2470,6 +2520,158 @@ describe("commandParse: S55 boundaries -- ALL_DAY/END_OF_SHIFT/END_OF_DAY (R-404
     if (!bd3.ok) throw new Error("BD3 must parse");
     expect(formatCommand(bd3.command)).toContain("for the rest of the day");
     expect(parseCommand(formatCommand(bd3.command))).toEqual(bd3);
+  });
+});
+
+describe("commandParse: F-151 a lone start before a boundary or a length reads by the workday rule", () => {
+  it("LS1: assign Sam to Housing A on Cell 1 from 2 until end of shift -- start 14:00, the boundary clause's own lone start (no end clock beside it) reads by the workday rule, same as the removal grammar's 'before 2'", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 14, minute: 0 },
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_SHIFT,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 2 until end of shift")).toEqual(
+      expected,
+    );
+    expect(formatCommand(expected.command)).toContain("from 14:00 until end of shift");
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS2: assign Sam to Housing A on Cell 1 from 2 for 4 hours -- 14:00-18:00, the length clause's own lone start reads by the same rule -- never the literal 02:00-06:00", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 14, minute: 0 },
+      end: { hour: 18, minute: 0 },
+      attach: null,
+      existing: null,
+      shift: null,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 2 for 4 hours")).toEqual(expected);
+    expect(formatCommand(expected.command)).toContain("from 14:00 to 18:00");
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS3: put Sam on Housing A on Cell 1 at 3 for the rest of the day -- 15:00, the boundary clause's 'at <time>' prefix (the same word AJ7's lone edge already accepts) reads the same as its 'from <time>' prefix", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 15, minute: 0 },
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_DAY,
+    });
+    expect(parseCommand("put Sam on Housing A on Cell 1 at 3 for the rest of the day")).toEqual(
+      expected,
+    );
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS4: assign Sam to Housing A on Cell 1 from 8 until end of shift -- stays 08:00, the rule's own range (an hour from 1 to 6) never touches an hour already at or past 7", () => {
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 8 until end of shift")).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: null,
+        attach: null,
+        existing: null,
+        shift: END_OF_SHIFT,
+      }),
+    );
+  });
+
+  it("LS5: assign Sam to Housing A on Cell 1 from 2 pm .../from 14:00 ... until end of shift -- both untouched at 14:00; an explicit meridiem or a 24-hour clock is never a lone edge for this rule", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 14, minute: 0 },
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_SHIFT,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 2 pm until end of shift")).toEqual(
+      expected,
+    );
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 14:00 until end of shift")).toEqual(
+      expected,
+    );
+  });
+
+  it("LS6: assign Sam to Housing A on Cell 1 from 6 until end of shift -- stays 06:00, the F-151 (session 174) rule's own edge: every demo plant's Shift 1 starts at 06:00, so a lone START of 6 with no am/pm reads as the morning; the 1-to-6 pm range from S55 now stops at 5 for a START only (a lone END, RM6/AJ7/the adjust grammar's own end door, still reads 1-to-6 as pm, unchanged)", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 6, minute: 0 },
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_SHIFT,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 6 until end of shift")).toEqual(
+      expected,
+    );
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS13: assign Sam to Housing A on Cell 1 from 5 for 4 hours -- 17:00-21:00, the START rule's own top edge (5 is still inside the 1-5 pm range, unlike LS6's 6)", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 17, minute: 0 },
+      end: { hour: 21, minute: 0 },
+      attach: null,
+      existing: null,
+      shift: null,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 5 for 4 hours")).toEqual(expected);
+    expect(formatCommand(expected.command)).toContain("from 17:00 to 21:00");
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS14: assign Sam to Housing A on Cell 1 from 6 until end of shift -- 06:00 to the first band's end, resolver-side is unchanged (this pin is the grammar's own half: the lone start reads 06:00, same as LS6; the band lookup itself belongs to resolve.ts, not parse.ts)", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 6, minute: 0 },
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_SHIFT,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 6 until end of shift")).toEqual(
+      expected,
+    );
   });
 });
 
@@ -4150,5 +4352,238 @@ describe("commandParse: S58 grammar widening, group 2 (R-412 to R-416, D132)", (
     expect(disjointLists.some((list) => list !== ASSIGN_VERBS && list.includes("make"))).toBe(
       false,
     );
+  });
+});
+
+describe("commandParse: F-151 reviewer follow-up -- more lone-start edges (LS7 onward)", () => {
+  it("LS7: assign Sam to Housing A on Cell 1 from 12 until end of shift -- 12:00 (noon), never the literal 24:00: 12 is outside the rule's 1-6 range", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 12, minute: 0 },
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_SHIFT,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 12 until end of shift")).toEqual(
+      expected,
+    );
+    expect(formatCommand(expected.command)).toContain("from 12:00 until end of shift");
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS8: assign Sam to Housing A on Cell 1 from 1 for 30 minutes -- 13:00-13:30, the rule's own bottom edge (hour 1) reads pm same as any other hour 1-6, a minutes-only duration included", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 13, minute: 0 },
+      end: { hour: 13, minute: 30 },
+      attach: null,
+      existing: null,
+      shift: null,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 1 for 30 minutes")).toEqual(
+      expected,
+    );
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS9: assign Sam to Housing A on Cell 1 from 5:30 until end of shift -- 17:30: a lone start carrying its OWN minutes still reads by the workday rule (the rule keys on the hour alone, the same way the removal grammar's pre-existing 'before 2'/'after 2' lone edge already does for any minute); F-151 (session 174) narrowed the START rule's own top edge to 5 (6:30 now stays 06:30, LS6's own hour), so this pin moved down to 5:30 to keep proving the minutes carry through", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 17, minute: 30 },
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_SHIFT,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 5:30 until end of shift")).toEqual(
+      expected,
+    );
+    expect(formatCommand(expected.command)).toContain("from 17:30 until end of shift");
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS10: assign Sam to Housing A on Cell 1 from 0 for 4 hours -- stays 00:00-04:00: hour 0 (midnight) is below the rule's own 1-6 range, untouched", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 0, minute: 0 },
+      end: { hour: 4, minute: 0 },
+      attach: null,
+      existing: null,
+      shift: null,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 0 for 4 hours")).toEqual(expected);
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS11: assign Sam to Housing A on Cell 1 from 7 for 4 hours -- stays 07:00-11:00, the rule's own top edge (7 is the first hour NOT in the 1-6 range, tighter than LS4's hour 8)", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 7, minute: 0 },
+      end: { hour: 11, minute: 0 },
+      attach: null,
+      existing: null,
+      shift: null,
+    });
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 7 for 4 hours")).toEqual(expected);
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("LS12: unassign Sam from Cell 1 in Line 1 from 2 until end of shift -- the removal grammar discards a boundary's own captured start (R-404's own amendment), so F-151's lone-edge reading of it never surfaces: span null, shift 'end of shift', no start field to read at all", () => {
+    const expected = {
+      ok: true as const,
+      command: {
+        intent: "unassign" as const,
+        operator: "Sam",
+        place: ["Cell 1", "Line 1"],
+        day: null,
+        span: null,
+        existing: null,
+        shift: END_OF_SHIFT,
+        until: null,
+      },
+    };
+    expect(parseCommand("unassign Sam from Cell 1 in Line 1 from 2 until end of shift")).toEqual(
+      expected,
+    );
+    expect(formatCommand(expected.command)).not.toContain("2:00");
+    expect(formatCommand(expected.command)).not.toContain("14:00");
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S60-b (docs/agent-briefs/s60-b-which-part-brief.md, R-422): the maintainer,
+// 15 Sept (session 174) -- "It can also ask what product if I don't give it
+// one to choose from the list of available products for the hierarchy
+// level." An assign or a booking whose sentence names a place and hours (or
+// a shift) but no part parses with `product: ""` instead of failing
+// `no_product`; `no_product` stays for a sentence with nothing after the
+// person at all. WP1 onward.
+// ---------------------------------------------------------------------------
+
+describe("commandParse: S60-b a place with no part (R-422)", () => {
+  it("WP1: assign -- 'assign Sam to Cell 1 from 8 to 4' -- product '', formatCommand prints it without a part, round trip", () => {
+    const expected = {
+      ok: true as const,
+      command: {
+        intent: "assign" as const,
+        operator: "Sam",
+        product: "",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      },
+    };
+    expect(parseCommand("assign Sam to Cell 1 from 8 to 4")).toEqual(expected);
+    expect(formatCommand(expected.command)).toBe("assign Sam to Cell 1 from 08:00 to 16:00");
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("WP2: book -- 'book Cell 2 for 3 people from 8 to 4' -- product '', round trip", () => {
+    const expected = {
+      ok: true as const,
+      command: {
+        intent: "book" as const,
+        product: "",
+        place: ["Cell 2"],
+        headcount: 3,
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        existing: null,
+        shift: null,
+      },
+    };
+    expect(parseCommand("book Cell 2 for 3 people from 8 to 4")).toEqual(expected);
+    expect(formatCommand(expected.command)).toBe("book Cell 2 for 3 people from 08:00 to 16:00");
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("WP3: a shift form -- 'put Sam on Cell 1 for shift 2' -- product '', round trip", () => {
+    const expected = {
+      ok: true as const,
+      command: {
+        intent: "assign" as const,
+        operator: "Sam",
+        product: "",
+        place: ["Cell 1"],
+        day: null,
+        start: null,
+        end: null,
+        attach: null,
+        existing: null,
+        shift: "2",
+      },
+    };
+    expect(parseCommand("put Sam on Cell 1 for shift 2")).toEqual(expected);
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
+  });
+
+  it("WP4: the several list form with no part -- 'assign Sam to Cell 1 and Cell 2 from 8 to 4' -- every inner command's own product ''", () => {
+    const result = parseCommand("assign Sam to Cell 1 and Cell 2 from 8 to 4");
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.command.intent !== "several") throw new Error("expected a several");
+    expect(result.command.commands).toHaveLength(2);
+    for (const [i, place] of [["Cell 1"], ["Cell 2"]].entries()) {
+      const inner = result.command.commands[i];
+      expect(inner.intent).toBe("assign");
+      if (inner.intent !== "assign") continue;
+      expect(inner.product).toBe("");
+      expect(inner.place).toEqual(place);
+      const printed = formatCommand(inner);
+      expect(parseCommand(printed)).toEqual({ ok: true, command: inner });
+    }
+  });
+
+  it("WP5: no_product still fires for 'assign Sam' (with the mandatory time clause, nothing at all between the operator and it -- P14's own boundary, unaffected by the new single-piece branch since productPlaces is empty before it ever runs)", () => {
+    expect(parseCommand("assign Sam from 10 to 2")).toEqual({
+      ok: false,
+      failure: { kind: "no_product" },
+    });
+  });
+
+  it("WP6: a quoted place that looks like a part -- 'assign Sam to \"Housing A\" from 8 to 4' -- still product '', place ['Housing A'] (the quote makes it one atomic segment, same as an unquoted single piece)", () => {
+    const expected = {
+      ok: true as const,
+      command: {
+        intent: "assign" as const,
+        operator: "Sam",
+        product: "",
+        place: ["Housing A"],
+        day: null,
+        start: { hour: 8, minute: 0 },
+        end: { hour: 16, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      },
+    };
+    expect(parseCommand('assign Sam to "Housing A" from 8 to 4')).toEqual(expected);
+    expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
   });
 });

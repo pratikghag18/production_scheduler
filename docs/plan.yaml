@@ -2719,6 +2719,58 @@ stages:
     place-less headcount). Recorded, not changed: "extend everyone" reads everyone as a person; "start Sam an
     hour later" is not a sentence (start is a booking verb), say "move Sam's start"; the count in a headcount
     sentence is always last; a headcount write reports a failure through the toast, as every single write does.
+- id: S59
+  track: core
+  num: 59
+  title: What the first spoken walk taught — the nearest names to pick, the floor's confirm words, a day one button away, the recogniser told the board's words
+  status: now
+  owner: agent
+  refs:
+  - 'session 174 conversation (the maintainer, 15 Sept, feedback on the nineteen sentences)'
+  - §19.104 (D133)
+  - docs/agent-briefs/s59-a-nearest-brief.md
+  - docs/agent-briefs/s59-b-bar-brief.md
+  - docs/agent-briefs/s59-c-whisper-hint-brief.md
+  - docs/agent-briefs/f-151-lone-start-workday-rule-brief.md
+  delivers:
+  - R-418
+  - R-419
+  - R-420
+  - R-421
+  what: >-
+    **Four small rules from one afternoon on the floor.** A word that matches nothing offers the nearest
+    names as buttons (R-418); "yeah" and friends confirm, "nah" and friends cancel, punctuation ignored
+    (F-150); the day-off-board question gains Show that day, which moves the window and reruns (R-419);
+    the local recogniser is handed the board's own words as its hint (R-420); and the decoder refuses a
+    name made of punctuation so the rules parser gets its turn (F-149).
+  state: >-
+    **Briefed 15 Sept (session 174).** Three lanes: A the resolver's nearest names; B the decoder, the bar's
+    words and the Show-that-day button; C the recogniser's hint (after B, sharing BoardPage). One thing
+    left unpinned on purpose: "until end of shift" landing on another end could not be reproduced from
+    the board's rows; the maintainer typed it and read the hours back: 02:00–06:00, the rules parser's lone
+    start read as 02:00 --- F-151, a fourth lane.
+- id: S60
+  track: core
+  num: 60
+  title: Real names on Plant A's demo board, and a sentence with no part asks which
+  status: now
+  owner: agent
+  refs:
+  - 'session 174 conversation (the maintainer, 15 Sept)'
+  - §19.104 (D133)
+  - docs/agent-briefs/s60-a-real-names-brief.md
+  - docs/agent-briefs/s60-b-which-part-brief.md
+  delivers:
+  - R-422
+  - R-423
+  what: >-
+    **Two more things the first walk asked for.** The demo people on Plant A get names a recogniser can
+    hear (one idempotent script, the two e2e specs that name them); and a sentence that names a place and
+    hours but no part is asked Which part? with the cell's own menu as buttons, the same rendering the
+    nearest-name question uses.
+  state: >-
+    **Briefed 15 Sept (session 174).** The rename lane runs now (its files are its own); the which-part
+    lane runs after S59's reviewer frees the grammar, resolver, decoder and bar.
 - id: M1
   track: matrix
   num: 1
@@ -11597,7 +11649,158 @@ requirements:
     notebook splice in prepare wanted Windows line endings (d5dfd94). A third at the trainer: the Colab
     trainer refuses group_by_length (4d47b1b), so that lever is gone. COVERED 15 Sept (session 173): the
     short-prompt run scored clean 499/500 (99.8%), perturbed 487/500 (97.4%); by intent every one at 96% or above on perturbed sentences, unassign, move and split at 100%; intent right on all 1214 forms; every field at 98.8% or above; extra keys 0; every sentence checked --- above the fourth run's 99.6 / 97.2 on both counts.
+- id: R-418
+  title: A word that matches no part, person or place offers the closest names as buttons to pick
+  source:
+  - 'session 174 conversation (the maintainer, 15 Sept, feedback on nineteen sentences by voice and keyboard)'
+  - §19.104 (D133)
+  stated_by: maintainer
+  claim: >-
+    When the resolver finds no part, person or place for the words said, it answers the same kind of question an ambiguous word gets: the nearest names, up to four, ranked by closeness (a trailing s stripped first, then shared letters and a common prefix), each a button that puts the real name into the sentence and runs it again; a word close to nothing keeps today's plain answer. The person picks; the board never substitutes on its own. "Common Fasteners" offers Common Fastener; "Housing Pay" offers Housing A (and Housing B, C where the plant makes them); "Operator A" offers the operators whose names begin so.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S59's tests when the lanes land; the maintainer says the sentences again"
+  status: uncovered
+  note: >-
+    STATED 15 Sept (session 174): "when it can't understand it should give me a list of products and I should be able to select or tell which one of them I want"; design §19.104 (D133 item 1).
+- id: R-419
+  title: A day off the board is one button away — Show that day moves the window and runs the sentence again
+  source:
+  - 'session 174 conversation (the maintainer, 15 Sept, feedback on nineteen sentences by voice and keyboard)'
+  - §19.104 (D133)
+  stated_by: maintainer
+  claim: >-
+    The day-off-board question (yesterday, Friday, a date, a week) gains one button, Show that day, that moves the board's window so the day is on it (the window's own start-date and day-count controls, never a second axis) and runs the same sentence again; a week word widens to seven days when the window is narrower. A cancel word or new typing drops the question as any other.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S59's tests when the lanes land; the maintainer says the sentences again"
+  status: uncovered
+  note: >-
+    STATED 15 Sept (session 174): "I had to go back a day on the board for it to work" and "it said friday is not on the board, move the board to that day first"; design §19.104 (D133 item 3).
+- id: R-420
+  title: The local recogniser is told the board's own words
+  source:
+  - 'session 174 conversation (the maintainer, 15 Sept, feedback on nineteen sentences by voice and keyboard)'
+  - §19.104 (D133)
+  stated_by: maintainer
+  claim: >-
+    Each clip sent to whisper.cpp carries an initial prompt built from the names on the board window (cells, lines, areas, parts, people, in board order) and the bar's own vocabulary (cell, line, shift, job, people, the digits and the words for them), rebuilt when the window changes and capped at roughly 200 words; the browser's recogniser is unchanged. A quiet or unclear clip still fails as it does today; the hint changes what a near-miss is heard as, never whether something was heard.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S59's tests when the lanes land; the maintainer says the sentences again"
+  status: uncovered
+  note: >-
+    STATED 15 Sept (session 174): the recogniser heard "cell" as something else, "A" as "pay" and "4" as "10"; design §19.104 (D133 item 4).
+- id: R-421
+  title: The bar writes a trace of what it heard, what the model answered, what it read and what it did to a local file
+  source:
+  - 'session 174 conversation (the maintainer, 15 Sept: "create a temporary log of what whisper is hearing, what the model responds and check the corresponding activity through the activity tab")'
+  - §19.104 (D133)
+  stated_by: maintainer
+  claim: >-
+    For its last twenty sentences the bar keeps, in memory only, one entry each with the time, the
+    transcript and which recogniser produced it (or "typed"), the model's raw answer or the reason it
+    was not used (no service, a timeout, a garbled answer, the rules fallback), the form as read, the
+    question shown or the readout, the answer given (a button, a confirm word) and what ran (the
+    readout of each command that was written). Each finished entry is posted to the dev server, which
+    appends it as one JSON line to data/voice/trace/bar.jsonl (gitignored) so a walk through the board can
+    be read from disk beside the Activity tab's rows; the endpoint exists only on the dev server, the post
+    is fire-and-forget, and a build without it changes nothing in the bar. The maintainer's word, 15 Sept:
+    "put it in a local temporary file instead of me pasting it".
+  verified_by:
+  - kind: manual
+    steps: "pinned by S59's tests when the lane lands; the maintainer's next walk is pasted from it"
+  status: uncovered
+  note: >-
+    STATED 15 Sept (session 174). Built after lane B so the two do not edit the bar at once.
+- id: R-422
+  title: A sentence with no part asks which, from what the cell makes
+  source:
+  - 'session 174 conversation (the maintainer, 15 Sept, after the first spoken walk)'
+  - §19.104 (D133)
+  stated_by: maintainer
+  claim: >-
+    An assign or a booking that names a place and hours (or a shift) but no part is read with an empty part rather than refused; the resolver, once the cell is known, asks Which part? with the parts offered at that cell as buttons (board order, at most eight, and a note to say the part when there are more); a part word that matches nothing and has no near name gets the same menu after the nearest-name pass (R-418) found nothing. A pick substitutes the part and runs the sentence again. The model was not taught a part-less sentence and will guess one; the readout shows the guess before the yes, and the shape joins the next run's data.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S60's tests and specs when the lanes land; the maintainer's next walk"
+  status: uncovered
+  note: >-
+    STATED 15 Sept (session 174): "It can also ask what product if I don't give it one to choose from the list of available products for the hierarchy level." Brief docs/agent-briefs/s60-b-which-part-brief.md.
+- id: R-423
+  title: Plant A's demo people carry real names, kept in one script the database is updated by
+  source:
+  - 'session 174 conversation (the maintainer, 15 Sept, after the first spoken walk)'
+  - §19.104 (D133)
+  stated_by: maintainer
+  claim: >-
+    The six demo operators homed on Plant A's cells (employee refs EMP-1001 to EMP-1006) are Sam Patel, Maria Lopez, John Kim, Priya Shah, Tom Baker and Lena Novak, renamed by scripts/demo/rename-plant-a-operators.sql (idempotent, applied by psql through the database container, no seed file creates them); the two e2e specs that name them name the new ones; the role walk is unchanged. The training pools keep their own names.
+  verified_by:
+  - kind: manual
+    steps: "pinned by S60's tests and specs when the lanes land; the maintainer's next walk"
+  status: uncovered
+  note: >-
+    STATED 15 Sept (session 174): "the operator names being A1, A2, etc is a bit more challenging to understand vs actual people names, should we try modifying plant A with actual people names?" Brief docs/agent-briefs/s60-a-real-names-brief.md.
 findings:
+- id: F-151
+  title: From 2 until end of shift read as 02:00, so the block ran to the night shift's end
+  tag: One lone-hour rule, applied to some clauses and not others
+  status: open
+  found_by: maintainer
+  stage: S55
+  refs:
+  - R-404
+  - R-405
+  story: >-
+    Reported 15 Sept (session 174) with the readout of a typed sentence: "Put Operator A3 on Common Fastener
+    on Cell 1 from 2 until end of shift" read by the rules as 02:00–06:00. The start was read as 02:00, so
+    "end of shift" found the band containing 02:00 --- Shift 3, 22:00 to 06:00 --- and ended there. The
+    bar's other one-edge forms already read a lone hour from 1 to 6 as the afternoon ("before 2" is 14:00,
+    "end Sam early at 3" is 15:00); the start of a boundary clause and of a length clause ("from 2 for 4
+    hours") were left out of that rule. The resolver did what it was told.
+  fix: >-
+    Open. The grammar applies the same workday rule to a start that stands alone before a boundary or a
+    length: "from 2 until end of shift" is 14:00, "from 2 for 4 hours" is 14:00–18:00, "from 8 for 4 hours"
+    stays 08:00, an explicit am/pm or a 24-hour clock is untouched; pinned as LS1 to LS6 (brief
+    docs/agent-briefs/f-151-lone-start-workday-rule-brief.md).
+- id: F-150
+  title: Saying yeah is not a yes, and a spoken yes to a lot needed the button
+  tag: The confirm words were the developer's, not the floor's
+  status: open
+  found_by: maintainer
+  stage: S51
+  refs:
+  - R-400
+  story: >-
+    Reported 15 Sept (session 174): "saying yeah was not interpreted as yes and nothing happened", so the
+    cover lot never ran and the tests that built on it fell over; and on the swap lot "I had to click the
+    button". The bar's universal confirm words were yes, yes please, confirm, do it and ok; the cancel
+    words no, cancel, leave it, stop.
+  fix: >-
+    Open. Yeah, yep, yup, sure, okay, go ahead, go on, correct and right join the confirm set; nope, nah,
+    never mind and forget it the cancel set; a transcript is trimmed, lower-cased and stripped of
+    punctuation before the comparison so a recogniser's "Yes." is a yes (brief
+    docs/agent-briefs/s59-b-bar-brief.md).
+- id: F-149
+  title: The model wrote a place named "]," and the decoder took it, so the bar said no cell called "],"
+  tag: A name made of punctuation is not a name
+  status: open
+  found_by: maintainer
+  stage: S44
+  refs:
+  - R-393
+  - R-395
+  story: >-
+    Reported 15 Sept (session 174): "end Operator A3 early at 8 pm" heard as "and Operator A3 early at 8 pm"
+    got the answer no cell called "]," on this board; the typed "make it 4 people" got no cell called ","
+    instead of the grammar's ask for the job's name. Probed: the model answers the first with an assign
+    whose place is ["],", "product"] and a part called Table 1, and the second with a headcount whose place
+    is ["],"]; the schema fence only says a string, and the decoder accepted it, so the rules parser --
+    which reads both sentences right or refuses them cleanly -- never got its turn.
+  fix: >-
+    Open. The decoder refuses any name (operator, product, place, toPlace, with, other, shift) that holds
+    no letter or digit, as garbled, so the bar falls back to the rules parser as it does for any other
+    garbled answer; pinned on both probes (brief docs/agent-briefs/s59-b-bar-brief.md).
 - id: F-148
   title: The fifth run predicted against the old held-out file still on Drive, and only the scorer here noticed
   tag: The data files were trusted by name
@@ -23036,6 +23239,16 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
+- kind: task
+  stage: S59
+  text: "What the first spoken walk taught --- nearest names to pick, the floor's confirm words, Show that day, the recogniser's hint (S59, R-418 to R-420, F-149, F-150, in progress)"
+  why: >-
+    The maintainer's feedback of 15 Sept (session 174) on nineteen sentences, each item answered by a rule.
+- kind: task
+  stage: S60
+  text: "Real names on Plant A's demo board; a sentence with no part asks which (S60, R-422, R-423, in progress)"
+  why: >-
+    The maintainer's two asks of 15 Sept (session 174) after the first spoken walk.
 - kind: task
   text: "A smoke run for the notebook --- a Settings switch that trains on 50 rows for one epoch and predicts 20, so the whole path from install to GGUF is proved in minutes before a real run"
   why: >-

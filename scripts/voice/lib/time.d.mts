@@ -20,6 +20,9 @@ export function resolveLoneTime(
   spec: TimeSpec,
   options?: { allowDayEnd?: boolean },
 ): { text: string; hour: number; minute: number };
+/** F-151: the START counterpart -- hours 1-5 read pm, 6-12 stay as said. */
+export function applyLoneStartRule(resolved: ResolvedTime): ResolvedTime;
+export function resolveLoneStart(spec: TimeSpec): { text: string; hour: number; minute: number };
 export function buildTimePair(
   startSpec: TimeSpec,
   endSpec: TimeSpec,

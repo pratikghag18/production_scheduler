@@ -9675,3 +9675,40 @@ away once wanted.
 
 **One run.** S58 lands before the fifth run's data is regenerated, so S56's data lane runs once
 more over both S55 and S58 and the maintainer trains once — the reason the maintainer chose it.
+
+## §19.104 — D133: what the first spoken walk through the catalogue taught (S59)
+
+> The maintainer, 15 Sept, session 174, after nineteen sentences by voice and by keyboard: a
+> near-miss on a part's name should offer the closest names to pick; "yeah" should be a yes; a day
+> off the board should be one click away; the recogniser mishears "cell", "A" and "4".
+
+### D133 — four small rules, each from one thing that went wrong on the floor
+
+**1. A name that matches nothing is a question with the nearest names as buttons.** The model
+copies the words it hears ("Housing Pay", "Common Fasteners"), as it should; the resolver's
+answer to a word that matches no part, person or place was a dead end. It becomes the same
+kind of question an ambiguous word already gets: up to four candidates, ranked by closeness
+(shared letters and a common prefix, the plural stripped first), each a button that substitutes
+the real name and re-runs. A word that is close to nothing stays a dead end, in the same words as
+today. The person picks; the board never guesses.
+
+**2. A confirm word is what people say.** "Yeah", "yep", "yup", "sure", "okay", "go ahead", "go
+on", "correct", "right" join yes; "nope", "nah", "never mind", "forget it" join no. A transcript is
+compared after trimming, lower-casing and dropping punctuation, so a recogniser's "Yes." is a
+yes. Nothing else about confirmation changes: the words that name one kind ("remove it") are
+still matched against the question's own kind.
+
+**3. A day off the board is one button away.** "Same as yesterday" on a window that starts today,
+"till Friday" on a three-day window: the day-off-board question gains a button, "Show that day",
+that moves the window to include it and runs the same sentence again. The window move is the
+board's own (`shiftWindowByDays`/`setWindowStartDate`), never a second axis.
+
+**4. The recogniser is told the board's own words.** whisper.cpp takes an initial prompt that
+biases what it hears. The bar hands it the names on the board (cells, lines, parts, people) and
+the bar's own vocabulary (cell, shift, job, the digits), built once per board window, capped in
+length. It does not fix a quiet microphone; it fixes "cell" heard as "sell" and "A" as "pay".
+
+**Not a rule yet.** "Until end of shift" landing on a different end than expected could not be
+reproduced from the board's rows (the block on the board came from a different transcript); the
+maintainer types the sentence and reads the hours back before it is called a defect. The model
+writing a name made of punctuation is a decoder gap, closed as F-149.

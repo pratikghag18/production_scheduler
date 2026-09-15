@@ -21,8 +21,22 @@ import formSchema from "../../../scripts/voice/serve/form.schema.json";
 export const SYSTEM_PROMPT: string = SYSTEM_PROMPT_RAW;
 
 export type Reading =
-  | { ok: true; command: Command; by: "model" }
-  | { ok: false; reason: "no-service" | "unavailable" | "timeout" | "garbled"; detail?: string };
+  | { ok: true; command: Command; by: "model"; raw?: string }
+  | {
+      ok: false;
+      reason: "no-service" | "unavailable" | "timeout" | "garbled";
+      detail?: string;
+      /**
+       * S59-e (R-421, brief docs/agent-briefs/s59-e-trace-brief.md §2): the
+       * raw model text, when the reader got far enough to have one -- a
+       * garbled answer (no JSON object, or one that failed to parse or to
+       * decode) still carries it; "no-service"/"unavailable"/"timeout", and
+       * the "no message content" garbled case, never do. Optional so every
+       * existing `Reading` literal in the test suite (none of which need
+       * this field) still type-checks unchanged.
+       */
+      raw?: string;
+    };
 
 export type Reader = (text: string, signal: AbortSignal) => Promise<Reading>;
 
@@ -186,22 +200,27 @@ export function makeReader(opts?: {
 
     const jsonText = extractFirstJsonObject(content);
     if (jsonText === null) {
-      return { ok: false, reason: "garbled", detail: "no JSON object in content" };
+      return { ok: false, reason: "garbled", detail: "no JSON object in content", raw: content };
     }
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(jsonText);
     } catch (err) {
-      return { ok: false, reason: "garbled", detail: String(err) };
+      return { ok: false, reason: "garbled", detail: String(err), raw: content };
     }
 
     const command = decodeCommand(parsed);
     if (command === null) {
-      return { ok: false, reason: "garbled", detail: "decodeCommand refused the form" };
+      return {
+        ok: false,
+        reason: "garbled",
+        detail: "decodeCommand refused the form",
+        raw: content,
+      };
     }
 
-    return { ok: true, command, by: "model" };
+    return { ok: true, command, by: "model", raw: content };
   };
 }
 

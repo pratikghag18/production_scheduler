@@ -90,6 +90,39 @@ export function resolveLoneTime(spec, { allowDayEnd = false } = {}) {
 }
 
 /**
+ * F-151 (docs/agent-briefs/f-151-b-six-is-morning-brief.md, session 174):
+ * mirrors parse.ts's own `applyLoneStartRule` -- the full suite showed
+ * `applyLoneEdgeRule`'s own 1-to-6 range is wrong for a lone START (every
+ * demo plant's Shift 1 starts at 06:00, so "from 6 for 8 hours"/"from 6
+ * until end of shift" must stay 06:00, never become 18:00). A lone START
+ * only: hours 1-5 with no explicit meridiem still read as the afternoon;
+ * hour 6 through 12 stay exactly as said. Distinct from `applyLoneEdgeRule`
+ * above, which still owns every lone END unchanged (the removal grammar's
+ * own "before 2"/"after 2", the adjust grammar's own end door) -- neither
+ * function calls the other, the same way the two sides of this file never
+ * share a rule by accident (header comment).
+ */
+export function applyLoneStartRule(resolved) {
+  if (!resolved.hasMeridiem && resolved.hour >= 1 && resolved.hour < 6) {
+    return { hour: resolved.hour + 12, minute: resolved.minute };
+  }
+  return { hour: resolved.hour, minute: resolved.minute };
+}
+
+/**
+ * F-151: the START counterpart to `resolveLoneTime` above -- used by every
+ * template that draws a lone start before a boundary or a length (A14, A16,
+ * A17, B9 and siblings), so the recorded form is computed by the same rule
+ * `applyLoneStartRule` states, never a retyped assumption about which hours
+ * are ambiguous.
+ */
+export function resolveLoneStart(spec) {
+  const resolved = resolveTimeSpec(spec);
+  const clock = applyLoneStartRule(resolved);
+  return { text: resolved.text, hour: clock.hour, minute: clock.minute };
+}
+
+/**
  * A `from <t1> <sep> <t2>`-shaped pair: the text (without the leading "from")
  * and the parsed `{ start, end }`, the end already carrying parse.ts's
  * afternoon rule ("from 10 to 2" -> 10:00-14:00). Returns null when even

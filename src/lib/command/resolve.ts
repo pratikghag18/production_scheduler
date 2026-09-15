@@ -291,7 +291,46 @@ export type Question =
       text: string;
       candidates: Candidate[];
     }
-  | { kind: "unknown"; field: "operator" | "product" | "place"; text: string }
+  /** D133 item 1: up to four names close enough to `text` to offer as
+   *  buttons -- absent (never an empty array) when nothing clears the floor,
+   *  so a caller with no suggestions is byte-identical to before this field
+   *  existed. Each candidate's `word` is the name itself; picking one
+   *  substitutes it into the field named here and re-runs, the same way an
+   *  `ambiguous` pick already does.
+   *
+   *  S60-b (R-422): for `field: "product"` ONLY, `suggestions` may instead be
+   *  the parts the resolved CELL actually offers (`ctx.offeredAt`, board
+   *  order, at most eight) -- when the sentence named no product at all
+   *  (`text` then carries the CELL's own name, the one thing this question
+   *  is about, never the empty string) or named one that matched nothing AND
+   *  had no near name either (R-418's own floor; `text` stays the word said).
+   *  `more: true` flags a cell offering more than eight -- the bar appends
+   *  "and more" rather than dropping the rest silently. See
+   *  `resolvePartStep`'s own comment for why a near name and the cell's menu
+   *  are never merged into one list.
+   *
+   *  Reviewer fix (S60-b review, R-422): a single-segment sentence
+   *  ("assign Sam to Housing A 8 to 4", no separator) reads its one segment
+   *  as the PLACE (`parse.ts`'s own R-422 branch), `product: ""` -- but
+   *  nothing stops that segment from actually NAMING a part instead ("Housing
+   *  A" a product, not a cell). `asPart: true` on a `field: "place"` question
+   *  flags exactly that: `resolveCellStep` found no cell for the word AND the
+   *  word matches a part (`matchName`'s own tiers, or a near name past
+   *  R-418's floor) -- `suggestions` then carries every track cell
+   *  (`ctx.cells`, board order) instead of a place near-miss, capped at eight;
+   *  past eight, `suggestions` is omitted entirely (unlike the product menu's
+   *  own `more` flag, there is no meaningful partial list of every cell on
+   *  the board to lead with) and the bar says "say the cell" instead. A
+   *  person who named the part gets told the part was heard, never sent
+   *  place suggestions for a word they never meant as a place. */
+  | {
+      kind: "unknown";
+      field: "operator" | "product" | "place";
+      text: string;
+      suggestions?: Candidate[];
+      more?: true;
+      asPart?: true;
+    }
   | { kind: "not_offered"; product: string; cell: string }
   | { kind: "place_mismatch"; cell: string; qualifier: string; elsewhere: Candidate[] }
   | { kind: "day_off_board"; text: string }
@@ -515,27 +554,219 @@ const LOT_CEILING = 100;
 type Node = { id: string; name: string; path: string };
 type ProductLike = ResolveContext["products"][number];
 
+/** S60-b (R-422 brief §5; the S59 reviewer, 15 Sept): a recogniser writes
+ *  "Cell one"/"shift two" for "Cell 1"/"shift 2" -- every spelled-out number
+ *  word one through twenty, STANDALONE, becomes its digit. `\b`-anchored on
+ *  both sides so a spelled digit that is merely part of a longer word ("one"
+ *  inside "Stone Cell") is never touched -- NW3. */
+const NUMBER_WORDS: Readonly<Record<string, number>> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+};
+const NUMBER_WORD_RE = new RegExp(`\\b(${Object.keys(NUMBER_WORDS).join("|")})\\b`, "g");
+
+/** S60-b: the spelled-digit substitution itself -- a standalone word only
+ *  (`NUMBER_WORD_RE`'s own `\b` anchors), never a digit run inside a longer
+ *  word. Note the space a multi-word name keeps around the substituted
+ *  digit is NOT collapsed away by this step or by `normalizeForMatch`'s own
+ *  whitespace pass below (that pass only collapses RUNS of whitespace down
+ *  to one space, it never deletes a single space) -- "Operator A three"
+ *  normalises to "operator a 3", one space short of "Operator A3"'s own
+ *  "operator a3", so the two are never an EXACT tier hit; `closenessScore`'s
+ *  digit-equality check still lets the near-name floor (D133 item 2) offer
+ *  "Operator A3" as a suggestion instead (NW2) -- never a silent guess. */
+function spellDigitsToNumerals(s: string): string {
+  return s.replace(NUMBER_WORD_RE, (word) => String(NUMBER_WORDS[word]));
+}
+
 function normalizeForMatch(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
+  return spellDigitsToNumerals(s.toLowerCase().replace(/\s+/g, " ").trim())
     .replace(/[^a-z0-9 /-]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/** The one matching function (brief §5): exact, then starts-with, then
- *  contains; first tier with ANY hit wins; never the "best" of several. */
-function matchName<T>(word: string, items: readonly T[], keyOf: (t: T) => string): T[] {
-  const w = normalizeForMatch(word);
-  if (w === "") return [];
-  const withKeys = items.map((it) => ({ it, key: normalizeForMatch(keyOf(it)) }));
+/** The three tiers themselves -- exact, then starts-with, then contains;
+ *  first tier with ANY hit wins; never the "best" of several. Shared by
+ *  `matchName`'s own word and (D133 item 1) its plural variants. */
+function matchTiers<T>(w: string, withKeys: ReadonlyArray<{ it: T; key: string }>): T[] {
   const exact = withKeys.filter((x) => x.key === w).map((x) => x.it);
   if (exact.length > 0) return exact;
   const starts = withKeys.filter((x) => x.key.startsWith(w)).map((x) => x.it);
   if (starts.length > 0) return starts;
   return withKeys.filter((x) => x.key.includes(w)).map((x) => x.it);
+}
+
+/** The one matching function (brief §5): exact, then starts-with, then
+ *  contains; first tier with ANY hit wins; never the "best" of several.
+ *
+ * D133 item 1: when all three come up empty, tries again with ONE trailing
+ * "s"/"es" removed from the word (a plural word, a singular item -- "Common
+ * Fasteners" finds "Common Fastener"), then with an "s" added (kept for the
+ * reverse shape, since a starts-with match already catches most singular-
+ * word/plural-item pairs on its own) -- each through the same three tiers,
+ * first non-empty wins. A word already found by the plain three tiers (e.g.
+ * "Bracket" against "Bracket A"/"Bracket B", a starts-with) never reaches
+ * this -- the plural passes are a fallback, not a fourth ordinary tier. */
+function matchName<T>(word: string, items: readonly T[], keyOf: (t: T) => string): T[] {
+  const w = normalizeForMatch(word);
+  if (w === "") return [];
+  const withKeys = items.map((it) => ({ it, key: normalizeForMatch(keyOf(it)) }));
+  const base = matchTiers(w, withKeys);
+  if (base.length > 0) return base;
+  let stripped: string | null = null;
+  if (w.endsWith("es")) stripped = w.slice(0, -2);
+  else if (w.endsWith("s")) stripped = w.slice(0, -1);
+  if (stripped !== null && stripped.length > 0) {
+    const strippedHits = matchTiers(stripped, withKeys);
+    if (strippedHits.length > 0) return strippedHits;
+  }
+  return matchTiers(`${w}s`, withKeys);
+}
+
+/** D133 item 2: below this Dice-plus-prefix score (`closenessScore` below),
+ *  `nearestNames` offers nothing -- "Housing Pay" against "Housing A" scores
+ *  ~0.93 (14 of their 18 combined bigrams shared, plus the shared-prefix
+ *  bonus for "housing ") and clears it easily; "xyzzy" scores 0 against
+ *  every fixture name (no letter pair in "xyzzy" appears in any of them) and
+ *  does not. */
+const NEAREST_FLOOR = 0.35;
+
+/** D133 item 2: a shared normalised prefix this long or longer adds this
+ *  much to the Dice score -- named for the rule it rewards ("Operator" and
+ *  "Opertor" already clear the floor on bigrams alone; the bonus is what
+ *  lets a short, heavily-prefixed word like a two-letter cell qualifier
+ *  clear it too). Ties among a fixture's own "Housing A"/"Housing B"/
+ *  "Housing C" -- which all share the whole "housing " prefix with a probe
+ *  word -- are unaffected: the bonus is the same for all three, so the
+ *  stable sort below still returns them in the fixture's own order. */
+const PREFIX_BONUS = 0.15;
+const PREFIX_MIN_LENGTH = 3;
+
+/** Every two-letter (Unicode code point) slice of `s`, in order -- the unit
+ *  `diceCoefficient` compares. */
+function bigramsOf(s: string): string[] {
+  const chars = Array.from(s);
+  const out: string[] = [];
+  for (let i = 0; i < chars.length - 1; i++) out.push(chars[i] + chars[i + 1]);
+  return out;
+}
+
+/** Dice coefficient over letter bigrams: twice the bigrams the two strings
+ *  share (as a multiset -- each bigram of `a` claimed by at most one bigram
+ *  of `b`), over their combined bigram count. 1 for identical strings, 0 for
+ *  two that share no bigram at all (including when either is under two
+ *  characters, so has none of its own). */
+function diceCoefficient(a: string, b: string): number {
+  if (a === b) return 1;
+  const bigramsA = bigramsOf(a);
+  const bigramsB = bigramsOf(b);
+  if (bigramsA.length === 0 || bigramsB.length === 0) return 0;
+  const remaining = new Map<string, number>();
+  for (const g of bigramsA) remaining.set(g, (remaining.get(g) ?? 0) + 1);
+  let shared = 0;
+  for (const g of bigramsB) {
+    const left = remaining.get(g) ?? 0;
+    if (left > 0) {
+      shared++;
+      remaining.set(g, left - 1);
+    }
+  }
+  return (2 * shared) / (bigramsA.length + bigramsB.length);
+}
+
+function sharedPrefixLength(a: string, b: string): number {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return i;
+}
+
+/** Every digit in `s`, in order, other characters dropped -- "cell 9" -> "9". */
+function digitsOf(s: string): string {
+  return s.replace(/[^0-9]/g, "");
+}
+
+/** D133 item 2: the closeness score `nearestNames` ranks by -- explainable
+ *  in one sentence: a Dice coefficient over letter bigrams of the two
+ *  (already-normalised) strings, plus `PREFIX_BONUS` when they share a
+ *  normalised prefix of `PREFIX_MIN_LENGTH` letters or more -- EXCEPT that
+ *  two strings that both carry digits score 0 outright when those digits
+ *  differ ("Cell 9" against "Cell 1"/"Cell 2", R22/R23's own fixture: a cell
+ *  NUMBER is an identifier, not a spelling, so sharing every letter around
+ *  it is never a reason to guess at a DIFFERENT one -- only a misheard WORD
+ *  ("Sell 1" for "Cell 1", "Housing Pay" for "Housing A") is offered; a word
+ *  with no digit at all (either side) skips this check, so it never keeps a
+ *  plain word ("Housing Pay") from matching a plain word ("Housing A"). */
+function closenessScore(a: string, b: string): number {
+  const digitsA = digitsOf(a);
+  const digitsB = digitsOf(b);
+  if (digitsA !== "" && digitsB !== "" && digitsA !== digitsB) return 0;
+  let score = diceCoefficient(a, b);
+  if (sharedPrefixLength(a, b) >= PREFIX_MIN_LENGTH) score += PREFIX_BONUS;
+  return score;
+}
+
+/** D133 item 2: a pure `nearestNames(word, names): string[]` -- up to four
+ *  of `names` scoring at or above `NEAREST_FLOOR` against `word`
+ *  (`closenessScore`), highest first; ties keep `names`' own relative order
+ *  (a stable sort), so a fixture listing "Housing A", "Housing B",
+ *  "Housing C" -- which tie exactly against "Housing Pay", only their last
+ *  letter unshared with "pay" either way -- comes back in that same order.
+ *  A name repeated in `names` (two cells sharing one name, on different
+ *  lines) is offered once. No `ResolveContext`, no ids: the three lookup
+ *  steps below turn what this returns into each field's own `Candidate`s. */
+function nearestNames(word: string, names: readonly string[]): string[] {
+  const w = normalizeForMatch(word);
+  if (w === "") return [];
+  const scored = names
+    .map((name) => ({ name, score: closenessScore(w, normalizeForMatch(name)) }))
+    .filter((x) => x.score >= NEAREST_FLOOR);
+  scored.sort((x, y) => y.score - x.score);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const { name } of scored) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+/** D133 item 3: `nearestNames`' output, turned back into `pool`'s own items
+ *  (the first item in `pool` whose `keyOf` equals each name -- `nearestNames`
+ *  already deduplicated the names themselves) and then into each field's own
+ *  `Candidate` shape via `toCandidate`. */
+function candidatesForNames<T>(
+  names: readonly string[],
+  pool: readonly T[],
+  keyOf: (t: T) => string,
+  toCandidate: (t: T) => Candidate,
+): Candidate[] {
+  const out: Candidate[] = [];
+  for (const name of names) {
+    const match = pool.find((t) => keyOf(t) === name);
+    if (match !== undefined) out.push(toCandidate(match));
+  }
+  return out;
 }
 
 /** Root-first ancestor path prefixes, EXCLUDING the node's own full path
@@ -587,6 +818,152 @@ function filterByQualifier(cands: Node[], qualifier: string, byPath: Map<string,
   if (exact.length > 0) return exact;
   if (starts.length > 0) return starts;
   return contains;
+}
+
+/** D133 item 3: suggestions for a place word matched against a specific pool
+ *  of nodes -- the SAME pool the caller itself searched on this word (a
+ *  suggestion drawn from anywhere else could never re-resolve through that
+ *  caller's own step). Each candidate's `label` is the full ancestor path
+ *  (`placeLabel`, `ambiguous`'s own place candidates' shape); `word` is the
+ *  bare name, substituted into the field named on a pick. */
+function nodeSuggestions(
+  word: string,
+  pool: readonly Node[],
+  byPath: Map<string, Node>,
+): Candidate[] {
+  const names = nearestNames(
+    word,
+    pool.map((n) => n.name),
+  );
+  return candidatesForNames(
+    names,
+    pool,
+    (n) => n.name,
+    (n) => ({
+      id: n.id,
+      label: placeLabel(n, byPath),
+      word: n.name,
+    }),
+  );
+}
+
+/** D133 item 3: suggestions for a place word `resolveCellStep`'s first pass
+ *  matched no cell at all -- track cells' own names (`ctx.cells`, the SAME
+ *  pool `resolveCellStep` itself searches on this word -- a suggestion drawn
+ *  from anywhere else could never re-resolve through this step, R23's own
+ *  "`ctx.cells` empty" fixture pins that: with no cells at all, there is
+ *  nothing to suggest, even though other nodes exist). */
+function placeSuggestions(
+  word: string,
+  ctx: ResolveContext,
+  byPath: Map<string, Node>,
+): Candidate[] {
+  return nodeSuggestions(word, ctx.cells as readonly Node[], byPath);
+}
+
+/** D133 item 3: suggestions for a product word `resolvePartStep` matched
+ *  nowhere (name, SKU, or the "sku/name" and slash-split fallbacks all
+ *  empty) -- product names only, `ambiguous`'s own product candidates'
+ *  shape (`label`/`word` both the name). Scope is deliberately every active
+ *  product, not narrowed to `cell`'s own `offeredAt` -- the person is being
+ *  shown what name they might have meant, the same not-yet-scoped pool
+ *  `resolvePartStep`'s own three matching tiers already search before its
+ *  `offeredAt` check. */
+function productSuggestions(word: string, ctx: ResolveContext): Candidate[] {
+  const names = nearestNames(
+    word,
+    ctx.products.map((p) => p.name),
+  );
+  return candidatesForNames(
+    names,
+    ctx.products,
+    (p) => p.name,
+    (p) => ({
+      id: p.id,
+      label: p.name,
+      word: p.name,
+    }),
+  );
+}
+
+/** S60-b (R-422): the resolver's own floor for offering a WHOLE MENU rather
+ *  than a near-miss guess -- the count `offeredSuggestions` shows before
+ *  flagging `more`. */
+const MAX_PRODUCT_MENU_SUGGESTIONS = 8;
+
+/** S60-b (R-422): the parts `cell` actually offers (`ctx.offeredAt`, the
+ *  SAME scope check `resolvePartStep`'s own `offered` check below already
+ *  runs, board order -- the same order the create pop-up's own product list
+ *  is built in), each turned into a `Candidate` the same shape
+ *  `productSuggestions` builds (`label`/`word` both the name). Capped at
+ *  `MAX_PRODUCT_MENU_SUGGESTIONS`; `more` is true only when the cell offers
+ *  more than that many. `ctx.offeredAt` returns bare `{ id }`s (no name), so
+ *  each is looked up in `ctx.products`; a dangling id (a deleted product
+ *  still on the scope list, D110) is skipped rather than crashing. */
+function offeredSuggestions(
+  cell: Node,
+  ctx: ResolveContext,
+): { suggestions: Candidate[]; more: boolean } {
+  const offered: ProductLike[] = [];
+  for (const o of ctx.offeredAt(cell.id)) {
+    const p = ctx.products.find((x) => x.id === o.id);
+    if (p !== undefined) offered.push(p);
+  }
+  const more = offered.length > MAX_PRODUCT_MENU_SUGGESTIONS;
+  const shown = more ? offered.slice(0, MAX_PRODUCT_MENU_SUGGESTIONS) : offered;
+  return { suggestions: shown.map((p) => ({ id: p.id, label: p.name, word: p.name })), more };
+}
+
+/** Reviewer fix (S60-b review, R-422): every track cell on the board
+ *  (`ctx.cells`, board order), offered when a single-segment word turns out
+ *  to name a part rather than a place -- see the `Question` type's own
+ *  `asPart` doc above. Eight or fewer cells: all of them, as buttons (the
+ *  same `placeLabel` shape `placeSuggestions`/`nodeSuggestions` already
+ *  build). More than eight: `sayOnly: true` and no candidates at all --
+ *  unlike `offeredSuggestions`'s own eight-plus-`more` menu, a cell list this
+ *  long has no natural lead-with-the-first-eight order worth showing, so the
+ *  bar says "say the cell" instead of a partial, arbitrary-feeling list. */
+function trackCellSuggestions(
+  ctx: ResolveContext,
+  byPath: Map<string, Node>,
+): { suggestions: Candidate[]; sayOnly: boolean } {
+  if (ctx.cells.length > MAX_PRODUCT_MENU_SUGGESTIONS) return { suggestions: [], sayOnly: true };
+  return {
+    suggestions: (ctx.cells as readonly Node[]).map((c) => ({
+      id: c.id,
+      label: placeLabel(c, byPath),
+      word: c.name,
+    })),
+    sayOnly: false,
+  };
+}
+
+/** D133 item 3: suggestions for a person word `resolvePersonStep` matched
+ *  nowhere -- display names first (the same pool its own first pass
+ *  searches); only when none of those is close enough, active employee refs
+ *  (its own second pass' pool). Either way each candidate is built from its
+ *  OWN operator, `label`/`word` always the display name -- `ambiguous`'s own
+ *  operator candidates never read from `employeeRef` either, only from
+ *  which operators matched. */
+function operatorSuggestions(word: string, activeOperators: readonly OperatorLike[]): Candidate[] {
+  const toCandidate = (o: OperatorLike): Candidate => ({
+    id: o.id,
+    label: o.displayName,
+    word: o.displayName,
+  });
+  const nameHits = nearestNames(
+    word,
+    activeOperators.map((o) => o.displayName),
+  );
+  if (nameHits.length > 0) {
+    return candidatesForNames(nameHits, activeOperators, (o) => o.displayName, toCandidate);
+  }
+  const withRef = activeOperators.filter((o) => o.employeeRef !== null);
+  const refHits = nearestNames(
+    word,
+    withRef.map((o) => o.employeeRef as string),
+  );
+  return candidatesForNames(refHits, withRef, (o) => o.employeeRef as string, toCandidate);
 }
 
 function pad2(n: number): string {
@@ -761,11 +1138,57 @@ function resolveCellStep(
   place: readonly string[],
   ctx: ResolveContext,
   byPath: Map<string, Node>,
+  // Reviewer fix (S60-b review, R-422): the command's own `product` word,
+  // passed ONLY by the three callers that have one (assign/book/headcount) --
+  // used solely to tell whether this call is the R-422 single-segment
+  // ambiguity (`product === ""` and `place.length === 1`; every other caller,
+  // and every ordinary multi-segment sentence, leaves this undefined and gets
+  // byte-identical behaviour to before this parameter existed).
+  emptyProductWord?: string,
 ): { ok: true; cell: Node } | { ok: false; question: Question } {
   const firstPlaceWord = place[0] ?? "";
   let cellCandidates = matchName(firstPlaceWord, ctx.cells, (c) => c.name) as Node[];
   if (cellCandidates.length === 0) {
-    return { ok: false, question: { kind: "unknown", field: "place", text: firstPlaceWord } };
+    // Reviewer fix (S60-b review, R-422): "assign Sam to Housing A 8 to 4"
+    // (a PART, no place) now parses with place ["Housing A"], product "" --
+    // parse.ts's own single-segment branch cannot tell "Housing A" the part
+    // from "Housing A" the cell name, so it reads the one segment as the
+    // place. When no cell matches AND this is exactly that ambiguous shape,
+    // check whether the word instead names a part (the same three tiers
+    // `matchName` uses everywhere, or a near name past R-418's own floor)
+    // before falling back to an ordinary "no place" question -- a person who
+    // named the part gets told the part was heard and asked which cell,
+    // never sent place suggestions for a word they never meant as a place.
+    if (emptyProductWord === "" && place.length === 1) {
+      const exactPartHits = matchName(firstPlaceWord, ctx.products, (p) => p.name);
+      const isPart =
+        exactPartHits.length > 0 ||
+        nearestNames(
+          firstPlaceWord,
+          ctx.products.map((p) => p.name),
+        ).length > 0;
+      if (isPart) {
+        const { suggestions, sayOnly } = trackCellSuggestions(ctx, byPath);
+        return {
+          ok: false,
+          question: {
+            kind: "unknown",
+            field: "place",
+            text: firstPlaceWord,
+            asPart: true,
+            ...(sayOnly ? {} : { suggestions }),
+          },
+        };
+      }
+    }
+    const suggestions = placeSuggestions(firstPlaceWord, ctx, byPath);
+    return {
+      ok: false,
+      question:
+        suggestions.length > 0
+          ? { kind: "unknown", field: "place", text: firstPlaceWord, suggestions }
+          : { kind: "unknown", field: "place", text: firstPlaceWord },
+    };
   }
   for (const qualifier of place.slice(1)) {
     const filtered = filterByQualifier(cellCandidates, qualifier, byPath);
@@ -830,7 +1253,48 @@ function resolvePartStep(
     }
   }
   if (productHits.length === 0) {
-    return { ok: false, question: { kind: "unknown", field: "product", text: productWord } };
+    // S60-b (R-422): a near-miss WORD (matchName found nothing, but R-418's
+    // own floor clears for a real name -- "Widgt" against "Widget A") is
+    // offered FIRST and alone -- never merged with the cell's own menu
+    // below. A near name is a better guess at what the person actually said
+    // than the whole menu is, so the two lists are tried in order, first
+    // non-empty wins, the same one-tier-at-a-time discipline `matchTiers`
+    // itself already uses for the ordinary exact/starts-with/contains tiers.
+    const nearSuggestions = productSuggestions(productWord, ctx);
+    if (nearSuggestions.length > 0) {
+      return {
+        ok: false,
+        question: {
+          kind: "unknown",
+          field: "product",
+          text: productWord,
+          suggestions: nearSuggestions,
+        },
+      };
+    }
+    // No near name either -- including the ordinary case, `productWord ===
+    // ""` (R-422's own "no part at all"), since `nearestNames`/`matchName`
+    // both read an empty word as no match by construction. Offer the
+    // resolved CELL's own menu instead (`offeredSuggestions`), capped at
+    // eight with a `more` flag; `text` carries the CELL's name for the
+    // empty-product shape specifically (there is no word to report, and the
+    // bar's own message for it names the cell, not a misheard word -- brief
+    // §4) but stays the word said for a genuine near-miss with no near name.
+    const { suggestions, more } = offeredSuggestions(cell, ctx);
+    if (suggestions.length === 0) {
+      // No offerings at all -- the existing plain `unknown`, byte for byte.
+      return { ok: false, question: { kind: "unknown", field: "product", text: productWord } };
+    }
+    return {
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "product",
+        text: productWord === "" ? cell.name : productWord,
+        suggestions,
+        ...(more ? { more: true as const } : {}),
+      },
+    };
   }
   if (productHits.length > 1) {
     return {
@@ -1348,7 +1812,14 @@ function resolvePersonStep(
     operatorHits = matchName(operatorWord, withRef, (o) => o.employeeRef as string);
   }
   if (operatorHits.length === 0) {
-    return { ok: false, question: { kind: "unknown", field: "operator", text: operatorWord } };
+    const suggestions = operatorSuggestions(operatorWord, activeOperators);
+    return {
+      ok: false,
+      question:
+        suggestions.length > 0
+          ? { kind: "unknown", field: "operator", text: operatorWord, suggestions }
+          : { kind: "unknown", field: "operator", text: operatorWord },
+    };
   }
   if (operatorHits.length > 1) {
     return {
@@ -1375,7 +1846,7 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
   const byPath = buildPathIndex(ctx.nodeById);
 
   // 1. Cell.
-  const cellResult = resolveCellStep(command.place, ctx, byPath);
+  const cellResult = resolveCellStep(command.place, ctx, byPath, command.product);
   if (!cellResult.ok) return { ok: false, question: cellResult.question };
   const cell = cellResult.cell;
 
@@ -1561,7 +2032,7 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
   const byPath = buildPathIndex(ctx.nodeById);
 
   // 1. Cell.
-  const cellResult = resolveCellStep(command.place, ctx, byPath);
+  const cellResult = resolveCellStep(command.place, ctx, byPath, command.product);
   if (!cellResult.ok) return { ok: false, question: cellResult.question };
   const cell = cellResult.cell;
 
@@ -2149,7 +2620,7 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
 function resolveHeadcountCommand(command: HeadcountCommand, ctx: ResolveContext): Resolution {
   const byPath = buildPathIndex(ctx.nodeById);
 
-  const cellResult = resolveCellStep(command.place, ctx, byPath);
+  const cellResult = resolveCellStep(command.place, ctx, byPath, command.product);
   if (!cellResult.ok) return { ok: false, question: cellResult.question };
   const cell = cellResult.cell;
 
@@ -2345,6 +2816,16 @@ function wrapMany(commands: SingleCommand[]): Expansion {
  * cell AT OR BELOW the match (a line or area names every cell under it, by
  * path prefix); an empty place is every cell the board shows. Also `copy`'s
  * own place, D130 item 4: the same rule, word for word.
+ *
+ * Reviewer fix (S59 review, D133 item 1): the first-word dead end below used
+ * to build its OWN bare `unknown` question, never offering a suggestion --
+ * unlike `resolveCellStep`'s identical dead end, so "copy Sell 1 to
+ * tomorrow" (and the EVERYONE reading of unassign/move) got a dead end with
+ * no nearest-name buttons while the same typo on an ordinary assign already
+ * did. Routed through `nodeSuggestions` scoped to `allNodes` -- the SAME
+ * pool searched two lines below (never `ctx.cells`: a line or area is a
+ * legitimate match for THIS function, so it must be a legitimate suggestion
+ * too, pinned NN10/NN10 twin).
  */
 function resolveEveryonePlaceCells(
   place: readonly string[],
@@ -2357,7 +2838,19 @@ function resolveEveryonePlaceCells(
   const firstWord = place[0];
   let candidates = matchName(firstWord, allNodes, (n) => n.name);
   if (candidates.length === 0) {
-    return { ok: false, question: { kind: "unknown", field: "place", text: firstWord } };
+    // D133 item 1 (R-418): the EVERYONE/`copy` place word gets the same
+    // nearest-names offer as an ordinary `resolveCellStep` dead end -- the
+    // suggestion pool is `allNodes`, the SAME pool searched two lines above
+    // (never `ctx.cells`: a suggestion of a line or area could never
+    // re-resolve through this function's own first pass otherwise).
+    const suggestions = nodeSuggestions(firstWord, allNodes, byPath);
+    return {
+      ok: false,
+      question:
+        suggestions.length > 0
+          ? { kind: "unknown", field: "place", text: firstWord, suggestions }
+          : { kind: "unknown", field: "place", text: firstWord },
+    };
   }
   for (const qualifier of place.slice(1)) {
     const filtered = filterByQualifier(candidates, qualifier, byPath);

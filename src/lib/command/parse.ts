@@ -193,10 +193,11 @@ export interface BookCommand {
  * S58 (docs/agent-briefs/s58-a-grammar-brief.md, R-412, design §19.103/D132
  * item 1): a re-time by ONE edge -- "extend Sam's block by an hour", "end
  * Sam early at 3", "move Sam's start to 9". `by` is signed minutes (+60 = an
- * hour later); `at` is a new clock time for that edge, read through the same
- * workday rule a lone edge always gets (`applyLoneEdgeRule`: an hour under 7
- * with no explicit meridiem reads as pm). Never both, never neither -- the
- * union has no third member on purpose.
+ * hour later); `at` is a new clock time for that edge, read through the
+ * workday rule a lone edge gets -- `applyLoneEdgeRule` (hours 1-6 read pm)
+ * when `edge === "end"`, `applyLoneStartRule` (F-151: hours 1-5 read pm, 6
+ * stays the morning) when `edge === "start"`. Never both, never neither --
+ * the union has no third member on purpose.
  */
 export type Adjust =
   { edge: "start" | "end"; by: number } | { edge: "start" | "end"; at: ClockTime };
@@ -731,20 +732,22 @@ const TIME_TOKEN_INLINE = "\\d{1,2}(?:[:.]\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?)?
 const ALL_DAY_RE = /\ball\s+day\b/i;
 
 /** R-404 (D130 item 3): the five phrasings the maintainer gave for "the shift
- *  ends here" -- an optional leading "from <time>" is the ONE edge this
- *  boundary may carry (it names only the other edge); `ALL_DAY_RE` above
- *  never gets this option. */
+ *  ends here" -- an optional leading "from <time>" or "at <time>" is the ONE
+ *  edge this boundary may carry (it names only the other edge); `ALL_DAY_RE`
+ *  above never gets this option. F-151: that captured start is a LONE
+ *  START -- read through `applyLoneStartRule` (not `applyLoneEdgeRule`)
+ *  where it is used, below, never here (this regex only finds the token). */
 const END_OF_SHIFT_CORE =
   "(?:until\\s+end\\s+of\\s+shift|till\\s+end\\s+of\\s+shift|to\\s+the\\s+end\\s+of\\s+the\\s+shift|" +
   "until\\s+the\\s+end\\s+of\\s+shift|for\\s+the\\s+rest\\s+of\\s+the\\s+shift)";
 const END_OF_DAY_CORE =
   "(?:for\\s+the\\s+rest\\s+of\\s+the\\s+day|until\\s+end\\s+of\\s+day|till\\s+the\\s+end\\s+of\\s+the\\s+day)";
 const END_OF_SHIFT_RE = new RegExp(
-  `\\b(?:from\\s+(${TIME_TOKEN_INLINE})\\s+)?${END_OF_SHIFT_CORE}\\b`,
+  `\\b(?:(?:from|at)\\s+(${TIME_TOKEN_INLINE})\\s+)?${END_OF_SHIFT_CORE}\\b`,
   "i",
 );
 const END_OF_DAY_RE = new RegExp(
-  `\\b(?:from\\s+(${TIME_TOKEN_INLINE})\\s+)?${END_OF_DAY_CORE}\\b`,
+  `\\b(?:(?:from|at)\\s+(${TIME_TOKEN_INLINE})\\s+)?${END_OF_DAY_CORE}\\b`,
   "i",
 );
 
@@ -768,10 +771,12 @@ interface ShiftOrBoundaryResult {
    *  as saying nothing at all (R-404's amendment; the caller drops it). */
   isAllDay: boolean;
   /** A start captured off an `end of shift`/`end of day` boundary's own
-   *  optional "from <time>" prefix (assign/book only -- R-404's amendment to
-   *  the invariant). A removal/move caller discards this (R-404: "read it
-   *  and drop it" applies the same way `ALL_DAY` does -- neither grammar has
-   *  anywhere to put a start next to a `span`). */
+   *  optional "from <time>"/"at <time>" prefix (assign/book only -- R-404's
+   *  amendment to the invariant), read through `applyLoneStartRule` (F-151:
+   *  it is a LONE START, no end clock beside it -- hours 1-5 read pm, 6
+   *  stays the morning). A removal/move caller discards this (R-404: "read
+   *  it and drop it" applies the same way `ALL_DAY` does -- neither grammar
+   *  has anywhere to put a start next to a `span`). */
   start: ClockTime | null;
   /** The day a time-of-day clause fixed ("this afternoon" -> today,
    *  "tomorrow morning" -> tomorrow) -- merged by the caller via `mergeDay`. */
@@ -809,7 +814,11 @@ function extractShiftOrBoundaryClause(text: string, quotes: string[]): ShiftOrBo
       ...none,
       rest: removeMatch(text, eos),
       shift: END_OF_SHIFT,
-      start: startToken ? { hour: startToken.hour, minute: startToken.minute } : null,
+      // F-151: a lone start (no end clock beside it) reads by the START
+      // workday rule (hours 1-5 read pm, 6 stays the morning -- every demo
+      // plant's Shift 1 starts at 06:00), never `applyLoneEdgeRule`'s own
+      // 1-6 range.
+      start: startToken ? applyLoneStartRule(startToken) : null,
     };
   }
   const eod = text.match(END_OF_DAY_RE);
@@ -819,7 +828,8 @@ function extractShiftOrBoundaryClause(text: string, quotes: string[]): ShiftOrBo
       ...none,
       rest: removeMatch(text, eod),
       shift: END_OF_DAY,
-      start: startToken ? { hour: startToken.hour, minute: startToken.minute } : null,
+      // F-151: same lone-start reading as the `end of shift` branch above.
+      start: startToken ? applyLoneStartRule(startToken) : null,
     };
   }
 
@@ -1396,7 +1406,57 @@ function parseAssignRest(
 
   const pieces = splitProductPlaces(productPlaces);
   if (pieces.length === 0) return { ok: false, failure: { kind: "no_product" } };
-  if (pieces.length === 1) return { ok: false, failure: { kind: "no_place" } };
+  if (pieces.length === 1) {
+    // R-422 (the maintainer, 15 Sept, session 174): a place (and hours or a
+    // shift) with nothing named for the part at all -- the ONE segment found
+    // after the person is the PLACE, never assumed to be the missing-place
+    // product it was read as before this session: `product: ""`, and the
+    // resolver asks which part the cell makes (R-418's own `unknown`/
+    // `suggestions` shape, widened). `no_product` stays reserved for a
+    // sentence with truly nothing after the person at all (`productPlaces
+    // === ""`, caught above) -- WP1-WP6. A list here ("Cell 1 and Cell 2")
+    // is read exactly as pieces[1]'s own list is below, just with an empty
+    // product on every inner command (WP4).
+    const operatorList = detectAndList(operatorPart, true);
+    if (operatorList.kind === "bad")
+      return { ok: false, failure: { kind: "bad_list", text: operatorPart } };
+    const placeList = detectAndList(pieces[0], false);
+    if (placeList.kind === "bad")
+      return { ok: false, failure: { kind: "bad_list", text: pieces[0] } };
+    if (operatorList.kind === "list" || placeList.kind === "list") {
+      const operatorItems = operatorList.kind === "list" ? operatorList.items : [operatorPart];
+      const placeItems = placeList.kind === "list" ? placeList.items : [pieces[0]];
+      const combined = combineLists(operatorItems, placeItems, (op, pl) => ({
+        intent: "assign" as const,
+        operator: restoreQuotes(op, quotes),
+        product: "",
+        place: [restoreQuotes(pl, quotes)],
+        day,
+        start,
+        end,
+        attach: null,
+        existing: null,
+        shift,
+      }));
+      if (!combined.ok) return combined;
+      return { ok: true, command: { intent: "several", commands: combined.items } };
+    }
+    return {
+      ok: true,
+      command: {
+        intent: "assign",
+        operator: restoreQuotes(operatorPart, quotes),
+        product: "",
+        place: [restoreQuotes(pieces[0], quotes)],
+        day,
+        start,
+        end,
+        attach: null,
+        existing: null,
+        shift,
+      },
+    };
+  }
 
   // S50 (brief §2 item 3): the OPERATOR segment and the FIRST PLACE segment
   // (pieces[1] -- pieces[0] is the product, pieces[2:] are qualifiers that
@@ -1485,7 +1545,43 @@ function parseBookRest(
 
   const pieces = splitProductPlaces(middle);
   if (pieces.length === 0) return { ok: false, failure: { kind: "no_product" } };
-  if (pieces.length === 1) return { ok: false, failure: { kind: "no_place" } };
+  if (pieces.length === 1) {
+    // R-422: same reading as `parseAssignRest`'s own single-piece branch --
+    // the one segment named is the PLACE, `product: ""`, never `no_place`
+    // (WP2). A list ("Cell 1 and Cell 2") still becomes a several, each
+    // inner command's own product empty.
+    const placeList = detectAndList(pieces[0], false);
+    if (placeList.kind === "bad")
+      return { ok: false, failure: { kind: "bad_list", text: pieces[0] } };
+    if (placeList.kind === "list") {
+      const commands = placeList.items.map((pl) => ({
+        intent: "book" as const,
+        product: "",
+        place: [restoreQuotes(pl, quotes)],
+        headcount: hc.headcount,
+        day,
+        start,
+        end,
+        existing: null,
+        shift,
+      }));
+      return { ok: true, command: { intent: "several", commands } };
+    }
+    return {
+      ok: true,
+      command: {
+        intent: "book",
+        product: "",
+        place: [restoreQuotes(pieces[0], quotes)],
+        headcount: hc.headcount,
+        day,
+        start,
+        end,
+        existing: null,
+        shift,
+      },
+    };
+  }
 
   // S50 (brief §2 item 3): book has no operator field, so only the FIRST
   // PLACE segment (pieces[1]) can list more than one item.
@@ -1670,6 +1766,32 @@ function applyLoneEdgeRule(t: {
   explicitMeridiem: boolean;
 }): ClockTime {
   if (!t.explicitMeridiem && t.hour >= 1 && t.hour < 7) {
+    return { hour: t.hour + 12, minute: t.minute };
+  }
+  return { hour: t.hour, minute: t.minute };
+}
+
+/**
+ * F-151 (docs/agent-briefs/f-151-b-six-is-morning-brief.md, session 174): the
+ * full suite showed `applyLoneEdgeRule`'s own edge (an hour from 1 to 6 reads
+ * pm) is wrong for a lone START -- every demo plant's Shift 1 starts at
+ * 06:00, so "from 6 for 8 hours"/"from 6 until end of shift" must stay
+ * 06:00, never become 18:00. New rule, for a lone START only: hours 1 to 5
+ * with no explicit am/pm still read as the afternoon (the same workday
+ * instinct); hour 6 through 12 stay exactly as said. A lone END keeps
+ * `applyLoneEdgeRule`'s own 1-to-6 range unchanged (RM6 "before 2", AJ7 "end
+ * Sam early at 3", and `tryMoveEdgeAdjust`'s own edge==="end" door all still
+ * call `applyLoneEdgeRule` above, not this) -- only a token that is itself
+ * the START of a span (the boundary clause's own captured start, a
+ * duration's own start, and `tryMoveEdgeAdjust`'s edge==="start" door) reads
+ * through this rule.
+ */
+function applyLoneStartRule(t: {
+  hour: number;
+  minute: number;
+  explicitMeridiem: boolean;
+}): ClockTime {
+  if (!t.explicitMeridiem && t.hour >= 1 && t.hour < 6) {
     return { hour: t.hour + 12, minute: t.minute };
   }
   return { hour: t.hour, minute: t.minute };
@@ -2261,7 +2383,15 @@ function tryMoveEdgeAdjust(rest: string, quotes: string[]): ParseResult | null {
     } else {
       const token = parseTimeToken(toMatch[1]);
       if (!token) return { ok: false, failure: { kind: "bad_time", text: toMatch[1].trim() } };
-      adjust = { edge, at: applyLoneEdgeRule(token) };
+      // F-151: which workday rule applies depends on WHICH edge this token
+      // is -- the START door (edge === "start", "move Sam's start to 6")
+      // reads by the new START rule (6 stays the morning); the END door
+      // (edge === "end", "move Sam's finish to 3") keeps `applyLoneEdgeRule`
+      // unchanged, same as AJ7's dedicated-verb door.
+      adjust = {
+        edge,
+        at: edge === "start" ? applyLoneStartRule(token) : applyLoneEdgeRule(token),
+      };
     }
     leftover = toMatch[2];
   } else {
@@ -2736,8 +2866,16 @@ function extractDurationClause(
   while ((m = DURATION_CLAUSE_RE.exec(text)) !== null) last = m;
   if (!last) return null;
 
-  const startToken = parseTimeToken(last[1]);
-  if (!startToken) return { ok: false, failure: { kind: "bad_time", text: last[1].trim() } };
+  const rawToken = parseTimeToken(last[1]);
+  if (!rawToken) return { ok: false, failure: { kind: "bad_time", text: last[1].trim() } };
+  // F-151: this start stands alone (a duration names only a LENGTH, never
+  // the other clock edge), so it reads by the same START workday rule the
+  // boundary clause's own lone start above now gets -- "from 2 for 4 hours"
+  // is 14:00-18:00, never the literal 02:00-06:00; "from 6 for 8 hours"
+  // stays 06:00 (6 is outside the START rule's 1-5 range -- every demo
+  // plant's Shift 1 starts at 06:00); "from 8 for 4 hours" is unaffected
+  // either way (8 is outside both ranges).
+  const startToken = applyLoneStartRule(rawToken);
   const minutes = parseDurationMinutes(last[2]);
   if (minutes === null || minutes === 0) {
     return { ok: false, failure: { kind: "bad_duration", text: last[2].trim() } };
@@ -3766,13 +3904,21 @@ function formatAssignCommand(command: AssignCommand): string {
     return parts.join(" ");
   }
 
-  const parts: string[] = [
-    "assign",
-    quoteIfNeeded(command.operator),
-    "to",
-    quoteIfNeeded(command.product),
-  ];
-  parts.push("on", quoteIfNeeded(command.place[0]));
+  // R-422: no part at all -- print "to <place[0]>" directly (never a bare
+  // "to" followed by "on <place>", which would round-trip as a QUALIFIER on
+  // an empty product, not a place at all). Every further place word still
+  // chains with "in", same as the ordinary branch below.
+  const parts: string[] =
+    command.product === ""
+      ? ["assign", quoteIfNeeded(command.operator), "to", quoteIfNeeded(command.place[0])]
+      : [
+          "assign",
+          quoteIfNeeded(command.operator),
+          "to",
+          quoteIfNeeded(command.product),
+          "on",
+          quoteIfNeeded(command.place[0]),
+        ];
   for (let i = 1; i < command.place.length; i++) {
     parts.push("in", quoteIfNeeded(command.place[i]));
   }
@@ -3801,8 +3947,13 @@ function formatAssignCommand(command: AssignCommand): string {
  * print `existing`.
  */
 function formatBookCommand(command: BookCommand): string {
-  const parts: string[] = ["book", quoteIfNeeded(command.product)];
-  parts.push("on", quoteIfNeeded(command.place[0]));
+  // R-422: same "to <place[0]> directly, never a bare product word" fix as
+  // `formatAssignCommand`'s own -- "book" already reads as the verb, so the
+  // empty-product form is simply "book <place[0]>".
+  const parts: string[] =
+    command.product === ""
+      ? ["book", quoteIfNeeded(command.place[0])]
+      : ["book", quoteIfNeeded(command.product), "on", quoteIfNeeded(command.place[0])];
   for (let i = 1; i < command.place.length; i++) {
     parts.push("in", quoteIfNeeded(command.place[i]));
   }

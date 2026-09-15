@@ -91,14 +91,17 @@ describe("DEF-0022: the part-day absence boundary is right live, though 88_absen
         );
       }
 
+      // R-423 renamed "Operator A2" to Maria Lopez -- look this person up by
+      // their stable employee ref, never the display name, which a rename
+      // may change out from under this pin.
       const { data: operators, error: opErr } = await db
         .from("operators")
         .select("id, display_name")
-        .eq("display_name", "Operator A2")
+        .eq("employee_ref", "EMP-1002")
         .limit(1);
       if (opErr || !operators || operators.length === 0) {
         liveBackendGone(
-          `DEF-0022: Operator A2 not found (${opErr?.message ?? "no rows"}). ` +
+          `DEF-0022: EMP-1002 not found (${opErr?.message ?? "no rows"}). ` +
             "Dana signed in, so the stack is up and it is the FIXTURE that is missing or " +
             "unreadable -- reload it with `npm run db:reset` (never while the app is in use).",
         );

@@ -35,15 +35,24 @@ const PASSWORD = "devpassword";
 /** role 'supervisor', a grant on Plant A's Line 1 and nothing else. */
 const SUPERVISOR = "ana@example.test";
 
-/** Plant A's six people, as `dev_demo.sql` names them. */
+/**
+ * Plant A's six people. `dev_demo.sql` still seeds them as "Operator A1" ..
+ * "Operator A6" (EMP-1001 .. EMP-1006); `scripts/demo/rename-plant-a-operators.sql`
+ * (R-423) renames them on this machine's database to real names, in the same
+ * order the employee_refs give them, and that is the running app this spec
+ * drives. `employee_ref` itself is untouched by that script.
+ */
 const PLANT_A_PEOPLE = [
-  "Operator A1",
-  "Operator A2",
-  "Operator A3",
-  "Operator A4",
-  "Operator A5",
-  "Operator A6",
+  "Sam Patel",
+  "Maria Lopez",
+  "John Kim",
+  "Priya Shah",
+  "Tom Baker",
+  "Lena Novak",
 ];
+
+/** Matches the start of any Plant A person's display name (see PLANT_A_PEOPLE). */
+const PLANT_A_NAME_RE = new RegExp(`^(${PLANT_A_PEOPLE.join("|")})`);
 
 async function signIn(page: Page, email: string, path = "/"): Promise<void> {
   await page.goto(`/sign-in?redirect=${encodeURIComponent(path)}`);
@@ -76,13 +85,13 @@ function mondayPlusWeeks(weeks: number): string {
  */
 async function readSplit(scope: import("@playwright/test").Locator, nameOf: (t: string) => string) {
   const control = scope.getByRole("button", { name: /other people in this plant/ });
-  const before = (await scope.getByText(/^Operator A\d/).allTextContents()).map(nameOf);
+  const before = (await scope.getByText(PLANT_A_NAME_RE).allTextContents()).map(nameOf);
   let behind: string[] = [];
   if ((await control.count()) > 0) {
     const label = (await control.textContent()) ?? "";
     const n = Number(/\((\d+)\)/.exec(label)?.[1] ?? "0");
     await control.click();
-    const after = (await scope.getByText(/^Operator A\d/).allTextContents()).map(nameOf);
+    const after = (await scope.getByText(PLANT_A_NAME_RE).allTextContents()).map(nameOf);
     behind = after.filter((name) => !before.includes(name));
     expect(behind.length, "the control's count is the number it reveals").toBe(n);
   }
@@ -97,7 +106,7 @@ test("a line supervisor sees the whole plant's people: the default list plus the
 
   const panel = page.getByRole("complementary", { name: "Operators" });
   await expect(panel).toBeVisible({ timeout: 15_000 });
-  await expect(panel.getByText(/^Operator A\d/).first()).toBeVisible({ timeout: 15_000 });
+  await expect(panel.getByText(PLANT_A_NAME_RE).first()).toBeVisible({ timeout: 15_000 });
 
   const { here, behind } = await readSplit(panel, (t) =>
     t.trim().split(/\s/).slice(0, 2).join(" "),

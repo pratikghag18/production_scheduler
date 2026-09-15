@@ -454,11 +454,27 @@ describe("commandResolve: brief §5 worked examples", () => {
     }
   });
 
-  it("R16: 'Gasket' -- unknown product", () => {
+  // R-422 (S60-b): re-pinned -- "Gasket" still matches no product AND no
+  // near name (R-418's own floor), but the cell it resolved (Cell 1, c1a)
+  // DOES offer something (Housing A, Housing B per the fixture's own
+  // `offeredAt`), so the resolver now offers the cell's own menu instead of
+  // a bare unknown -- the maintainer's own words, 15 Sept: "it can also ask
+  // what product ... from the list of available products for the hierarchy
+  // level." Byte-identical to the pre-R-422 behaviour would only remain for
+  // a cell with NO offerings at all (RS-WP4, commandResolve.test.ts).
+  it("R16 (R-422 re-pin): 'Gasket' -- no near name either, so the cell's own menu (Housing A, Housing B)", () => {
     const res = resolveCommand(cmd({ product: "Gasket" }), baseCtx());
     expect(res).toEqual({
       ok: false,
-      question: { kind: "unknown", field: "product", text: "Gasket" },
+      question: {
+        kind: "unknown",
+        field: "product",
+        text: "Gasket",
+        suggestions: [
+          { id: "ha", label: "Housing A", word: "Housing A" },
+          { id: "hb", label: "Housing B", word: "Housing B" },
+        ],
+      },
     });
   });
 
@@ -4343,5 +4359,668 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         resolveCommand(withoutUntil, zCtx({ assignments: [blk] })),
       );
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S59-a (docs/agent-briefs/s59-a-nearest-brief.md, D133 item 1): a word that
+// matches nothing offers the nearest names as `unknown`'s own optional
+// `suggestions`. NN1 onward.
+// ---------------------------------------------------------------------------
+
+describe("commandResolve: S59-a nearest names for a word that matches nothing (D133 item 1)", () => {
+  const commonFastener = { id: "cf1", sku: "CF-1", name: "Common Fastener" };
+  const bracketA = { id: "brA", sku: "BR-A", name: "Bracket A" };
+  const bracketB = { id: "brB", sku: "BR-B", name: "Bracket B" };
+  const housingA = { id: "hoA", sku: "HA-9", name: "Housing A" };
+  const housingB = { id: "hoB", sku: "HB-9", name: "Housing B" };
+  const housingC = { id: "hoC", sku: "HC-9", name: "Housing C" };
+  const opA1 = { id: "oa1", displayName: "Operator A1", employeeRef: null, active: true };
+  const opA2 = { id: "oa2", displayName: "Operator A2", employeeRef: null, active: true };
+  const opA3 = { id: "oa3", displayName: "Operator A3", employeeRef: null, active: true };
+
+  // NN1: the plural passes (brief §1). A plural search word finds a
+  // singular item ("Common Fasteners" -> "Common Fastener") -- resolved
+  // fully, no question at all (also NN4's own case: "resolves without a
+  // question, the plural pass wins first").
+  it("NN1: 'Common Fasteners' finds 'Common Fastener' -- resolves, no question", () => {
+    const ctx = baseCtx({ products: [commonFastener], offeredAt: () => [{ id: "cf1" }] });
+    const res = resolveCommand(cmd({ product: "Common Fasteners" }), ctx);
+    expect(res.ok).toBe(true);
+    if (res.ok && res.resolved.intent === "assign") {
+      expect(res.resolved.productId).toBe("cf1");
+    }
+  });
+
+  // NN1 twin: a word the plain three tiers already resolve never reaches
+  // the plural passes -- "Bracket" still an ambiguous starts-with list, not
+  // narrowed or changed by the new fallback.
+  it("NN1 twin: 'Bracket' still finds Bracket A and Bracket B (a starts-with, unaffected)", () => {
+    const ctx = baseCtx({
+      products: [bracketA, bracketB],
+      offeredAt: () => [{ id: "brA" }, { id: "brB" }],
+    });
+    const res = resolveCommand(cmd({ product: "Bracket" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "product",
+        text: "Bracket",
+        candidates: [
+          { id: "brA", label: "Bracket A", word: "Bracket A" },
+          { id: "brB", label: "Bracket B", word: "Bracket B" },
+        ],
+      },
+    });
+  });
+
+  // NN2: "Housing Pay" (a misheard "Housing A", D133's own example) offers
+  // every close product name, fixture order.
+  it("NN2: 'Housing Pay' offers Housing A, Housing B and Housing C, fixture order", () => {
+    const ctx = baseCtx({ products: [housingA, housingB, housingC], offeredAt: () => [] });
+    const res = resolveCommand(cmd({ product: "Housing Pay" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "product",
+        text: "Housing Pay",
+        suggestions: [
+          { id: "hoA", label: "Housing A", word: "Housing A" },
+          { id: "hoB", label: "Housing B", word: "Housing B" },
+          { id: "hoC", label: "Housing C", word: "Housing C" },
+        ],
+      },
+    });
+  });
+
+  // NN3: the same word offers only what the fixture actually has.
+  it("NN3: 'Housing Pay' offers only Housing A when only it exists", () => {
+    const ctx = baseCtx({ products: [housingA], offeredAt: () => [] });
+    const res = resolveCommand(cmd({ product: "Housing Pay" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "product",
+        text: "Housing Pay",
+        suggestions: [{ id: "hoA", label: "Housing A", word: "Housing A" }],
+      },
+    });
+  });
+
+  // NN5: a word that already prefix-matches more than one name is still
+  // `ambiguous` -- never routed through `nearestNames` at all.
+  it("NN5: 'Operator A' (a prefix of two) is still ambiguous, not a suggestion", () => {
+    const ctx = baseCtx({ operators: [opA1, opA2] });
+    const res = resolveCommand(cmd({ operator: "Operator A" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "operator",
+        text: "Operator A",
+        candidates: [
+          { id: "oa1", label: "Operator A1", word: "Operator A1" },
+          { id: "oa2", label: "Operator A2", word: "Operator A2" },
+        ],
+      },
+    });
+  });
+
+  // NN6: a word close to nothing offers nothing -- byte-identical to the
+  // question before `suggestions` existed.
+  it("NN6: 'xyzzy' is close to nothing -- no suggestions field at all", () => {
+    const ctx = baseCtx({ operators: [opA1, opA2] });
+    const res = resolveCommand(cmd({ operator: "xyzzy" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "unknown", field: "operator", text: "xyzzy" },
+    });
+  });
+
+  // NN7: a person. "Opertor A3" prefix-matches nothing (its own middle
+  // letters are swapped), but its trailing digit picks out the one operator
+  // whose own digit matches -- "Operator A1"/"A2" score 0 (R22/R23's own
+  // digit-exact rule), only "Operator A3" is offered.
+  it("NN7: a person ('Opertor A3') offers the suggestion Operator A3", () => {
+    const ctx = baseCtx({ operators: [opA1, opA2, opA3] });
+    const res = resolveCommand(cmd({ operator: "Opertor A3" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "operator",
+        text: "Opertor A3",
+        suggestions: [{ id: "oa3", label: "Operator A3", word: "Operator A3" }],
+      },
+    });
+  });
+
+  // NN8: a place. "Sell 1" (a misheard "Cell 1") offers Cell 1, the two
+  // cells sharing that name (c1a, c1b, brief §5's own fixture) collapsed to
+  // one suggestion; "Cell 2" is excluded by the same digit-exact rule R22/
+  // R23 pin ("1" against "2").
+  it("NN8: a place ('Sell 1') offers Cell 1, not Cell 2", () => {
+    const res = resolveCommand(cmd({ place: ["Sell 1", "Line 1"] }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "place",
+        text: "Sell 1",
+        suggestions: [{ id: "c1a", label: "Cell 1 — Plant 1 › Assembly › Line 1", word: "Cell 1" }],
+      },
+    });
+  });
+
+  // NN9: every suggestion's own `word`, fed back into the field it named
+  // and the sentence re-run through `resolveCommand`, resolves to exactly
+  // one thing -- an operator suggestion and a place suggestion both.
+  it("NN9: a suggestion's word re-resolves to exactly one thing through resolveCommand", () => {
+    const placeCtx = baseCtx();
+    const placeAnswer = resolveCommand(cmd({ place: ["Sell 1", "Line 1"] }), placeCtx);
+    if (placeAnswer.ok || placeAnswer.question.kind !== "unknown") throw new Error("setup");
+    const placeWord = placeAnswer.question.suggestions?.[0]?.word;
+    expect(placeWord).toBe("Cell 1");
+    const placeRerun = resolveCommand(cmd({ place: [placeWord!, "Line 1"] }), placeCtx);
+    expect(placeRerun.ok).toBe(true);
+
+    const opCtx = baseCtx({ operators: [opA1, opA2, opA3] });
+    const opAnswer = resolveCommand(cmd({ operator: "Opertor A3" }), opCtx);
+    if (opAnswer.ok || opAnswer.question.kind !== "unknown") throw new Error("setup");
+    const opWord = opAnswer.question.suggestions?.[0]?.word;
+    expect(opWord).toBe("Operator A3");
+    const opRerun = resolveCommand(cmd({ operator: opWord! }), opCtx);
+    expect(opRerun.ok).toBe(true);
+  });
+
+  // NN10 (reviewer): `resolveEveryonePlaceCells` -- the EVERYONE/`copy`
+  // place resolution (R-407/D130 item 5, D130 item 4) -- built its OWN
+  // `unknown` question on a dead end and never offered a suggestion, unlike
+  // every other intent's place field (`resolveCellStep`, above): "copy Cell
+  // 1 to tomorrow" misheard as "copy Sell 1 to tomorrow" got a dead end with
+  // no way to pick "Cell 1", while the identical typo on an assign's place
+  // already did (NN8). Fixed by routing its dead end through the same
+  // `nodeSuggestions` helper, scoped to `allNodes` -- the SAME pool this
+  // function itself searches (never `ctx.cells`: a line or area can be this
+  // function's OWN match, so it must be a possible SUGGESTION too).
+  it("NN10: expandCommand's copy offers a place suggestion on a dead end, the same as an ordinary assign", () => {
+    const copyCmd: CopyCommand = {
+      intent: "copy",
+      place: ["Sell 1"],
+      from: { kind: "today" },
+      to: { kind: "tomorrow" },
+    };
+    const result = expandCommand(copyCmd, baseCtx());
+    expect(result).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "place",
+        text: "Sell 1",
+        suggestions: [{ id: "c1a", label: "Cell 1 — Plant 1 › Assembly › Line 1", word: "Cell 1" }],
+      },
+    });
+  });
+
+  // NN10 twin: the same function backs the EVERYONE reading of unassign and
+  // move (R-407) -- "unassign everyone from Sell 1" gets the same offer.
+  it("NN10 twin: 'unassign everyone from Sell 1' offers the same place suggestion", () => {
+    const result = expandCommand(
+      unassignCmd({ operator: "everyone", place: ["Sell 1"] }),
+      baseCtx(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "place",
+        text: "Sell 1",
+        suggestions: [{ id: "c1a", label: "Cell 1 — Plant 1 › Assembly › Line 1", word: "Cell 1" }],
+      },
+    });
+  });
+
+  // NN11: a display name shared by two operators (S59-b's demo-person
+  // convention doesn't cover this, so built here) -- a near-miss suggestion
+  // offers the shared name ONCE (deduplicated, same as NN8's two same-named
+  // cells), but picking it must re-ask `ambiguous` between the two real
+  // people, never silently resolve to one of them.
+  it("NN11: a suggestion for a name shared by two people re-asks ambiguous, never picks one", () => {
+    const james1 = { id: "j1", displayName: "James", employeeRef: "E1", active: true };
+    const james2 = { id: "j2", displayName: "James", employeeRef: "E2", active: true };
+    const ctx = baseCtx({ operators: [james1, james2] });
+    const answer = resolveCommand(cmd({ operator: "Jaymes" }), ctx);
+    expect(answer).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "operator",
+        text: "Jaymes",
+        suggestions: [{ id: "j1", label: "James", word: "James" }],
+      },
+    });
+    if (answer.ok || answer.question.kind !== "unknown") throw new Error("setup");
+    const word = answer.question.suggestions?.[0]?.word;
+    expect(word).toBe("James");
+    const rerun = resolveCommand(cmd({ operator: word! }), ctx);
+    expect(rerun).toEqual({
+      ok: false,
+      question: {
+        kind: "ambiguous",
+        field: "operator",
+        text: "James",
+        candidates: [
+          { id: "j1", label: "James", word: "James" },
+          { id: "j2", label: "James", word: "James" },
+        ],
+      },
+    });
+  });
+
+  // NN12: the plural pass never over-fires on a name that already IS its
+  // own plural spelling, or one that merely ends in "s" -- "James" resolves
+  // to James directly (never truncated to a search for "Jame"), and "Buses"
+  // to the actual product named "Buses" (never to a "Bus" it also has).
+  it("NN12: 'James' (ends in s) resolves to James, never a search for 'Jame'", () => {
+    const james = { id: "j1", displayName: "James", employeeRef: null, active: true };
+    const res = resolveCommand(cmd({ operator: "James" }), baseCtx({ operators: [james] }));
+    expect(res.ok).toBe(true);
+    if (res.ok && res.resolved.intent === "assign") expect(res.resolved.operatorId).toBe("j1");
+  });
+
+  it("NN12 twin: 'Buses' resolves to the product literally named Buses, not 'Bus'", () => {
+    const bus = { id: "bu1", sku: "BU-1", name: "Bus" };
+    const buses = { id: "bu2", sku: "BU-2", name: "Buses" };
+    const ctx = baseCtx({
+      products: [bus, buses],
+      offeredAt: () => [{ id: "bu1" }, { id: "bu2" }],
+    });
+    const res = resolveCommand(cmd({ product: "Buses" }), ctx);
+    expect(res.ok).toBe(true);
+    if (res.ok && res.resolved.intent === "assign") expect(res.resolved.productId).toBe("bu2");
+  });
+
+  // NN13: the suggestions' own `word`, fed back through EVERY step that can
+  // ask an `unknown` question (D133 item 1's own list) -- a loop, not one
+  // case per intent, so a step added later that forgets to wire suggestions
+  // in fails here too. `book`/`headcount` use `resolvePartStep`; `assign`/
+  // `unassign`/`move`/`replace`/`swap`/`split` use `resolvePersonStep`;
+  // `copy` (and the EVERYONE reading NN10 pins) uses `resolveEveryonePlace
+  // Cells`. Every one of the nine must clear the dead end once the
+  // suggested word is substituted back in.
+  it("NN13: a suggestion's word re-resolves cleanly through every intent (assign, book, unassign, move, replace, swap, copy, split, headcount)", () => {
+    // "Opertor Sam" -> "Operator Sam" is the same letter-transposition typo
+    // NN7 already pins for a person ("Opertor A3" -> "Operator A3"); reused
+    // here so every intent's own near-miss is known, independently, to
+    // clear the floor.
+    const sam = { id: "sam", displayName: "Operator Sam", employeeRef: null, active: true };
+    const sam2 = { id: "sam2", displayName: "Sam Two", employeeRef: null, active: true };
+    const opCtx = baseCtx({ operators: [sam] });
+    const twoOpCtx = baseCtx({ operators: [sam, sam2] });
+
+    function assertUnknownWithSuggestion(
+      label: string,
+      result: { ok: boolean; question?: unknown },
+      expectedWord: string,
+    ): string {
+      expect(result.ok, `${label} first pass`).toBe(false);
+      const q = (result as { question: { kind: string; suggestions?: Candidate[] } }).question;
+      if (q.kind !== "unknown") {
+        throw new Error(`${label}: expected an unknown question, got ${JSON.stringify(result)}`);
+      }
+      const word = q.suggestions?.[0]?.word;
+      expect(word, `${label} suggestion word`).toBe(expectedWord);
+      return word!;
+    }
+
+    // assign
+    const assignFirst = resolveCommand(cmd({ operator: "Opertor Sam" }), opCtx);
+    const assignWord = assertUnknownWithSuggestion("assign", assignFirst, "Operator Sam");
+    expect(resolveCommand(cmd({ operator: assignWord }), opCtx).ok).toBe(true);
+
+    // book
+    const bookFirst = resolveCommand(bookCmd({ product: "Houseing A" }), baseCtx());
+    const bookWord = assertUnknownWithSuggestion("book", bookFirst, "Housing A");
+    expect(resolveCommand(bookCmd({ product: bookWord }), baseCtx()).ok).toBe(true);
+
+    // unassign -- no block on the board for Operator Sam here, so the
+    // clearest fixture-independent proof the NAME resolved is that the
+    // second pass is no longer the SAME dead end (a different question,
+    // "no_block", not "unknown" again).
+    const unassignFirst = resolveCommand(unassignCmd({ operator: "Opertor Sam" }), opCtx);
+    const unassignWord = assertUnknownWithSuggestion("unassign", unassignFirst, "Operator Sam");
+    const unassignRerun = resolveCommand(unassignCmd({ operator: unassignWord }), opCtx);
+    expect(unassignRerun.ok || unassignRerun.question.kind !== "unknown").toBe(true);
+
+    // move -- same reasoning as unassign.
+    const moveFirst = resolveCommand(moveCmd({ operator: "Opertor Sam" }), opCtx);
+    const moveWord = assertUnknownWithSuggestion("move", moveFirst, "Operator Sam");
+    const moveRerun = resolveCommand(moveCmd({ operator: moveWord }), opCtx);
+    expect(moveRerun.ok || moveRerun.question.kind !== "unknown").toBe(true);
+
+    // headcount
+    const hc = (product: string): HeadcountCommand => ({
+      intent: "headcount",
+      product,
+      place: ["Cell 1", "Line 1"],
+      day: null,
+      span: null,
+      shift: null,
+      headcount: 4,
+    });
+    // headcount needs an existing RUN to update (S58, R-415) -- none is set
+    // up here, so (as with unassign/move above) the proof the NAME resolved
+    // is that the second pass asks something else, not "unknown" again.
+    const headcountFirst = resolveCommand(hc("Houseing A"), baseCtx());
+    const headcountWord = assertUnknownWithSuggestion("headcount", headcountFirst, "Housing A");
+    const headcountRerun = resolveCommand(hc(headcountWord), baseCtx());
+    expect(headcountRerun.ok || headcountRerun.question.kind !== "unknown").toBe(true);
+
+    // replace/swap/copy/split are board-answered -- `expandCommand`, not
+    // `resolveCommand` (D130 item 1/2).
+    const replace = (withWord: string): ReplaceCommand => ({
+      intent: "replace",
+      operator: "Sam Two",
+      with: withWord,
+      place: ["Cell 1", "Line 1"],
+      day: null,
+      span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+      shift: null,
+    });
+    // No block on the board for either operator here, so (as with unassign/
+    // move/headcount above) the second pass asking something OTHER than
+    // "unknown" is the proof the name itself resolved.
+    const replaceFirst = expandCommand(replace("Opertor Sam"), twoOpCtx);
+    const replaceWord = assertUnknownWithSuggestion("replace", replaceFirst, "Operator Sam");
+    const replaceRerun = expandCommand(replace(replaceWord), twoOpCtx);
+    expect(replaceRerun.ok || replaceRerun.question.kind !== "unknown").toBe(true);
+
+    const swap = (otherWord: string): SwapCommand => ({
+      intent: "swap",
+      operator: "Sam Two",
+      other: otherWord,
+      place: ["Cell 1", "Line 1"],
+      day: null,
+      span: { start: { hour: 10, minute: 0 }, end: { hour: 14, minute: 0 } },
+      shift: null,
+    });
+    const swapFirst = expandCommand(swap("Opertor Sam"), twoOpCtx);
+    const swapWord = assertUnknownWithSuggestion("swap", swapFirst, "Operator Sam");
+    const swapRerun = expandCommand(swap(swapWord), twoOpCtx);
+    expect(swapRerun.ok || swapRerun.question.kind !== "unknown").toBe(true);
+
+    const copy = (place: string): CopyCommand => ({
+      intent: "copy",
+      place: [place],
+      from: { kind: "today" },
+      to: { kind: "tomorrow" },
+    });
+    const copyFirst = expandCommand(copy("Sell 1"), baseCtx());
+    const copyWord = assertUnknownWithSuggestion("copy", copyFirst, "Cell 1");
+    const copyRerun = expandCommand(copy(copyWord), baseCtx());
+    expect(copyRerun.ok || copyRerun.question.kind !== "unknown").toBe(true);
+
+    const split = (operator: string): SplitCommand => ({
+      intent: "split",
+      operator,
+      place: ["Cell 1", "Line 1"],
+      day: null,
+      at: { hour: 12, minute: 0 },
+    });
+    const splitFirst = expandCommand(split("Opertor Sam"), opCtx);
+    const splitWord = assertUnknownWithSuggestion("split", splitFirst, "Operator Sam");
+    const splitRerun = expandCommand(split(splitWord), opCtx);
+    expect(splitRerun.ok || splitRerun.question.kind !== "unknown").toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S60-b (docs/agent-briefs/s60-b-which-part-brief.md, R-422): a sentence with
+// no part -- or a product word that matches nothing and clears no near name
+// either (R-418's own floor) -- asks which part, offered from the RESOLVED
+// CELL's own menu (`ctx.offeredAt`), never the whole product list. RS-WP1
+// onward.
+// ---------------------------------------------------------------------------
+
+describe("commandResolve: S60-b which part, from what the cell makes (R-422)", () => {
+  // RS-WP1: an empty product on a cell offering three parts -- all three,
+  // `text` naming the CELL (there is no word said to report).
+  it("RS-WP1: empty product on a cell with three parts -- three suggestions", () => {
+    const ctx = baseCtx({
+      products: [ha, hb, cov],
+      offeredAt: () => [{ id: "ha" }, { id: "hb" }, { id: "cov" }],
+    });
+    const res = resolveCommand(cmd({ product: "" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "product",
+        text: "Cell 1",
+        suggestions: [
+          { id: "ha", label: "Housing A", word: "Housing A" },
+          { id: "hb", label: "Housing B", word: "Housing B" },
+          { id: "cov", label: "Cover", word: "Cover" },
+        ],
+      },
+    });
+  });
+
+  // RS-WP2: a near-miss word ("Housing Pay") still gets R-418's own nearest
+  // names FIRST -- never merged with the cell's own (larger) menu, even
+  // though this cell offers three parts. Only Housing A/B clear the floor
+  // against "Housing Pay" (same fixture NN2 already uses); "Cover" does not,
+  // and is never added in just because the cell happens to offer it too --
+  // a near name is a better guess at what was actually SAID than the whole
+  // menu is, so the two lists are never combined into one (see
+  // `resolvePartStep`'s own comment).
+  it("RS-WP2: a near-miss word still gets the nearest names first, never merged with the cell's menu", () => {
+    const ctx = baseCtx({
+      products: [ha, hb, cov],
+      offeredAt: () => [{ id: "ha" }, { id: "hb" }, { id: "cov" }],
+    });
+    const res = resolveCommand(cmd({ product: "Housing Pay" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "product",
+        text: "Housing Pay",
+        suggestions: [
+          { id: "ha", label: "Housing A", word: "Housing A" },
+          { id: "hb", label: "Housing B", word: "Housing B" },
+        ],
+      },
+    });
+  });
+
+  // RS-WP3: a cell with nine parts -- the first eight, board order, and
+  // `more: true` (never a ninth button, never a silent drop).
+  const nineParts = Array.from({ length: 9 }, (_, i) => ({
+    id: `pp${i + 1}`,
+    sku: `PP-${i + 1}`,
+    name: `Part ${i + 1}`,
+  }));
+  it("RS-WP3: a cell with nine parts -- the first eight, and more: true", () => {
+    const ctx = baseCtx({
+      products: nineParts,
+      offeredAt: () => nineParts.map((p) => ({ id: p.id })),
+    });
+    const res = resolveCommand(cmd({ product: "" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "product",
+        text: "Cell 1",
+        suggestions: nineParts.slice(0, 8).map((p) => ({ id: p.id, label: p.name, word: p.name })),
+        more: true,
+      },
+    });
+  });
+
+  // RS-WP4: a cell with no offerings at all -- the existing plain `unknown`,
+  // no `suggestions` key at all (byte for byte what every OTHER unknown
+  // looked like before R-422).
+  it("RS-WP4: empty product on a cell with no offerings at all -- the existing plain unknown", () => {
+    const ctx = baseCtx({ products: [ha, hb], offeredAt: () => [] });
+    const res = resolveCommand(cmd({ product: "" }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "unknown", field: "product", text: "" },
+    });
+  });
+
+  // RS-WP5: every suggestion's own `word` re-resolves to exactly one part --
+  // the same dead-end-clearing discipline D133 item 1 already requires of
+  // every other `unknown` suggestion (NN13, above), extended to the cell's
+  // own menu.
+  it("RS-WP5: a suggestion's word re-resolves to exactly one part", () => {
+    const ctx = baseCtx({
+      products: [ha, hb, cov],
+      offeredAt: () => [{ id: "ha" }, { id: "hb" }, { id: "cov" }],
+    });
+    const res = resolveCommand(cmd({ product: "" }), ctx);
+    if (res.ok || res.question.kind !== "unknown" || !res.question.suggestions) {
+      throw new Error(`expected an unknown question with suggestions, got ${JSON.stringify(res)}`);
+    }
+    for (const s of res.question.suggestions) {
+      const picked = resolveCommand(cmd({ product: s.word }), ctx);
+      expect(picked.ok, `picking "${s.word}" must resolve cleanly`).toBe(true);
+    }
+  });
+
+  // RS-PP1-RS-PP4 (the S60-b reviewer, 15 Sept): "assign Sam to Housing A 8
+  // to 4" -- no separator, so parse.ts's own R-422 branch reads the one
+  // segment as the PLACE, product "". "Housing A" is a PART in this fixture
+  // (`ha`), not a cell -- `resolveCellStep` must recognise that before
+  // falling back to an ordinary "no place" question.
+  it("RS-PP1: a single segment that names no cell but names a part exactly -- asPart, every track cell offered", () => {
+    const res = resolveCommand(cmd({ product: "", place: ["Housing A"] }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "place",
+        text: "Housing A",
+        asPart: true,
+        suggestions: [
+          { id: "c1a", label: "Cell 1 — Plant 1 › Assembly › Line 1", word: "Cell 1" },
+          { id: "c2", label: "Cell 2 — Plant 1 › Assembly › Line 1", word: "Cell 2" },
+          { id: "c1b", label: "Cell 1 — Plant 1 › Assembly › Line 3", word: "Cell 1" },
+        ],
+      },
+    });
+  });
+
+  it("RS-PP2: a single segment that near-misses a part (no cell, no exact part) -- asPart too", () => {
+    // "Housing Pay" clears R-418's own floor against "Housing A"/"Housing B"
+    // (the same fixture NN2/RS-WP2 already use) but matches no cell either.
+    const res = resolveCommand(cmd({ product: "", place: ["Housing Pay"] }), baseCtx());
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error("expected a question");
+    expect(res.question).toMatchObject({ kind: "unknown", field: "place", asPart: true });
+  });
+
+  it("RS-PP3: a single segment that matches neither a cell nor any part (near or exact) -- the ordinary place unknown, no asPart", () => {
+    const res = resolveCommand(cmd({ product: "", place: ["Zzyzx"] }), baseCtx());
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "unknown", field: "place", text: "Zzyzx" },
+    });
+  });
+
+  it("RS-PP4: more than eight track cells -- asPart with no suggestions at all, never a partial list", () => {
+    const manyCells = Array.from({ length: 9 }, (_, i) => ({
+      id: `mc${i + 1}`,
+      name: `Bay ${i + 1}`,
+      path: `plant_1.assembly.bay_${i + 1}`,
+    }));
+    const ctx = baseCtx({
+      cells: manyCells,
+      nodeById: new Map([...allNodes, ...manyCells].map((n) => [n.id, n])),
+    });
+    const res = resolveCommand(cmd({ product: "", place: ["Housing A"] }), ctx);
+    expect(res).toEqual({
+      ok: false,
+      question: { kind: "unknown", field: "place", text: "Housing A", asPart: true },
+    });
+  });
+
+  it("RS-PP5: picking one of RS-PP1's own suggested cells, part substituted alongside it, resolves cleanly", () => {
+    const first = resolveCommand(cmd({ product: "", place: ["Housing A"] }), baseCtx());
+    if (first.ok || first.question.kind !== "unknown" || !first.question.suggestions) {
+      throw new Error(
+        `expected an unknown/place question with suggestions, got ${JSON.stringify(first)}`,
+      );
+    }
+    // c2 ("Cell 2") is the one unambiguous cell among RS-PP1's three
+    // suggestions -- the bar's own `pickPartAsPlace` sets BOTH `place` (the
+    // picked cell) and `product` (the word recognised as a part, "Housing
+    // A") from one button; this proves the combination resolves, not just
+    // either field alone.
+    const c2Suggestion = first.question.suggestions.find((s) => s.id === "c2");
+    if (!c2Suggestion) throw new Error("expected c2 among RS-PP1's suggestions");
+    const picked = resolveCommand(
+      cmd({ product: "Housing A", place: [c2Suggestion.word] }),
+      baseCtx(),
+    );
+    expect(picked.ok).toBe(true);
+    if (picked.ok && picked.resolved.intent === "assign") expect(picked.resolved.nodeId).toBe("c2");
+  });
+
+  // NW1-NW3 (the S59 reviewer, 15 Sept): a recogniser writes "Cell one" for
+  // "Cell 1" -- `normalizeForMatch`'s own spelled-digit step, exercised
+  // through the ordinary cell/operator match tiers and the nearest-name
+  // score, the one place it runs for every field.
+  it("NW1: 'Cell one' matches Cell 1 exactly (never ties with Cell 2)", () => {
+    // Both `c1a` (Line 1) and `c1b` (Line 3) are named "Cell 1" in the
+    // fixture -- the "Line 1" qualifier (same as `cmd()`'s own default
+    // place) narrows to the one this pins, exactly as plain "Cell 1" would.
+    const res = resolveCommand(cmd({ place: ["Cell one", "Line 1"] }), baseCtx());
+    expect(res.ok).toBe(true);
+    if (res.ok && res.resolved.intent === "assign") expect(res.resolved.nodeId).toBe("c1a");
+  });
+
+  // NW2: "decide, and pin what is true" (the brief's own words) -- a
+  // standalone word becomes a digit, but the SPACE it leaves behind is not
+  // itself dropped ("Operator A three" -> "operator a 3", one space short of
+  // "Operator A3"'s own "operator a3"), so the two are never an EXACT tier
+  // hit; the near-name floor (D133 item 2) still offers "Operator A3" as a
+  // SUGGESTION instead, since a shared digit trail never zeroes the score
+  // and the bigram overlap otherwise is near total. Never a silent guess.
+  it("NW2: 'Operator A three' does not exact-match 'Operator A3' (the space is not dropped) -- offered as the nearest name instead", () => {
+    const opA3 = { id: "oa3x", displayName: "Operator A3", employeeRef: null, active: true };
+    const res = resolveCommand(
+      cmd({ operator: "Operator A three" }),
+      baseCtx({ operators: [opA3] }),
+    );
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "unknown",
+        field: "operator",
+        text: "Operator A three",
+        suggestions: [{ id: "oa3x", label: "Operator A3", word: "Operator A3" }],
+      },
+    });
+  });
+
+  // NW3: "one" inside "Stone Cell" is a SUBSTRING, never a standalone word --
+  // `\b`-anchored, so it is left untouched; "Stone Cell" still resolves as
+  // its own plain name, never corrupted into something with a stray "1".
+  it("NW3: 'one' inside 'Stone Cell' is untouched -- resolves as its own name, unaffected", () => {
+    const stoneCell = { id: "stc", name: "Stone Cell", path: "plant_1.assembly.line_1.stone_cell" };
+    const ctx = baseCtx({
+      cells: [...cells, stoneCell],
+      nodeById: new Map([...nodeById, [stoneCell.id, stoneCell]]),
+      offeredAt: (nodeId: string) => (nodeId === "stc" ? [{ id: "ha" }] : offeredAt(nodeId)),
+    });
+    const res = resolveCommand(cmd({ place: ["Stone Cell"] }), ctx);
+    expect(res.ok).toBe(true);
+    if (res.ok && res.resolved.intent === "assign") expect(res.resolved.nodeId).toBe("stc");
   });
 });

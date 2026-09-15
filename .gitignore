@@ -62,6 +62,12 @@ data/voice/model/
 # built it -- never committed.
 data/voice/whisper/
 
+# S59-e (R-421): the bar's own dev-only trace -- what it heard, what the
+# model answered, what it read and what it did -- appended locally by the
+# dev server's `/__trace` handler (`src/lib/voice/traceServer.ts`). Local
+# debugging output, never committed.
+data/voice/trace/
+
 # The per-machine Claude Code resume file. It says "personal -- gitignored, not
 # shared" in its own first line, and it is written for whoever is sitting at
 # this checkout: it names local paths, what is running on the machine, and how

@@ -54,6 +54,28 @@
  * own `until`) stays plain `decodeDayWord`, so a repeat kind there falls
  * through to `return undefined` and garbles the whole form, the same way a
  * week kind already does everywhere but a copy's `from`/`to`.
+ *
+ * S59 (brief docs/agent-briefs/s59-b-bar-brief.md, F-149): every NAME string
+ * the model can write (`operator`, `product`, `with`, `other`, every element
+ * of `place`/`toPlace`, and a non-null `shift`) must hold at least one letter
+ * or digit (`/\p{L}|\p{N}/u`) -- a string of pure punctuation (`"],"`, the
+ * model's own garbled answer that started this) is refused the same way a
+ * missing field already is, so the whole form is garbled and the bar falls
+ * back to the rules parser, which refuses or reads the sentence cleanly. Day
+ * words (`iso` strings), clock times and headcounts are UNCHANGED -- this is
+ * a NAME check, not a general string check. `isValidName`/`isNonEmptyNameArray`/
+ * `isNameArray` replace the pre-S59 `isNonEmptyString`/`isNonEmptyStringArray`/
+ * `isStringArray` everywhere a NAME is being checked (every call site below),
+ * one letter/digit check narrower; `isNonEmptyString` itself stays, still
+ * used for `decodeDayWord`'s own `iso` field, which is not a name.
+ *
+ * S60-b (docs/agent-briefs/s60-b-which-part-brief.md, R-422): the maintainer,
+ * 15 Sept -- "it can also ask what product if I don't give it one". `product`
+ * may now decode as the empty string on `assign`, `book` and `headcount`
+ * ONLY (`isValidProductOrEmpty`, used nowhere else) -- "no part was said,
+ * the resolver asks which"; F-149's letter-or-digit rule keeps applying the
+ * moment the string is non-empty, so a garbled non-empty product is still
+ * refused exactly as before. Every other name field is untouched.
  */
 import type {
   Adjust,
@@ -81,16 +103,43 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-function isNonEmptyStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
+/** S59 (F-149): true for any non-empty string that holds at least one letter
+ *  or digit, any script (`\p{L}`/`\p{N}`) -- a string of pure punctuation
+ *  (`"],"`, `","`) is garbled, never a name. */
+function hasLetterOrDigit(value: string): boolean {
+  return /\p{L}|\p{N}/u.test(value);
 }
 
-/** S49 (R-397): `place` for a removal or a move may be empty ("wherever the
- *  person is") -- still an array of non-empty strings, just possibly none of
- *  them. `assign`/`book` keep the non-empty check above (a create always
- *  needs a place). */
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(isNonEmptyString);
+/** S59 (F-149): `isNonEmptyString` narrowed to a NAME -- operator, product,
+ *  `with`, `other` and a non-null `shift` all go through this instead. */
+function isValidName(value: unknown): value is string {
+  return isNonEmptyString(value) && hasLetterOrDigit(value);
+}
+
+/** S60-b (R-422, brief §2): a product may be the EMPTY string on assign,
+ *  book and headcount ONLY -- "no part was said, the resolver asks which".
+ *  F-149's letter-or-digit rule keeps applying to a NON-empty product (a
+ *  string of pure punctuation is still garbled); every other name field
+ *  (`operator`, `with`, `other`, `place`/`toPlace` elements, `shift`) stays
+ *  on plain `isValidName`, unchanged. */
+function isValidProductOrEmpty(value: unknown): value is string {
+  return value === "" || isValidName(value);
+}
+
+/** S59 (F-149): a `place`/`toPlace` whose every element is a valid name --
+ *  and non-empty (assign/book/headcount's own required `place`, and
+ *  `decodeToPlace`'s non-null branch, which a create always needs). */
+function isNonEmptyNameArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isValidName);
+}
+
+/** S49 (R-397) + S59 (F-149): `place` for a removal or a move may be empty
+ *  ("wherever the person is") -- still an array of names, just possibly none
+ *  of them; every element PRESENT must be a valid name. `assign`/`book`/
+ *  `headcount` keep the non-empty check above (a create, or an existing run's
+ *  own edit, always needs a place). */
+function isNameArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(isValidName);
 }
 
 function isInt(value: unknown): value is number {
@@ -123,7 +172,9 @@ function decodeClockTimeOrNull(value: unknown): ClockTime | null | undefined {
  *  before this field existed stops decoding now. */
 function decodeShift(value: unknown): string | null | undefined {
   if (value === undefined || value === null) return null;
-  return isNonEmptyString(value) ? value : undefined;
+  // S59 (F-149): a shift's name is a NAME too -- garbled if it holds no
+  // letter or digit.
+  return isValidName(value) ? value : undefined;
 }
 
 /** `undefined` means "invalid"; `null` is itself a valid answer ("the day
@@ -222,13 +273,15 @@ function decodeHeadcountValue(value: unknown): number | undefined {
 
 function decodeToPlace(value: unknown): string[] | null | undefined {
   if (value === null) return null;
-  return isNonEmptyStringArray(value) ? value : undefined;
+  // S59 (F-149): every element must be a valid name.
+  return isNonEmptyNameArray(value) ? value : undefined;
 }
 
 function decodeAssign(obj: Record<string, unknown>): AssignCommand | null {
-  if (!isNonEmptyString(obj.operator)) return null;
-  if (!isNonEmptyString(obj.product)) return null;
-  if (!isNonEmptyStringArray(obj.place)) return null;
+  if (!isValidName(obj.operator)) return null;
+  // S60-b (R-422): the product may be "" -- no part named at all.
+  if (!isValidProductOrEmpty(obj.product)) return null;
+  if (!isNonEmptyNameArray(obj.place)) return null;
   // S58 (R-416): assign's own `day` accepts the two REPEAT kinds too.
   const day = decodeDayWordOrRepeat(obj.day);
   if (day === undefined) return null;
@@ -257,8 +310,9 @@ function decodeAssign(obj: Record<string, unknown>): AssignCommand | null {
 }
 
 function decodeBook(obj: Record<string, unknown>): BookCommand | null {
-  if (!isNonEmptyString(obj.product)) return null;
-  if (!isNonEmptyStringArray(obj.place)) return null;
+  // S60-b (R-422): the product may be "" -- no part named at all.
+  if (!isValidProductOrEmpty(obj.product)) return null;
+  if (!isNonEmptyNameArray(obj.place)) return null;
   const headcount = decodeOptionalHeadcount(obj.headcount);
   if (headcount === undefined) return null;
   // S58 (R-416): book's own `day` accepts the two REPEAT kinds too.
@@ -286,8 +340,8 @@ function decodeBook(obj: Record<string, unknown>): BookCommand | null {
 }
 
 function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
-  if (!isNonEmptyString(obj.operator)) return null;
-  if (!isStringArray(obj.place)) return null;
+  if (!isValidName(obj.operator)) return null;
+  if (!isNameArray(obj.place)) return null;
   const day = decodeDayWord(obj.day);
   if (day === undefined) return null;
   const span = decodeSpan(obj.span);
@@ -341,8 +395,8 @@ function decodeAdjust(value: unknown): Adjust | null | undefined {
 }
 
 function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
-  if (!isNonEmptyString(obj.operator)) return null;
-  if (!isStringArray(obj.place)) return null;
+  if (!isValidName(obj.operator)) return null;
+  if (!isNameArray(obj.place)) return null;
   const toPlace = decodeToPlace(obj.toPlace);
   if (toPlace === undefined) return null;
   const day = decodeDayWord(obj.day);
@@ -379,13 +433,13 @@ function decodeMove(obj: Record<string, unknown>): MoveCommand | null {
 }
 
 /** S55 (R-406): "cover Sam with Ana on Cell 1 today" -- `place` may be empty
- *  ("wherever the operator is", the same reading `isStringArray` already
+ *  ("wherever the operator is", the same reading `isNameArray` already
  *  gives unassign/move). R-402's shift-or-hours invariant, unchanged:
  *  non-null `shift` implies `span` null. */
 function decodeReplace(obj: Record<string, unknown>): ReplaceCommand | null {
-  if (!isNonEmptyString(obj.operator)) return null;
-  if (!isNonEmptyString(obj.with)) return null;
-  if (!isStringArray(obj.place)) return null;
+  if (!isValidName(obj.operator)) return null;
+  if (!isValidName(obj.with)) return null;
+  if (!isNameArray(obj.place)) return null;
   const day = decodeDayWord(obj.day);
   if (day === undefined) return null;
   const span = decodeSpan(obj.span);
@@ -407,9 +461,9 @@ function decodeReplace(obj: Record<string, unknown>): ReplaceCommand | null {
 /** S55 (R-406): "swap Sam and Ana on Cell 1 tomorrow" -- same shape as
  *  `decodeReplace` with `other` in place of `with`. */
 function decodeSwap(obj: Record<string, unknown>): SwapCommand | null {
-  if (!isNonEmptyString(obj.operator)) return null;
-  if (!isNonEmptyString(obj.other)) return null;
-  if (!isStringArray(obj.place)) return null;
+  if (!isValidName(obj.operator)) return null;
+  if (!isValidName(obj.other)) return null;
+  if (!isNameArray(obj.place)) return null;
   const day = decodeDayWord(obj.day);
   if (day === undefined) return null;
   const span = decodeSpan(obj.span);
@@ -436,7 +490,7 @@ function decodeSwap(obj: Record<string, unknown>): SwapCommand | null {
  *  the grammar's job, not the decoder's (see `decodeDayOrWeekWord`'s own
  *  comment). */
 function decodeCopy(obj: Record<string, unknown>): CopyCommand | null {
-  if (!isStringArray(obj.place)) return null;
+  if (!isNameArray(obj.place)) return null;
   const from = decodeDayOrWeekWord(obj.from);
   if (from === undefined) return null;
   const to = decodeDayOrWeekWord(obj.to);
@@ -447,14 +501,14 @@ function decodeCopy(obj: Record<string, unknown>): CopyCommand | null {
 /** S58 (R-413, design section 19.103/D132 item 2): "split Sam's block at
  *  noon" -- board-answered like `replace`/`swap`/`copy` above, never part of
  *  a `several`. `place` may be empty ("wherever the operator is", the same
- *  reading `isStringArray` already gives move/unassign); `at` is REQUIRED
+ *  reading `isNameArray` already gives move/unassign); `at` is REQUIRED
  *  and never null -- unlike every other clock-time-bearing field in this
  *  file, `SplitCommand` has no "the block's own hours" reading. Plain
  *  `decodeDayWord`, not `decodeDayWordOrRepeat`: a repeat kind on a split's
  *  `day` is garbled too (only assign/book's own `day` admits one). */
 function decodeSplit(obj: Record<string, unknown>): SplitCommand | null {
-  if (!isNonEmptyString(obj.operator)) return null;
-  if (!isStringArray(obj.place)) return null;
+  if (!isValidName(obj.operator)) return null;
+  if (!isNameArray(obj.place)) return null;
   const day = decodeDayWord(obj.day);
   if (day === undefined) return null;
   const at = decodeClockTime(obj.at);
@@ -472,8 +526,9 @@ function decodeSplit(obj: Record<string, unknown>): SplitCommand | null {
  *  EXISTING run rather than creating hours); `headcount` is REQUIRED, 1-99
  *  (`decodeHeadcountValue`, above). */
 function decodeHeadcountCommand(obj: Record<string, unknown>): HeadcountCommand | null {
-  if (!isNonEmptyString(obj.product)) return null;
-  if (!isNonEmptyStringArray(obj.place)) return null;
+  // S60-b (R-422): the product may be "" -- no part named at all.
+  if (!isValidProductOrEmpty(obj.product)) return null;
+  if (!isNonEmptyNameArray(obj.place)) return null;
   const day = decodeDayWord(obj.day);
   if (day === undefined) return null;
   const span = decodeSpan(obj.span);

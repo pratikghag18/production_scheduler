@@ -5,12 +5,14 @@ import fieldStyles from "@/components/Field.module.css";
 import styles from "./CommandBar.module.css";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
 import type { Recognizer, RecognizerHandle } from "@/lib/voice/recognizer";
+import { renderLine, type TraceEntry } from "@/lib/voice/trace";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
 import type {
   AssignCommand,
   BookCommand,
   UnassignCommand,
   MoveCommand,
+  HeadcountCommand,
   SingleCommand,
   Command,
   Attach,
@@ -136,6 +138,24 @@ export interface LotResult {
  * purpose: they are not passed anywhere that needs referential stability, and
  * a `useCallback` ring here would just be three hooks feeding each other's
  * dependency arrays for no benefit.
+ *
+ * S60-b (docs/agent-briefs/s60-b-which-part-brief.md, R-422): the RULES
+ * grammar (`parse.ts`) can now leave `product: ""` on a part-less sentence,
+ * and this file's own `questionToStatus` renders that as "Which part? <cell>
+ * makes: " with the cell's own menu as buttons (see the `kind === "unknown"`
+ * branch below). The MODEL path (`reader`, S44-b) was never trained on a
+ * part-less sentence at all -- every row in its training set names a part --
+ * so a model reading of one is expected to GUESS a part rather than answer
+ * with an empty string. That is fine, on purpose: the guess is never run
+ * unseen. `applyReading`'s own success path hands the model's `command`
+ * (guessed part included) to `runCommand`, whose readout is what actually
+ * shows on screen, suffixed " · read by the model" -- the person sees the
+ * GUESSED part named in that readout, exactly the same as any other model
+ * reading, before anything is written (`onOpen`/`onBook`/etc. still wait on
+ * the pop-up or a further confirm). A future training pass that teaches the
+ * model this shape (S56's successor) only ever needs to start emitting
+ * `product: ""` itself -- this file needs no change either way, since it
+ * already renders whatever `resolveCommand` answers.
  */
 
 type Status =
@@ -165,15 +185,51 @@ type Status =
 const YES_SUFFIX = " — say or type yes to do it, no to leave it.";
 
 /** S47: recognised by `submitText` before parsing (case-insensitive,
- *  trimmed, trailing punctuation ignored -- see `normalizeWord`). These five
- *  confirm ANY block question, or a pop-up, regardless of kind. "remove it"
- *  and "move it" are NOT here -- review fix: they used to be, which meant
- *  saying "remove it" to a standing MOVE question ran the move (the word
- *  was never checked against what was actually being asked). They are
- *  matched against the standing question's own kind instead, in
- *  `confirmsQuestion` below. */
-const UNIVERSAL_CONFIRM_WORDS = new Set(["yes", "yes please", "confirm", "do it", "ok"]);
-const CANCEL_WORDS = new Set(["no", "cancel", "leave it", "stop"]);
+ *  trimmed, every punctuation character stripped -- see `normalizeWord`).
+ *  These confirm ANY block question, or a pop-up, regardless of kind.
+ *  "remove it" and "move it" are NOT here -- review fix: they used to be,
+ *  which meant saying "remove it" to a standing MOVE question ran the move
+ *  (the word was never checked against what was actually being asked). They
+ *  are matched against the standing question's own kind instead, in
+ *  `confirmsQuestion` below.
+ *
+ *  S59 (F-150, design §19.104/D133 item 2): "the confirm words were the
+ *  developer's, not the floor's" -- the maintainer said "yeah" to a standing
+ *  question and nothing happened. Yeah/yep/yup/sure/okay/go ahead/go on/
+ *  correct/yes yes join the confirm set; nope/nah/never mind/forget it
+ *  join the cancel set -- the floor's own words, not a developer's guess at
+ *  them.
+ *
+ *  S60-b (the S59 reviewer, 15 Sept): "right" is WITHDRAWN -- it is a floor
+ *  filler word ("right, so..."), not a confirm, and would confirm a standing
+ *  REMOVAL question the person never meant to say yes to. Every other word
+ *  above stays. */
+const UNIVERSAL_CONFIRM_WORDS = new Set([
+  "yes",
+  "yes please",
+  "confirm",
+  "do it",
+  "ok",
+  "yeah",
+  "yep",
+  "yup",
+  "sure",
+  "okay",
+  "go ahead",
+  "go on",
+  "correct",
+  "yes yes",
+]);
+const CANCEL_WORDS = new Set([
+  "no",
+  "cancel",
+  "leave it",
+  "stop",
+  "nope",
+  "nah",
+  "never mind",
+  "forget it",
+]);
 
 /**
  * S47 review fix: true when `word` confirms a block question of `kind` --
@@ -207,11 +263,17 @@ function isConfirmOrCancelWord(word: string): boolean {
   );
 }
 
+/** S59 (F-150): strips EVERY punctuation character, not only a trailing one
+ *  -- a recogniser's "Yes." must match the same as a typed "yes", and so must
+ *  "yeah," or "Okay!". The trailing `.trim()` cleans up any whitespace a
+ *  removed character leaves behind (a stray leading/trailing space); the
+ *  words themselves never carry the punctuation this strips. */
 function normalizeWord(value: string): string {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[.!?,;:]+$/, "");
+    .replace(/[.!?,;:]+/g, "")
+    .trim();
 }
 
 interface CandidateButton {
@@ -273,12 +335,48 @@ export interface CommandBarProps {
    *  (the default) renders no button -- byte for byte the pre-S46-a
    *  behaviour. */
   recognizer?: Recognizer | null;
+  /**
+   * S59-e (R-421, brief docs/agent-briefs/s59-e-trace-brief.md §3): which
+   * recogniser `recognizer` actually is -- `BoardPage`'s own choice between
+   * the local (whisper.cpp) one and the browser's, mirrored here since this
+   * file never imports either concretely (no second door on that either).
+   * Used only as the trace entry's `by` for a spoken sentence; omitted (or
+   * `recognizer` unset) falls back to `"browser"`, the pre-S59-e default.
+   *
+   * S60-b (the S59 reviewer, 15 Sept): widened from a plain value to a
+   * GETTER -- which engine actually ran is a per-clip fact once
+   * `localRecognizer.ts`'s `withFallback` can fall back mid-session
+   * (LREC-17/18's own `onEngine`), never a static configuration fact fixed
+   * at render (the bug this fixes: a clip that fell back to the browser was
+   * traced as "local" regardless, since the OLD plain-value prop was read
+   * once, before any clip had run). Read here at the moment the trace
+   * entry's `by` is actually set (`onFinal`, below), never at render --
+   * CB-t-8 pins that a render between sessions does not change what an
+   * IN-FLIGHT clip is traced as.
+   */
+  recognizerName?: () => "browser" | "local";
   /** S47 / R-395: told what is in question -- the ids to outline and which
    *  colour -- whenever a remove/move/retime question stands, and `null`
    *  whenever it is answered, cleared or this component unmounts. S51: a
    *  several's finished lot status widens this to a LIST -- one outline per
    *  block a removal or a move in it would touch, each its own kind. */
   onHighlight?: (highlight: Highlight | Highlight[] | null) => void;
+  /**
+   * S59 / R-419 (design §19.104/D133 item 3): called when the "Show that
+   * day" button on a `day_off_board` question is pressed, with the target
+   * VERBATIM as the question names it (`question.text` -- "yesterday",
+   * "tomorrow", a lowercase weekday name, an ISO date, or a week word). The
+   * bar itself does no date arithmetic (CLAUDE.md §4/commandPurity.test.ts:
+   * `resolve.ts` never reads a clock, and this file holds no copy of the
+   * board's own day axis beyond `ctx.days`) -- `BoardPage` (the caller) owns
+   * turning that word into a window move through the store's own
+   * `setWindowStartDate`/`setWindowDayCount`/`shiftWindowByDays`. Once the
+   * window actually moves, the NEW `ctx` this component receives as a prop
+   * re-runs the same command that asked the question -- see the effect keyed
+   * on `ctx` below. Omit to render the button inert (a caller that has not
+   * wired window control at all).
+   */
+  onShowDay?: (target: string) => void;
   /**
    * S47 / R-385/R-384: called when a confirm word (`yes`, `confirm`, ...)
    * arrives and no block question stands. Three outcomes, review fix
@@ -320,6 +418,101 @@ const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
 /** The readout's day is an ISO token (`resolve.ts` cannot import the date
  *  seam); this is the one place it is rendered through it (brief §3). */
 const ISO_DAY = /\d{4}-\d{2}-\d{2}/;
+const FULL_ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** S60-b (the S59 reviewer, 15 Sept): `resolve.ts`'s own `WEEKDAY_FULL_NAMES`
+ *  (0 = Sunday), mirrored -- not imported (this file imports no VALUE from
+ *  `resolve.ts`, only types; `BoardPage.tsx`'s own `SHOW_DAY_WEEKDAY_NAMES`
+ *  already mirrors the same list for the same reason). Used only to tell
+ *  whether a `day_off_board` question's own weekday-name `text` is now on
+ *  the board (`isTargetOnBoard`, below) -- never to compute a day, only to
+ *  read one `ctx.days` already carries (`BoardDay.weekday`). */
+const SHOW_DAY_WEEKDAY_NAMES = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+];
+
+/** S60-b: true for either half of a `CopyCommand` naming a WEEK (D130 item
+ *  4's own three kinds) -- the one shape `day_off_board`'s `text` ever names
+ *  by its FIRST missing day alone (`resolve.ts`'s own `resolveWeekDays`)
+ *  rather than the whole week; `isTargetOnBoard` widens the check to all
+ *  seven when this is true. No other command ever carries one of these three
+ *  kinds (`DayWord`'s own doc: legal only on a copy's `from`/`to`). */
+function commandNamesAWeek(command: Command): boolean {
+  if (command.intent !== "copy") return false;
+  const isWeekKind = (d: { kind: string }): boolean =>
+    d.kind === "this_week" || d.kind === "next_week" || d.kind === "last_week";
+  return isWeekKind(command.from) || isWeekKind(command.to);
+}
+
+/** S60-b: the seven ISOs of the calendar week `iso` falls in, MONDAY first
+ *  -- `resolve.ts`'s own `resolveWeekDays` is explicitly "seven, Monday
+ *  first" (its own comment), never Sunday first (`SHOW_DAY_WEEKDAY_NAMES`'s
+ *  own 0=Sunday convention is for a single weekday NAME, a different axis --
+ *  mixing the two up here would silently check the wrong seven days). Built
+ *  with the same UTC-noon-safe `Date` arithmetic `renderReadout` below
+ *  already uses to turn an ISO token into a label, the one place this file
+ *  touches a `Date` at all; never `ctx`'s own day axis
+ *  (`wallToOffset`/`wallOf`), which stays untouched. */
+function isoWeekOf(iso: string): string[] {
+  const start = new Date(`${iso}T00:00:00Z`);
+  const daysFromMonday = (start.getUTCDay() + 6) % 7; // Sun(0)->6 .. Sat(6)->5, Mon(1)->0
+  start.setUTCDate(start.getUTCDate() - daysFromMonday);
+  const out: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start);
+    d.setUTCDate(start.getUTCDate() + i);
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/**
+ * S60-b (the S59 reviewer, 15 Sept): is `pending.target` -- the exact word
+ * `question.text` named when "Show that day" was pressed -- actually on the
+ * board in `ctx` now? Fixes a real bug: the rerun effect used to fire on
+ * ANY `ctx` change at all (a density click, a background refetch) and
+ * consume the one-shot `pendingRerunRef` against whichever `ctx` happened to
+ * be current, re-asking the SAME `day_off_board` question when the window
+ * had not actually moved yet -- and, worse, the LATER `ctx` that really did
+ * include the target then had nothing left pending to run. This is the
+ * precheck that lets the effect below leave `pendingRerunRef` alone until a
+ * `ctx` that actually contains the target arrives.
+ *
+ * "today"/"tomorrow"/"yesterday" are read off `ctx.todayIndex` (the same
+ * index arithmetic `resolve.ts`'s own `resolveDay` already does, never a
+ * calendar computation -- `ctx.todayIndex + 1`/`- 1` is a WINDOW position,
+ * not a date); an ISO token (a `date` kind, or a week's own first missing
+ * day) is compared directly, widened to the whole week
+ * (`commandNamesAWeek`/`isoWeekOf`) when the original command named one; a
+ * weekday name is read off `BoardDay.weekday`, never computed.
+ */
+function isTargetOnBoard(
+  pending: { command: Command; target: string },
+  ctx: ResolveContext,
+): boolean {
+  const { command, target } = pending;
+  if (target === "today") return ctx.todayIndex !== null;
+  if (target === "tomorrow") {
+    return ctx.todayIndex !== null && ctx.days.some((d) => d.index === ctx.todayIndex! + 1);
+  }
+  if (target === "yesterday") {
+    return ctx.todayIndex !== null && ctx.days.some((d) => d.index === ctx.todayIndex! - 1);
+  }
+  if (FULL_ISO_DAY.test(target)) {
+    const need = commandNamesAWeek(command) ? isoWeekOf(target) : [target];
+    const have = new Set(ctx.days.map((d) => d.iso));
+    return need.every((iso) => have.has(iso));
+  }
+  const weekdayIndex = SHOW_DAY_WEEKDAY_NAMES.indexOf(target);
+  if (weekdayIndex >= 0) return ctx.days.some((d) => d.weekday === weekdayIndex);
+  return false;
+}
 
 /** The one sentence shown when the bar cannot read the line (brief §6);
  *  `bad_time`/`bad_day` get the offending text named first. */
@@ -375,7 +568,9 @@ export function CommandBar({
   onRunLot,
   reader = null,
   recognizer = null,
+  recognizerName,
   onHighlight,
+  onShowDay,
   onConfirmWord,
   onCancelWord,
   onEscapeIdle,
@@ -415,6 +610,22 @@ export function CommandBar({
   // START -- kept anyway, belt and braces, exactly as those two refs are)
   // is discarded rather than clobbering whatever the bar is doing by then.
   const lotRunSeqRef = useRef(0);
+  // S59 (R-419): the command a "Show that day" press is waiting to re-run,
+  // once the NEW window's `ctx` arrives as a prop (the effect keyed on `ctx`
+  // below) -- `null` whenever no such press is outstanding. A ref, not
+  // state, same reason as `heldRef`/`lotRef`: read and written from event
+  // handlers and one effect, never rendered directly. Cleared on a typed
+  // edit, a cancel word or Escape (the same three the brief names) -- a
+  // stale rerun must never fire against a window the person has since moved
+  // away from by hand, or under a sentence they have since abandoned.
+  //
+  // S60-b (the S59 reviewer, 15 Sept): widened to carry `target` (the exact
+  // word `question.text` named) alongside `command` -- the effect below
+  // needs it to check `isTargetOnBoard` before consuming this, so a `ctx`
+  // change that does not yet include the target leaves it standing instead
+  // of firing (and re-asking the same question) against a `ctx` that was
+  // never going to answer differently.
+  const pendingRerunRef = useRef<{ command: Command; target: string } | null>(null);
   // S44-b: the in-flight reading's own abort controller (null when nothing
   // is pending) and a sequence number bumped by every Enter, Escape and edit
   // so a reading that settles after a newer one has started is discarded
@@ -431,6 +642,58 @@ export function CommandBar({
   // findings 1-3).
   const recognitionRef = useRef<RecognizerHandle | null>(null);
   const recognitionSeqRef = useRef(0);
+  // S59-e (R-421, brief §3): one trace entry in progress for the CURRENT
+  // sentence, `null` whenever none is open. A ref, not state, same reason as
+  // `heldRef`/`lotRef` above: read and written from event handlers and one
+  // `.then()`, never rendered.
+  const traceRef = useRef<TraceEntry | null>(null);
+
+  /** S59-e: posts `entry` to the dev server's `/__trace`, fire-and-forget,
+   *  errors swallowed (both a synchronous throw -- an invalid URL under a
+   *  test's fetch, say -- and a rejected promise), only when
+   *  `import.meta.env.DEV` (brief §3: "a build without it changes nothing in
+   *  the bar"). */
+  function postTrace(entry: TraceEntry): void {
+    if (!import.meta.env.DEV) return;
+    try {
+      fetch("/__trace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: renderLine(entry),
+      }).catch(() => {});
+    } catch {
+      // Never throws -- see above.
+    }
+  }
+
+  /** S59-e: the sentence's life ends here (brief §3: "a readout written, a
+   *  cancel, a new sentence") -- posts whatever the entry holds and clears
+   *  it. A no-op when nothing is open (every call site below is safe to
+   *  call unconditionally). */
+  function finishTrace(): void {
+    const entry = traceRef.current;
+    if (!entry) return;
+    traceRef.current = null;
+    postTrace(entry);
+  }
+
+  /** S59-e: starts a fresh entry for `heard`/`by` -- flushes (posts) any
+   *  entry still open first, since starting one IS "a new sentence" ending
+   *  the previous one's life (brief §3). `model` defaults to "no reader",
+   *  overwritten by `applyReading` the moment a real reader answers. */
+  function startTrace(heard: string, by: "typed" | "browser" | "local"): void {
+    finishTrace();
+    traceRef.current = {
+      at: new Date().toISOString(),
+      heard,
+      by,
+      model: { skipped: "no reader" },
+      read: "",
+      asked: null,
+      answered: null,
+      ran: [],
+    };
+  }
 
   // S46-a: stop a listening session on unmount rather than leak it, and
   // retire its generation so a callback that fires after teardown is a
@@ -471,6 +734,32 @@ export function CommandBar({
     return () => onHighlightRef.current?.(null);
   }, [status]);
 
+  // S59 (R-419): re-runs a "Show that day" press's held command once the
+  // window has actually moved -- `ctx` is the SAME object from one render to
+  // the next until `BoardPage`'s own `commandCtx` memo recomputes, which only
+  // happens once the store's window state changes AND the board's data for
+  // the new window has landed, so this effect fires exactly when "the new
+  // window's ctx arrives" (brief §3), never against the ctx that produced the
+  // `day_off_board` question in the first place. `pendingRerunRef` is `null`
+  // on every OTHER render (the ordinary case), so this is a no-op then.
+  //
+  // S60-b (the S59 reviewer, 15 Sept): this effect used to fire (and consume
+  // the one-shot ref) on ANY `ctx` change at all -- a density click, a
+  // background refetch -- not only the window actually moving; a `ctx` that
+  // still did not include the target just re-asked the SAME `day_off_board`
+  // question and threw the pending rerun away, so the LATER `ctx` that
+  // really did move never got a turn. `isTargetOnBoard` gates the consume:
+  // a `ctx` without the target leaves `pendingRerunRef` standing (this
+  // effect simply runs again, a no-op, on the next change) instead.
+  useEffect(() => {
+    if (pendingRerunRef.current && isTargetOnBoard(pendingRerunRef.current, ctx)) {
+      const command = pendingRerunRef.current.command;
+      pendingRerunRef.current = null;
+      runCommand(command);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
   function renderReadout(readout: string): string {
     return readout.replace(ISO_DAY, (iso) =>
       formatDayLabel(new Date(`${iso}T00:00:00Z`), dateFormat, zone),
@@ -488,7 +777,27 @@ export function CommandBar({
    * readout status, append ... to the readout text"). Every existing call
    * site omits it, which is byte-for-byte the pre-S44-b behaviour.
    */
+  /** S59-e (brief §3): records what `status` means for the trace entry
+   *  currently open, if any -- a resolver/expand-phase "question" sets
+   *  `asked`; a "readout" (an ordinary one, or `questionToStatus`'s own
+   *  `nothing_to_do` case) ends the entry's life the same as any other
+   *  readout. Never touches `status` itself -- called right after the
+   *  `setStatus` that already shows it. */
+  function traceQuestionStatus(status: Status): void {
+    if (!traceRef.current) return;
+    if (status.kind === "question") {
+      traceRef.current.asked = status.message;
+    } else if (status.kind === "readout") {
+      finishTrace();
+    }
+  }
+
   function runCommand(command: Command, suffix?: string): void {
+    // S59-e (brief §3): what the bar read, regardless of how this resolves
+    // (a write, a question, or a several) -- `command` here, not whatever
+    // `expandCommand` turns it into below, since a lot's own numbered steps
+    // resolve their OWN commands through `resolveLotStep`, never this one.
+    if (traceRef.current) traceRef.current.read = formatCommand(command);
     // S55 (R-406 to R-410, D130/brief §2): `expandCommand` runs FIRST, before
     // the S51 several intercept below -- a board-answered sentence
     // (`replace`/`swap`/`copy`, `everyone` on a removal/move, an absence's
@@ -505,7 +814,9 @@ export function CommandBar({
       // ORIGINAL sentence's command is what a candidate button must
       // substitute a field into and re-run (see `pickCandidate`'s own S55
       // comment below).
-      setStatus(questionToStatus(expanded.question, command));
+      const next = questionToStatus(expanded.question, command);
+      setStatus(next);
+      traceQuestionStatus(next);
       return;
     }
     const resolvedCommand = expanded.command;
@@ -547,6 +858,12 @@ export function CommandBar({
         }
       }
       setStatus({ kind: "readout", message: renderReadout(resolved.readout) + (suffix ?? "") });
+      // S59-e (brief §3): a readout written ends the sentence's life --
+      // `resolved.readout` is the ONE command this run actually wrote
+      // (never the `+ suffix` UI annotation, which says WHY it was read,
+      // not what ran).
+      if (traceRef.current) traceRef.current.ran.push(resolved.readout);
+      finishTrace();
       return;
     }
     // `resolvedCommand`, not `command`: when `expandCommand` collapsed a
@@ -555,7 +872,9 @@ export function CommandBar({
     // handed to `resolveCommand` and so what a candidate button must
     // substitute a field into -- for an ordinary sentence the two are the
     // same object, so this is unchanged from before S55 there.
-    setStatus(questionToStatus(resolution.question, resolvedCommand));
+    const next = questionToStatus(resolution.question, resolvedCommand);
+    setStatus(next);
+    traceQuestionStatus(next);
   }
 
   /** S51: starts a fresh lot from a several's inner commands and resolves
@@ -628,7 +947,15 @@ export function CommandBar({
       setStatus(base);
       return;
     }
-    setStatus({ ...base, message: `${lot.index + 1} of ${lot.commands.length}: ${base.message}` });
+    const next = {
+      ...base,
+      message: `${lot.index + 1} of ${lot.commands.length}: ${base.message}`,
+    };
+    setStatus(next);
+    // S59-e (brief §3): a lot's own per-step question, numbered exactly as
+    // shown -- the entry's single `asked` is the CURRENT question, same as
+    // a single sentence's.
+    if (traceRef.current) traceRef.current.asked = next.message;
   }
 
   /**
@@ -739,13 +1066,17 @@ export function CommandBar({
     const shown = n > 6 ? lot.done.slice(0, 5) : lot.done;
     const readouts = shown.map((r, i) => `${i + 1}. ${renderReadout(r.readout)}`).join("; ");
     const readoutText = n > 6 ? `${readouts}; … and ${n - 5} more` : readouts;
+    const message = `${n} commands ready: ${readoutText} — say or type yes to do them, no to leave them.`;
     setStatus({
       kind: "question",
-      message: `${n} commands ready: ${readoutText} — say or type yes to do them, no to leave them.`,
+      message,
       candidates: [{ key: "__do_all__", label: `Do all ${n}`, onClick: () => runLotNow() }],
       blockHighlight: buildLotHighlights(lot.done),
       lot: true,
     });
+    // S59-e (brief §3): the lot's own single question, same as a per-step
+    // one above.
+    if (traceRef.current) traceRef.current.asked = message;
   }
 
   /**
@@ -785,6 +1116,17 @@ export function CommandBar({
       if (lotRunSeqRef.current !== mySeq) return;
       runningLotRef.current = false;
       lotRef.current = null;
+      // S59-e (brief §3): every command the lot actually wrote, in order --
+      // `result.done` of `resolved` on a partial failure, all of them on a
+      // clean sweep -- and the lot's run always ends the entry's life
+      // either way (a busy "Working…" never itself opens a NEW entry, so
+      // this is the same one the lot's own question set `asked` on).
+      if (traceRef.current) {
+        traceRef.current.ran.push(
+          ...resolved.slice(0, result.error === null ? n : result.done).map((r) => r.readout),
+        );
+      }
+      finishTrace();
       if (result.error === null) {
         setStatus({ kind: "readout", message: `Done: ${n} commands.` });
         setText("");
@@ -825,6 +1167,12 @@ export function CommandBar({
     const parsed = parseCommand(sentence);
     if (!parsed.ok) {
       heldRef.current = null;
+      // S59-e (brief §3): "the failure kind" -- `read` when the bar could
+      // not read a command at all. The entry's life does NOT end here
+      // (brief §3's own three triggers -- a readout, a cancel, a new
+      // sentence -- and a bare shape hint is none of them): it stays open,
+      // posted once one of those actually happens.
+      if (traceRef.current) traceRef.current.read = parsed.failure.kind;
       const base = failureToStatus(parsed.failure);
       setStatus(
         reason === null
@@ -839,8 +1187,24 @@ export function CommandBar({
     );
   }
 
+  /** S59-e (brief §2/§3): the trace entry's own `model` field for `result`
+   *  -- the raw answer when the reader got far enough to have one (a form,
+   *  or a garbled answer past "no message content"), the plain reason
+   *  otherwise. `readSentence.ts`'s own `reason`s map onto the brief's own
+   *  words ("no service", "timeout", "network") rather than the readout's
+   *  phrasing (`whyForReason`), which is written for a person, not a log. */
+  function traceModelField(result: Reading): TraceEntry["model"] {
+    if (result.ok) return { raw: result.raw ?? "" };
+    if (result.reason === "garbled" && result.raw !== undefined) return { raw: result.raw };
+    if (result.reason === "no-service") return { skipped: "no service" };
+    if (result.reason === "timeout") return { skipped: "timeout" };
+    if (result.reason === "unavailable") return { skipped: "network" };
+    return { skipped: "garbled" };
+  }
+
   /** S44-b: settles a reading that is still current (brief §3.3). */
   function applyReading(sentence: string, result: Reading): void {
+    if (traceRef.current) traceRef.current.model = traceModelField(result);
     if (result.ok) {
       runCommand(result.command, " · read by the model");
       return;
@@ -944,6 +1308,43 @@ export function CommandBar({
     const parsed = parseCommand(rendered);
     if (!parsed.ok) {
       heldRef.current = null;
+      // S59-e (brief §3): same as `submitText`'s own identical comment.
+      if (traceRef.current) traceRef.current.read = parsed.failure.kind;
+      setStatus(failureToStatus(parsed.failure));
+      return;
+    }
+    runCommand(parsed.command);
+  }
+
+  /**
+   * Reviewer fix (S60-b review, R-422): the one caller for the `unknown`/
+   * `place` question's own `asPart` flag (`questionToStatus`, below) -- a
+   * single-segment word `resolve.ts` recognised as a PART, not a place
+   * ("Housing A" in "assign Sam to Housing A 8 to 4"). Picking a track-cell
+   * button here has to set TWO fields at once: `place` to the picked cell,
+   * `product` to the word itself (already matched or near-matched by
+   * `resolveCellStep`, never re-guessed here). A plain `pickCandidate(command,
+   * "place", c, text)` would leave `product` at its original empty string,
+   * and the re-run would only ask "Which part?" again for a part the person
+   * already named -- this is the one picker that fills two fields from one
+   * button.
+   */
+  function pickPartAsPlace(
+    command: AssignCommand | BookCommand | HeadcountCommand,
+    product: string,
+    candidate: Candidate,
+  ): void {
+    const next = { ...command, place: [candidate.word], product };
+    if (lotRef.current) {
+      updateLotCommand(next as SingleCommand);
+      return;
+    }
+    const rendered = formatCommand(next);
+    setText(rendered);
+    const parsed = parseCommand(rendered);
+    if (!parsed.ok) {
+      heldRef.current = null;
+      if (traceRef.current) traceRef.current.read = parsed.failure.kind;
       setStatus(failureToStatus(parsed.failure));
       return;
     }
@@ -1123,6 +1524,120 @@ export function CommandBar({
           onClick: () => pickCandidate(command, field, c, text),
         })),
       };
+    }
+    // S59 / R-419 (design §19.104/D133 item 3): "Show that day" -- moves the
+    // window through `onShowDay` (the caller's job, see that prop's own doc)
+    // and holds `command` (the exact command this question came from -- the
+    // ordinary sentence, or a lot's own current step, whichever
+    // `questionToStatus` was called with) until the effect above sees a new
+    // `ctx` and re-runs it. No candidate answers the question directly (a
+    // window move is asynchronous), so this is the button's whole job.
+    if (question.kind === "day_off_board") {
+      const day = question.text;
+      return {
+        kind: "question",
+        message,
+        candidates: [
+          {
+            key: "__show_that_day__",
+            label: "Show that day",
+            onClick: () => {
+              pendingRerunRef.current = { command, target: day };
+              onShowDay?.(day);
+            },
+          },
+        ],
+      };
+    }
+    // S59 / R-418's message (design §19.104/D133 item 1): a word that
+    // matches no part, person or place, WITH nearest-name suggestions from
+    // the resolver, offers them as buttons -- the same shape `ambiguous`
+    // already renders, a pick substituting the real name and re-running. Lane
+    // A (resolver) is concurrently adding `suggestions?: Candidate[]` to this
+    // question -- read through a local cast so this compiles either side of
+    // that landing; `suggestions` undefined or empty (today, and any
+    // `unknown` the resolver still answers with none) keeps the plain
+    // `describeQuestion` wording and no buttons, unchanged from before S59.
+    if (question.kind === "unknown") {
+      const suggestions = (question as { suggestions?: Candidate[] }).suggestions;
+      // S60-b (R-422): `more` flags a cell whose own menu is bigger than the
+      // eight `resolve.ts`'s own `offeredSuggestions` ever shows at once --
+      // never a silent drop of the rest.
+      const more = (question as { more?: true }).more === true;
+      const moreTail = more ? " … and more — say the part." : "";
+      // Reviewer fix (S60-b review, R-422): `asPart` (set only by
+      // `resolveCellStep`'s own check, resolve.ts) flags a single-segment
+      // word that named no place but DOES name a part -- "assign Sam to
+      // Housing A 8 to 4" with no separator reads "Housing A" as the place
+      // (parse.ts's own R-422 branch) since there is no syntactic way to
+      // tell the two apart; the resolver catches it once no cell matches.
+      // Rendered BEFORE the ordinary place-suggestion wording below so a
+      // person who named a part is told the part was heard, never sent place
+      // suggestions for a word they never meant as a place. `suggestions`
+      // carries every track cell (`ctx.cells`, capped at eight) when there
+      // are few enough to list; past eight, `resolve.ts` omits the field
+      // entirely and this falls to the plain "say the cell" wording, never a
+      // silent partial list (unlike the product menu's own `more` flag,
+      // there is no natural "first eight" order for every cell on the
+      // board).
+      if (question.field === "place" && (question as { asPart?: true }).asPart === true) {
+        const text = question.text;
+        const asPlaceCommand = command as AssignCommand | BookCommand | HeadcountCommand;
+        if (suggestions && suggestions.length > 0) {
+          return {
+            kind: "question",
+            message: `${text} is a part; which cell?`,
+            candidates: suggestions.map((c) => ({
+              key: c.id,
+              label: c.label,
+              onClick: () => pickPartAsPlace(asPlaceCommand, text, c),
+            })),
+          };
+        }
+        return {
+          kind: "question",
+          message: `${text} is a part; which cell? Say the cell.`,
+          candidates: [],
+        };
+      }
+      if (suggestions && suggestions.length > 0) {
+        const field = question.field;
+        const text = question.text;
+        // S60-b: no part was said at all (`resolvePartStep`'s own empty-
+        // product branch) -- `question.text` carries the resolved CELL's
+        // own name for exactly this shape (there is no misheard word to
+        // report), and the message names it directly rather than the
+        // generic "No part called ..." wording, which would read oddly for
+        // an empty string. `command.product` is read off the SAME command
+        // `resolveCommand` was just given (assign/book/headcount, the only
+        // three intents `resolvePartStep` ever runs for -- `resolve.ts`'s
+        // own comment above it), so this never fires for a genuine
+        // near-miss word (non-empty `product`), which keeps the ordinary
+        // "Did you mean one of these?" wording below, unchanged.
+        if (field === "product" && (command as { product?: string }).product === "") {
+          const whichPartBase = `Which part? ${text} makes:`;
+          return {
+            kind: "question",
+            message: more ? `${whichPartBase} … and more — say the part.` : `${whichPartBase} `,
+            candidates: suggestions.map((c) => ({
+              key: c.id,
+              label: c.label,
+              onClick: () => pickCandidate(command, field, c, text),
+            })),
+          };
+        }
+        const fieldNoun = field === "operator" ? "person" : field === "product" ? "part" : "place";
+        return {
+          kind: "question",
+          message: `No ${fieldNoun} called "${text}" on this board. Did you mean one of these?${moreTail}`,
+          candidates: suggestions.map((c) => ({
+            key: c.id,
+            label: c.label,
+            onClick: () => pickCandidate(command, field, c, text),
+          })),
+        };
+      }
+      return { kind: "question", message, candidates: [] };
     }
     if (question.kind === "run_exists") {
       // Only ever asked from the assign path (brief §5/§9).
@@ -1305,6 +1820,9 @@ export function CommandBar({
     // attach (a new sentence is a new question)." Clearing the held command
     // clears its `existing` (R-385) the same way it clears `attach`.
     heldRef.current = null;
+    // S59 (R-419): a typed edit drops a "Show that day" press's pending
+    // rerun too -- the sentence it would have re-run is gone.
+    pendingRerunRef.current = null;
     // S44-b: any edit aborts an in-flight reading (brief §3.3) -- the bump
     // discards a response that settles after this point even if abort()
     // itself has no effect on an already-settled fetch. Review finding 1:
@@ -1361,7 +1879,13 @@ export function CommandBar({
    * recognition result submits exactly as Enter does. Behaviour is
    * unchanged from the pre-S46-a Enter path.
    */
-  function submitText(value: string): void {
+  function submitText(
+    value: string,
+    // S59-e (R-421, brief §3): "typed" for Enter (every pre-S59-e caller),
+    // the recogniser's own name for a final transcript (`startListening`'s
+    // `onFinal`, below) -- the trace entry's `by`.
+    by: "typed" | "browser" | "local" = "typed",
+  ): void {
     // S51 review fix: a lot writing in the background cannot be cancelled
     // or re-confirmed out from under itself -- Enter on ANY word (a cancel
     // word, a stray "yes", an ordinary sentence) is a no-op while
@@ -1394,6 +1918,10 @@ export function CommandBar({
     // (`ambiguous`, `run_exists`, ...) stands -- also falls through.
     const normalized = normalizeWord(value);
     const isCancel = CANCEL_WORDS.has(normalized);
+    // S59 (R-419): a cancel word drops a "Show that day" press's pending
+    // rerun, whichever context below actually claims the word (or none does
+    // -- the sentence it would have re-run is gone either way).
+    if (isCancel) pendingRerunRef.current = null;
     // "remove it"/"move it" are only ever confirm CANDIDATES -- whether they
     // actually confirm depends on the standing question's kind, decided
     // below by `confirmsQuestion`; the five universal words always are.
@@ -1411,12 +1939,17 @@ export function CommandBar({
       // question; a cancel drops the lot exactly as it drops a single one.
       if (status?.kind === "question" && status.lot) {
         if (isCancel) {
+          // S59-e (brief §3): a cancel ends the sentence's life -- nothing
+          // ran.
+          if (traceRef.current) traceRef.current.answered = value;
+          finishTrace();
           setStatus(null);
           setText("");
           lotRef.current = null;
           return;
         }
         if (UNIVERSAL_CONFIRM_WORDS.has(normalized)) {
+          if (traceRef.current) traceRef.current.answered = value;
           runLotNow();
           return;
         }
@@ -1434,6 +1967,12 @@ export function CommandBar({
       ) {
         if (isConfirmCandidate && confirmsQuestion(normalized, status.blockHighlight.kind)) {
           if (status.candidates.length === 1) {
+            // S59-e (brief §3): a spoken/typed confirm word IS the answer --
+            // the same field a candidate BUTTON's click sets (see the
+            // candidates' own `onClick` wrapper below), set here since this
+            // calls the candidate's `onClick` directly rather than through
+            // that wrapper.
+            if (traceRef.current) traceRef.current.answered = value;
             status.candidates[0].onClick();
           } else {
             // Several candidates: a bare confirm is ambiguous (brief §2
@@ -1446,6 +1985,8 @@ export function CommandBar({
           return;
         }
         if (isCancel) {
+          if (traceRef.current) traceRef.current.answered = value;
+          finishTrace();
           setStatus(null);
           setText("");
           return;
@@ -1485,6 +2026,13 @@ export function CommandBar({
       }
       // Neither context claimed it -- ordinary text, falls through below.
     }
+    // S59-e (brief §3): a sentence submitted -- starts a fresh trace entry,
+    // flushing (posting) whatever was still open from before ("a new
+    // sentence" is one of the three life-end triggers). Placed after every
+    // confirm/cancel branch above that returns without reaching here: none
+    // of those is a NEW sentence, only an answer to (or a cancel of) the
+    // one already open.
+    startTrace(value, by);
     // Review finding 2: empty/whitespace-only text takes exactly the
     // null-reader path -- no network round trip (and no 20s wait) for a
     // sentence that can only ever fail to parse, and no misleading "not a
@@ -1496,6 +2044,10 @@ export function CommandBar({
     const parsed = parseCommand(value);
     if (!parsed.ok) {
       heldRef.current = null;
+      // S59-e (brief §3): "the failure kind" -- see `fallbackToRules`'s own
+      // identical comment; the entry stays open, posted once one of the
+      // three triggers actually happens.
+      if (traceRef.current) traceRef.current.read = parsed.failure.kind;
       setStatus(failureToStatus(parsed.failure));
       return;
     }
@@ -1561,7 +2113,11 @@ export function CommandBar({
       onFinal(finalText: string): void {
         if (!isCurrent()) return;
         setText(finalText);
-        submitText(finalText);
+        // S59-e (brief §3): `by` for the trace entry this starts --
+        // `recognizerName`'s own doc explains the "browser" fallback. S60-b:
+        // called HERE, not read as a plain value, so a clip that fell back
+        // mid-session is traced by what actually ran for THIS clip.
+        submitText(finalText, recognizerName?.() ?? "browser");
       },
       onError(kind, detail): void {
         if (!isCurrent()) return;
@@ -1607,6 +2163,9 @@ export function CommandBar({
       return;
     }
     if (e.key === "Escape") {
+      // S59 (R-419): Escape always drops a "Show that day" press's pending
+      // rerun, whichever of the branches below actually fires.
+      pendingRerunRef.current = null;
       // S51 review fix: a lot writing in the background cannot be
       // cancelled by Escape either -- not even the launcher's own
       // "nothing left, close the panel" signal (`onEscapeIdle`) fires here,
@@ -1619,6 +2178,14 @@ export function CommandBar({
         readingAbortRef.current.abort();
         readingAbortRef.current = null;
         readingSeqRef.current++;
+        // S60-b (the S59 reviewer, 15 Sept): Escape on a "Reading…" spinner
+        // is one of the trace's own three life-end triggers too (a cancel,
+        // same as a typed cancel word gets) -- the entry was left open
+        // otherwise, and this line would never be written. `answered`
+        // records WHICH cancel this was, same field a confirm/cancel word
+        // sets.
+        if (traceRef.current) traceRef.current.answered = "escape";
+        finishTrace();
         setStatus(null);
         return;
       }
@@ -1626,6 +2193,13 @@ export function CommandBar({
       // then the existing Escape rules apply from the NEXT Escape (brief
       // §2.2 -- the same shape as the reading branch above).
       if (recognitionRef.current) {
+        // S60-b: same trace-closing fix as the reading branch above -- an
+        // active listen has not necessarily opened a trace entry yet (no
+        // `onFinal` has fired), so this is a no-op then; when it has
+        // (interim text already produced a final on a PRIOR press, this one
+        // stopping a fresh session), it closes it.
+        if (traceRef.current) traceRef.current.answered = "escape";
+        finishTrace();
         stopListening();
         return;
       }
@@ -1637,6 +2211,12 @@ export function CommandBar({
         // S51 (brief §2 item 1): drops a standing lot exactly as it drops a
         // single question.
         lotRef.current = null;
+        // S60-b: Escape on a standing question is the third trigger this
+        // fixes -- the question's own `asked` was written when it was
+        // shown, but nothing ever closed the entry (a pick would have, via
+        // `runCommand`'s own readout; Escape never ran that).
+        if (traceRef.current) traceRef.current.answered = "escape";
+        finishTrace();
         setStatus(null);
       } else if (text !== "") {
         setText("");
@@ -1690,7 +2270,21 @@ export function CommandBar({
       {status?.kind === "question" && status.candidates.length > 0 && (
         <div className={styles.candidates}>
           {status.candidates.map((c) => (
-            <button key={c.key} type="button" className={fieldStyles.btn} onClick={c.onClick}>
+            <button
+              key={c.key}
+              type="button"
+              className={fieldStyles.btn}
+              onClick={() => {
+                // S59-e (R-421, brief §3): "the answer given (a candidate
+                // label ...)" -- one place for EVERY candidate button
+                // (ambiguous picks, run_exists, block_exists, remove_which,
+                // move_which, job_gone, "Show that day", the lot's own "Do
+                // all N", ...), rather than threading this through every
+                // `onClick` built in `questionToStatus` above.
+                if (traceRef.current) traceRef.current.answered = c.label;
+                c.onClick();
+              }}
+            >
               {c.label}
             </button>
           ))}

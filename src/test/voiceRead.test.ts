@@ -1316,3 +1316,277 @@ describe("VR23 (S58, R-416): a repeat day word decodes only on assign/book's own
     expect(untilRefs).toEqual(["#/$defs/day_word"]);
   });
 });
+
+// S59 (docs/agent-briefs/s59-b-bar-brief.md §1, F-149): every NAME string
+// (operator, product, with, other, every element of place/toPlace, a
+// non-null shift) must hold at least one letter or digit -- a name made of
+// pure punctuation is garbled, the same as any other malformed field.
+describe("VR24 (S59, F-149): a name made of punctuation is garbled", () => {
+  it('VR24: the assign probe -- place ["],", "product"] is garbled', () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    const garbled = { ...valid, place: ["],", "product"] };
+    expect(decodeCommand(garbled)).toBeNull();
+  });
+
+  it('VR24: the headcount probe -- place ["],"] is garbled', () => {
+    const parsed = parseCommand("make the Housing A job on Cell 1 4 people");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    const garbled = { ...valid, place: ["],"] };
+    expect(decodeCommand(garbled)).toBeNull();
+  });
+
+  it('VR24: place ["Cell 1"] and shift "2" are not garbled', () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 for shift 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
+    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+  });
+
+  it('VR24: a person named "A-3" is fine (a letter is enough)', () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    const named = { ...valid, operator: "A-3" };
+    expect(decodeCommand(named)).toEqual({ ...parsed.command, operator: "A-3" });
+  });
+
+  it("VR24: a punctuation-only operator, product, with, other or toPlace element is garbled", () => {
+    const assignParsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(assignParsed.ok).toBe(true);
+    if (assignParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(assignParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, operator: "],#" })).toBeNull();
+      expect(decodeCommand({ ...valid, product: "--" })).toBeNull();
+    }
+
+    const replaceParsed = parseCommand("cover Sam with Ana on Cell 1 today");
+    expect(replaceParsed.ok).toBe(true);
+    if (replaceParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(replaceParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, with: "!!" })).toBeNull();
+    }
+
+    const swapParsed = parseCommand("swap Sam and Ana");
+    expect(swapParsed.ok).toBe(true);
+    if (swapParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(swapParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, other: "()" })).toBeNull();
+    }
+
+    const moveParsed = parseCommand("move Sam on Cell 1 in Line 1 to Cell 2");
+    expect(moveParsed.ok).toBe(true);
+    if (moveParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(moveParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, toPlace: ["Cell 2", "]"] })).toBeNull();
+    }
+  });
+
+  it("VR24: an empty place ([] for unassign/move) still decodes -- the name check only judges PRESENT elements", () => {
+    const unassignParsed = parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2");
+    expect(unassignParsed.ok).toBe(true);
+    if (!unassignParsed.ok) return;
+    const unassignForm = { ...(unassignParsed.command as unknown as Record<string, unknown>) };
+    unassignForm.place = [];
+    expect(decodeCommand(unassignForm)).toEqual({ ...unassignParsed.command, place: [] });
+  });
+
+  it("VR24: any script's letter counts -- a Unicode name is not garbled", () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    const named = { ...valid, operator: "李四" };
+    expect(decodeCommand(named)).toEqual({ ...parsed.command, operator: "李四" });
+  });
+
+  // VR25 (reviewer follow-up): three shapes the S59 fence description warned
+  // about -- an empty string mixed into an otherwise-present place array, an
+  // empty shift, and a product made of nothing but emoji. The first two keep
+  // their PRE-S59 contract exactly (an empty string was already refused by
+  // `isNonEmptyString`, before F-149 existed, so `isValidName`'s narrower
+  // check changes nothing here); the third is new -- `hasLetterOrDigit`
+  // refuses an emoji-only string the same way it refuses pure punctuation
+  // (`\p{L}`/`\p{N}` do not match emoji code points), so F-149's fix also
+  // closes this door, not asked for by the card but a direct consequence of
+  // "holds no letter or digit" rather than "holds no letter, digit or
+  // emoji".
+  it('VR25: place ["Cell 1", ""] stays garbled -- an empty element already failed before F-149, unchanged', () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, place: ["Cell 1", ""] })).toBeNull();
+  });
+
+  it('VR25: shift "" stays garbled -- an empty shift already failed before F-149, unchanged', () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 for shift 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, shift: "" })).toBeNull();
+  });
+
+  it("VR25: a product made only of emoji is garbled -- no letter or digit, the same as pure punctuation", () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, product: "🎉🎉" })).toBeNull();
+  });
+});
+
+// S59-e (R-421, brief docs/agent-briefs/s59-e-trace-brief.md §2): `makeReader`'s
+// own `raw` field on `Reading` -- reviewer follow-up, since nothing in this
+// file exercised the new field's actual VALUE (only VR4/VR5/VR7's `toEqual`
+// on the reason/no-raw shapes, which happen not to touch it). Pins every
+// branch the brief's own doc comment names: `ok: true` and the three
+// garbled-with-a-body cases carry it; a garbled answer with no body (no
+// message content, or a response that failed to parse as JSON at all) does
+// not.
+describe("VR26 (S59-e, R-421): readSentence.ts's own `raw` field on Reading", () => {
+  it('VR26: ok: true carries "raw" -- the content the model actually sent, verbatim', async () => {
+    const parsed = parseCommand(SENTENCE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const content = JSON.stringify(parsed.command);
+    const reader = makeReader({
+      baseUrl: "http://voice.local",
+      fetch: fetchReturningContent(content),
+    });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.raw).toBe(content);
+  });
+
+  it('VR26: "no JSON object in content" carries raw (the content itself)', async () => {
+    const content = "no object in here at all";
+    const reader = makeReader({
+      baseUrl: "http://voice.local",
+      fetch: fetchReturningContent(content),
+    });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("garbled");
+      expect(result.raw).toBe(content);
+    }
+  });
+
+  it("VR26: bad JSON in the content carries raw (the content itself)", async () => {
+    const content = "{intent: assign}";
+    const reader = makeReader({
+      baseUrl: "http://voice.local",
+      fetch: fetchReturningContent(content),
+    });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("garbled");
+      expect(result.raw).toBe(content);
+    }
+  });
+
+  it("VR26: a well-formed object decodeCommand refuses still carries raw", async () => {
+    const content = '{"intent":"assign"}';
+    const reader = makeReader({
+      baseUrl: "http://voice.local",
+      fetch: fetchReturningContent(content),
+    });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("garbled");
+      expect(result.raw).toBe(content);
+    }
+  });
+
+  it('VR26: "no message content" (no choices[0].message.content string) carries NO raw', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ choices: [{ message: {} }] }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    const reader = makeReader({ baseUrl: "http://voice.local", fetch: fetchMock });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("garbled");
+      expect(result.raw).toBeUndefined();
+    }
+  });
+
+  it("VR26: a response body that fails to parse as JSON at all carries NO raw", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("not json", { status: 200 })) as unknown as typeof fetch;
+    const reader = makeReader({ baseUrl: "http://voice.local", fetch: fetchMock });
+    const result = await reader(SENTENCE, new AbortController().signal);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("garbled");
+      expect(result.raw).toBeUndefined();
+    }
+  });
+});
+
+// S60-b (docs/agent-briefs/s60-b-which-part-brief.md §2, R-422): `product`
+// may decode as the empty string on `assign`, `book` and `headcount` ONLY --
+// "no part was said, the resolver asks which" -- and F-149's letter-or-digit
+// rule keeps applying the moment the string is non-empty.
+describe("VR27 (S60-b, R-422): product may be '' on assign, book and headcount only", () => {
+  it("VR27: an empty product decodes on assign", () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, product: "" })).toEqual({ ...parsed.command, product: "" });
+  });
+
+  it("VR27: an empty product decodes on book", () => {
+    const parsed = parseCommand("book Housing A on Cell 1 from 6 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, product: "" })).toEqual({ ...parsed.command, product: "" });
+  });
+
+  it("VR27: an empty product decodes on headcount", () => {
+    const parsed = parseCommand("make the Housing A job on Cell 1 4 people");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, product: "" })).toEqual({ ...parsed.command, product: "" });
+  });
+
+  it("VR27: a non-empty punctuation-only product still garbles book and headcount (F-149 keeps applying)", () => {
+    const bookParsed = parseCommand("book Housing A on Cell 1 from 6 to 2");
+    expect(bookParsed.ok).toBe(true);
+    if (bookParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(bookParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, product: "--" })).toBeNull();
+    }
+
+    const hcParsed = parseCommand("make the Housing A job on Cell 1 4 people");
+    expect(hcParsed.ok).toBe(true);
+    if (hcParsed.ok) {
+      const valid = JSON.parse(JSON.stringify(hcParsed.command)) as Record<string, unknown>;
+      expect(decodeCommand({ ...valid, product: "--" })).toBeNull();
+    }
+  });
+
+  it("VR27: an empty product does NOT widen any other name field -- operator, place elements and shift still require a letter or digit", () => {
+    const parsed = parseCommand("assign Sam to Housing A on Cell 1 from 10 to 2");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
+    expect(decodeCommand({ ...valid, operator: "" })).toBeNull();
+    expect(decodeCommand({ ...valid, place: [""] })).toBeNull();
+  });
+});

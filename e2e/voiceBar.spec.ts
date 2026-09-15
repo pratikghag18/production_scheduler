@@ -18,7 +18,7 @@ const PASSWORD = "devpassword";
 const HEALTH_URL = "http://127.0.0.1:8089/health";
 // A demo person who can place, Plant A / Line 1 / Cell 1 (supabase/seed.sql).
 const EMAIL = "dana@example.test";
-const OPERATOR = "Operator A1";
+const OPERATOR = "Sam Patel";
 const PRODUCT = "Housing A";
 const FIXED_SENTENCE = `Assign ${OPERATOR} to ${PRODUCT} on Cell 1 in Line 1 from 9 to 11 tomorrow`;
 const FREE_SENTENCE = `could you put ${OPERATOR} on ${PRODUCT} at Cell 1 tomorrow between 9 and 11`;

@@ -584,6 +584,71 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
     const file = form.get("file") as File;
     expect(file.size).toBeGreaterThan(44);
   });
+
+  it("LREC-15: a non-empty hint is sent as the clip's `prompt` field, read at clip time not construction", async () => {
+    // S59-c (brief §2, design-plan §19.104/D133 item 4).
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "put ana on cell one" }));
+    let current = "before the clip started";
+    const recognizer = localRecognizer("http://127.0.0.1:8090", h.deps, () => current);
+    const handle = recognizer(h.events as unknown as RecognizerEvents);
+    await flush();
+    const processor = h.audioContext.lastProcessor;
+    if (!processor) throw new Error("test setup: no processor created");
+
+    // Changed AFTER the session started listening but BEFORE the clip is
+    // finalised -- the hint the request carries is whichever the function
+    // returns when `transcribe()` actually calls it, not whatever it
+    // returned when `localRecognizer(...)` was called.
+    current = "cell, line, Cell 1, Housing A, Operator A3";
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 50;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1600;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+    await flush();
+
+    const [, init] = h.fetchMock.mock.calls[0];
+    const form = init.body as FormData;
+    expect(form.get("prompt")).toBe("cell, line, Cell 1, Housing A, Operator A3");
+    handle.stop();
+  });
+
+  it("LREC-16: no hint function, and an empty-string hint, both leave `prompt` absent from the request", async () => {
+    // S59-c (brief §2): "the field is sent when a hint is given and absent
+    // when not" -- `form.get` returns `null` for a field never appended.
+    const h1 = makeHarness();
+    h1.fetchMock.mockResolvedValue(okJsonResponse({ text: "no hint fn" }));
+    const p1 = await startAndRecord(h1); // startAndRecord's own recognizer(...) has no third argument
+    h1.clock.t = 0;
+    p1.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h1.clock.t = 50;
+    p1.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h1.clock.t = 1600;
+    p1.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+    await flush();
+    const form1 = (h1.fetchMock.mock.calls[0][1] as { body: FormData }).body;
+    expect(form1.get("prompt")).toBeNull();
+
+    const h2 = makeHarness();
+    h2.fetchMock.mockResolvedValue(okJsonResponse({ text: "empty hint" }));
+    const recognizer2 = localRecognizer("http://127.0.0.1:8090", h2.deps, () => "");
+    recognizer2(h2.events as unknown as RecognizerEvents);
+    await flush();
+    const processor2 = h2.audioContext.lastProcessor;
+    if (!processor2) throw new Error("test setup: no processor created");
+    h2.clock.t = 0;
+    processor2.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h2.clock.t = 50;
+    processor2.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h2.clock.t = 1600;
+    processor2.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+    await flush();
+    const form2 = (h2.fetchMock.mock.calls[0][1] as { body: FormData }).body;
+    expect(form2.get("prompt")).toBeNull();
+  });
 });
 
 describe("LREC: withFallback (S57-a brief §4, design-plan D131 §3)", () => {
@@ -768,5 +833,73 @@ describe("LREC: withFallback (S57-a brief §4, design-plan D131 §3)", () => {
     expect(barEvents.onError).toHaveBeenCalledWith("no-speech");
     expect(barEvents.onEnd).toHaveBeenCalledTimes(1);
     expect(started).toHaveLength(1); // still just the one browser session
+  });
+
+  // Reviewer finding (S59-e / R-421, item 5): `BoardPage.tsx` tagged every
+  // trace entry's `by` field from static configuration
+  // (`WHISPER_URL !== null ? "local" : "browser"`), which is wrong exactly
+  // when whisper.cpp is configured but down and this function's own
+  // fallback silently hands the session to the browser -- the trace would
+  // say "local" for text the browser actually produced. `onEngine` is the
+  // fix's other half: it tells a caller which leg is REALLY answering,
+  // synchronously and in time to matter (see the doc above `withFallback`).
+  it('LREC-17: onEngine("local") fires once, before onFinal, when local never falls back', () => {
+    let localEvents!: RecognizerEvents;
+    const local: Recognizer = (events) => {
+      localEvents = events;
+      return { stop: vi.fn() };
+    };
+    const { recognizer: browser } = fakeBrowserRecognizer();
+    const engines: ("local" | "browser")[] = [];
+    let engineAtFinal: string | null = null;
+    const wrapped = withFallback(local, browser, (e) => engines.push(e));
+    const barEvents = {
+      onInterim: vi.fn(),
+      onFinal: vi.fn(() => {
+        engineAtFinal = engines[engines.length - 1];
+      }),
+      onError: vi.fn(),
+      onEnd: vi.fn(),
+    };
+    wrapped(barEvents as unknown as RecognizerEvents);
+
+    expect(engines).toEqual(["local"]); // announced up front, before any clip finishes
+    localEvents.onFinal("put ana on cell one");
+    expect(engineAtFinal).toBe("local"); // already "local" by the time onFinal ran
+    expect(engines).toEqual(["local"]); // never called again -- no fallback happened
+  });
+
+  it('LREC-18: onEngine("browser") fires on an actual fallback, before the browser leg\'s own onFinal', () => {
+    let localEvents!: RecognizerEvents;
+    const local: Recognizer = (events) => {
+      localEvents = events;
+      return { stop: vi.fn() };
+    };
+    const { recognizer: browser, started } = fakeBrowserRecognizer();
+    const engines: ("local" | "browser")[] = [];
+    let engineAtFinal: string | null = null;
+    const wrapped = withFallback(local, browser, (e) => engines.push(e));
+    const barEvents = {
+      onInterim: vi.fn(),
+      onFinal: vi.fn(() => {
+        engineAtFinal = engines[engines.length - 1];
+      }),
+      onError: vi.fn(),
+      onEnd: vi.fn(),
+    };
+    wrapped(barEvents as unknown as RecognizerEvents);
+    expect(engines).toEqual(["local"]);
+
+    // whisper.cpp errors before any final text -- the fallback this function
+    // exists for.
+    localEvents.onError("other", "local recogniser not answering");
+    localEvents.onEnd();
+    expect(engines).toEqual(["local", "browser"]); // updated BEFORE the browser leg answers
+
+    started[0].onFinal("put ana on cell one");
+    // By the time the bar's own onFinal ran, the ref a caller like
+    // BoardPage.tsx keeps already reads "browser" -- the whole point: a
+    // trace entry tagged from this value, not from static config, is right.
+    expect(engineAtFinal).toBe("browser");
   });
 });

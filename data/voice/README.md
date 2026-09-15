@@ -64,6 +64,27 @@ file: clean 500/500 (1.0), perturbed 43/500 (0.086) — see
 `data/voice/colab/manifest.json`'s `ruleParserBaseline` for the number a trained
 model has to beat.
 
+**Regenerated a fourth time, same seed (F-151, session 174, "six is the morning"):**
+the full suite showed `parse.ts`'s own lone-edge workday rule (an hour 1-6 with no
+am/pm reads pm) was wrong for a lone START -- every demo plant's Shift 1 starts at
+06:00, so "from 6 for 8 hours"/"from 6 until end of shift" read 18:00, and this
+file's own recorded rows for "from 6 ..." no longer parsed as recorded. New rule,
+lone START only: hours 1-5 read pm, 6 through 12 stay as said; a lone END (the
+removal grammar's "before 2"/"after 2", the adjust grammar's own end door) keeps
+the old 1-to-6 range, unchanged. `scripts/voice/lib/time.mjs` gained
+`applyLoneStartRule`/`resolveLoneStart`, the mirror of `parse.ts`'s own
+`applyLoneStartRule`; every template that draws a lone start before a boundary or
+a length (A14-duration, A16, A17, B9, and the move grammar's own edge-tail
+template M15 when it draws the START edge) now computes its recorded form through
+it instead of assuming the raw literal hour. The fifth (model-training) run's own
+score (99.8% / 97.4%, session 173) stands against the file as it was at commit
+`36b684d` -- this regeneration changes exactly the rows whose lone start was an
+hour 1-6 with no am/pm (most visibly the "from 6 ..." rows LS6 itself pins), so
+that score is not directly comparable to this file; the sixth run's data carries
+this fix forward. Rule-parser baseline on this file: clean 500/500 (1.0),
+perturbed 43/500 (0.086) — see `data/voice/colab/manifest.json`'s
+`ruleParserBaseline` for the number a trained model has to beat.
+
 ## `train.jsonl` — gitignored, generated on demand
 
 Not committed. Generate it with:

@@ -10,7 +10,7 @@
 // `parseCommand(sentence(slots))` equals `form(slots)` is a real check, not a
 // tautology (brief §2).
 import { pick, randInt, chance } from "./rng.mjs";
-import { buildTimePair, TIME_SEPARATORS, resolveLoneTime } from "./time.mjs";
+import { buildTimePair, TIME_SEPARATORS, resolveLoneTime, resolveLoneStart } from "./time.mjs";
 import {
   PEOPLE_ALL,
   PEOPLE_DEMO,
@@ -798,7 +798,11 @@ const assignTemplates = [
         durationText = `${n} ${unit}`;
         minutes = n * 60;
       }
-      const endTotal = startHour * 60 + minutes;
+      // F-151: this start stands alone (a duration names only a LENGTH), so
+      // it is computed by `resolveLoneStart`, the same START rule parse.ts's
+      // `applyLoneStartRule` now gives it -- never the raw literal hour.
+      const start = resolveLoneStart({ kind: "24h", hour: startHour, minute: 0 });
+      const endTotal = start.hour * 60 + start.minute + minutes;
       return {
         verb: pick(rng, ASSIGN_VERBS),
         op: pick(rng, PEOPLE_ALL),
@@ -806,7 +810,7 @@ const assignTemplates = [
         cell: pick(rng, CELLS_ALL),
         startHour,
         durationText,
-        start: { hour: startHour, minute: 0 },
+        start: { hour: start.hour, minute: start.minute },
         end: { hour: Math.floor(endTotal / 60), minute: endTotal % 60 },
       };
     },
@@ -854,20 +858,28 @@ const assignTemplates = [
     // boundary shift that may carry a start (D130 item 3's amendment).
     id: "A16-from-until-end-of-shift",
     intent: "assign",
-    genSlots: (rng) => ({
-      verb: pick(rng, ASSIGN_VERBS),
-      op: pick(rng, PEOPLE_ALL),
-      part: pick(rng, PARTS_ALL),
-      cell: pick(rng, CELLS_ALL),
-      startHour: randInt(rng, 6, 20),
-      phrase: pick(rng, [
-        "until end of shift",
-        "till end of shift",
-        "to the end of the shift",
-        "until the end of shift",
-        "for the rest of the shift",
-      ]),
-    }),
+    genSlots: (rng) => {
+      const startHour = randInt(rng, 6, 20);
+      // F-151: the boundary clause's own captured start is a LONE START --
+      // `resolveLoneStart` (time.mjs), the same rule parse.ts's own
+      // `applyLoneStartRule` gives it, never the raw literal hour.
+      const start = resolveLoneStart({ kind: "24h", hour: startHour, minute: 0 });
+      return {
+        verb: pick(rng, ASSIGN_VERBS),
+        op: pick(rng, PEOPLE_ALL),
+        part: pick(rng, PARTS_ALL),
+        cell: pick(rng, CELLS_ALL),
+        startHour,
+        start,
+        phrase: pick(rng, [
+          "until end of shift",
+          "till end of shift",
+          "to the end of the shift",
+          "until the end of shift",
+          "for the rest of the shift",
+        ]),
+      };
+    },
     sentence: (s) =>
       `${s.verb} ${qw(s.op)} to ${qw(s.part)} on ${qw(s.cell)} from ${s.startHour} ${s.phrase}`,
     form: (s) =>
@@ -876,7 +888,7 @@ const assignTemplates = [
         product: s.part,
         place: [s.cell],
         day: null,
-        start: { hour: s.startHour, minute: 0 },
+        start: { hour: s.start.hour, minute: s.start.minute },
         end: null,
         attach: null,
         existing: null,
@@ -890,13 +902,19 @@ const assignTemplates = [
     intent: "assign",
     genSlots: (rng) => {
       const withStart = chance(rng, 0.5);
+      const startHour = withStart ? randInt(rng, 6, 20) : null;
+      // F-151: same LONE START reading as A16 above, only when there is one.
+      const start = withStart
+        ? resolveLoneStart({ kind: "24h", hour: startHour, minute: 0 })
+        : null;
       return {
         verb: pick(rng, ASSIGN_VERBS),
         op: pick(rng, PEOPLE_ALL),
         part: pick(rng, PARTS_ALL),
         cell: pick(rng, CELLS_ALL),
         withStart,
-        startHour: withStart ? randInt(rng, 6, 20) : null,
+        startHour,
+        start,
         phrase: pick(rng, [
           "for the rest of the day",
           "until end of day",
@@ -914,7 +932,7 @@ const assignTemplates = [
         product: s.part,
         place: [s.cell],
         day: null,
-        start: s.withStart ? { hour: s.startHour, minute: 0 } : null,
+        start: s.withStart ? { hour: s.start.hour, minute: s.start.minute } : null,
         end: null,
         attach: null,
         existing: null,
@@ -1388,7 +1406,11 @@ const bookTemplates = [
     genSlots: (rng) => {
       const startHour = randInt(rng, 6, 16);
       const durHours = randInt(rng, 1, 6);
-      const endTotal = startHour * 60 + durHours * 60;
+      // F-151: this start stands alone (a duration names only a LENGTH), so
+      // it is computed by `resolveLoneStart`, the same START rule parse.ts's
+      // `applyLoneStartRule` now gives it -- never the raw literal hour.
+      const start = resolveLoneStart({ kind: "24h", hour: startHour, minute: 0 });
+      const endTotal = start.hour * 60 + start.minute + durHours * 60;
       return {
         verb: pick(rng, BOOK_VERBS),
         part: pick(rng, PARTS_ALL),
@@ -1396,7 +1418,7 @@ const bookTemplates = [
         startHour,
         durHours,
         n: randInt(rng, 1, 12),
-        start: { hour: startHour, minute: 0 },
+        start: { hour: start.hour, minute: start.minute },
         end: { hour: Math.floor(endTotal / 60), minute: endTotal % 60 },
       };
     },
@@ -2426,7 +2448,13 @@ const moveTemplates = [
         // F-146: only an END edge ever draws "midnight" here -- a START
         // stays the literal {0,0} the S58 brief's own rule keeps.
         const spec = randomLoneTimeSpec(rng, /* allowMidnight */ edge === "end");
-        const resolved = resolveLoneTime(spec, { allowDayEnd: edge === "end" });
+        // F-151: which workday rule applies depends on WHICH edge this is --
+        // parse.ts's `tryMoveEdgeAdjust` reads a START through
+        // `applyLoneStartRule` (hours 1-5 read pm, 6-12 stay as said) and an
+        // END through `applyLoneEdgeRule` (1-6) unchanged, so this template
+        // mirrors that split rather than always using the END resolver.
+        const resolved =
+          edge === "start" ? resolveLoneStart(spec) : resolveLoneTime(spec, { allowDayEnd: true });
         clauseText = `to ${resolved.text}`;
         adjust = { edge, at: { hour: resolved.hour, minute: resolved.minute } };
       } else if (kind === "by") {

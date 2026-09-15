@@ -235,11 +235,26 @@ function isNotAllowedError(err: unknown): boolean {
 }
 
 /**
- * `localRecognizer(baseUrl, deps?)` -- brief §3. `deps` defaults to the
- * window's own microphone, audio context, `fetch` and clock; a test passes
- * fakes for all four.
+ * `localRecognizer(baseUrl, deps?, hint?)` -- brief §3, and S59-c (brief
+ * §2, design-plan §19.104 / D133 item 4). `deps` defaults to the window's
+ * own microphone, audio context, `fetch` and clock; a test passes fakes for
+ * all four. `hint`, when given, is called once per clip -- at transcribe
+ * time in `transcribe()` below, never at construction -- so a board window
+ * change (`BoardPage.tsx`'s own `commandCtx`) is picked up by the NEXT clip
+ * without rebuilding the recogniser itself. A non-empty string it returns
+ * is sent to whisper.cpp's server as the multipart field `prompt` (verified
+ * against the running container, brief's own instruction: `curl -F
+ * file=@… -F prompt="…" 127.0.0.1:8090/inference` measurably changes what
+ * comes back); an absent `hint`, or one that returns `""`, sends no
+ * `prompt` field at all -- whisper.cpp treats a present-but-empty prompt no
+ * differently than none, so there is nothing to gain from sending it, and
+ * the pin (`LREC-15`/`LREC-16`) checks the field is ABSENT, not empty.
  */
-export function localRecognizer(baseUrl: string, deps?: Partial<LocalRecognizerDeps>): Recognizer {
+export function localRecognizer(
+  baseUrl: string,
+  deps?: Partial<LocalRecognizerDeps>,
+  hint?: () => string,
+): Recognizer {
   const d: LocalRecognizerDeps = { ...defaultDeps(), ...deps };
 
   return function recognize(events: RecognizerEvents): RecognizerHandle {
@@ -322,6 +337,13 @@ export function localRecognizer(baseUrl: string, deps?: Partial<LocalRecognizerD
       form.append("response_format", "json");
       form.append("temperature", "0");
       form.append("language", "en");
+      // S59-c (brief §2): read NOW, not at construction, so the current
+      // board window's names reach this clip even when they changed after
+      // the session started listening.
+      const hintText = hint?.();
+      if (hintText !== undefined && hintText !== "") {
+        form.append("prompt", hintText);
+      }
 
       let response: Response;
       try {
@@ -507,12 +529,35 @@ export function localRecognizer(baseUrl: string, deps?: Partial<LocalRecognizerD
  * session". `not-allowed` and `no-speech`, and an `onError("other", …)`
  * that follows a final result, are forwarded as-is: only an unanswered
  * service before any text triggers the fallback.
+ *
+ * S59 reviewer finding (S59-e / R-421): `BoardPage.tsx` used to tag every
+ * trace entry's `by` field from `WHISPER_URL !== null ? "local" : "browser"`
+ * -- a STATIC fact about configuration, not about what actually produced any
+ * given clip's text. The whole point of this function is that the caller
+ * cannot tell, from the outside, whether a session fell back -- `events`
+ * only ever sees one `onFinal`, exactly as brief §4 intends -- so a
+ * configuration-only guess is wrong on precisely the case this function
+ * exists for: whisper.cpp down/erroring, the browser's own recognition
+ * silently answering instead, the trace file claiming "local" regardless.
+ * `onEngine`, when given, is called synchronously -- BEFORE the matching
+ * `events.onFinal` -- with which leg is about to answer, once per session:
+ * once up front for `local` (the leg every session starts on), and again,
+ * only on an actual fallback, for `browser`. A caller that keeps the latest
+ * value in a ref (read synchronously inside its own `onFinal`, which fires
+ * after this callback in the same tick) has the true answer; see
+ * BoardPage.tsx's own doc for the wiring this enables there, and this
+ * function's own test (LREC-17/18) for the ordering guarantee.
  */
-export function withFallback(local: Recognizer, browser: Recognizer | null): Recognizer {
+export function withFallback(
+  local: Recognizer,
+  browser: Recognizer | null,
+  onEngine?: (engine: "local" | "browser") => void,
+): Recognizer {
   return function recognize(events: RecognizerEvents): RecognizerHandle {
     let gotFinal = false;
     let fellBack = false;
 
+    onEngine?.("local");
     let currentHandle = local({
       onInterim(text) {
         events.onInterim(text);
@@ -524,6 +569,7 @@ export function withFallback(local: Recognizer, browser: Recognizer | null): Rec
       onError(kind, detail) {
         if (kind === "other" && !gotFinal && browser !== null) {
           fellBack = true;
+          onEngine?.("browser");
           currentHandle = browser({
             onInterim: events.onInterim,
             onFinal: events.onFinal,
