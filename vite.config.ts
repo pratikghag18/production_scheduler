@@ -26,6 +26,14 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/voice/, ""),
       },
+      // S57-a / D131: the local (whisper.cpp) recogniser, `npm run
+      // voice:serve`'s second container, 127.0.0.1:8090 -- the same pattern
+      // as `/voice` above, one proxy entry per local service.
+      "/whisper": {
+        target: "http://127.0.0.1:8090",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/whisper/, ""),
+      },
     },
   },
   build: {

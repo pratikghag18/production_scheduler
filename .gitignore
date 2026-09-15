@@ -56,6 +56,12 @@ __pycache__/
 # fine-tuned GGUF here; never committed (1+ GB).
 data/voice/model/
 
+# S57-a: whisper.cpp's own model file (`npm run voice:whisper:fetch`) and,
+# when this machine had to build its own arm64-compatible server image
+# (README under scripts/voice/serve/), the whisper.cpp source clone that
+# built it -- never committed.
+data/voice/whisper/
+
 # The per-machine Claude Code resume file. It says "personal -- gitignored, not
 # shared" in its own first line, and it is written for whoever is sitting at
 # this checkout: it names local paths, what is running on the machine, and how

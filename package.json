@@ -32,7 +32,9 @@
     "voice:score": "node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --rule-parser --bar 0.95",
     "voice:prepare": "node scripts/voice/train/prepare.mjs --train data/voice/train.jsonl --heldout data/voice/heldout.jsonl --out data/voice/colab",
     "voice:serve": "node scripts/voice/serve/serve.mjs",
-    "voice:probe": "node scripts/voice/serve/probe.mjs"
+    "voice:probe": "node scripts/voice/serve/probe.mjs",
+    "voice:whisper:fetch": "node scripts/voice/serve/fetch-whisper.mjs",
+    "voice:whisper:build": "node scripts/voice/serve/build-whisper-image.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",

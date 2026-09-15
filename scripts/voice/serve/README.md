@@ -49,12 +49,16 @@ a dead service.
 
 ## Stopping it
 
-Ctrl+C in the terminal running `npm run voice:serve` stops the container. If that terminal
-is gone, from any terminal:
+Ctrl+C in the terminal running `npm run voice:serve` stops the container(s) it started
+(`scheduler-voice`, and `scheduler-whisper` if it started too). If that terminal is
+gone, from any terminal:
 
 ```
 npm run voice:serve -- --stop
 ```
+
+(S57-a: this stops BOTH `scheduler-voice` and `scheduler-whisper` -- do not run it while
+another lane's `scheduler-voice` is in use; see "Testing just the whisper half" below.)
 
 Confirm it is gone with `docker ps`.
 
@@ -83,6 +87,79 @@ name, no missing or extra key, no out-of-range hour or weekday. Pass `--no-gramm
 `npm run voice:probe` to send the plain request instead, the way S44 measured it, so the
 grammar's accuracy and time cost can be compared against a run without it.
 
+## S57-a: the local (whisper.cpp) recogniser
+
+`npm run voice:serve` also starts a second container, `scheduler-whisper`, running
+whisper.cpp's server on `http://127.0.0.1:8090` -- the command bar's microphone, when
+`VITE_WHISPER_URL` is set, records a clip and posts it there instead of using the
+browser's own speech recognition (design-plan §19.102 / D131). `--stop` stops both
+containers.
+
+### First time
+
+1. Fetch whisper.cpp's own model file (not the fine-tuned one above -- a separate,
+   published model that reads audio, `data/voice/whisper/`, gitignored):
+
+   ```
+   npm run voice:whisper:fetch
+   ```
+
+   (`npm run voice:whisper:fetch -- small.en` for the larger model, a one-flag upgrade
+   for a loud floor -- pass the same name to `npm run voice:serve -- --whisper-model
+small.en` afterward so the served model matches.)
+
+2. **This machine (Windows on Snapdragon) needs its own image.** whisper.cpp's own CI
+   publishes `ghcr.io/ggml-org/whisper.cpp:main-arm64`, and it pulls here without
+   error -- but every binary in it (`whisper-cli`, `whisper-bench`, the server) raises
+   `SIGILL` the moment it runs: that image is built on GitHub's own arm64 runners with
+   `ggml`'s `GGML_NATIVE` CMake default tuned to THEIR cores, which use at least one
+   instruction (this machine's `/proc/cpuinfo` has no `sve`) this machine's Snapdragon
+   cores do not have. Building whisper.cpp's own `.devops/main.Dockerfile` locally
+   fixes it -- `GGML_NATIVE` then tunes to this machine's actual cores. One command
+   does it (clones `ggml-org/whisper.cpp` into `data/voice/whisper/src/`, gitignored,
+   builds `.devops/main.Dockerfile`, tags it, and sanity-checks `whisper-server --help`
+   before returning):
+
+   ```
+   npm run voice:whisper:build
+   ```
+
+   A machine whose Docker Desktop already runs the published `main-arm64` image fine
+   (no SIGILL) does not need this step -- `serve.mjs` only ever runs
+   `scheduler-whisper-server:arm64-local` (this build's own tag), so on such a machine
+   run `docker tag ghcr.io/ggml-org/whisper.cpp:main-arm64
+scheduler-whisper-server:arm64-local` once instead.
+
+3. Add this line to `.env.local` (alongside `VITE_VOICE_URL`, if set):
+
+   ```
+   VITE_WHISPER_URL=/whisper
+   ```
+
+   Restart `npm run dev` after adding it. Unset, the command bar's microphone is the
+   browser's own recogniser, exactly as before this stage; set, the local recogniser is
+   used first, falling back once to the browser's own if the service does not answer
+   (design-plan §19.102 D131 §3).
+
+4. Start it (with the fine-tuned model from the section above too, if using both):
+
+   ```
+   npm run voice:serve
+   ```
+
+   Check it answers -- whisper.cpp's server takes a WAV and returns `{"text": "..."}`:
+
+   ```
+   curl -F "file=@path/to/a/clip.wav" -F "response_format=json" -F "temperature=0" -F "language=en" http://127.0.0.1:8090/inference
+   ```
+
+### Testing just the whisper half
+
+A second lane may already own `scheduler-voice` (e.g. mid-training-run). `npm run
+voice:serve -- --whisper-only` starts (and, on Ctrl+C, stops) only `scheduler-whisper`,
+leaving `scheduler-voice` alone -- `npm run voice:serve -- --stop` stops BOTH
+containers, so do not use it while another lane's `scheduler-voice` is in use.
+
 ## S55: the board-answered shapes
 
 The schema now carries eight `oneOf` branches, not five: the original `assign`/`book`/
@@ -99,3 +176,18 @@ no case for a week kind) is the second gate, for every caller that is not the se
 `unassign` gains a required `until` (`null` or a `day_word`) for "off till Friday". None of this
 moves `max_tokens`: it stays 640, because a board-answered form is still one short JSON object --
 the board makes the many blocks, the model still ever says one.
+
+## S58: group 2 of the catalogue
+
+The schema now carries ten `oneOf` branches: S55's eight plus `split` ("split Sam's block at
+noon") and `headcount` ("make the Housing A job on Cell 1 4 people") -- `several`'s own inner
+`commands` array still holds only the original four (D132: neither is ever part of a lot). `move`
+gains a required `adjust` (`null`, or `$defs.adjust`'s own two-variant union -- `{edge, by}`, a
+non-zero integer of minutes, or `{edge, at}`, a `clock_time`); the decoder is the one place the
+house rule ("when adjust is set, `toPlace`/`span`/`shift` are all null") is enforced -- the schema,
+like R-402's own shift-vs-hours pairing, only shapes the field, it does not cross-check it. The
+fence widens once more for `day_word`: a new `$defs.repeat_day_word` (`weekdays`/`every_day`, each
+carrying `week: "this_week" | "next_week"`) is reachable ONLY from `assign.day` and `book.day`
+(`oneOf [day_word, repeat_day_word]`) -- every other `day` field in the schema, and `unassign`'s
+own `until`, stays plain `day_word` alone, the same fence `week_word` already has around every
+field but a copy's `from`/`to`. `max_tokens` still holds at 640.

@@ -18,6 +18,10 @@ export default tseslint.config(
       // Aug — fail `npm run lint` on a repo whose source was clean. Scratch
       // that can break the build is not scratch.
       "_delivery",
+      // S57: data/ is gitignored model and training material; the whisper.cpp
+      // source clone voice:whisper:build makes under data/voice/whisper/src has
+      // its own JavaScript, which is not this repo's to lint.
+      "data",
     ],
   },
   {
