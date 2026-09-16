@@ -147,7 +147,27 @@ function findRunOverlap(
   return null;
 }
 
+/** F-152-b: mirrors `src/features/board/lib/time.ts`'s own `wallOf` -- an
+ *  offset outside the board's own window clamps its `dayIndex` to the
+ *  NEAREST end (0 or the last day's own index) while `minuteOfDay` stays
+ *  the real wall clock, exactly the shape that let the maintainer's real
+ *  board read a block starting the day before the window as starting on
+ *  day 0 at its own real hour. Unclamped, no fake in this file could ever
+ *  see this class of bug. Takes the days actually in play (never a fixed
+ *  count): a builder calls this with whatever `days` the test passed. */
+function clampedWallOf(
+  boardDays: readonly BoardDay[],
+): (m: number) => { dayIndex: number; minuteOfDay: number } {
+  const lastIndex = boardDays.length > 0 ? boardDays[boardDays.length - 1].index : 0;
+  return (m: number) => {
+    const raw = Math.floor(m / 1440);
+    const dayIndex = raw < 0 ? 0 : raw > lastIndex ? lastIndex : raw;
+    return { dayIndex, minuteOfDay: ((m % 1440) + 1440) % 1440 };
+  };
+}
+
 function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
+  const finalDays = overrides.days ?? days;
   return {
     cells,
     nodeById,
@@ -165,7 +185,7 @@ function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
     findRunOverlap,
     shiftsAt: () => [],
     nowMinuteOfDay: null,
-    wallOf: (m: number) => ({ dayIndex: Math.floor(m / 1440), minuteOfDay: m % 1440 }),
+    wallOf: clampedWallOf(finalDays),
     ...overrides,
   };
 }
@@ -2260,12 +2280,9 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
     return null;
   };
   const zWallToOffset = (d: number, m: number): number => d * 1440 + m;
-  const zWallOf = (m: number): { dayIndex: number; minuteOfDay: number } => ({
-    dayIndex: Math.floor(m / 1440),
-    minuteOfDay: ((m % 1440) + 1440) % 1440,
-  });
 
   function zCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
+    const finalDays = overrides.days ?? zDays;
     return {
       cells: zCells,
       nodeById: zNodeById,
@@ -2283,7 +2300,10 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       findRunOverlap: zFindRunOverlap,
       shiftsAt: zShiftsAt,
       nowMinuteOfDay: null,
-      wallOf: zWallOf,
+      // F-152-b: `clampedWallOf` (top of file) mirrors `time.ts`'s own
+      // clamp; without it none of MN13-MN19 below could see the class of
+      // bug the maintainer's real board hit.
+      wallOf: clampedWallOf(finalDays),
       ...overrides,
     };
   }
@@ -2649,7 +2669,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       }
     });
 
-    it("EX3: after 14:00 with a straddling 08:00-16:00 block -- a move to 08:00-14:00", () => {
+    it("EX3: after 14:00 with a straddling 08:00-16:00 block -- an edge adjust, end to 14:00 (F-152-b, rule 1: never a re-dated span)", () => {
       const straddle = zBlk({
         startMin: 2 * 1440 + 480,
         endMin: 2 * 1440 + 960,
@@ -2671,8 +2691,21 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         const move = res.command as MoveCommand;
         expect(move.intent).toBe("move");
         expect(move.toPlace).toBeNull();
-        expect(move.span).toEqual({ start: { hour: 8, minute: 0 }, end: { hour: 14, minute: 0 } });
+        expect(move.day).toEqual({ kind: "date", iso: "2026-09-03" });
+        expect(move.span).toBeNull();
+        expect(move.adjust).toEqual({ edge: "end", at: { hour: 14, minute: 0 } });
         expect(move.existing).toEqual({ kind: "move", assignmentId: "zblk" });
+
+        // The adjust resolves to the same 08:00-14:00 kept part the old
+        // re-dated span used to name directly.
+        const resolved = resolveCommand(move, zCtx({ assignments: [straddle] }));
+        expect(resolved.ok).toBe(true);
+        if (resolved.ok && resolved.resolved.intent === "move") {
+          expect(resolved.resolved.range).toEqual({
+            startMin: 2 * 1440 + 480,
+            endMin: 2 * 1440 + 840,
+          });
+        }
       } else {
         throw new Error("expected a single move");
       }
@@ -3729,11 +3762,19 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
   });
 
   // -------------------------------------------------------------------------
-  // MN1-MN9: F-152 (docs/agent-briefs/f-152-midnight-remainder-brief.md) --
-  // "clear Cell 1 today" on a block that crosses midnight used to date the
-  // KEPT part by the sentence's own day, never the day it itself starts on,
-  // so `resolveDaySpanStep` read the rendered clock pair as negative. `zDays`
-  // (index 0 = 2026-09-01 .. index 4 = 2026-09-05, today = index 1) already
+  // MN1-MN19: F-152 (docs/agent-briefs/f-152-midnight-remainder-brief.md,
+  // docs/agent-briefs/f-152-b-window-edge-brief.md). "clear Cell 1 today" on
+  // a block that crosses midnight used to date the KEPT part by the
+  // sentence's own day, never the day it itself starts on, so
+  // `resolveDaySpanStep` read the rendered clock pair as negative (the first
+  // fix, MN1-MN12). That fix still failed on the maintainer's real board: a
+  // block starting BEFORE the window clamps under the real `wallOf`
+  // (`zClampedWallOf` below mirrors it), so `copyableSpan` called it
+  // representable and rendered a still-wrong clock pair. The second fix
+  // (MN13-MN19) makes the kept part an EDGE ADJUST on the sentence's own
+  // day instead -- no `wallOf` read on the block's own untouched edge at
+  // all -- and guards every WHOLE-block builder with `edgeOnBoard` first.
+  // `zDays` (index 0 = 2026-09-01 .. index 4 = 2026-09-05, today = index 1)
   // spans five days -- MN1/MN4 lean on index -1/0 (off the left edge) and
   // MN2 on index 3 (tomorrow of "today" = index 2) to prove the fix without
   // a separate fixture. Every span below is `zWallToOffset`/`zWallOf`
@@ -3741,7 +3782,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
   // -------------------------------------------------------------------------
 
   describe("MN: F-152 midnight remainder", () => {
-    it("MN1: yesterday 02:00 to today 06:00, clear today -- a several of two: the kept part dated yesterday 02:00-DAY_END, the other block removed", () => {
+    it("MN1: yesterday 02:00 to today 06:00, clear today -- a several of two: an edge adjust dated TODAY (end to 00:00), the other block removed", () => {
       const overnight = zBlk({
         id: "mn1a",
         startMin: zWallToOffset(1, 120), // 2026-09-02 (index 1) 02:00
@@ -3765,27 +3806,43 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         existing: null,
         until: null,
       };
-      const res = expandCommand(command, zCtx({ assignments: [overnight, sameDay] }));
+      const ctx = zCtx({ assignments: [overnight, sameDay] });
+      const res = expandCommand(command, ctx);
       expect(res.ok).toBe(true);
       if (res.ok && res.command.intent === "several") {
         expect(res.command.commands).toHaveLength(2);
         const [move, remove] = res.command.commands;
         expect(move.intent).toBe("move");
         const m = move as MoveCommand;
-        expect(m.day).toEqual({ kind: "date", iso: "2026-09-02" }); // its OWN day, not "today"
-        expect(m.span).toEqual({ start: { hour: 2, minute: 0 }, end: { hour: 23, minute: 59 } }); // DAY_END
+        // F-152-b, rule 1: dated the SENTENCE's own day (never re-dated to
+        // "yesterday" -- that read is exactly what clamped and broke on
+        // the real board), span null, an edge adjust instead.
+        expect(m.day).toEqual({ kind: "date", iso: "2026-09-03" });
+        expect(m.span).toBeNull();
+        expect(m.adjust).toEqual({ edge: "end", at: { hour: 0, minute: 0 } });
         expect(m.existing).toEqual({ kind: "move", assignmentId: "mn1a" });
         expect(remove.intent).toBe("unassign");
         expect((remove as UnassignCommand).existing).toEqual({
           kind: "remove",
           assignmentId: "mn1b",
         });
+
+        // Resolved, the block's own untouched start (02:00 yesterday) and
+        // its new end (00:00 today) come back as real minutes, no question.
+        const moveRes = resolveCommand(m, ctx);
+        expect(moveRes.ok).toBe(true);
+        if (moveRes.ok && moveRes.resolved.intent === "move") {
+          expect(moveRes.resolved.range).toEqual({
+            startMin: zWallToOffset(1, 120),
+            endMin: zWallToOffset(2, 0),
+          });
+        }
       } else {
         throw new Error("expected a several of two");
       }
     });
 
-    it("MN2: today 22:00 to tomorrow 06:00, clear today -- a move dated tomorrow 00:00-06:00", () => {
+    it("MN2: today 22:00 to tomorrow 06:00, clear today -- an edge adjust dated today (start to DAY_END)", () => {
       const overnight = zBlk({
         id: "mn2",
         startMin: zWallToOffset(2, 1320), // today 22:00
@@ -3802,14 +3859,27 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         existing: null,
         until: null,
       };
-      const res = expandCommand(command, zCtx({ assignments: [overnight] }));
+      const ctx = zCtx({ assignments: [overnight] });
+      const res = expandCommand(command, ctx);
       expect(res.ok).toBe(true);
       if (res.ok && res.command.intent !== "several") {
         const move = res.command as MoveCommand;
         expect(move.intent).toBe("move");
-        expect(move.day).toEqual({ kind: "date", iso: "2026-09-04" }); // tomorrow, not today
-        expect(move.span).toEqual({ start: { hour: 0, minute: 0 }, end: { hour: 6, minute: 0 } });
+        // F-152-b, rule 1: dated TODAY (the sentence's own day), never
+        // "tomorrow" -- the window's own end is DAY_END on today's own day.
+        expect(move.day).toEqual({ kind: "date", iso: "2026-09-03" });
+        expect(move.span).toBeNull();
+        expect(move.adjust).toEqual({ edge: "start", at: { hour: 23, minute: 59 } });
         expect(move.existing).toEqual({ kind: "move", assignmentId: "mn2" });
+
+        const moveRes = resolveCommand(move, ctx);
+        expect(moveRes.ok).toBe(true);
+        if (moveRes.ok && moveRes.resolved.intent === "move") {
+          expect(moveRes.resolved.range).toEqual({
+            startMin: zWallToOffset(3, 0), // today's own 1440th minute = tomorrow 00:00
+            endMin: zWallToOffset(3, 360), // the block's own untouched end
+          });
+        }
       } else {
         throw new Error("expected a single move");
       }
@@ -3845,7 +3915,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       });
     });
 
-    it('MN4: the kept part\'s own day is off the board -- day_off_board naming its ISO, never a bare iso: ""', () => {
+    it("MN4 (F-152-b, rule 1: item 4 no longer applies here): a block starting off zDays entirely still clears via an edge adjust -- the untouched edge's own day is never read at all", () => {
       const overnight = zBlk({
         id: "mn4",
         startMin: zWallToOffset(-1, 120), // 2026-08-31, off zDays entirely -- 02:00
@@ -3862,11 +3932,30 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         existing: null,
         until: null,
       };
-      const res = expandCommand(command, zCtx({ assignments: [overnight] }));
-      expect(res).toEqual({
-        ok: false,
-        question: { kind: "day_off_board", text: "2026-08-31" },
-      });
+      const ctx = zCtx({ assignments: [overnight] });
+      const res = expandCommand(command, ctx);
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent !== "several") {
+        const move = res.command as MoveCommand;
+        expect(move.day).toEqual({ kind: "date", iso: "2026-09-01" });
+        expect(move.span).toBeNull();
+        expect(move.adjust).toEqual({ edge: "end", at: { hour: 0, minute: 0 } });
+        expect(move.existing).toEqual({ kind: "move", assignmentId: "mn4" });
+
+        // Resolves clean too -- `resolveMoveCommand` finds the block by
+        // OVERLAP with today's window, never by asking `ctx.days` whether
+        // day -1 exists.
+        const moveRes = resolveCommand(move, ctx);
+        expect(moveRes.ok).toBe(true);
+        if (moveRes.ok && moveRes.resolved.intent === "move") {
+          expect(moveRes.resolved.range).toEqual({
+            startMin: zWallToOffset(-1, 120),
+            endMin: zWallToOffset(0, 0),
+          });
+        }
+      } else {
+        throw new Error("expected a single move");
+      }
     });
 
     it("MN5: a block wholly inside today is unchanged -- a plain remove dated today", () => {
@@ -4181,6 +4270,311 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           hours: "21:00–06:00",
         },
       });
+    });
+
+    // -----------------------------------------------------------------------
+    // MN13-MN19 (docs/agent-briefs/f-152-b-window-edge-brief.md): the first
+    // fix (MN1-MN12 above) still failed on the maintainer's real board --
+    // his window starts TODAY, so John Kim's block (starting yesterday)
+    // clamped under the real `wallOf` and rendered wrong. A ONE-DAY board,
+    // the maintainer's own shape, operators named for the real report.
+    // -----------------------------------------------------------------------
+
+    const oneDay: BoardDay[] = [{ index: 0, iso: "2026-09-03", weekday: 4 }];
+    const zJohn = { id: "zjohn", displayName: "John Kim", employeeRef: null, active: true };
+    const zSamP = { id: "zsamp", displayName: "Sam Patel", employeeRef: null, active: true };
+    const zTom = { id: "ztom", displayName: "Tom Baker", employeeRef: null, active: true };
+
+    /** MN13-MN19's own ctx: `zCtx` narrowed to ONE day (today, index 0, no
+     *  day before it at all -- the maintainer's own board), with John
+     *  Kim/Sam Patel/Tom Baker added and no shift pattern (MN10/MN11 above
+     *  already cover the shift-match path, on the wider `zDays` board). */
+    function edgeCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
+      return zCtx({
+        days: oneDay,
+        todayIndex: 0,
+        operators: [...zOperators, zJohn, zSamP, zTom],
+        shiftsAt: () => [],
+        ...overrides,
+      });
+    }
+
+    it("MN13: John Kim -1320..360 (starts before the window) and Sam Patel 540..660, clear Cell 1 today -- an edge adjust for John (existing id, span null, day today), a plain remove for Sam, both resolve clean", () => {
+      const john = zBlk({
+        id: "mn13john",
+        operatorId: "zjohn",
+        startMin: -1320,
+        endMin: 360,
+        label: "02:00–06:00",
+      });
+      const sam = zBlk({
+        id: "mn13sam",
+        operatorId: "zsamp",
+        startMin: 540,
+        endMin: 660,
+        label: "09:00–11:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const ctx = edgeCtx({ assignments: [john, sam] });
+      const res = expandCommand(command, ctx);
+      expect(res.ok).toBe(true);
+      if (!res.ok || res.command.intent !== "several") throw new Error("expected a several of two");
+      expect(res.command.commands).toHaveLength(2);
+      const [move, remove] = res.command.commands;
+      expect(move.intent).toBe("move");
+      const m = move as MoveCommand;
+      expect(m.day).toEqual({ kind: "date", iso: "2026-09-03" });
+      expect(m.span).toBeNull();
+      expect(m.adjust).toEqual({ edge: "end", at: { hour: 0, minute: 0 } });
+      expect(m.existing).toEqual({ kind: "move", assignmentId: "mn13john" });
+      expect(remove.intent).toBe("unassign");
+      expect((remove as UnassignCommand).existing).toEqual({
+        kind: "remove",
+        assignmentId: "mn13sam",
+      });
+
+      // No question anywhere -- both steps resolve clean against the SAME
+      // ctx, John's own untouched start and the window's own new end.
+      const moveRes = resolveCommand(m, ctx);
+      expect(moveRes.ok).toBe(true);
+      if (moveRes.ok && moveRes.resolved.intent === "move") {
+        expect(moveRes.resolved.range).toEqual({ startMin: -1320, endMin: 0 });
+      }
+      const removeRes = resolveCommand(remove as UnassignCommand, ctx);
+      expect(removeRes.ok).toBe(true);
+    });
+
+    it("MN14: 22:00 today to 06:00 tomorrow (tomorrow off the one-day board), clear Cell 1 today -- an edge adjust (start to DAY_END), resolved start = 1440", () => {
+      const block = zBlk({
+        id: "mn14",
+        operatorId: "zjohn",
+        startMin: 1320,
+        endMin: 1800,
+        label: "22:00–06:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const ctx = edgeCtx({ assignments: [block] });
+      const res = expandCommand(command, ctx);
+      expect(res.ok).toBe(true);
+      if (!res.ok || res.command.intent === "several") throw new Error("expected a single move");
+      const move = res.command as MoveCommand;
+      expect(move.day).toEqual({ kind: "date", iso: "2026-09-03" });
+      expect(move.span).toBeNull();
+      expect(move.adjust).toEqual({ edge: "start", at: { hour: 23, minute: 59 } });
+      expect(move.existing).toEqual({ kind: "move", assignmentId: "mn14" });
+
+      const moveRes = resolveCommand(move, ctx);
+      expect(moveRes.ok).toBe(true);
+      if (moveRes.ok && moveRes.resolved.intent === "move") {
+        expect(moveRes.resolved.range).toEqual({ startMin: 1440, endMin: 1800 });
+      }
+    });
+
+    it("MN15: replacing John Kim (whose block starts before the one-day board) with Tom Baker -- day_off_board naming yesterday's own ISO", () => {
+      const john = zBlk({
+        id: "mn15",
+        operatorId: "zjohn",
+        startMin: -1320,
+        endMin: 360,
+        label: "02:00–06:00",
+      });
+      const command: ReplaceCommand = {
+        intent: "replace",
+        operator: "John Kim",
+        with: "Tom Baker",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+      };
+      const res = expandCommand(command, edgeCtx({ assignments: [john] }));
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "day_off_board", text: "2026-09-02" },
+      });
+    });
+
+    it("MN16: swapping John Kim (block starts before the board) with Tom Baker -- the same day_off_board, before either half is written", () => {
+      const john = zBlk({
+        id: "mn16john",
+        operatorId: "zjohn",
+        startMin: -1320,
+        endMin: 360,
+        label: "02:00–06:00",
+      });
+      const tom = zBlk({
+        id: "mn16tom",
+        operatorId: "ztom",
+        startMin: 540,
+        endMin: 660,
+        label: "09:00–11:00",
+      });
+      const command: SwapCommand = {
+        intent: "swap",
+        operator: "John Kim",
+        other: "Tom Baker",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+      };
+      const res = expandCommand(command, edgeCtx({ assignments: [john, tom] }));
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "day_off_board", text: "2026-09-02" },
+      });
+    });
+
+    it("MN17: splitting John Kim's block (which starts before the board) at 3am -- day_off_board, never a negative span", () => {
+      const john = zBlk({
+        id: "mn17",
+        operatorId: "zjohn",
+        startMin: -1320,
+        endMin: 360,
+        label: "02:00–06:00",
+      });
+      const command: SplitCommand = {
+        intent: "split",
+        operator: "John Kim",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        at: { hour: 3, minute: 0 },
+      };
+      const res = expandCommand(command, edgeCtx({ assignments: [john] }));
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "day_off_board", text: "2026-09-02" },
+      });
+    });
+
+    it("MN18: an absence over John Kim's block that starts before the board -- day_off_board, never a negative span", () => {
+      const john = zBlk({
+        id: "mn18",
+        operatorId: "zjohn",
+        startMin: -1320,
+        endMin: 360,
+        label: "02:00–06:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "John Kim",
+        place: [],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: { kind: "date", iso: "2026-09-03" },
+      };
+      const res = expandCommand(command, edgeCtx({ assignments: [john] }));
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "day_off_board", text: "2026-09-02" },
+      });
+    });
+
+    it("MN19: a block starting exactly at the window's own first minute (0..360) is ON the board -- a cover resolves as a plain same-day pair, never a refusal", () => {
+      const john = zBlk({
+        id: "mn19",
+        operatorId: "zjohn",
+        startMin: 0,
+        endMin: 360,
+        label: "00:00–06:00",
+      });
+      const command: ReplaceCommand = {
+        intent: "replace",
+        operator: "John Kim",
+        with: "Tom Baker",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+      };
+      const res = expandCommand(command, edgeCtx({ assignments: [john] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const [removal, assign] = res.command.commands;
+        expect(removal.intent).toBe("unassign");
+        const r = removal as UnassignCommand;
+        expect(r.day).toEqual({ kind: "date", iso: "2026-09-03" });
+        expect(r.span).toEqual({ start: { hour: 0, minute: 0 }, end: { hour: 6, minute: 0 } });
+        expect(r.existing).toEqual({ kind: "remove", assignmentId: "mn19" });
+        expect(assign.intent).toBe("assign");
+        const a = assign as AssignCommand;
+        expect(a.operator).toBe("Tom Baker");
+        expect(a.day).toEqual({ kind: "date", iso: "2026-09-03" });
+        expect(a.start).toEqual({ hour: 0, minute: 0 });
+        expect(a.end).toEqual({ hour: 6, minute: 0 });
+      } else {
+        throw new Error("expected a several of two");
+      }
+    });
+
+    it("MN20 (reviewer fix, F-152-b rule 2): expandCopy SKIPS a source block with an edge off the board -- John's leftover never blocks copying Sam's, and never asks a question", () => {
+      // A minimal two-day board (today, tomorrow) -- narrower than `zDays`,
+      // the same today-starting shape MN13-MN19 use, widened by exactly the
+      // one extra day a copy's own destination needs to resolve at all.
+      const twoDay: BoardDay[] = [
+        { index: 0, iso: "2026-09-03", weekday: 4 },
+        { index: 1, iso: "2026-09-04", weekday: 5 },
+      ];
+      const john = zBlk({
+        id: "mn20john",
+        operatorId: "zjohn",
+        startMin: -1320, // off the board entirely -- yesterday 02:00
+        endMin: 360,
+        label: "02:00–06:00",
+      });
+      const sam = zBlk({
+        id: "mn20sam",
+        operatorId: "zsamp",
+        startMin: 480, // 08:00, an ordinary same-day block
+        endMin: 960, // 16:00
+        label: "08:00–16:00",
+      });
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "date", iso: "2026-09-03" },
+        to: { kind: "date", iso: "2026-09-04" },
+      };
+      const ctx = zCtx({
+        days: twoDay,
+        operators: [...zOperators, zJohn, zSamP],
+        shiftsAt: () => [],
+        assignments: [john, sam],
+      });
+      const res = expandCommand(command, ctx);
+      expect(res.ok).toBe(true);
+      // Exactly ONE command -- Sam's own copy, never a `several` (John's
+      // leftover contributed nothing, not even a skipped placeholder).
+      if (res.ok && res.command.intent !== "several") {
+        const a = res.command as AssignCommand;
+        expect(a.intent).toBe("assign");
+        expect(a.operator).toBe("Sam Patel");
+        expect(a.day).toEqual({ kind: "date", iso: "2026-09-04" });
+        expect(a.start).toEqual({ hour: 8, minute: 0 });
+        expect(a.end).toEqual({ hour: 16, minute: 0 });
+      } else {
+        throw new Error("expected a single assign (Sam's), never a several and never a question");
+      }
     });
   });
 

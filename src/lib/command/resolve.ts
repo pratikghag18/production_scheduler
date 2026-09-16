@@ -997,6 +997,15 @@ function formatSpan(
   return `${pad2(start.hour)}:${pad2(start.minute)}–${pad2(end.hour)}:${pad2(end.minute)}`;
 }
 
+/** F-152-b: a single "HH:MM" -- the adjust readout's own "ends 00:00, was
+ *  06:00" names one clock at a time, never a pair, so `formatSpan` does not
+ *  fit. A literal `ClockTime`, never `clockOfOffset`'s own `wallOf` read,
+ *  when the caller already has one (`adjust.at`, DAY_END included, reads
+ *  back as "23:59" exactly like every other DAY_END text in this file). */
+function formatClockTime(c: { hour: number; minute: number }): string {
+  return `${pad2(c.hour)}:${pad2(c.minute)}`;
+}
+
 /** S55 (R-404, D130 item 3): a `ClockTime` of `DAY_END` (23:59, parse.ts's
  *  own reserved spelling for "the day's end") reads as MIDNIGHT -- 1440
  *  minutes into the day, one minute later than the literal clock reading --
@@ -2494,6 +2503,16 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
   let startMin: number;
   let endMin: number;
   let arrow: string;
+  // F-152-b (the maintainer, window-edge follow-up): non-null only for an
+  // adjust -- the compact readout below ("ends 00:00, was 06:00") names
+  // just the ADJUSTED edge's own before/after, never the whole block's
+  // arrow (`formatSpan` of both new edges reads backward, "02:00-00:00",
+  // for `expandEveryoneUnassign`'s own edge-adjust use: the OTHER edge is
+  // the block's real, unmoved start/end, which may sit on an entirely
+  // different calendar day than `dayIndex` on purpose -- see rule 1's own
+  // comment on the off-day check just below).
+  let adjustReadout: { edge: "start" | "end"; oldClock: ClockTime; newClock: ClockTime } | null =
+    null;
 
   if (command.adjust !== null) {
     // S58 (R-412, D132 item 1): a re-time by ONE edge -- the top-of-function
@@ -2530,9 +2549,22 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
         },
       };
     }
+    // F-152-b, rule 1(b)/(c): ONLY the edge just named by `adjust` has to
+    // land on `dayIndex` -- `edgeMin` is that edge's own new value, built
+    // above either from `adjust.at` (`ctx.wallToOffset(dayIndex, ...)`,
+    // always in [dayStart, dayEndBound] by construction) or `by` (which
+    // CAN legitimately overshoot the day, AJ9's own case). The OTHER edge
+    // (`blk.startMin`/`blk.endMin`, untouched) is never checked here any
+    // more: `expandEveryoneUnassign`'s edge-adjust move keeps a block's
+    // real, ALREADY-off-day start or end exactly as it was (a leftover
+    // that starts the day before the window it is cleared from, the John
+    // Kim shape) -- the old blanket check on BOTH new edges asked
+    // `adjust_off_day` for that block even though nothing about ITS OWN
+    // named edge was invalid, which is what shipped the "-120 minutes"
+    // bug's own second half.
     const dayStart = ctx.wallToOffset(dayIndex, 0);
     const dayEndBound = ctx.wallToOffset(dayIndex, 1440);
-    if (newStartMin < dayStart || newEndMin > dayEndBound) {
+    if (edgeMin < dayStart || edgeMin > dayEndBound) {
       return {
         ok: false,
         question: { kind: "adjust_off_day", person: operator.displayName, block: blockWords },
@@ -2544,6 +2576,17 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
     target = { kind: "retime" };
     targetNodeId = blk.nodeId;
     arrow = formatSpan(clockOfOffset(newStartMin, ctx), clockOfOffset(newEndMin, ctx));
+    adjustReadout = {
+      edge: adjust.edge,
+      oldClock:
+        adjust.edge === "start" ? clockOfOffset(blk.startMin, ctx) : clockOfOffset(blk.endMin, ctx),
+      // `adjust.at` is already the exact new clock (DAY_END included) when
+      // given that way -- reading it back through `clockOfOffset` would be
+      // the same value by construction, but `edgeMin` for the `by` form
+      // has no such literal to reuse, so that form always goes through
+      // `clockOfOffset` on the now-validated (on-day) `edgeMin`.
+      newClock: "at" in adjust ? adjust.at : clockOfOffset(edgeMin, ctx),
+    };
   } else if (command.toPlace === null) {
     // Move in time only -- R-385's own retime target (`command.span` is
     // guaranteed non-null here whenever `shift` is null too: parseMoveRest's
@@ -2606,7 +2649,16 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
   const blkCellNode = ctx.nodeById.get(blk.nodeId) ?? null;
   const ancestorNames = blkCellNode ? ancestorsOf(blkCellNode, byPath).map((n) => n.name) : [];
   const chain = blkCellNode ? [...ancestorNames, blkCellNode.name].join(" › ") : "";
-  const readout = `Moving ${operator.displayName}'s ${blk.productName ?? "block"} block · ${chain} · ${whenText} · ${blk.label} → ${arrow}`;
+  // F-152-b: an adjust's own readout names just the ONE edge that moved,
+  // "<person> · <cell> · ends 00:00, was 06:00" -- the generic arrow
+  // (`blk.label → formatSpan(newStart, newEnd)`) reads backward for a
+  // block whose OTHER edge is genuinely on a different calendar day (the
+  // edge-adjust `expandEveryoneUnassign` now builds), and is no plainer
+  // even for an ordinary same-day "shorten by 6 hours".
+  const readout =
+    adjustReadout !== null
+      ? `${operator.displayName} · ${blkCellNode?.name ?? blk.nodeId} · ${adjustReadout.edge}s ${formatClockTime(adjustReadout.newClock)}, was ${formatClockTime(adjustReadout.oldClock)}`
+      : `Moving ${operator.displayName}'s ${blk.productName ?? "block"} block · ${chain} · ${whenText} · ${blk.label} → ${arrow}`;
 
   return {
     ok: true,
@@ -2816,6 +2868,78 @@ function hoursOfBlock(
 }
 
 /**
+ * F-152-b (rule 1): the wall clock of a real minute offset that is ALREADY
+ * known to sit on `dayIndex` -- a window's own edge (`resolveWindowForCell`
+ * builds it as `ctx.wallToOffset(dayIndex, ...)` in the first place, so it
+ * can never be off that day), never a block's own edge (which can be off
+ * the board entirely, `ctx.wallOf`'s own clamp territory -- `edgeOnBoard`
+ * below guards THAT). Pure `wallToOffset` arithmetic, no `wallOf` at all:
+ * `offsetMin - wallToOffset(dayIndex, 0)` is the minute-of-day `offsetMin`
+ * was built from, for ANY `dayIndex` (a DST day's own per-day constant
+ * cancels out of the subtraction), read back through `clockFromMinuteOfDay`
+ * so an edge sitting at the day's own 1440th minute prints DAY_END, not
+ * midnight of the wrong day.
+ */
+function clockOnDay(offsetMin: number, dayIndex: number, ctx: ResolveContext): ClockTime {
+  return clockFromMinuteOfDay(offsetMin - ctx.wallToOffset(dayIndex, 0));
+}
+
+/**
+ * F-152-b (rule 2, "nothing trusts the clamp"): whether a real minute
+ * offset is on the board's own window at all. `ctx.wallOf`
+ * (`src/features/board/lib/time.ts`) clamps an offset outside the window to
+ * the NEAREST end's `dayIndex` while `minuteOfDay` stays the instant's real
+ * wall clock -- a defensive read for an overnight shift band that
+ * legitimately carries past the window's own last local midnight, never
+ * meant to stand in for "which day is this really on". A block's own edge
+ * (never a window's -- see `clockOnDay` above) read through `wallOf`
+ * without checking this first is exactly how the John Kim bug's second half
+ * shipped: a block starting the day before the window read as starting on
+ * day 0 at its own real 02:00, `copyableSpan` called that representable,
+ * and a REPLACE would have silently written the wrong person a 02:00-06:00
+ * block today instead of asking anything. `ctx.days` is non-empty by
+ * contract (the bar never shows with no days on the board).
+ */
+function edgeOnBoard(offsetMin: number, ctx: ResolveContext): boolean {
+  const lastDayIndex = ctx.days[ctx.days.length - 1].index;
+  return 0 <= offsetMin && offsetMin <= ctx.wallToOffset(lastDayIndex, 1440);
+}
+
+/** F-152-b, rule 2: the `day_off_board` question for ONE edge that failed
+ *  `edgeOnBoard` -- before the window names the day just before the
+ *  board's own first (`addDaysToIso(ctx.days[0].iso, -1)`), after names the
+ *  day just past its own last (`addDaysToIso(lastDay.iso, 1)`) -- the day
+ *  the person must move the board to before this block's own edges are
+ *  even readable. A block that still pokes out after that move asks again,
+ *  which is honest: never a guess at how far out it really goes. */
+function edgeOffBoardQuestion(offsetMin: number, ctx: ResolveContext): Question {
+  const lastDay = ctx.days[ctx.days.length - 1];
+  const iso = offsetMin < 0 ? addDaysToIso(ctx.days[0].iso, -1) : addDaysToIso(lastDay.iso, 1);
+  return { kind: "day_off_board", text: iso };
+}
+
+/** F-152-b, rule 2: both of a WHOLE block's own real edges must be on the
+ *  board before anything reads them through `wallOf` (`copyableSpan`,
+ *  `renderBlockForRebuild`, `matchingShiftBandName`'s own day index, ...).
+ *  Every builder that carries a block WHOLE (`expandReplace`, `expandSwap`,
+ *  `expandSplit`, `expandAbsence`, `expandCopy`, and `crossesBothEdgesQuestion`
+ *  below) calls this FIRST, so the two-edge check is written once. Start
+ *  checked before end (never both at once): whichever the person would fix
+ *  first by moving the board. */
+function blockEdgesOnBoard(
+  x: { startMin: number; endMin: number },
+  ctx: ResolveContext,
+): { ok: true } | { ok: false; question: Question } {
+  if (!edgeOnBoard(x.startMin, ctx)) {
+    return { ok: false, question: edgeOffBoardQuestion(x.startMin, ctx) };
+  }
+  if (!edgeOnBoard(x.endMin, ctx)) {
+    return { ok: false, question: edgeOffBoardQuestion(x.endMin, ctx) };
+  }
+  return { ok: true };
+}
+
+/**
  * F-152: the day a block-derived MINUTE OFFSET (a remainder's own start, a
  * split's own edge -- never the sentence's own already-checked `resolveDay`
  * result) falls on, guarded -- `dayWordForIndex` alone would silently write
@@ -2952,6 +3076,13 @@ function crossesBothEdgesQuestion(
   window: { startMin: number; endMin: number },
   ctx: ResolveContext,
 ): { ok: false; question: Question } {
+  // F-152-b, rule 2: this branch reads the BLOCK's own edges (`copyableSpan`,
+  // `clockOfOffset`) below -- both must be on the board first, the same
+  // guard every other whole-block builder uses, else a block that pokes off
+  // the board entirely could clamp into a wrongly-"representable" span here
+  // too, the identical class of bug this whole follow-up fixes.
+  const edgesOk = blockEdgesOnBoard(x, ctx);
+  if (!edgesOk.ok) return edgesOk;
   const block = `${x.productName ?? "block"} ${x.label}`;
   if (copyableSpan(x.startMin, x.endMin, ctx) === null) {
     return {
@@ -3149,35 +3280,37 @@ function expandEveryoneUnassign(command: UnassignCommand, ctx: ResolveContext): 
         until: null,
       });
     } else if (insideStart !== insideEnd) {
-      // F-152 items 1/2/4: the kept (outside-window) part is dated by the
-      // day IT starts on, never `dayIndex` (the sentence's own day) -- a
-      // block that starts the day before (kept 02:00-DAY_END, item 1) or
-      // ends the day after (kept 00:00-06:00 on tomorrow, item 2) a
-      // same-day `today` window used to read as a negative span on the
-      // sentence's own day; a kept day off the board asks `day_off_board`
-      // naming its own ISO (item 4) instead of the old bare `iso: ""`.
-      const outsideStart = insideStart ? window.endMin : x.startMin;
-      const outsideEnd = insideStart ? x.endMin : window.startMin;
-      const remainder = remainderDayAndSpan(outsideStart, outsideEnd, ctx);
-      if (!remainder.ok) {
-        if (remainder.question !== null) return { ok: false, question: remainder.question };
-        // Item 3 / the review follow-up: genuinely not representable
-        // (crosses into a later day's daytime hours) -- the same question
-        // the both-edges case just below asks: `across_midnight`, naming
-        // the block's own real hours, when the BLOCK itself (not just this
-        // kept piece) cannot be written as one day's clock pair.
-        return crossesBothEdgesQuestion(op, x, xCell, window, ctx);
-      }
+      // F-152-b, rule 1: the kept (outside-window) part is an EDGE ADJUST
+      // on the SENTENCE's own day, never a re-dated span -- the window's
+      // own edges (`window.startMin`/`window.endMin`) are always on
+      // `dayIndex` by construction (`resolveWindowForCell`'s own
+      // `wallToOffset`), so `clockOnDay` reads their wall clock with no
+      // `wallOf` at all, hence no clamp to go wrong. The block's OTHER
+      // edge (its own real start or end, left untouched) is never read
+      // here either -- `resolveMoveCommand`'s own adjust path keeps it
+      // exactly as it is, even when that is a different calendar day
+      // entirely (a leftover that starts the day before the window it is
+      // cleared from, the John Kim shape): block starts outside, ends
+      // inside -> the end moves to the window's own start (DAY_END when
+      // that is the day's own end); starts inside, ends outside -> the
+      // start moves to the window's own end (DAY_END the ordinary
+      // whole-day-window case). Items 3 (both edges outside) and 4
+      // (a kept day off the board) of the first brief no longer apply
+      // here at all -- there is no `wallOf` read left in this branch to
+      // fall off the board.
+      const adjust: Adjust = insideStart
+        ? { edge: "start", at: clockOnDay(window.endMin, dayIndex, ctx) }
+        : { edge: "end", at: clockOnDay(window.startMin, dayIndex, ctx) };
       commands.push({
         intent: "move",
         operator: personWords(op),
         place: cellWordsOf(xCell, byPath),
         toPlace: null,
-        day: remainder.day,
-        span: remainder.span,
+        day: dayWordForIndex(dayIndex, ctx),
+        span: null,
         existing: { kind: "move", assignmentId: x.id },
         shift: null,
-        adjust: null,
+        adjust,
       });
     } else {
       return crossesBothEdgesQuestion(op, x, xCell, window, ctx);
@@ -3387,6 +3520,15 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
   const assigns: SingleCommand[] = [];
   for (const x of blocks) {
     const xCell = ctx.nodeById.get(x.nodeId) as Node;
+    // F-152-b, rule 2: this block's own edges are about to be read through
+    // `wallOf` (`renderBlockForRebuild` -> `remainderDayAndSpan` ->
+    // `copyableSpan`) -- both must be on the board first, or the clamp
+    // could read a block starting before the window as starting on day 0
+    // at its own real hour, `copyableSpan` would call that representable,
+    // and this would silently REMOVE John's whole block and WRITE Tom a
+    // wrong-day block instead of asking anything.
+    const edgesOk = blockEdgesOnBoard(x, ctx);
+    if (!edgesOk.ok) return edgesOk;
     // F-152 follow-up: `blocks` is gathered by OVERLAP with the window, the
     // same as `expandEveryoneUnassign` -- a leftover block only partly
     // inside it (an overnight shift's own band, or a plain leftover that
@@ -3543,6 +3685,14 @@ function expandSwap(command: SwapCommand, ctx: ResolveContext): Expansion {
   const blkB = bBlocks[0];
   const cellA = ctx.nodeById.get(blkA.nodeId) as Node;
   const cellB = ctx.nodeById.get(blkB.nodeId) as Node;
+
+  // F-152-b, rule 2: both blocks' own edges, checked before either is read
+  // through `wallOf` below (`renderBlockForRebuild`) -- same reason
+  // `expandReplace` checks first.
+  const edgesA = blockEdgesOnBoard(blkA, ctx);
+  if (!edgesA.ok) return edgesA;
+  const edgesB = blockEdgesOnBoard(blkB, ctx);
+  if (!edgesB.ok) return edgesB;
 
   // F-152 follow-up (the same fix `expandReplace` needed, plus the
   // maintainer's night-shift follow-up): each block is dated by the day IT
@@ -3813,12 +3963,31 @@ function expandCopy(command: CopyCommand, ctx: ResolveContext): Expansion {
       );
       for (const run of srcRuns) {
         if (run.productId === null) continue;
+        // F-152-b, rule 2 (reviewer fix): `run`'s own edges, checked before
+        // `copyableSpan` reads them -- a run gathered by OVERLAP with the
+        // source day's window may itself start or end off the board
+        // entirely, where the clamp could otherwise call it representable
+        // and copy the wrong hours silently. Off-board is SKIPPED
+        // (`continue`), the same shape `copyableSpan === null` (genuinely
+        // overnight) already uses just below -- this function's own
+        // documented limitation is "skip what it cannot copy", never a
+        // refusal that would block every OTHER run/block on the cell for
+        // one stray leftover. A `day_off_board` REFUSAL belongs to the
+        // builders that rewrite THAT specific block (`expandReplace`,
+        // `expandSwap`, `expandSplit`, `expandAbsence`) -- `expandCopy`
+        // only ever adds new commands elsewhere, never touches the source.
+        const edgesOk = blockEdgesOnBoard(run, ctx);
+        if (!edgesOk.ok) continue;
         const span = copyableSpan(run.startMin, run.endMin, ctx);
         if (span === null) continue; // genuinely overnight -- not representable, skipped
         const { startMOD, endMOD } = span;
         const alreadyThere = ctx.runs.some((r) => {
           if (r.nodeId !== cell.id || r.productId !== run.productId) return false;
           if (r.startMin < dstDayStart || r.startMin >= dstDayEnd) return false;
+          // Off-board here only means "this candidate cannot be compared" --
+          // never a reason to refuse the WHOLE copy for an unrelated
+          // existing row, so it simply never counts as a match.
+          if (!edgeOnBoard(r.startMin, ctx) || !edgeOnBoard(r.endMin, ctx)) return false;
           const rSpan = copyableSpan(r.startMin, r.endMin, ctx);
           return rSpan !== null && rSpan.startMOD === startMOD && rSpan.endMOD === endMOD;
         });
@@ -3843,6 +4012,12 @@ function expandCopy(command: CopyCommand, ctx: ResolveContext): Expansion {
         if (blk.operatorId === null || blk.productId === null) continue;
         const op = operatorById(blk.operatorId, ctx);
         if (op === null) continue;
+        // F-152-b, rule 2 (reviewer fix): same edge check as the run loop
+        // just above, same reason, same SKIP (never a refusal) -- see that
+        // comment for why a leftover here must not block copying every
+        // other run/block on the cell.
+        const edgesOk = blockEdgesOnBoard(blk, ctx);
+        if (!edgesOk.ok) continue;
         const span = copyableSpan(blk.startMin, blk.endMin, ctx);
         if (span === null) continue; // genuinely overnight -- not representable, skipped
         const { startMOD, endMOD } = span;
@@ -3855,6 +4030,9 @@ function expandCopy(command: CopyCommand, ctx: ResolveContext): Expansion {
             return false;
           }
           if (x.startMin < dstDayStart || x.startMin >= dstDayEnd) return false;
+          // Off-board here only disqualifies THIS candidate as a match --
+          // never a reason to refuse the whole copy for an unrelated row.
+          if (!edgeOnBoard(x.startMin, ctx) || !edgeOnBoard(x.endMin, ctx)) return false;
           const xSpan = copyableSpan(x.startMin, x.endMin, ctx);
           return xSpan !== null && xSpan.startMOD === startMOD && xSpan.endMOD === endMOD;
         });
@@ -3954,6 +4132,11 @@ function expandAbsence(command: UnassignCommand, ctx: ResolveContext): Expansion
       if (seen.has(x.id)) continue;
       seen.add(x.id);
       const xCell = ctx.nodeById.get(x.nodeId) as Node;
+      // F-152-b, rule 2: `x`'s own edges, checked before `ctx.wallOf`/
+      // `copyableSpan` read them just below -- a leftover block found by
+      // this day's own window may itself start (or end) off the board.
+      const edgesOk = blockEdgesOnBoard(x, ctx);
+      if (!edgesOk.ok) return edgesOk;
       // F-152: a whole block (never clipped here, R-409's own "each of the
       // person's blocks becomes an unassign") is dated by the day IT
       // starts on, never the loop's own `dayIndex` -- the same "22:00 to
@@ -4079,6 +4262,12 @@ function expandSplit(command: SplitCommand, ctx: ResolveContext): Expansion {
   }
   const blk = containing[0];
   const blkCell = ctx.nodeById.get(blk.nodeId) as Node;
+
+  // F-152-b, rule 2: `blk`'s own edges, checked before `copyableSpan`
+  // (below) ever reads them through `wallOf` -- a block found by `atMin`
+  // may itself start (or, more rarely here, end) off the board entirely.
+  const edgesOk = blockEdgesOnBoard(blk, ctx);
+  if (!edgesOk.ok) return edgesOk;
 
   const firstMinutes = atMin - blk.startMin;
   const secondMinutes = blk.endMin - atMin;

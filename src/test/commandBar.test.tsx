@@ -42,6 +42,7 @@ import type {
   ContextRun,
   ContextAssignment,
   Candidate,
+  BoardDay,
 } from "@/lib/command/resolve";
 // S59 (R-418's message): a runtime (not type-only) import, used ONLY by the
 // CB-unknown describe block below to spy on `resolveCommand` for one test at
@@ -73,9 +74,40 @@ function findRunOverlap(
   return null;
 }
 
+/** F-152-b: mirrors `src/features/board/lib/time.ts`'s own `wallOf` -- an
+ *  offset outside the board's own window clamps its `dayIndex` to the
+ *  nearest end while `minuteOfDay` stays the real wall clock, exactly the
+ *  shape that let the maintainer's real board read a block starting the
+ *  day before the window as starting on day 0 at its own real hour.
+ *  Unclamped, no fake in this file could ever see this class of bug. */
+function clampedWallOf(
+  boardDays: readonly { index: number }[],
+): (m: number) => { dayIndex: number; minuteOfDay: number } {
+  const lastIndex = boardDays.length > 0 ? boardDays[boardDays.length - 1].index : 0;
+  return (m: number) => {
+    const raw = Math.floor(m / 1440);
+    const dayIndex = raw < 0 ? 0 : raw > lastIndex ? lastIndex : raw;
+    return { dayIndex, minuteOfDay: ((m % 1440) + 1440) % 1440 };
+  };
+}
+
+/** Brief §5's own days: a 7-day window from Monday 2026-08-31, today =
+ *  index 3 (Thursday 2026-09-03). Named so `buildCtx`'s own `wallOf` can
+ *  clamp against whichever `days` a test actually passed. */
+const BUILD_CTX_DAYS: BoardDay[] = [
+  { index: 0, iso: "2026-08-31", weekday: 1 },
+  { index: 1, iso: "2026-09-01", weekday: 2 },
+  { index: 2, iso: "2026-09-02", weekday: 3 },
+  { index: 3, iso: "2026-09-03", weekday: 4 },
+  { index: 4, iso: "2026-09-04", weekday: 5 },
+  { index: 5, iso: "2026-09-05", weekday: 6 },
+  { index: 6, iso: "2026-09-06", weekday: 0 },
+];
+
 /** Brief §5's fixture, verbatim: a 7-day window from Monday 2026-08-31,
  *  today = index 3 (Thursday 2026-09-03), the plain (no-changeover) stub. */
 function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
+  const finalDays = over.days ?? BUILD_CTX_DAYS;
   const nodes = [
     { id: "p1", name: "Plant 1", path: "plant_1" },
     { id: "asm", name: "Assembly", path: "plant_1.assembly" },
@@ -102,15 +134,7 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     ],
     offeredAt: (nodeId: string) =>
       nodeId === "c1b" ? [{ id: "cov" }] : [{ id: "ha" }, { id: "hb" }],
-    days: [
-      { index: 0, iso: "2026-08-31", weekday: 1 },
-      { index: 1, iso: "2026-09-01", weekday: 2 },
-      { index: 2, iso: "2026-09-02", weekday: 3 },
-      { index: 3, iso: "2026-09-03", weekday: 4 },
-      { index: 4, iso: "2026-09-04", weekday: 5 },
-      { index: 5, iso: "2026-09-05", weekday: 6 },
-      { index: 6, iso: "2026-09-06", weekday: 0 },
-    ],
+    days: BUILD_CTX_DAYS,
     todayIndex: 3,
     wallToOffset: (d: number, m: number) => d * 1440 + m,
     runs: [],
@@ -124,9 +148,10 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     // boundary shift name (`ALL_DAY`/`END_OF_SHIFT`/`END_OF_DAY`), so "no
     // clock" is the safer default; CB-x-8 overrides it to test the rounding.
     nowMinuteOfDay: null,
-    // The brief's own plain `wallOf` for a non-DST window -- the exact
-    // inverse of this fixture's `wallToOffset` above.
-    wallOf: (m: number) => ({ dayIndex: Math.floor(m / 1440), minuteOfDay: m % 1440 }),
+    // F-152-b: `clampedWallOf` mirrors `time.ts`'s own clamp -- without it
+    // CB-mid-2 (and CB-mid-1) could not see the class of bug the
+    // maintainer's real board hit.
+    wallOf: clampedWallOf(finalDays),
     ...over,
   };
 }
@@ -2009,6 +2034,52 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     );
   });
 
+  /** CB-mid-2 (F-152-b, the window-edge follow-up, MN13's own scenario): a
+   *  ONE-DAY board that starts TODAY -- the maintainer's own shape -- with
+   *  John Kim's block starting the day before it (`clampedWallOf`, the top
+   *  of this file, is what lets this fixture see the bug at all). */
+  const ONE_DAY_XBOARD: BoardDay[] = [{ index: 0, iso: "2026-09-03", weekday: 4 }];
+  const XJOHN_OVERNIGHT: ContextAssignment = {
+    id: "xjohnOvernight",
+    nodeId: "xc1",
+    operatorId: "john",
+    productId: "ha",
+    productName: "Housing A",
+    startMin: -1320, // yesterday 02:00 -- before the one-day window starts
+    endMin: 360, // today 06:00
+    label: "02:00–06:00",
+    runId: null,
+  };
+  const XSAMP_PLAIN: ContextAssignment = {
+    id: "xsampPlain",
+    nodeId: "xc1",
+    operatorId: "samp",
+    productId: "ha",
+    productName: "Housing A",
+    startMin: 540, // 09:00
+    endMin: 660, // 11:00
+    label: "09:00–11:00",
+    runId: null,
+  };
+
+  it("CB-mid-2: the lot's adjust step readout for MN13's first command -- John Kim's own compact 'ends 00:00, was 06:00', never a re-dated span", () => {
+    const { input } = renderXBar({
+      assignments: [XJOHN_OVERNIGHT, XSAMP_PLAIN],
+      days: ONE_DAY_XBOARD,
+      todayIndex: 0,
+      operators: [
+        { id: "john", displayName: "John Kim", employeeRef: null, active: true },
+        { id: "samp", displayName: "Sam Patel", employeeRef: null, active: true },
+      ],
+    });
+
+    fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toContain("1. John Kim · Cell 1 · ends 00:00, was 06:00");
+  });
+
   it("CB-x-10: an ambiguous SECOND person on a replace fills `with`, never `operator`, and the lot appears once picked", () => {
     const { input } = renderXBar({
       assignments: [XSAM],
@@ -2312,7 +2383,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     expect(screen.getByRole("button", { name: "Do all 5" })).toBeTruthy();
   });
 
-  it("CB-y-3: 'extend Sam's block by an hour' is the single move path, readout with the new hours", () => {
+  it("CB-y-3: 'extend Sam's block by an hour' is the single move path, the adjust's own compact readout (F-152-b: names just the moved edge, never the whole block's arrow)", () => {
     const { onMove, input } = renderXBar({ assignments: [XSAM] });
 
     fireEvent.change(input, { target: { value: "extend Sam's block by an hour" } });
@@ -2322,7 +2393,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.target).toEqual({ kind: "retime" });
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
-    expect(statusText()).toContain("10:00–14:00 → 10:00–15:00");
+    expect(statusText()).toContain("Sam · Cell 1 · ends 15:00, was 14:00");
   });
 
   it("CB-y-4: 'make the Housing A job on Cell 1 4 people' calls onSetHeadcount with the run and the number, and shows the readout", () => {
@@ -2507,7 +2578,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     }
   });
 
-  it("CB-y-11: reviewer scenario 3 -- 'extend Sam's block by an hour' with Sam on TWO cells asks move_which naming both, the pick substitutes and the readout shows the new hours", () => {
+  it("CB-y-11: reviewer scenario 3 -- 'extend Sam's block by an hour' with Sam on TWO cells asks move_which naming both, the pick substitutes and the readout shows the adjust's own compact form", () => {
     const XSAM2: ContextAssignment = {
       id: "xsam2",
       nodeId: "xc2",
@@ -2532,7 +2603,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.target).toEqual({ kind: "retime" });
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
-    expect(statusText()).toContain("10:00–14:00 → 10:00–15:00");
+    expect(statusText()).toContain("Sam · Cell 1 · ends 15:00, was 14:00");
   });
 
   it("CB-y-12: reviewer scenario 4 -- the headcount readout shows immediately on Enter regardless of the async write's own outcome (fire-and-forget, same shape as onRetime/onUnassign/onMove); a later mutation failure surfaces through the toast useDragGesture's own failWith writes, never the bar's status -- ACCEPTABLE, matches every other single-write intent", () => {
