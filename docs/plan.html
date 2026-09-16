@@ -113,17 +113,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 174 · 2026-09-15 · The first spoken walk: nineteen sentences, seven rules, three findings, real names, a trace on disk (S59, S60, R-418 to R-423, F-149 to F-151)</h2>
-  <div class="lead"><p>The maintainer walked nineteen sentences through the bar by voice and keyboard and reported every one. Sorted: the model copies what it hears (right), the resolver's dead end on a near-miss was the gap (R-418); &quot;yeah&quot; was not a yes (F-150); yesterday and Friday off the board (R-419); the recogniser mishearing cell, A and 4 (R-420); the model writing a place named &quot;],&quot; (F-149); a typed &quot;from 2 until end of shift&quot; read as 02:00 (F-151, found by asking the maintainer to type it); two of the tests were the developer's own design mistakes. The maintainer then asked for a temporary log of what was heard, answered and done, and for it to go to a local file rather than a paste (R-421); for real names on Plant A (R-423); and for a sentence with no part to ask which (R-422). Six lanes and three reviewers; the last reviewer drove the real bar in a browser and proved the trace line and the hint. Next: the maintainer's second walk with the new names and the trace on disk; the smoke switch; 6b.</p></div>
+  <h2>Session 175 · 2026-09-16 · The second walk's first sentence: a block across midnight, kept on the wrong day (F-152)</h2>
+  <div class="lead"><p>The maintainer began the second walk a day after the list was written. The first sentence, &quot;clear Cell 1 today&quot;, met a leftover block that now crossed midnight and answered with a negative span (F-152). The trace line for it had not landed because the sentence was still standing on its question; Escape ends a sentence's life and writes the line, which was explained rather than changed. One lane fixed the remainder's day in five builders and a follow-up made a replace or a swap on a night-shift block go through the shift form instead of refusing; a reviewer attacked it on DST, the unwritten board, the absence dedupe, the off-board rerun and the pins' numbers. Next: the maintainer's walk resumes with the list re-dated to the 16th; the trace file read after it; the smoke switch; 6b.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">3812</span><span class="l">app tests in 150 files — session 174, 2026-09-15</span></div>
+  <div class="stat ok"><span class="n">3825</span><span class="l">app tests in 150 files — session 175, 2026-09-16</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">856</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">80</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
   <div class="stat "><span class="n">318 / 366</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>fe2e29d</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>441786c</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2311,7 +2311,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>151 things that weren't in the plan</h2>
+  <h2>152 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3641,6 +3641,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   <div class="aside"><span class="k">Fix</span><p>Session 174 (fe2e29d). A lone start before a boundary or a length reads by the workday rule (LS1 to LS14): &quot;from 2 until end of shift&quot; is 14:00 to 22:00 on Plant A. The rule's edge was then moved for a START: 1 to 5 are the afternoon, 6 stays the morning (every demo plant's first shift starts at 06:00, and the training data said &quot;from 6&quot; meaning it); a lone END keeps 1 to 6. The templates compute their forms by the same rule and the held-out set was regenerated a fourth time on the same seed; the fifth run's score stands against the file as it was, and the sixth run's data carries this. Was: The grammar applies the same workday rule to a start that stands alone before a boundary or a length: &quot;from 2 until end of shift&quot; is 14:00, &quot;from 2 for 4 hours&quot; is 14:00–18:00, &quot;from 8 for 4 hours&quot; stays 08:00, an explicit am/pm or a 24-hour clock is untouched; pinned as LS1 to LS6 (brief docs/agent-briefs/f-151-lone-start-workday-rule-brief.md).</p></div>
   <p class="fine">R-404 · R-405</p>
+</div>
+<div class="find fix" id="F-152">
+  <span class="tag">A block's remainder rendered as bare clocks and dated by the sentence, not by itself · fixed · you found it · <a href="#S55">S55</a></span>
+  <h3>Clearing a day wrote the kept part of a midnight-crossing block onto the wrong day</h3>
+  <p>Found 16 Sept (session 175) on the second walk's first sentence. &quot;Clear Cell 1 today&quot; answered &quot;1 of 2: That is -120 minutes; a block is at least 15 minutes.&quot; John Kim's leftover block ran from 02:00 the day before to 06:00 that morning (Plant A is on Chicago time). The clear keeps the part outside today as a move, and wrote that part's hours --- 02:00 to midnight --- onto today, the day the sentence named, where 02:00 to 00:00 runs backwards. Every night shift reaches the same spot the morning after: Shift 3 is 22:00 to 06:00 on all three demo plants. The same shape stood in four more builders: the absence form (which also removed a two-window block twice), the split, and the replace and swap, which copied a whole night block's hours onto one day and so could never cover or swap anyone on Shift 3.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 175 (441786c). A block's remainder is dated by the day it starts on, an end at 00:00 of the next day is written as the day's end, and a part that itself crosses into a later day's hours asks split_needed rather than guessing; a remainder whose day is off the board asks day_off_board with the date, so Show that day answers it. A replace or a swap on a block that exactly matches a shift band is rebuilt through the shift form (the removal by its id, the new block by the band's name), so covering someone on Shift 3 works; a night block matching no band asks for a split. The absence form removes each block once. Pinned MN1 to MN12 (brief docs/agent-briefs/f-152-midnight-remainder-brief.md, review docs/agent-briefs/f-152-review-brief.md).</p></div>
+  <p class="fine">R-407 · R-406 · R-409 · R-413</p>
 </div>
 </section>
 
@@ -6220,6 +6228,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 175</b> · 2026-09-16 · The second walk's first sentence: a block across midnight, kept on the wrong day (F-152) <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>The maintainer began the second walk a day after the list was written. The first sentence, &quot;clear Cell 1 today&quot;, met a leftover block that now crossed midnight and answered with a negative span (F-152). The trace line for it had not landed because the sentence was still standing on its question; Escape ends a sentence's life and writes the line, which was explained rather than changed. One lane fixed the remainder's day in five builders and a follow-up made a replace or a swap on a night-shift block go through the shift form instead of refusing; a reviewer attacked it on DST, the unwritten board, the absence dedupe, the off-board rerun and the pins' numbers. Next: the maintainer's walk resumes with the list re-dated to the 16th; the trace file read after it; the smoke switch; 6b.</p>
+    <div class="aside"><span class="k">A note on these numbers</span><p>npm run test, 16 Sept, after the F-152 commit: 3825 tests in 150 files, all passing; tsc and eslint clean; the role walk passed; no migration or RPC changed.</p></div>
+    <p class="fine">3825 app tests in 150 files · 856 database checks · 80 migrations · tsc 0 · eslint 0 · commits 441786c</p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 174</b> · 2026-09-15 · The first spoken walk: nineteen sentences, seven rules, three findings, real names, a trace on disk (S59, S60, R-418 to R-423, F-149 to F-151) <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>The maintainer walked nineteen sentences through the bar by voice and keyboard and reported every one. Sorted: the model copies what it hears (right), the resolver's dead end on a near-miss was the gap (R-418); &quot;yeah&quot; was not a yes (F-150); yesterday and Friday off the board (R-419); the recogniser mishearing cell, A and 4 (R-420); the model writing a place named &quot;],&quot; (F-149); a typed &quot;from 2 until end of shift&quot; read as 02:00 (F-151, found by asking the maintainer to type it); two of the tests were the developer's own design mistakes. The maintainer then asked for a temporary log of what was heard, answered and done, and for it to go to a local file rather than a paste (R-421); for real names on Plant A (R-423); and for a sentence with no part to ask which (R-422). Six lanes and three reviewers; the last reviewer drove the real bar in a browser and proved the trace line and the hint. Next: the maintainer's second walk with the new names and the trace on disk; the smoke switch; 6b.</p>
@@ -7533,5 +7549,5 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 </details>
 </section>
 
-<footer>Generated from <code>docs/plan.yaml</code> (updated 2026-09-15) by <code>scripts/render-plan.mjs</code>. Edit the YAML, never this page.</footer>
+<footer>Generated from <code>docs/plan.yaml</code> (updated 2026-09-16) by <code>scripts/render-plan.mjs</code>. Edit the YAML, never this page.</footer>
 </div></body></html>

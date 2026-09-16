@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-15'
-  tip: 'fe2e29d'
+  updated: '2026-09-16'
+  tip: '441786c'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -11788,6 +11788,35 @@ requirements:
   note: >-
     STATED 15 Sept (session 174): "the operator names being A1, A2, etc is a bit more challenging to understand vs actual people names, should we try modifying plant A with actual people names?" Brief docs/agent-briefs/s60-a-real-names-brief.md.
 findings:
+- id: F-152
+  title: Clearing a day wrote the kept part of a midnight-crossing block onto the wrong day
+  tag: A block's remainder rendered as bare clocks and dated by the sentence, not by itself
+  status: fixed
+  found_by: maintainer
+  stage: S55
+  refs:
+  - R-407
+  - R-406
+  - R-409
+  - R-413
+  story: >-
+    Found 16 Sept (session 175) on the second walk's first sentence. "Clear Cell 1 today" answered "1 of 2:
+    That is -120 minutes; a block is at least 15 minutes." John Kim's leftover block ran from 02:00 the day
+    before to 06:00 that morning (Plant A is on Chicago time). The clear keeps the part outside today as a
+    move, and wrote that part's hours --- 02:00 to midnight --- onto today, the day the sentence named, where
+    02:00 to 00:00 runs backwards. Every night shift reaches the same spot the morning after: Shift 3 is
+    22:00 to 06:00 on all three demo plants. The same shape stood in four more builders: the absence
+    form (which also removed a two-window block twice), the split, and the replace and swap, which copied a
+    whole night block's hours onto one day and so could never cover or swap anyone on Shift 3.
+  fix: >-
+    Session 175 (441786c). A block's remainder is dated by the day it starts on, an end at 00:00 of the next
+    day is written as the day's end, and a part that itself crosses into a later day's hours asks
+    split_needed rather than guessing; a remainder whose day is off the board asks day_off_board with the
+    date, so Show that day answers it. A replace or a swap on a block that exactly matches a shift band is
+    rebuilt through the shift form (the removal by its id, the new block by the band's name), so covering
+    someone on Shift 3 works; a night block matching no band asks for a split. The absence form removes
+    each block once. Pinned MN1 to MN12 (brief docs/agent-briefs/f-152-midnight-remainder-brief.md,
+    review docs/agent-briefs/f-152-review-brief.md).
 - id: F-151
   title: From 2 until end of shift read as 02:00, so the block ran to the night shift's end
   tag: One lone-hour rule, applied to some clauses and not others
@@ -15833,6 +15862,32 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 175
+  date: 2026-09-16
+  title: "The second walk's first sentence: a block across midnight, kept on the wrong day (F-152)"
+  shipped: []
+  commits: ['441786c']
+  numbers:
+    app_tests: 3825
+    app_test_files: 150
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    npm run test, 16 Sept, after the F-152 commit: 3825 tests in 150 files, all passing; tsc and
+    eslint clean; the role walk passed; no migration or RPC changed.
+  summary: >-
+    The maintainer began the second walk a day after the list was written. The first sentence, "clear Cell 1
+    today", met a leftover block that now crossed midnight and answered with a negative span (F-152). The
+    trace line for it had not landed because the sentence was still standing on its question; Escape ends a
+    sentence's life and writes the line, which was explained rather than changed. One lane fixed the
+    remainder's day in five builders and a follow-up made a replace or a swap on a night-shift block go
+    through the shift form instead of refusing; a reviewer attacked it on DST, the unwritten board, the
+    absence dedupe, the off-board rerun and the pins' numbers. Next: the maintainer's walk resumes with the
+    list re-dated to the 16th; the trace file read after it; the smoke switch; 6b.
 - id: 174
   date: 2026-09-15
   title: "The first spoken walk: nineteen sentences, seven rules, three findings, real names, a trace on disk (S59, S60, R-418 to R-423, F-149 to F-151)"
