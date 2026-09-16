@@ -3729,6 +3729,462 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
   });
 
   // -------------------------------------------------------------------------
+  // MN1-MN9: F-152 (docs/agent-briefs/f-152-midnight-remainder-brief.md) --
+  // "clear Cell 1 today" on a block that crosses midnight used to date the
+  // KEPT part by the sentence's own day, never the day it itself starts on,
+  // so `resolveDaySpanStep` read the rendered clock pair as negative. `zDays`
+  // (index 0 = 2026-09-01 .. index 4 = 2026-09-05, today = index 1) already
+  // spans five days -- MN1/MN4 lean on index -1/0 (off the left edge) and
+  // MN2 on index 3 (tomorrow of "today" = index 2) to prove the fix without
+  // a separate fixture. Every span below is `zWallToOffset`/`zWallOf`
+  // arithmetic, never a hand-summed minute count.
+  // -------------------------------------------------------------------------
+
+  describe("MN: F-152 midnight remainder", () => {
+    it("MN1: yesterday 02:00 to today 06:00, clear today -- a several of two: the kept part dated yesterday 02:00-DAY_END, the other block removed", () => {
+      const overnight = zBlk({
+        id: "mn1a",
+        startMin: zWallToOffset(1, 120), // 2026-09-02 (index 1) 02:00
+        endMin: zWallToOffset(2, 360), // 2026-09-03 (index 2) 06:00
+        label: "02:00–06:00",
+      });
+      const sameDay = zBlk({
+        id: "mn1b",
+        operatorId: "zana",
+        startMin: zWallToOffset(2, 600), // today 10:00
+        endMin: zWallToOffset(2, 720), // today 12:00
+        label: "10:00–12:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [overnight, sameDay] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        expect(res.command.commands).toHaveLength(2);
+        const [move, remove] = res.command.commands;
+        expect(move.intent).toBe("move");
+        const m = move as MoveCommand;
+        expect(m.day).toEqual({ kind: "date", iso: "2026-09-02" }); // its OWN day, not "today"
+        expect(m.span).toEqual({ start: { hour: 2, minute: 0 }, end: { hour: 23, minute: 59 } }); // DAY_END
+        expect(m.existing).toEqual({ kind: "move", assignmentId: "mn1a" });
+        expect(remove.intent).toBe("unassign");
+        expect((remove as UnassignCommand).existing).toEqual({
+          kind: "remove",
+          assignmentId: "mn1b",
+        });
+      } else {
+        throw new Error("expected a several of two");
+      }
+    });
+
+    it("MN2: today 22:00 to tomorrow 06:00, clear today -- a move dated tomorrow 00:00-06:00", () => {
+      const overnight = zBlk({
+        id: "mn2",
+        startMin: zWallToOffset(2, 1320), // today 22:00
+        endMin: zWallToOffset(3, 360), // tomorrow (index 3) 06:00
+        label: "22:00–06:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [overnight] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent !== "several") {
+        const move = res.command as MoveCommand;
+        expect(move.intent).toBe("move");
+        expect(move.day).toEqual({ kind: "date", iso: "2026-09-04" }); // tomorrow, not today
+        expect(move.span).toEqual({ start: { hour: 0, minute: 0 }, end: { hour: 6, minute: 0 } });
+        expect(move.existing).toEqual({ kind: "move", assignmentId: "mn2" });
+      } else {
+        throw new Error("expected a single move");
+      }
+    });
+
+    it('MN3: yesterday 22:00 to tomorrow 02:00 -- across_midnight (the review follow-up: the window\'s own bounds would have been the untrue, unanswerable "00:00-00:00")', () => {
+      const wide = zBlk({
+        id: "mn3",
+        startMin: zWallToOffset(1, 1320), // yesterday 22:00
+        endMin: zWallToOffset(3, 120), // tomorrow 02:00
+        label: "22:00–02:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [wide] }));
+      expect(res).toEqual({
+        ok: false,
+        question: {
+          kind: "across_midnight",
+          person: "Sam",
+          cell: "Cell 1",
+          block: "Housing A 22:00–02:00",
+          hours: "22:00–02:00", // the block's OWN real hours, never the window's
+        },
+      });
+    });
+
+    it('MN4: the kept part\'s own day is off the board -- day_off_board naming its ISO, never a bare iso: ""', () => {
+      const overnight = zBlk({
+        id: "mn4",
+        startMin: zWallToOffset(-1, 120), // 2026-08-31, off zDays entirely -- 02:00
+        endMin: zWallToOffset(0, 360), // 2026-09-01 (index 0, on board) 06:00
+        label: "02:00–06:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-01" }, // index 0
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [overnight] }));
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "day_off_board", text: "2026-08-31" },
+      });
+    });
+
+    it("MN5: a block wholly inside today is unchanged -- a plain remove dated today", () => {
+      const inside = zBlk({
+        id: "mn5",
+        startMin: zWallToOffset(2, 600),
+        endMin: zWallToOffset(2, 720),
+        label: "10:00–12:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "everyone",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+        existing: null,
+        until: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [inside] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent !== "several") {
+        const remove = res.command as UnassignCommand;
+        expect(remove.intent).toBe("unassign");
+        expect(remove.day).toEqual({ kind: "date", iso: "2026-09-03" });
+        expect(remove.span).toEqual({
+          start: { hour: 10, minute: 0 },
+          end: { hour: 12, minute: 0 },
+        });
+        expect(remove.existing).toEqual({ kind: "remove", assignmentId: "mn5" });
+      } else {
+        throw new Error("expected a single remove");
+      }
+    });
+
+    it("MN6 (extra site: expandAbsence, the `until` form): a block spanning two of its own day windows dedupes to one removal, dated by its own start day, span null when not representable", () => {
+      const overnight = zBlk({
+        id: "mn6",
+        startMin: zWallToOffset(1, 1320), // 2026-09-02 (index 1) 22:00
+        endMin: zWallToOffset(2, 360), // 2026-09-03 (index 2) 06:00
+        label: "22:00–06:00",
+      });
+      const command: UnassignCommand = {
+        intent: "unassign",
+        operator: "Sam",
+        place: [],
+        day: { kind: "date", iso: "2026-09-02" }, // index 1
+        span: null,
+        shift: null,
+        existing: null,
+        until: { kind: "date", iso: "2026-09-03" }, // index 2 -- the block overlaps BOTH day windows
+      };
+      const res = expandCommand(command, zCtx({ assignments: [overnight] }));
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent !== "several") {
+        const remove = res.command as UnassignCommand;
+        expect(remove.day).toEqual({ kind: "date", iso: "2026-09-02" }); // its own start day
+        expect(remove.span).toBeNull(); // ends 06:00, not midnight -- not representable, never a guess
+        expect(remove.existing).toEqual({ kind: "remove", assignmentId: "mn6" });
+      } else {
+        throw new Error("expected a single remove, never one per day it overlaps");
+      }
+    });
+
+    it("MN7 (extra site: expandSplit, the split builder): splitting a block that starts the day before -- split_needed, never a negative span dated on the split's own day", () => {
+      const overnight = zBlk({
+        id: "mn7",
+        startMin: zWallToOffset(1, 1320), // yesterday 22:00
+        endMin: zWallToOffset(2, 360), // today 06:00
+        label: "22:00–06:00",
+      });
+      const command: SplitCommand = {
+        intent: "split",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" }, // today, index 2
+        at: { hour: 2, minute: 0 }, // today 02:00 -- inside the block, not at midnight
+      };
+      const res = expandCommand(command, zCtx({ assignments: [overnight] }));
+      expect(res).toEqual({
+        ok: false,
+        question: {
+          kind: "split_needed",
+          person: "Sam",
+          cell: "Cell 1",
+          block: "Housing A 22:00–06:00",
+          span: "22:00–06:00",
+        },
+      });
+    });
+
+    it("MN8 (extra site: expandReplace): replacing someone on a leftover overnight block that matches no band -- across_midnight naming the block's own real hours, never a negative span or the window's bounds", () => {
+      const overnight = zBlk({
+        id: "mn8",
+        startMin: zWallToOffset(1, 1320), // yesterday 22:00
+        endMin: zWallToOffset(2, 360), // today 06:00
+        label: "22:00–06:00",
+      });
+      const command: ReplaceCommand = {
+        intent: "replace",
+        operator: "Sam",
+        with: "Ana",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [overnight] }));
+      expect(res).toEqual({
+        ok: false,
+        question: {
+          kind: "across_midnight",
+          person: "Sam",
+          cell: "Cell 1",
+          block: "Housing A 22:00–06:00",
+          hours: "22:00–06:00",
+        },
+      });
+    });
+
+    it("MN9 (extra site: expandSwap): swapping someone on a leftover overnight block that matches no band -- across_midnight before either half is written", () => {
+      const overnight = zBlk({
+        id: "mn9a",
+        startMin: zWallToOffset(1, 1320), // yesterday 22:00
+        endMin: zWallToOffset(2, 360), // today 06:00
+        label: "22:00–06:00",
+      });
+      const anaBlock = zBlk({
+        id: "mn9b",
+        operatorId: "zana",
+        startMin: zWallToOffset(2, 600),
+        endMin: zWallToOffset(2, 720),
+        label: "10:00–12:00",
+      });
+      const command: SwapCommand = {
+        intent: "swap",
+        operator: "Sam",
+        other: "Ana",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+      };
+      const res = expandCommand(command, zCtx({ assignments: [overnight, anaBlock] }));
+      expect(res).toEqual({
+        ok: false,
+        question: {
+          kind: "across_midnight",
+          person: "Sam",
+          cell: "Cell 1",
+          block: "Housing A 22:00–06:00",
+          hours: "22:00–06:00",
+        },
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // MN10-MN12 (the maintainer's follow-up, 16 Sept): a replace/swap on a
+    // night-shift block must WORK -- "cover Sam with Tom" on Shift 3 (22:00
+    // to 06:00) is the everyday case, not an edge case a `split_needed`
+    // refusal may hit nightly. `zShiftsAt` (the outer fixture) carries only
+    // Shift 1/Shift 2, neither overnight -- these three pins add their own
+    // `shiftsAt` naming a genuine overnight Shift 3 (`endMin` past 1440,
+    // R-402/D128 §19.99's own convention), the SAME shape `ctx.shiftsAt`
+    // documents.
+    // -----------------------------------------------------------------------
+
+    const shiftsWithNight3 = (
+      nodeId: string,
+    ): { name: string; startMin: number; endMin: number }[] =>
+      nodeId === "zc1"
+        ? [
+            { name: "Shift 1", startMin: 360, endMin: 840 },
+            { name: "Shift 2", startMin: 840, endMin: 1320 },
+            { name: "Shift 3", startMin: 1320, endMin: 1800 }, // 22:00-06:00, crosses midnight
+          ]
+        : [];
+
+    it('MN10: replace on a Shift 3 block -- the removal carries the existing id with a null span, the assign carries `shift: "Shift 3"` dated the block\'s own start day', () => {
+      const overnight = zBlk({
+        id: "mn10",
+        startMin: zWallToOffset(1, 1320), // yesterday 22:00 -- exactly Shift 3's own start
+        endMin: zWallToOffset(2, 360), // today 06:00 -- exactly Shift 3's own end
+        label: "22:00–06:00",
+      });
+      const command: ReplaceCommand = {
+        intent: "replace",
+        operator: "Sam",
+        with: "Ana",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+      };
+      const res = expandCommand(
+        command,
+        zCtx({ assignments: [overnight], shiftsAt: shiftsWithNight3 }),
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        expect(res.command.commands).toHaveLength(2);
+        const [removal, assign] = res.command.commands;
+        expect(removal.intent).toBe("unassign");
+        const r = removal as UnassignCommand;
+        expect(r.day).toEqual({ kind: "date", iso: "2026-09-02" }); // the block's own start day
+        expect(r.span).toBeNull(); // needs no hours -- `existing`'s own id finds it
+        expect(r.existing).toEqual({ kind: "remove", assignmentId: "mn10" });
+        expect(assign.intent).toBe("assign");
+        const a = assign as AssignCommand;
+        expect(a.operator).toBe("Ana");
+        expect(a.day).toEqual({ kind: "date", iso: "2026-09-02" });
+        expect(a.shift).toBe("Shift 3");
+        expect(a.start).toBeNull();
+        expect(a.end).toBeNull();
+      } else {
+        throw new Error("expected a several of two");
+      }
+    });
+
+    it("MN11: swap where one block is on Shift 3 -- that block's own removal and its new assign both carry the shift form", () => {
+      const overnight = zBlk({
+        id: "mn11a",
+        startMin: zWallToOffset(1, 1320), // yesterday 22:00, exactly Shift 3
+        endMin: zWallToOffset(2, 360), // today 06:00
+        label: "22:00–06:00",
+      });
+      const anaBlock = zBlk({
+        id: "mn11b",
+        operatorId: "zana",
+        startMin: zWallToOffset(2, 600), // today 10:00, an ordinary same-day block
+        endMin: zWallToOffset(2, 720), // today 12:00
+        label: "10:00–12:00",
+      });
+      const command: SwapCommand = {
+        intent: "swap",
+        operator: "Sam",
+        other: "Ana",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+      };
+      const res = expandCommand(
+        command,
+        zCtx({ assignments: [overnight, anaBlock], shiftsAt: shiftsWithNight3 }),
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const cmds = res.command.commands;
+        expect(cmds).toHaveLength(4);
+        // Sam's own removal -- the Shift 3 block, dated its own start day,
+        // no hours needed.
+        const removeSam = cmds[0] as UnassignCommand;
+        expect(removeSam.existing).toEqual({ kind: "remove", assignmentId: "mn11a" });
+        expect(removeSam.day).toEqual({ kind: "date", iso: "2026-09-02" });
+        expect(removeSam.span).toBeNull();
+        // Ana's own removal -- an ordinary same-day block, unchanged shape.
+        const removeAna = cmds[1] as UnassignCommand;
+        expect(removeAna.existing).toEqual({ kind: "remove", assignmentId: "mn11b" });
+        expect(removeAna.day).toEqual({ kind: "date", iso: "2026-09-03" });
+        expect(removeAna.span).toEqual({
+          start: { hour: 10, minute: 0 },
+          end: { hour: 12, minute: 0 },
+        });
+        // Sam takes Ana's old (ordinary) block -- plain hours.
+        const assignSam = cmds[2] as AssignCommand;
+        expect(assignSam.operator).toBe("Sam");
+        expect(assignSam.day).toEqual({ kind: "date", iso: "2026-09-03" });
+        expect(assignSam.start).toEqual({ hour: 10, minute: 0 });
+        expect(assignSam.end).toEqual({ hour: 12, minute: 0 });
+        expect(assignSam.shift).toBeNull();
+        // Ana takes Sam's old Shift 3 block -- the shift form, dated the
+        // block's own start day, never "today".
+        const assignAna = cmds[3] as AssignCommand;
+        expect(assignAna.operator).toBe("Ana");
+        expect(assignAna.day).toEqual({ kind: "date", iso: "2026-09-02" });
+        expect(assignAna.shift).toBe("Shift 3");
+        expect(assignAna.start).toBeNull();
+        expect(assignAna.end).toBeNull();
+      } else {
+        throw new Error("expected a several of four");
+      }
+    });
+
+    it("MN12: a night block matching NO band (close, not exact) -- across_midnight still, never a guess at the nearest one", () => {
+      const closeButNotShift3 = zBlk({
+        id: "mn12",
+        startMin: zWallToOffset(1, 1260), // yesterday 21:00 -- an hour off Shift 3's own 22:00
+        endMin: zWallToOffset(2, 360), // today 06:00
+        label: "21:00–06:00",
+      });
+      const command: ReplaceCommand = {
+        intent: "replace",
+        operator: "Sam",
+        with: "Ana",
+        place: ["Cell 1"],
+        day: { kind: "date", iso: "2026-09-03" },
+        span: null,
+        shift: null,
+      };
+      const res = expandCommand(
+        command,
+        zCtx({ assignments: [closeButNotShift3], shiftsAt: shiftsWithNight3 }),
+      );
+      expect(res).toEqual({
+        ok: false,
+        question: {
+          kind: "across_midnight",
+          person: "Sam",
+          cell: "Cell 1",
+          block: "Housing A 21:00–06:00",
+          hours: "21:00–06:00",
+        },
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // JB1-JB6: "the job's hours" (R-414, D132 item 3) -- resolveShiftSpanStep's
   // own `jobProduct` branch, and the assign path.
   // -------------------------------------------------------------------------

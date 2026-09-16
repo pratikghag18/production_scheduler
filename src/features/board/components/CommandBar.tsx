@@ -1436,6 +1436,21 @@ export function CommandBar({
         candidates: [],
       };
     }
+    // F-152 review follow-up (the maintainer, 16 Sept): a block that
+    // genuinely crosses a day boundary and matches no shift band -- never
+    // the window's own bounds (untrue and unanswerable for a whole-day
+    // window's "00:00-00:00"). `question.hours` (the block's own real
+    // span) stays on the question for the trace/tests, but the text itself
+    // drops it -- `question.block` already carries the hours in its own
+    // label, so printing both said them twice (the maintainer, wording
+    // trim, 16 Sept).
+    if (question.kind === "across_midnight") {
+      return {
+        kind: "question",
+        message: `${question.person}'s ${question.block} block on ${question.cell} crosses midnight and matches no shift; split it at midnight first, or say the shift.`,
+        candidates: [],
+      };
+    }
     if (question.kind === "swap_which") {
       return {
         kind: "question",

@@ -443,8 +443,24 @@ export type Question =
   | { kind: "nothing_to_do"; text: string }
   /** S55 (R-407, D130 item 5): an `everyone` removal's span falls strictly
    *  inside a block on BOTH edges -- a split the app does not have. Nothing
-   *  is built; the person is asked for a span that reaches one end instead. */
+   *  is built; the person is asked for a span that reaches one end instead.
+   *  `span` is the WINDOW the sentence itself named (true only when that
+   *  window sits inside a single day, e.g. "clear ... from 8 to 12" over a
+   *  same-day block) -- never used when the reason is the block itself
+   *  crossing a day boundary; that reason is `across_midnight` below. */
   | { kind: "split_needed"; person: string; cell: string; block: string; span: string }
+  /** F-152 review follow-up (the maintainer, 16 Sept): a block that itself
+   *  cannot be written as one day's clock pair (a leftover, or a night
+   *  shift's own band) AND matches no shift band exactly -- `expandReplace`,
+   *  `expandSwap`, and `expandEveryoneUnassign`'s both-edges-outside branch
+   *  all reach this for the SAME reason (never the sentence's own span
+   *  crossing a same-day block -- that stays `split_needed`, above).
+   *  `hours` is the block's OWN real span, start clock to end clock with
+   *  the day boundary implied (`formatSpan` of `clockOfOffset` on the
+   *  block's real minutes, the same rendering `expandSplit`'s own
+   *  `split_needed` already uses) -- never the window's bounds, which for
+   *  a whole-day window is the untrue, unanswerable "00:00-00:00". */
+  | { kind: "across_midnight"; person: string; cell: string; block: string; hours: string }
   /** S55 (R-406): a `swap` found more than one block for `person` in the
    *  window -- `blocks` are that person's own, "<part> <hours>" strings, for
    *  the message to list (never a button list -- a swap is four commands at
@@ -2799,6 +2815,168 @@ function hoursOfBlock(
   return { start: clockOfOffset(startMin, ctx), end: clockOfOffset(endMin, ctx) };
 }
 
+/**
+ * F-152: the day a block-derived MINUTE OFFSET (a remainder's own start, a
+ * split's own edge -- never the sentence's own already-checked `resolveDay`
+ * result) falls on, guarded -- `dayWordForIndex` alone would silently write
+ * `iso: ""` for a day `ctx.days` carries no row for (the exact shape the
+ * John Kim bug's item 4 catches: a kept part dated off the board's own
+ * window). Returns `day_off_board` naming THAT day's own ISO instead, never
+ * "today"/"yesterday" (there is no relative word for a day reached by
+ * walking a block's own minutes) -- computed off any day already on the
+ * board via `addDaysToIso`, the same pure day-arithmetic `resolveWeekDays`
+ * already uses for the identical gap, so the person's "Show that day"
+ * button lands on the right date. `dayIndex` is resolved through
+ * `ctx.wallOf`, never called with a raw offset. */
+function dayWordOrOffBoard(
+  dayIndex: number,
+  ctx: ResolveContext,
+): { ok: true; day: DayWord } | { ok: false; question: Question } {
+  const row = ctx.days.find((d) => d.index === dayIndex);
+  if (row) return { ok: true, day: { kind: "date", iso: row.iso } };
+  const ref = ctx.days[0] as BoardDay | undefined;
+  const iso = ref ? addDaysToIso(ref.iso, dayIndex - ref.index) : "";
+  return { ok: false, question: { kind: "day_off_board", text: iso } };
+}
+
+/**
+ * F-152 (`expandEveryoneUnassign`'s move branch, `expandSplit`'s first
+ * half): the day and same-day clock pair a REMAINDER piece of a block --
+ * `keptStart` to `keptEnd`, real continuous minutes, never a sentence's own
+ * span -- renders as. Dated by `keptStart`'s OWN day (`ctx.wallOf`), never
+ * the day the sentence named (the John Kim bug: a block that starts the day
+ * BEFORE the window it is cleared from kept its start's own clock reading
+ * but the sentence's own day, so `resolveDaySpanStep` read it as negative).
+ * The piece's own minutes read through `copyableSpan`'s already-proven
+ * single-day/DAY_END/not-representable rule for the END. `ok: false,
+ * question: null` means genuinely not representable (the piece crosses into
+ * a later day's daytime hours) -- the caller asks `split_needed` itself,
+ * never a guess and never a silent skip that loses the block. */
+function remainderDayAndSpan(
+  keptStart: number,
+  keptEnd: number,
+  ctx: ResolveContext,
+):
+  | { ok: true; day: DayWord; span: { start: ClockTime; end: ClockTime } }
+  | { ok: false; question: Question | null } {
+  const span = copyableSpan(keptStart, keptEnd, ctx);
+  if (span === null) return { ok: false, question: null };
+  const dayResult = dayWordOrOffBoard(ctx.wallOf(keptStart).dayIndex, ctx);
+  if (!dayResult.ok) return dayResult;
+  return {
+    ok: true,
+    day: dayResult.day,
+    span: { start: clockFromMinuteOfDay(span.startMOD), end: clockFromMinuteOfDay(span.endMOD) },
+  };
+}
+
+/**
+ * F-152 follow-up (the maintainer, 16 Sept: a replace/swap on a night-shift
+ * block must WORK, not refuse -- "cover Sam with Tom" on Shift 3 is the
+ * everyday case, not an edge case). A block not representable as one day's
+ * clock pair may still be EXACTLY one band of its own cell's shift pattern,
+ * on the day it itself starts -- `ctx.shiftsAt`'s own bands, whose `endMin`
+ * already carries an overnight band past 1440 (R-402/D128 §19.99), rendered
+ * onto that day through the SAME `ctx.wallToOffset` the board's own blocks
+ * are. An EXACT match only (both ends) -- never "close enough", never a
+ * guess at which band a block that merely overlaps one was meant to be. */
+function matchingShiftBandName(
+  cell: Node,
+  startDayIndex: number,
+  startMin: number,
+  endMin: number,
+  ctx: ResolveContext,
+): string | null {
+  for (const band of ctx.shiftsAt(cell.id)) {
+    if (
+      ctx.wallToOffset(startDayIndex, band.startMin) === startMin &&
+      ctx.wallToOffset(startDayIndex, band.endMin) === endMin
+    ) {
+      return band.name;
+    }
+  }
+  return null;
+}
+
+/**
+ * F-152 follow-up: how `expandReplace`/`expandSwap` re-describe an existing
+ * block that is being carried whole onto a new person -- `remainderDayAndSpan`
+ * first (the common case: a same-day block, `hours` set, `shift` null,
+ * unchanged from before); when that block is genuinely not representable as
+ * one day's clock pair, `matchingShiftBandName` next -- the grammar already
+ * carries an overnight span this way (an assign's own `shift` clause,
+ * R-402's "shift stands in for hours, never alongside them" invariant, so
+ * `hours` is null here, mirrored exactly). `ok: false, question: null` means
+ * neither: the caller asks `across_midnight` naming the block's own real
+ * hours, never a guess and never a silently wrong write. */
+function renderBlockForRebuild(
+  x: ContextAssignment,
+  xCell: Node,
+  ctx: ResolveContext,
+):
+  | {
+      ok: true;
+      day: DayWord;
+      hours: { start: ClockTime; end: ClockTime } | null;
+      shift: string | null;
+    }
+  | { ok: false; question: Question | null } {
+  const rendered = remainderDayAndSpan(x.startMin, x.endMin, ctx);
+  if (rendered.ok) return { ok: true, day: rendered.day, hours: rendered.span, shift: null };
+  if (rendered.question !== null) return rendered;
+  const startDayIndex = ctx.wallOf(x.startMin).dayIndex;
+  const bandName = matchingShiftBandName(xCell, startDayIndex, x.startMin, x.endMin, ctx);
+  if (bandName === null) return { ok: false, question: null };
+  const dayResult = dayWordOrOffBoard(startDayIndex, ctx);
+  if (!dayResult.ok) return dayResult;
+  return { ok: true, day: dayResult.day, hours: null, shift: bandName };
+}
+
+/**
+ * F-152 review follow-up (the maintainer, 16 Sept): `expandEveryoneUnassign`
+ * refuses a block that crosses BOTH edges of its window for two DIFFERENT
+ * reasons, and only one of them makes the WINDOW's own bounds a true,
+ * answerable message -- the sentence's own span sitting strictly inside an
+ * otherwise same-day block (EX4: "clear ... from 10 to 12" over an
+ * 08:00-16:00 block; "say a span that reaches one end" is real, sound
+ * advice there). When the block ITSELF cannot be written as one day's clock
+ * pair (`copyableSpan` on its own real minutes, null), the window's bounds
+ * are beside the point -- a whole-day window's own "00:00-00:00" is not
+ * even true, and "say a span that reaches one end" cannot be answered (the
+ * block crosses TWO calendar days no span fixes) -- `across_midnight`,
+ * naming the block's own real hours, is asked instead. */
+function crossesBothEdgesQuestion(
+  op: OperatorLike,
+  x: ContextAssignment,
+  xCell: Node,
+  window: { startMin: number; endMin: number },
+  ctx: ResolveContext,
+): { ok: false; question: Question } {
+  const block = `${x.productName ?? "block"} ${x.label}`;
+  if (copyableSpan(x.startMin, x.endMin, ctx) === null) {
+    return {
+      ok: false,
+      question: {
+        kind: "across_midnight",
+        person: op.displayName,
+        cell: xCell.name,
+        block,
+        hours: formatSpan(clockOfOffset(x.startMin, ctx), clockOfOffset(x.endMin, ctx)),
+      },
+    };
+  }
+  return {
+    ok: false,
+    question: {
+      kind: "split_needed",
+      person: op.displayName,
+      cell: xCell.name,
+      block,
+      span: formatSpan(clockOfOffset(window.startMin, ctx), clockOfOffset(window.endMin, ctx)),
+    },
+  };
+}
+
 function operatorById(id: string | null, ctx: ResolveContext): OperatorLike | null {
   if (id === null) return null;
   return ctx.operators.find((o) => o.id === id) ?? null;
@@ -2971,30 +3149,38 @@ function expandEveryoneUnassign(command: UnassignCommand, ctx: ResolveContext): 
         until: null,
       });
     } else if (insideStart !== insideEnd) {
+      // F-152 items 1/2/4: the kept (outside-window) part is dated by the
+      // day IT starts on, never `dayIndex` (the sentence's own day) -- a
+      // block that starts the day before (kept 02:00-DAY_END, item 1) or
+      // ends the day after (kept 00:00-06:00 on tomorrow, item 2) a
+      // same-day `today` window used to read as a negative span on the
+      // sentence's own day; a kept day off the board asks `day_off_board`
+      // naming its own ISO (item 4) instead of the old bare `iso: ""`.
       const outsideStart = insideStart ? window.endMin : x.startMin;
       const outsideEnd = insideStart ? x.endMin : window.startMin;
+      const remainder = remainderDayAndSpan(outsideStart, outsideEnd, ctx);
+      if (!remainder.ok) {
+        if (remainder.question !== null) return { ok: false, question: remainder.question };
+        // Item 3 / the review follow-up: genuinely not representable
+        // (crosses into a later day's daytime hours) -- the same question
+        // the both-edges case just below asks: `across_midnight`, naming
+        // the block's own real hours, when the BLOCK itself (not just this
+        // kept piece) cannot be written as one day's clock pair.
+        return crossesBothEdgesQuestion(op, x, xCell, window, ctx);
+      }
       commands.push({
         intent: "move",
         operator: personWords(op),
         place: cellWordsOf(xCell, byPath),
         toPlace: null,
-        day: dayWordForIndex(dayIndex, ctx),
-        span: hoursOfBlock(outsideStart, outsideEnd, ctx),
+        day: remainder.day,
+        span: remainder.span,
         existing: { kind: "move", assignmentId: x.id },
         shift: null,
         adjust: null,
       });
     } else {
-      return {
-        ok: false,
-        question: {
-          kind: "split_needed",
-          person: op.displayName,
-          cell: xCell.name,
-          block: `${x.productName ?? "block"} ${x.label}`,
-          span: formatSpan(clockOfOffset(window.startMin, ctx), clockOfOffset(window.endMin, ctx)),
-        },
-      };
+      return crossesBothEdgesQuestion(op, x, xCell, window, ctx);
     }
   }
   if (commands.length === 0) {
@@ -3201,13 +3387,41 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
   const assigns: SingleCommand[] = [];
   for (const x of blocks) {
     const xCell = ctx.nodeById.get(x.nodeId) as Node;
-    const hours = hoursOfBlock(x.startMin, x.endMin, ctx);
+    // F-152 follow-up: `blocks` is gathered by OVERLAP with the window, the
+    // same as `expandEveryoneUnassign` -- a leftover block only partly
+    // inside it (an overnight shift's own band, or a plain leftover that
+    // started the day before) is taken WHOLE, same as always, but dated by
+    // the day IT starts on, never `dayIndex` (the sentence's own day); the
+    // exact "22:00 to 06:00 on a single day" negative span the John Kim bug
+    // shipped from otherwise. A night-shift block ("cover Sam with Tom" on
+    // Shift 3 -- the everyday case, not an edge case) is not representable
+    // as a clock pair at all, but IS exactly one band of its own cell's
+    // pattern -- `renderBlockForRebuild` hands back a `shift` name instead
+    // of `hours` for it (the removal never needs either, `existing`'s own
+    // assignment id finds it). Only a block matching NEITHER shape asks
+    // `across_midnight`, naming the block's own real hours -- never the
+    // window's bounds (`expandReplace` never clips, so there is no "the
+    // sentence's own span crossed a same-day block" reading here at all).
+    const rendered = renderBlockForRebuild(x, xCell, ctx);
+    if (!rendered.ok) {
+      if (rendered.question !== null) return { ok: false, question: rendered.question };
+      return {
+        ok: false,
+        question: {
+          kind: "across_midnight",
+          person: a.displayName,
+          cell: xCell.name,
+          block: `${x.productName ?? "block"} ${x.label}`,
+          hours: formatSpan(clockOfOffset(x.startMin, ctx), clockOfOffset(x.endMin, ctx)),
+        },
+      };
+    }
     removals.push({
       intent: "unassign",
       operator: personWords(a),
       place: cellWordsOf(xCell, byPath),
-      day: dayWordForIndex(dayIndex, ctx),
-      span: hours,
+      day: rendered.day,
+      span: rendered.hours,
       existing: { kind: "remove", assignmentId: x.id },
       shift: null,
       until: null,
@@ -3217,12 +3431,12 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
       operator: personWords(b),
       product: x.productName ?? "",
       place: cellWordsOf(xCell, byPath),
-      day: dayWordForIndex(dayIndex, ctx),
-      start: hours.start,
-      end: hours.end,
+      day: rendered.day,
+      start: rendered.hours?.start ?? null,
+      end: rendered.hours?.end ?? null,
       attach: x.runId !== null ? { kind: "run", runId: x.runId } : { kind: "direct" },
       existing: null,
-      shift: null,
+      shift: rendered.shift,
     });
   }
   const commands = [...removals, ...assigns];
@@ -3329,17 +3543,51 @@ function expandSwap(command: SwapCommand, ctx: ResolveContext): Expansion {
   const blkB = bBlocks[0];
   const cellA = ctx.nodeById.get(blkA.nodeId) as Node;
   const cellB = ctx.nodeById.get(blkB.nodeId) as Node;
-  const hoursA = hoursOfBlock(blkA.startMin, blkA.endMin, ctx);
-  const hoursB = hoursOfBlock(blkB.startMin, blkB.endMin, ctx);
-  const dayWord = dayWordForIndex(dayIndex, ctx);
+
+  // F-152 follow-up (the same fix `expandReplace` needed, plus the
+  // maintainer's night-shift follow-up): each block is dated by the day IT
+  // starts on, never `dayIndex` (the sentence's own day) -- a leftover or
+  // an overnight shift's own band read as a negative span the John Kim
+  // bug's own way otherwise. A night-shift block that matches no band AND
+  // is not a same-day clock pair asks `across_midnight`, naming the
+  // block's OWN real hours -- `expandSwap` never clips either, so there is
+  // no window-bounds reading to fall back to. `a`'s removal and `b`'s new
+  // assign onto that same block share `blkA`'s own rendering (and the
+  // mirror for `blkB`), never one `dayWord` for all four.
+  const notRepresentable = (
+    person: string,
+    blk: ContextAssignment,
+    blkCell: Node,
+  ): { ok: false; question: Question } => ({
+    ok: false,
+    question: {
+      kind: "across_midnight",
+      person,
+      cell: blkCell.name,
+      block: `${blk.productName ?? "block"} ${blk.label}`,
+      hours: formatSpan(clockOfOffset(blk.startMin, ctx), clockOfOffset(blk.endMin, ctx)),
+    },
+  });
+  const renderedA = renderBlockForRebuild(blkA, cellA, ctx);
+  if (!renderedA.ok) {
+    return renderedA.question !== null
+      ? { ok: false, question: renderedA.question }
+      : notRepresentable(a.displayName, blkA, cellA);
+  }
+  const renderedB = renderBlockForRebuild(blkB, cellB, ctx);
+  if (!renderedB.ok) {
+    return renderedB.question !== null
+      ? { ok: false, question: renderedB.question }
+      : notRepresentable(b.displayName, blkB, cellB);
+  }
 
   const commands: SingleCommand[] = [
     {
       intent: "unassign",
       operator: personWords(a),
       place: cellWordsOf(cellA, byPath),
-      day: dayWord,
-      span: hoursA,
+      day: renderedA.day,
+      span: renderedA.hours,
       existing: { kind: "remove", assignmentId: blkA.id },
       shift: null,
       until: null,
@@ -3348,8 +3596,8 @@ function expandSwap(command: SwapCommand, ctx: ResolveContext): Expansion {
       intent: "unassign",
       operator: personWords(b),
       place: cellWordsOf(cellB, byPath),
-      day: dayWord,
-      span: hoursB,
+      day: renderedB.day,
+      span: renderedB.hours,
       existing: { kind: "remove", assignmentId: blkB.id },
       shift: null,
       until: null,
@@ -3359,24 +3607,24 @@ function expandSwap(command: SwapCommand, ctx: ResolveContext): Expansion {
       operator: personWords(a),
       product: blkB.productName ?? "",
       place: cellWordsOf(cellB, byPath),
-      day: dayWord,
-      start: hoursB.start,
-      end: hoursB.end,
+      day: renderedB.day,
+      start: renderedB.hours?.start ?? null,
+      end: renderedB.hours?.end ?? null,
       attach: blkB.runId !== null ? { kind: "run", runId: blkB.runId } : { kind: "direct" },
       existing: null,
-      shift: null,
+      shift: renderedB.shift,
     },
     {
       intent: "assign",
       operator: personWords(b),
       product: blkA.productName ?? "",
       place: cellWordsOf(cellA, byPath),
-      day: dayWord,
-      start: hoursA.start,
-      end: hoursA.end,
+      day: renderedA.day,
+      start: renderedA.hours?.start ?? null,
+      end: renderedA.hours?.end ?? null,
       attach: blkA.runId !== null ? { kind: "run", runId: blkA.runId } : { kind: "direct" },
       existing: null,
-      shift: null,
+      shift: renderedA.shift,
     },
   ];
   return wrapMany(commands);
@@ -3681,6 +3929,11 @@ function expandAbsence(command: UnassignCommand, ctx: ResolveContext): Expansion
   }
 
   const commands: SingleCommand[] = [];
+  // F-152 (the `until` form): a block spanning midnight (a night-shift
+  // leftover, the same shape the John Kim bug shipped from) overlaps TWO of
+  // this loop's own per-day windows -- `seen` keeps it a single removal,
+  // never one per day it touches.
+  const seen = new Set<string>();
   for (let dayIndex = dayResult.dayIndex; dayIndex <= untilResult.dayIndex; dayIndex++) {
     let dayStart: number;
     let dayEnd: number;
@@ -3698,13 +3951,34 @@ function expandAbsence(command: UnassignCommand, ctx: ResolveContext): Expansion
         ctx.overlaps({ startMin: dayStart, endMin: dayEnd }, x),
     );
     for (const x of dayBlocks) {
+      if (seen.has(x.id)) continue;
+      seen.add(x.id);
       const xCell = ctx.nodeById.get(x.nodeId) as Node;
+      // F-152: a whole block (never clipped here, R-409's own "each of the
+      // person's blocks becomes an unassign") is dated by the day IT
+      // starts on, never the loop's own `dayIndex` -- the same "22:00 to
+      // 06:00 dated today" negative span the John Kim bug shipped from,
+      // reached here whenever a leftover block overlaps a later day's
+      // window without starting on it. When the block's own hours are not
+      // representable on that one day (genuinely two nights, not just an
+      // exact-midnight end), `span: null` (S49's own "whole day" window)
+      // still finds and removes the SAME block by its `existing`
+      // assignment id -- never a guess at hours nobody asked for.
+      const dayForBlock = dayWordOrOffBoard(ctx.wallOf(x.startMin).dayIndex, ctx);
+      if (!dayForBlock.ok) return dayForBlock;
+      const repSpan = copyableSpan(x.startMin, x.endMin, ctx);
       commands.push({
         intent: "unassign",
         operator: personWords(person),
         place: cellWordsOf(xCell, byPath),
-        day: dayWordForIndex(dayIndex, ctx),
-        span: hoursOfBlock(x.startMin, x.endMin, ctx),
+        day: dayForBlock.day,
+        span:
+          repSpan === null
+            ? null
+            : {
+                start: clockFromMinuteOfDay(repSpan.startMOD),
+                end: clockFromMinuteOfDay(repSpan.endMOD),
+              },
         existing: { kind: "remove", assignmentId: x.id },
         shift: null,
         until: null,
@@ -3829,15 +4103,42 @@ function expandSplit(command: SplitCommand, ctx: ResolveContext): Expansion {
   // silently read as EARLIER than its own `start` once re-resolved
   // (`resolveDaySpanStep`/`clockToMinuteOfDay`, which never special-cases a
   // bare `00:00`), surfacing as `too_short` with a negative count instead of
-  // the split completing. `clockFromMinuteOfDay` (already used by `expandCopy`
-  // for exactly this reason) is the correct inverse for a day-relative
-  // minute-of-day, so it is used here whenever the block's own end IS the
-  // day's own end -- `firstHours`' own end (`atMin`) can never reach it (the
-  // containing check above already proved `atMin < blk.endMin <= dayEnd`).
-  const firstHours = hoursOfBlock(blk.startMin, atMin, ctx);
+  // the split completing.
+  //
+  // F-152 follow-up: `copyableSpan` is that same DAY_END rule (`expandCopy`'s
+  // own fix for the identical shape) generalized to BOTH halves at once, so
+  // it replaces the ad hoc `blk.endMin === dayEnd` ternary here. `atMin` is
+  // always on `dayIndex` (it is built from it, two lines up), so the second
+  // half's own day never moves -- only its END needed the DAY_END rule. The
+  // FIRST half's own START is `blk.startMin`, which -- unlike `atMin` -- can
+  // fall on an EARLIER calendar day (a night-shift block found by `atMin`
+  // long after it started, a leftover the same shape the John Kim bug
+  // shipped from): dating it `dayIndex` regardless used to read a negative
+  // span the same way. Neither half representable on a single day (the
+  // block genuinely runs two nights) asks `split_needed`, never a guess.
+  const firstSpan = copyableSpan(blk.startMin, atMin, ctx);
+  const secondSpan = copyableSpan(atMin, blk.endMin, ctx);
+  if (firstSpan === null || secondSpan === null) {
+    return {
+      ok: false,
+      question: {
+        kind: "split_needed",
+        person: operator.displayName,
+        cell: blkCell.name,
+        block: `${blk.productName ?? "block"} ${blk.label}`,
+        span: formatSpan(clockOfOffset(blk.startMin, ctx), clockOfOffset(blk.endMin, ctx)),
+      },
+    };
+  }
+  const firstDayResult = dayWordOrOffBoard(ctx.wallOf(blk.startMin).dayIndex, ctx);
+  if (!firstDayResult.ok) return firstDayResult;
+  const firstHours = {
+    start: clockFromMinuteOfDay(firstSpan.startMOD),
+    end: clockFromMinuteOfDay(firstSpan.endMOD),
+  };
   const secondHours = {
-    start: clockOfOffset(atMin, ctx),
-    end: blk.endMin === dayEnd ? clockFromMinuteOfDay(24 * 60) : clockOfOffset(blk.endMin, ctx),
+    start: clockFromMinuteOfDay(secondSpan.startMOD),
+    end: clockFromMinuteOfDay(secondSpan.endMOD),
   };
   const dayWord = dayWordForIndex(dayIndex, ctx);
   const cellWords = cellWordsOf(blkCell, byPath);
@@ -3847,7 +4148,7 @@ function expandSplit(command: SplitCommand, ctx: ResolveContext): Expansion {
     operator: personWords(operator),
     place: cellWords,
     toPlace: null,
-    day: dayWord,
+    day: firstDayResult.day,
     span: firstHours,
     existing: { kind: "move", assignmentId: blk.id },
     shift: null,
@@ -4080,6 +4381,8 @@ export function describeQuestion(q: Question): string {
       return q.text;
     case "split_needed":
       return `${q.person}'s ${q.block} on ${q.cell} crosses both ends of ${q.span}; say a span that reaches one end of the block instead.`;
+    case "across_midnight":
+      return `${q.person}'s ${q.block} block on ${q.cell} crosses midnight and matches no shift; split it at midnight first, or say the shift.`;
     case "swap_which":
       return `${q.person} has ${q.blocks.length} blocks ${q.when} (${q.blocks.join(", ")}). Swap which?`;
     case "day_order":

@@ -1981,6 +1981,34 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     expect(assignResolved.operatorId).toBe("ana");
   });
 
+  /** CB-mid-1 (F-152 review follow-up, 16 Sept): Sam's own block crosses
+   *  midnight (a leftover, the John Kim shape) and `buildXCtx`'s own
+   *  `shiftsAt` default (`() => []`) means it matches no band either --
+   *  `expandReplace` asks `across_midnight` before ANY command is built, so
+   *  the bar's status is the question text directly, never a lot. */
+  const XSAM_OVERNIGHT: ContextAssignment = {
+    id: "xsamOvernight",
+    nodeId: "xc1",
+    operatorId: "sam",
+    productId: "ha",
+    productName: "Housing A",
+    startMin: 2 * 1440 + 1320, // yesterday (index 2) 22:00
+    endMin: 3 * 1440 + 360, // today (index 3) 06:00
+    label: "22:00–06:00",
+    runId: null,
+  };
+
+  it("CB-mid-1: a replace on a block that crosses midnight and matches no shift -- the bar's own across_midnight text, never the hours twice", () => {
+    const { input } = renderXBar({ assignments: [XSAM_OVERNIGHT] });
+
+    fireEvent.change(input, { target: { value: "cover Sam with Ana on Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "Sam's Housing A 22:00–06:00 block on Cell 1 crosses midnight and matches no shift; split it at midnight first, or say the shift.",
+    );
+  });
+
   it("CB-x-10: an ambiguous SECOND person on a replace fills `with`, never `operator`, and the lot appears once picked", () => {
     const { input } = renderXBar({
       assignments: [XSAM],
