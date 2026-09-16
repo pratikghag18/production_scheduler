@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-16'
-  tip: '441786c'
+  tip: '4246a8c'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -11816,7 +11816,15 @@ findings:
     rebuilt through the shift form (the removal by its id, the new block by the band's name), so covering
     someone on Shift 3 works; a night block matching no band asks for a split. The absence form removes
     each block once. Pinned MN1 to MN12 (brief docs/agent-briefs/f-152-midnight-remainder-brief.md,
-    review docs/agent-briefs/f-152-review-brief.md).
+    review docs/agent-briefs/f-152-review-brief.md). That fix failed on the maintainer's board the same
+    morning: the window starts today and the board's wallOf clamps a time before the window onto the first
+    day, so the kept part still rendered 02:00 to 00:00. Second half (4246a8c): the kept part of a
+    partly-inside block is an edge adjust on the sentence's own day (end John Kim at 00:00 today), which
+    needs no day off the board; the adjust path validates only the adjusted edge; every builder that
+    reads a whole block's own edges (replace, swap, split, absence, copy) first checks both edges are on
+    the board and otherwise asks day_off_board naming the day to show; the test fakes clamp exactly as
+    the board does. Pinned MN13 to MN19 and CB-mid-2 (brief docs/agent-briefs/f-152-b-window-edge-brief.md,
+    review docs/agent-briefs/f-152-b-review-brief.md).
 - id: F-151
   title: From 2 until end of shift read as 02:00, so the block ran to the night shift's end
   tag: One lone-hour rule, applied to some clauses and not others
@@ -15866,9 +15874,9 @@ sessions:
   date: 2026-09-16
   title: "The second walk's first sentence: a block across midnight, kept on the wrong day (F-152)"
   shipped: []
-  commits: ['441786c']
+  commits: ['441786c', '4246a8c']
   numbers:
-    app_tests: 3825
+    app_tests: 3834
     app_test_files: 150
     tsc: 0
     eslint: 0
@@ -15877,7 +15885,7 @@ sessions:
     e2e: 49
   confirmed: true
   numbers_note: >-
-    npm run test, 16 Sept, after the F-152 commit: 3825 tests in 150 files, all passing; tsc and
+    npm run test, 16 Sept, after the F-152 second-half commit: 3834 tests in 150 files, all passing; tsc and
     eslint clean; the role walk passed; no migration or RPC changed.
   summary: >-
     The maintainer began the second walk a day after the list was written. The first sentence, "clear Cell 1
@@ -15886,7 +15894,13 @@ sessions:
     sentence's life and writes the line, which was explained rather than changed. One lane fixed the
     remainder's day in five builders and a follow-up made a replace or a swap on a night-shift block go
     through the shift form instead of refusing; a reviewer attacked it on DST, the unwritten board, the
-    absence dedupe, the off-board rerun and the pins' numbers. Next: the maintainer's walk resumes with the
+    absence dedupe, the off-board rerun and the pins' numbers. The fix then failed on the maintainer's own
+    board: its window starts today, and the board's clock helper clamps a time before the window onto the
+    first day, so every test window that held yesterday had hidden the case. Second half: the kept part is
+    an edge adjust on the day the sentence named, and no builder reads a block's own edges without first
+    checking both are on the board. The maintainer asked why the board does not just read the database;
+    answered: the readout is computed from what is on screen so it can be checked by eye before the yes.
+    Next: the maintainer's walk resumes with the
     list re-dated to the 16th; the trace file read after it; the smoke switch; 6b.
 - id: 174
   date: 2026-09-15
