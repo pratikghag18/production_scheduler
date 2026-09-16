@@ -20,7 +20,12 @@ import { useRootPath } from "./hooks/useRootPath";
 import { NO_PLACES_MESSAGE } from "./lib/rootSelection";
 import { useBoardViewStore } from "./store/boardView";
 import { useDragGesture } from "./hooks/useDragGesture";
-import { buildBoardIndex, policyForNode, type BoardIndex } from "./lib/boardIndex";
+import {
+  buildBoardIndex,
+  policyForNode,
+  certificateGaps as certificateGapsFor,
+  type BoardIndex,
+} from "./lib/boardIndex";
 import { outsideAreaOperatorIds as outsideAreaFor, splitPeopleFor } from "./lib/outsideArea";
 import { DENSITIES, scaleDensity } from "./lib/geometry";
 import {
@@ -699,6 +704,29 @@ export default function BoardPage() {
       // S55 (D130 item 3/4): the inverse of `wallToOffset` for a window
       // offset -- `lib/time.ts`'s own `wallOf`, over this window's axis.
       wallOf: (offsetMin: number) => wallOfAxis(axis, offsetMin),
+      // S61-b (R-425, F-155): the SAME two calls the create pop-up already
+      // makes for its own verdict (`CreatePopover.tsx`) -- `index.
+      // skillsForNode` (rule 5, already unioned up the node's ancestor
+      // path) and `certificateGapsFor` (`boardIndex.ts`'s `certificateGaps`,
+      // the server's rule transcribed), with `windowEnd` built the pop-up's
+      // own way (`addMinutes(index.windowStart, endMin)`). An unknown
+      // operator id answers no gaps -- never a reason to ask, never a
+      // reason to write either (`resolvePersonStep` already refused any
+      // sentence naming nobody real before a certificate question could be
+      // reached).
+      certificateGaps: (operatorId: string, nodeId: string, endMin: number) => {
+        const op = index.operatorById.get(operatorId);
+        if (!op) return [];
+        const required = index.skillsForNode.get(nodeId) ?? [];
+        const windowEnd = addMinutes(index.windowStart, endMin);
+        return certificateGapsFor(op, required, windowEnd).map((g) => ({
+          skill: g.skill.name,
+          state: g.state,
+        }));
+      },
+      // S61-b (R-425, F-155): the SAME per-node policy the create pop-up
+      // reads (`policyForNode`, R-331's own answer) -- never a second copy.
+      eligibilityPolicy: (nodeId: string) => policyForNode(index, nodeId),
     };
   }, [boardQuery.data, index, operatorPool]);
 
@@ -737,10 +765,12 @@ export default function BoardPage() {
    * target is what the question names") -- every shape `resolve.ts`'s
    * `day_off_board` question can ever carry, read off every place it is
    * built there: "today", "tomorrow", "yesterday", a lowercase weekday name,
-   * an ISO date, or (defensively -- D130's three week kinds are legal only
-   * on a copy's own `from`/`to`, which resolves through `resolveWeekDays` and
-   * so never reaches `resolveDay`'s own week-kind fallback in practice) a
-   * week word. Every branch below moves the window through the STORE'S OWN
+   * an ISO date, or a week word. The week word is NOT defensive (F-158; this
+   * comment used to say it was): a `weekdays`/`every_day` repeat whose week
+   * is not wholly on the board asks `day_off_board` naming that week, exactly
+   * so this handler's own week-word branch -- the only one that WIDENS the
+   * window -- is what its button reaches. Every branch below moves the window
+   * through the STORE'S OWN
    * `setWindowStartDate`/`setWindowDayCount`/`shiftWindowByDays`/`goToToday`
    * -- never a second axis of its own. `CommandBar`'s own effect (keyed on
    * `ctx`) re-runs the held command once `commandCtx` above recomputes for
@@ -775,6 +805,14 @@ export default function BoardPage() {
       setWindowStartDate(new Date(`${target}T00:00:00.000Z`));
       return;
     }
+    // F-158: this is the branch a REPEAT DAY's own "Show that day" lands on.
+    // A `weekdays`/`every_day` repeat needs its whole week on the board
+    // before it expands, and `resolveWeekDays` now names that week ("this
+    // week"/"next week") when it is not -- precisely so the button arrives
+    // here, where the window is anchored on that week's Monday AND widened
+    // to seven days. The widening is the point: the ISO branch above only
+    // moves a three-day window, so an ISO-named repeat asked about Monday,
+    // moved, then asked about Thursday, for ever.
     if (target in SHOW_DAY_WEEK_WORD_OFFSETS) {
       const anchorDay =
         commandCtx.todayIndex !== null
@@ -786,9 +824,12 @@ export default function BoardPage() {
       setWindowDayCount(Math.max(windowDayCount, 7));
       return;
     }
-    // Every other string is defensive only (`resolve.ts`'s own
-    // `bad_repeat_day` wording, "every weekday this week" and the like,
-    // never reaches `day_off_board`) -- a no-op rather than a guess.
+    // Every other string is defensive only -- a no-op rather than a guess.
+    // (This comment used to claim a repeat day "never reaches
+    // `day_off_board`". It does, and always did: `expandRepeatDay` raises one
+    // whenever the week is not wholly on the board. The S61-c typed walk
+    // caught it saying so on a real board -- F-158 -- and the week-word
+    // branch above is where it now lands.)
   }
 
   /** A node's ltree path, or `null` when this window does not carry the node. */
@@ -1040,6 +1081,14 @@ export default function BoardPage() {
                   operatorId: resolved.operatorId,
                   target: resolved.target,
                   anchor,
+                  // S61-a review fix (R-425, F-155): set only when a
+                  // not_certified "warn" question was suppressed by a
+                  // reason the bar already collected -- without this,
+                  // `openCreateFromCommand` opens the popover unchecked,
+                  // ignoring the reason entirely (the reviewer's own live
+                  // bug: the readout said "· override: ..." and nothing was
+                  // written).
+                  override: resolved.override,
                 });
               }}
               onRetime={(resolved, anchor) => {
@@ -1091,6 +1140,10 @@ export default function BoardPage() {
                     operatorId: resolved.operatorId,
                     productId: resolved.productId,
                     anchor,
+                    // S61-a review fix (R-425, F-155): same reasoning as
+                    // `onOpen` above -- a `move_cell` target is the only
+                    // shape `ResolvedMove.override` is ever set for.
+                    override: resolved.override,
                   });
                 }
               }}

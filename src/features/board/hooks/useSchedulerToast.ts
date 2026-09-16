@@ -101,6 +101,23 @@ function resolveNodeName(ctx: ToastResolveCtx, nodeId: string): string {
 /**
  * §7's message-shape table, pure (exported for testing). `kind` picks the
  * toast's CSS treatment — the mockup's `""`/`"warn"`/`"crit"` classes.
+ *
+ * F-154 review fix (S61-a, the several-lot's own trace read, 16 Sept): this
+ * used to bake " — reverted." straight into the CapacityExceeded/
+ * NotEligible/RunOverlap/Absent messages below -- true for a REAL drag,
+ * which really does roll back its own optimistic move, but not for
+ * `runLot`'s catch (`useDragGesture.ts`'s own doc on that function), which
+ * writes each step for REAL and simply stops at the first failure -- there
+ * is nothing to revert, and "swap Lena Novak and Tom Baker today" wrote
+ * three of four and still said "reverted", reading as the whole lot undone
+ * when nothing was. This function no longer decides that -- it hands back
+ * the plain fact, and the CALLER says whether anything was actually rolled
+ * back: a genuine drag/retime failure goes through `toast.reverted(message,
+ * kind)` (`useDragGesture.ts`'s own `failWith` and `openMoveFromCommand`'s
+ * override branch), which appends the suffix itself; `runLot`'s own catch
+ * reads `.message` directly and never sees it, no strip required on the
+ * bar's own side any more either (`CommandBar.tsx`'s F-154 fix, now just
+ * "The N done stayed: …" appended to the message as-is).
  */
 export function buildSchedulerErrorToast(
   err: SchedulerError,
@@ -119,7 +136,7 @@ export function buildSchedulerErrorToast(
       const peakPct = Math.round(err.peak * 100);
       const capPct = Math.round(err.cap * 100);
       return {
-        message: `${name} would reach ${peakPct}% (cap ${capPct}%) — reverted. Someone else changed their load — try the split again.`,
+        message: `${name} would reach ${peakPct}% (cap ${capPct}%). Someone else changed their load — try the split again.`,
         kind: "crit",
       };
     }
@@ -129,7 +146,7 @@ export function buildSchedulerErrorToast(
       const missing = err.missingSkills.map((s) => s.name);
       const missingText = missing.length > 0 ? missing.join(", ") : "a required skill";
       return {
-        message: `${name} is not certified for ${cell}: missing ${missingText} — reverted.`,
+        message: `${name} is not certified for ${cell}: missing ${missingText}.`,
         kind: "warn",
       };
     }
@@ -159,9 +176,9 @@ export function buildSchedulerErrorToast(
             ? "another product"
             : (ctx.productById?.get(conflict.productId)?.name ?? "another product");
         const range = ctx.formatRange?.(conflict.startMin, conflict.endMin) ?? err.timerange;
-        return { message: `${cell} already runs ${product} ${range} — reverted.`, kind: "crit" };
+        return { message: `${cell} already runs ${product} ${range}.`, kind: "crit" };
       }
-      return { message: `${cell} already has an overlapping run — reverted.`, kind: "crit" };
+      return { message: `${cell} already has an overlapping run.`, kind: "crit" };
     }
     case "RaceLost":
       return { message: "Someone else changed this — refreshed, try again.", kind: "warn" };
@@ -189,7 +206,7 @@ export function buildSchedulerErrorToast(
         const name = resolveOperatorName(ctx, o.operatorId);
         if (o.from === null || o.to === null) {
           const reason = o.reason !== null ? `: ${o.reason}` : "";
-          return { message: `${name} is on leave${reason} — reverted.`, kind: "warn" };
+          return { message: `${name} is on leave${reason}.`, kind: "warn" };
         }
         const line = leaveLine(
           {
@@ -203,13 +220,13 @@ export function buildSchedulerErrorToast(
           ctx.zone ?? BOARD_ZONE,
         );
         return {
-          message: `${name} is ${line.charAt(0).toLowerCase()}${line.slice(1)} — reverted.`,
+          message: `${name} is ${line.charAt(0).toLowerCase()}${line.slice(1)}.`,
           kind: "warn",
         };
       }
       const names = err.operators.map((o) => resolveOperatorName(ctx, o.operatorId));
       return {
-        message: `${names.join(", ")} ${names.length === 1 ? "is" : "are"} on leave for this window — reverted.`,
+        message: `${names.join(", ")} ${names.length === 1 ? "is" : "are"} on leave for this window.`,
         kind: "warn",
       };
     }
@@ -231,8 +248,13 @@ export function useSchedulerToast() {
      *  since closed — call this instead of `schedulerError` when the
      *  caller wants to control the exact "<Block> ... — reverted" wording
      *  itself (e.g. §7's RunOverlap-caught-client-side path, which already
-     *  has the full conflicting run in hand and doesn't need `runById`). */
-    reverted: (message: string) => push(`${message} — reverted.`, "crit"),
+     *  has the full conflicting run in hand and doesn't need `runById`).
+     *  F-154 review fix (S61-a): `kind` defaults to "crit" (every pre-
+     *  existing caller's own class, unchanged) -- a caller that wants
+     *  `buildSchedulerErrorToast`'s OWN kind (NotEligible/Absent are
+     *  "warn", not "crit") passes it through explicitly rather than losing
+     *  it now that this function, not that one, appends the suffix. */
+    reverted: (message: string, kind: ToastKind = "crit") => push(`${message} — reverted.`, kind),
     /** D37's one true path: a rejected edit's typed error -> a sentence,
      *  built by `buildSchedulerErrorToast` above. */
     schedulerError: (err: SchedulerError, ctx?: ToastResolveCtx) => {

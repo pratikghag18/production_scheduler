@@ -65,7 +65,7 @@ describe("buildSchedulerErrorToast (R-D37)", () => {
       timerange: "fallback",
     } as SchedulerError;
     const t = buildSchedulerErrorToast(err, ctx);
-    expect(t.message).toBe("Cell 3 already runs Widget X 360-480 — reverted.");
+    expect(t.message).toBe("Cell 3 already runs Widget X 360-480.");
     expect(t.kind).toBe("crit");
   });
 
@@ -77,10 +77,25 @@ describe("buildSchedulerErrorToast (R-D37)", () => {
       timerange: "fallback",
     } as SchedulerError;
     const t = buildSchedulerErrorToast(err, {});
-    expect(t.message).toBe("node1 already has an overlapping run — reverted.");
+    expect(t.message).toBe("node1 already has an overlapping run.");
   });
 
-  it("D37e: every named-path message ends '— reverted.', matching the claim's toast shape", () => {
+  /**
+   * F-154 review fix (S61-a, the several-lot's own trace read, 16 Sept):
+   * THE CONTRACT CHANGED, this test did not merely pin a bug -- this used to
+   * assert every named-path message ends "— reverted.", baked in here. That
+   * was true for a real drag (which really does revert its own optimistic
+   * move) but FALSE for `runLot`'s catch (`useDragGesture.ts`), which
+   * writes each lot step for real and simply stops at the first failure --
+   * "swap Lena Novak and Tom Baker today" wrote three of four and the bar
+   * still said "reverted", reading as the whole lot undone when nothing
+   * was. `buildSchedulerErrorToast` now hands back the plain fact; a
+   * genuine revert is the CALLER's own `toast.reverted(message, kind)`
+   * call (`failWith`, `openMoveFromCommand`'s override branch), not
+   * something baked into every message regardless of whether anything was
+   * actually rolled back.
+   */
+  it("D37e: a named-path message never bakes in '— reverted.' -- that is a caller's own toast.reverted, not this function's job", () => {
     const capacity = buildSchedulerErrorToast(
       { kind: "CapacityExceeded", operatorId: "op1", peak: 1.1, cap: 1.0 } as SchedulerError,
       ctx,
@@ -96,8 +111,8 @@ describe("buildSchedulerErrorToast (R-D37)", () => {
       } as SchedulerError,
       ctx,
     );
-    expect(capacity.message).toContain("— reverted.");
-    expect(eligible.message).toContain("— reverted.");
+    expect(capacity.message).not.toContain("reverted");
+    expect(eligible.message).not.toContain("reverted");
   });
 
   /*
@@ -146,7 +161,9 @@ describe("buildSchedulerErrorToast (R-D37)", () => {
       expect(t.message).toContain("09:00");
       expect(t.message).toContain("13:00");
       expect(t.message).toContain("Sam Torres");
-      expect(t.message).toContain("— reverted.");
+      // F-154 review fix: no longer bakes in "reverted" -- see D37e's own
+      // comment above.
+      expect(t.message).not.toContain("reverted");
     });
 
     it("a whole-day absence invents no hours", () => {

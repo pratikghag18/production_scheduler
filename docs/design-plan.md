@@ -9712,3 +9712,61 @@ length. It does not fix a quiet microphone; it fixes "cell" heard as "sell" and 
 reproduced from the board's rows (the block on the board came from a different transcript); the
 maintainer types the sentence and reads the hours back before it is called a defect. The model
 writing a name made of punctuation is a decoder gap, closed as F-149.
+
+## §19.105 — D134: what the second walk taught before its first sentence was through (S61)
+
+> The maintainer, 16 Sept, session 176, after thirteen sentences: "People not trained are being
+> assigned and not everything the board says is being recorded in the file. It is just not working
+> as it should." And: "clear the board, make sure you have the tests figured out properly before
+> you hand me the testing."
+
+### D134 — five rules, and one change in how a walk is handed over
+
+**1. The bar keeps its conversation for the session (R-424).** The board's query key carries the
+window's dates, so a window move or the refetch after any write made the board's data go back to
+"nothing yet" for a moment, and the bar, mounted only while there is data, unmounted with it:
+its status, its open question, its lot and its unflushed trace entry gone. The query now keeps
+the previous window's data across a refetch, and the bar is gated off only before the board has
+ever loaded. The bar also keeps its last context in a ref so a stray empty context cannot empty
+it.
+
+**2. Training is asked about before the yes, by the server's own rule (R-425).** The create
+pop-up already asks through `certificateGaps`, the transcript of `check_eligibility`; the bar
+never did, so a person without the cell's training got a plain readout and then a pop-up, and a
+swap wrote three of four before the server refused the fourth. The resolver now asks
+`not_certified` first, for every builder that puts a person on a cell. Under the plant's warn
+policy a single sentence takes the reason as its next answer and writes with the override; a
+lot is refused before its yes, naming the person and the missing training, because a lot never
+asks a reason and never writes half of itself. Under block, refused.
+
+**3. A lot's failure says what stood.** `runLot` stops at the first refused step and has no
+undo; the message borrowed the drag's "reverted" wording. The toast helper no longer bakes that
+suffix into every message; a lot's failure lists the steps that stayed. An undo for a lot is a
+later decision, not a word.
+
+**4. A date is formatted from its parts, never from a UTC midnight read in a zone.** Every day
+label the bar printed was a day early west of UTC. The same rule `src/lib/format/dates.ts` was
+written for, applied to the bar.
+
+**5. No day means today, and today off the board is a question.** After "Show that day" moved
+the window, a day-less "split Tom Baker at 10" fell to the window's first day and looked on the
+wrong date. `resolveDay(null)` now asks the same day-off-board question a spoken "today" gets.
+
+**The trace records everything the bar showed.** A single's readout and its automatic run, a
+parse failure's "Say it like" message, and an entry still open at unmount (flushed with a
+beacon) — F-157. A walk is read from disk, and what the file lacks is itself a finding.
+
+**How a walk is handed over from now on.** The typed half of a walk is a Playwright spec that
+drives the real bar on the real board, prepares and clears its own rows through the database,
+asserts each answer AND each write, and reads the trace file back. The maintainer is handed
+only the voice sentences, from the same data file, after that spec has passed twice in a row.
+Two hand-written lists in two days met a board the writer had not checked: a person without
+the cell's training, a date that rolled overnight, a grammar form that does not exist. The list
+is now a test, and its expectations are computed by the same code that will answer.
+
+**What the spec found on its first day (F-158).** A repeat day ("every weekday this week") could
+never run from the board's own three-day window: the resolver wants the week on the board, its
+question named a date, and the Show-that-day handler widens the window only for a week word. The
+question now carries the week word, so one press widens to seven days on that Monday and the five
+commands list. Two hand-written walks had never said a repeat on a short window; the spec did on
+its first run, twice, byte-identical. That is the point of the spec.

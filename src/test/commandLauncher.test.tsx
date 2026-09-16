@@ -79,6 +79,12 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     // `buildCtx` -- this file never touches a boundary shift name.
     nowMinuteOfDay: null,
     wallOf: (m: number) => ({ dayIndex: Math.floor(m / 1440), minuteOfDay: m % 1440 }),
+    // S61-b (R-425, F-155): same defaults as `commandBar.test.tsx`'s own
+    // `buildCtx` -- "fully eligible, no gaps", which keeps every case in
+    // this file byte for byte its pre-R-425 behaviour (this file's own
+    // scope is the launcher panel's open/close/focus, not certification).
+    certificateGaps: () => [],
+    eligibilityPolicy: () => "warn",
     ...over,
   };
 }

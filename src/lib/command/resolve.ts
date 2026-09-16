@@ -176,6 +176,27 @@ export interface ResolveContext {
    *  wall-clock hours back off its real-minute `startMin`/`endMin` when
    *  copying them onto another day. */
   wallOf: (offsetMin: number) => { dayIndex: number; minuteOfDay: number };
+  /** S61-b (R-425, F-155): the server's certificate rule, transcribed --
+   *  `BoardPage` feeds this from the SAME two calls the create pop-up
+   *  already makes for its own verdict (`certificateGaps` and
+   *  `index.skillsForNode.get(nodeId)`, the node's required skills already
+   *  unioned up its ancestor path -- rule 5 in `boardIndex.ts`), with
+   *  `windowEnd` built the SAME way the pop-up builds its own
+   *  (`addMinutes(index.windowStart, endMin)`). `endMin` is real minutes
+   *  from the window's origin, the same coordinate every other `endMin` in
+   *  this module already is. `skill` is the skill's own NAME (never an id)
+   *  -- this module has no skill table to look one up in. Empty when the
+   *  operator is fully eligible, or unknown to `BoardPage`. This module
+   *  holds no copy of the rule itself -- this is the one door in. */
+  certificateGaps: (
+    operatorId: string,
+    nodeId: string,
+    endMin: number,
+  ) => { skill: string; state: "never-trained" | "lapsed" }[];
+  /** S61-b (R-425, F-155): the SAME per-node policy the create pop-up reads
+   *  (`policyForNode`, `boardIndex.ts`'s own R-331 answer) -- a function of
+   *  `nodeId` so a lot's several different cells each ask their own. */
+  eligibilityPolicy: (nodeId: string) => "warn" | "block";
 }
 
 /**
@@ -202,6 +223,15 @@ export interface ResolvedCommand {
    *  (+ " · joining <run label>" for a run target). The ISO day is a token the bar
    *  re-renders through `formatDayLabel(_, dateFormat, zone)`. */
   readout: string;
+  /** S61-b (R-425, F-155): set ONLY when a `not_certified` "warn" question
+   *  was suppressed by a re-resolve carrying `{ overrideReason }` (never by
+   *  a clean resolve, and never under `policy: "block"`, which offers no
+   *  reason to suppress with). The writer (`createFromCommand`'s own input,
+   *  `src/features/board/hooks/useDragGesture.ts`) is NOT this module's --
+   *  it must fold this into the SAME `eligibilityOverride: true,
+   *  overrideReason` pair `buildCreateAssignmentInput`'s own `overrides`
+   *  parameter already carries for the pop-up's own override checkbox. */
+  override?: { reason: string };
 }
 
 /** S41-a: a "book a job" sentence resolves to either a brand-new job (never
@@ -261,6 +291,12 @@ export interface ResolvedMove {
    *  Cell 1 · 2026-09-03 · 10:00–14:00 → Cell 2 · 10:00–14:00" (the arrow
    *  names what changes: the cell, the hours, or both). */
   readout: string;
+  /** S61-b (R-425, F-155): the same field `ResolvedCommand` carries, for a
+   *  `move_cell` target only (a `retime` target never asks -- same cell,
+   *  same person). The writer's own input is `submitMove`'s 4th/5th
+   *  positional arguments (`eligibilityOverride`, `overrideReason`,
+   *  `src/features/board/hooks/useDragGesture.ts`), NOT this module's. */
+  override?: { reason: string };
 }
 
 export type Candidate = {
@@ -333,6 +369,28 @@ export type Question =
     }
   | { kind: "not_offered"; product: string; cell: string }
   | { kind: "place_mismatch"; cell: string; qualifier: string; elsewhere: Candidate[] }
+  /** S61-b (R-425, F-155): a resolved write would put `person` on `cell`
+   *  short a required certificate -- the SAME rule `certificateGaps`
+   *  transcribes from the server (F-087), asked BEFORE anything is written,
+   *  never after. `missing` names each gap ("Welding", or "Welding
+   *  (lapsed)" -- built here from `ctx.certificateGaps`'s own `state`,
+   *  never a second copy of that rule). `policy` is the resolved cell's own
+   *  (`ctx.eligibilityPolicy`) -- `"warn"` offers a reason (the bar re-
+   *  resolves with `{ overrideReason }`, R-425's own suppression); `"block"`
+   *  offers none. `inLot: true` marks a question raised by `expandCommand`
+   *  itself (`expandReplace`/`expandSwap`/`expandCopy`) for the FIRST
+   *  uncertified member of a lot, before the lot's one yes -- a lot never
+   *  asks a reason and never writes half of itself, so `policy: "warn"`
+   *  still refuses here rather than offering the single-sentence reason
+   *  flow. `inLot: false` is an ordinary single sentence's own question. */
+  | {
+      kind: "not_certified";
+      person: string;
+      cell: string;
+      missing: string[];
+      policy: "warn" | "block";
+      inLot: boolean;
+    }
   | { kind: "day_off_board"; text: string }
   | { kind: "too_short"; minutes: number; min: number }
   /** R-383: the span sits inside one or more jobs for this part on this cell,
@@ -1079,7 +1137,14 @@ function resolveDay(
   ctx: ResolveContext,
 ): { ok: true; dayIndex: number } | { ok: false; question: Question } {
   if (day === null) {
-    return { ok: true, dayIndex: ctx.todayIndex ?? 0 };
+    // F-156: a sentence with no day means TODAY -- when today is off the
+    // board, that is the same question a spoken "today" gets below, never a
+    // silent fall to the window's first day (day 0 is not "today" just
+    // because it sorts first).
+    if (ctx.todayIndex === null) {
+      return { ok: false, question: { kind: "day_off_board", text: "today" } };
+    }
+    return { ok: true, dayIndex: ctx.todayIndex };
   }
   if (day.kind === "today") {
     if (ctx.todayIndex === null)
@@ -1147,6 +1212,70 @@ function dayWordLabel(day: DayWord): string {
   const week = day.week === "next_week" ? "next week" : "this week";
   if (day.kind === "weekdays") return `every weekday ${week}`;
   return `every day ${week}`;
+}
+
+/** S61-b (R-425, F-155): `ctx.certificateGaps`' own gaps, worded the one way
+ *  every `not_certified` question names them -- "Welding" for
+ *  `never-trained`, "Welding (lapsed)" for `lapsed`. The ONE place this
+ *  wording is built, so a single sentence's own question and a lot's
+ *  expansion-time question can never say it two different ways. */
+function missingSkillWords(gaps: { skill: string; state: "never-trained" | "lapsed" }[]): string[] {
+  return gaps.map((g) => (g.state === "lapsed" ? `${g.skill} (lapsed)` : g.skill));
+}
+
+/** S61-b (R-425): the reason a single sentence's `not_certified` "warn"
+ *  question was answered with -- `resolveCommand`'s own third argument,
+ *  passed only by a caller re-resolving after the bar collected a typed
+ *  reason. Blank/whitespace-only is treated as "no reason given" -- the
+ *  same floor `CreatePopover`'s own override box holds its Save button to
+ *  (`overrideReason.trim() === ""`). */
+export interface ResolveOptions {
+  overrideReason?: string;
+}
+
+function usableOverrideReason(options: ResolveOptions | undefined): string | null {
+  const r = options?.overrideReason;
+  if (r === undefined) return null;
+  const trimmed = r.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/** S61-b (R-425, F-155): the one gate a resolved write that puts a person on
+ *  a cell runs before it is ever returned `ok: true` -- `ctx.certificateGaps`
+ *  (the server's own rule, transcribed) over `ctx.eligibilityPolicy`'s
+ *  answer for `cell`. `{ ok: true }` (no `override`) when the operator is
+ *  eligible outright -- nothing to ask, nothing to carry. `inLot: true`
+ *  (from `expandReplace`/`expandSwap`/`expandCopy`, checked at EXPANSION
+ *  time, before the lot's one yes) NEVER honours `options` -- a lot never
+ *  asks a reason and never writes half of itself (R-425), so even a "warn"
+ *  policy refuses here. `inLot: false` (`resolveAssignCommand`/
+ *  `resolveMoveCommand`, an ordinary single sentence) honours a non-blank
+ *  `options.overrideReason` under "warn" ONLY -- "block" offers no reason
+ *  to suppress with regardless of what `options` carries. */
+function certificateGate(
+  operator: { id: string; displayName: string },
+  cell: Node,
+  endMin: number,
+  inLot: boolean,
+  ctx: ResolveContext,
+  options: ResolveOptions | undefined,
+): { ok: true; override?: { reason: string } } | { ok: false; question: Question } {
+  const gaps = ctx.certificateGaps(operator.id, cell.id, endMin);
+  if (gaps.length === 0) return { ok: true };
+  const policy = ctx.eligibilityPolicy(cell.id);
+  const reason = !inLot && policy === "warn" ? usableOverrideReason(options) : null;
+  if (reason !== null) return { ok: true, override: { reason } };
+  return {
+    ok: false,
+    question: {
+      kind: "not_certified",
+      person: operator.displayName,
+      cell: cell.name,
+      missing: missingSkillWords(gaps),
+      policy,
+      inLot,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1867,7 +1996,11 @@ function resolvePersonStep(
 /** The assign path (unchanged in meaning from before S41-a/S41-b): cell,
  *  part, person (shared, `resolvePersonStep`), day and span, the own-block
  *  question (R-385), the run question (R-383), then the readout. */
-function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Resolution {
+function resolveAssignCommand(
+  command: AssignCommand,
+  ctx: ResolveContext,
+  options?: ResolveOptions,
+): Resolution {
   const byPath = buildPathIndex(ctx.nodeById);
 
   // 1. Cell.
@@ -2019,6 +2152,18 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
     }
   }
 
+  // S61-b (R-425, F-155): the certificate question, before anything is
+  // written -- skipped only for a `retime` of the operator's OWN existing
+  // block (same person, same cell; `updateAssignmentFields`, that write's
+  // own door, has no override field to carry a reason to in the first
+  // place, and the person is already on this cell either way).
+  let override: { reason: string } | undefined;
+  if (target.kind !== "retime") {
+    const gate = certificateGate(operator, cell, endMin, false, ctx, options);
+    if (!gate.ok) return gate;
+    override = gate.override;
+  }
+
   // Readout.
   const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
   const chain = [...ancestorNames, cell.name].join(" › ");
@@ -2043,6 +2188,7 @@ function resolveAssignCommand(command: AssignCommand, ctx: ResolveContext): Reso
       target,
       range: { startMin, endMin },
       readout,
+      ...(override ? { override } : {}),
     },
   };
 }
@@ -2375,7 +2521,11 @@ function buildDestinationText(command: MoveCommand): string {
  * new cell by the shared cell step, checks the part is offered there, and
  * uses the sentence's new hours if given, else the block's own.
  */
-function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resolution {
+function resolveMoveCommand(
+  command: MoveCommand,
+  ctx: ResolveContext,
+  options?: ResolveOptions,
+): Resolution {
   const byPath = buildPathIndex(ctx.nodeById);
 
   // S58 (R-412, D132 item 1): `adjust` set alongside a destination cell, new
@@ -2513,6 +2663,10 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
   // comment on the off-day check just below).
   let adjustReadout: { edge: "start" | "end"; oldClock: ClockTime; newClock: ClockTime } | null =
     null;
+  // S61-b (R-425, F-155): set only inside the `move_cell` branch below --
+  // an adjust or a move-in-time never leaves the block's own cell, so the
+  // operator is already certified there (or was never asked when placed).
+  let override: { reason: string } | undefined;
 
   if (command.adjust !== null) {
     // S58 (R-412, D132 item 1): a re-time by ONE edge -- the top-of-function
@@ -2642,6 +2796,13 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
     }
     target = { kind: "move_cell" };
     targetNodeId = newCell.id;
+
+    // S61-b (R-425, F-155): the certificate question, before anything is
+    // written -- ONLY here, moving to ANOTHER cell (never a move-in-time or
+    // an adjust, which keep the block on its own cell, above).
+    const gate = certificateGate(operator, newCell, endMin, false, ctx, options);
+    if (!gate.ok) return gate;
+    override = gate.override;
   }
 
   // Readout -- the chain names the BLOCK's own cell (S49: it may have come
@@ -2671,6 +2832,7 @@ function resolveMoveCommand(command: MoveCommand, ctx: ResolveContext): Resoluti
       range: { startMin, endMin },
       target,
       readout,
+      ...(override ? { override } : {}),
     },
   };
 }
@@ -2743,10 +2905,17 @@ function resolveHeadcountCommand(command: HeadcountCommand, ctx: ResolveContext)
  * existing test's `cmd()`/`bookCmd()` fixture, for one — gets back the
  * narrower result type without a cast; only `CommandBar`, which holds the
  * `Command` union, sees the full `Resolution`.
+ *
+ * S61-b (R-425, F-155): the third argument, `options`, is read ONLY by the
+ * assign and move paths (`certificateGate`) -- a caller re-resolving after
+ * the bar collected a reason for a `not_certified` "warn" question passes
+ * `{ overrideReason }`; every other caller (and every other intent) omits
+ * it, byte-identical to before this parameter existed.
  */
 export function resolveCommand(
   command: AssignCommand,
   ctx: ResolveContext,
+  options?: ResolveOptions,
 ): { ok: true; resolved: ResolvedCommand } | { ok: false; question: Question };
 export function resolveCommand(
   command: BookCommand,
@@ -2759,13 +2928,22 @@ export function resolveCommand(
 export function resolveCommand(
   command: MoveCommand,
   ctx: ResolveContext,
+  options?: ResolveOptions,
 ): { ok: true; resolved: ResolvedMove } | { ok: false; question: Question };
 export function resolveCommand(
   command: HeadcountCommand,
   ctx: ResolveContext,
 ): { ok: true; resolved: ResolvedHeadcount } | { ok: false; question: Question };
-export function resolveCommand(command: Command, ctx: ResolveContext): Resolution;
-export function resolveCommand(command: Command, ctx: ResolveContext): Resolution {
+export function resolveCommand(
+  command: Command,
+  ctx: ResolveContext,
+  options?: ResolveOptions,
+): Resolution;
+export function resolveCommand(
+  command: Command,
+  ctx: ResolveContext,
+  options?: ResolveOptions,
+): Resolution {
   // S50 (brief §2 item 4, R-398): a several is read but not yet run -- the
   // bar's one-yes-for-the-lot confirmation is the next stage after this one.
   if (command.intent === "several") {
@@ -2792,9 +2970,9 @@ export function resolveCommand(command: Command, ctx: ResolveContext): Resolutio
   }
   if (command.intent === "book") return resolveBookCommand(command, ctx);
   if (command.intent === "unassign") return resolveUnassignCommand(command, ctx);
-  if (command.intent === "move") return resolveMoveCommand(command, ctx);
+  if (command.intent === "move") return resolveMoveCommand(command, ctx, options);
   if (command.intent === "headcount") return resolveHeadcountCommand(command, ctx);
-  return resolveAssignCommand(command, ctx);
+  return resolveAssignCommand(command, ctx, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -3558,6 +3736,14 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
         },
       };
     }
+    // S61-b (R-425, F-155): the certificate question, at EXPANSION time --
+    // before the lot's readouts are ever shown, so a "warn" policy still
+    // refuses (R-425: a lot never asks a reason, never writes half of
+    // itself). `b` is the one being newly placed on `xCell`; `x.endMin` is
+    // that block's own real end, the exact window `b` would take over.
+    const gate = certificateGate(b, xCell, x.endMin, true, ctx, undefined);
+    if (!gate.ok) return gate;
+
     removals.push({
       intent: "unassign",
       operator: personWords(a),
@@ -3731,6 +3917,15 @@ function expandSwap(command: SwapCommand, ctx: ResolveContext): Expansion {
       : notRepresentable(b.displayName, blkB, cellB);
   }
 
+  // S61-b (R-425, F-155): the certificate question, at EXPANSION time --
+  // same reason and same "before the lot's own yes" timing as
+  // `expandReplace` above. Checked in the order the four commands below are
+  // written: `a` moving onto `cellB` first, then `b` onto `cellA`.
+  const gateA = certificateGate(a, cellB, blkB.endMin, true, ctx, undefined);
+  if (!gateA.ok) return gateA;
+  const gateB = certificateGate(b, cellA, blkA.endMin, true, ctx, undefined);
+  if (!gateB.ok) return gateB;
+
   const commands: SingleCommand[] = [
     {
       intent: "unassign",
@@ -3838,9 +4033,44 @@ function addDaysToIso(iso: string, delta: number): string {
  *  `last_week` that shifted by seven. Every day of the week must be on the
  *  board, else `day_off_board` naming the first missing one's own iso
  *  (`addDaysToIso` off today's, for a day outside `ctx.days`' own range). */
+/**
+ * F-158: what a `day_off_board` raised from a week's own missing day NAMES.
+ *
+ * `"iso"` (the default, and what `copy`'s week form keeps) names the exact
+ * calendar day that is missing -- CP8's own pin: "names that exact iso, not
+ * a generic 'off the board'", which is right for a copy, where the person
+ * asked for two specific weeks and wants to be told which day of them the
+ * board cannot see.
+ *
+ * `"week_word"` names the WEEK ("this week" / "next week"). A repeat day
+ * needs this, and the reason is the door, not the wording: `BoardPage`'s
+ * `onShowDay` handler widens the window to seven days ONLY for a week-word
+ * target (`SHOW_DAY_WEEK_WORD_OFFSETS`), and an ISO target merely moves a
+ * three-day window to start on that day. So an ISO-named repeat could never
+ * be opened by its own "Show that day" button: pressing it moved the window
+ * to the missing Monday, the sentence re-ran, and the board -- still three
+ * days wide -- was missing Thursday instead. The question walked in a circle
+ * and the repeat day was unreachable from the board's default window
+ * (F-158, found by the S61-c typed walk). Naming the week hands that same
+ * button the one target that widens.
+ */
+type OffBoardNaming = "iso" | "week_word";
+
+/** The word `parse.ts` uses for each week kind -- the same strings
+ *  `SHOW_DAY_WEEK_WORD_OFFSETS` keys on, so the question the resolver asks
+ *  and the door the board opens cannot drift apart. `last_week` has no
+ *  repeat form (`parse.ts` builds `week` as this/next only), and keeps the
+ *  iso naming regardless; it is listed for totality, not for use. */
+const WEEK_WORD: Record<"this_week" | "next_week" | "last_week", string> = {
+  this_week: "this week",
+  next_week: "next week",
+  last_week: "last week",
+};
+
 function resolveWeekDays(
   kind: "this_week" | "next_week" | "last_week",
   ctx: ResolveContext,
+  naming: OffBoardNaming = "iso",
 ): { ok: true; days: number[] } | { ok: false; question: Question } {
   if (ctx.todayIndex === null) {
     return { ok: false, question: { kind: "day_off_board", text: "today" } };
@@ -3855,7 +4085,13 @@ function resolveWeekDays(
     if (!ctx.days.some((d) => d.index === idx)) {
       return {
         ok: false,
-        question: { kind: "day_off_board", text: addDaysToIso(todayDay.iso, idx - ctx.todayIndex) },
+        question: {
+          kind: "day_off_board",
+          text:
+            naming === "week_word"
+              ? WEEK_WORD[kind]
+              : addDaysToIso(todayDay.iso, idx - ctx.todayIndex),
+        },
       };
     }
   }
@@ -4037,6 +4273,23 @@ function expandCopy(command: CopyCommand, ctx: ResolveContext): Expansion {
           return xSpan !== null && xSpan.startMOD === startMOD && xSpan.endMOD === endMOD;
         });
         if (alreadyThere) continue;
+
+        // S61-b (R-425, F-155): the certificate question, at EXPANSION time
+        // -- a copy is a lot too (R-425), so the FIRST uncertified member
+        // (board order: day pair, then cell, then block) is asked before
+        // the lot's own yes, never deferred to the bar's later resolve.
+        // `endMin` is the DESTINATION day's own real minute for the block's
+        // end clock, the exact window this copy would place `op` into.
+        const gate = certificateGate(
+          op,
+          cell,
+          ctx.wallToOffset(dstIdx, endMOD),
+          true,
+          ctx,
+          undefined,
+        );
+        if (!gate.ok) return gate;
+
         commands.push({
           intent: "assign",
           operator: personWords(op),
@@ -4387,7 +4640,13 @@ function expandSplit(command: SplitCommand, ctx: ResolveContext): Expansion {
  */
 function expandRepeatDay(command: AssignCommand | BookCommand, ctx: ResolveContext): Expansion {
   const day = command.day as { kind: "weekdays" | "every_day"; week: "this_week" | "next_week" };
-  const weekResult = resolveWeekDays(day.week, ctx);
+  // F-158: the week word, not the missing day's iso -- see `OffBoardNaming`.
+  // The seven-day requirement below is UNCHANGED: a `weekdays` repeat writes
+  // Monday to Friday and an `every_day` one writes all seven, so the week
+  // has to be on the board before either can expand at all. What changes is
+  // only what the question names, and therefore whether its own button can
+  // open the board wide enough to answer it.
+  const weekResult = resolveWeekDays(day.week, ctx, "week_word");
   if (!weekResult.ok) return weekResult;
   const dayIndexes = day.kind === "weekdays" ? weekResult.days.slice(0, 5) : weekResult.days;
 
@@ -4470,6 +4729,17 @@ export function describeQuestion(q: Question): string {
       return `There is no ${q.cell} in ${q.qualifier}. ${q.cell} is in ${q.elsewhere
         .map((c) => c.label)
         .join(" / ")}.`;
+    // S61-b (R-425, F-155): the wording here is a baseline only -- the bar
+    // (`CommandBar.tsx`, another lane) is the one that reads this string,
+    // and may refine it further; the shape (`missing`/`policy`/`inLot`) is
+    // this module's own, pinned by `commandResolve.test.ts`'s NC1-NC7.
+    case "not_certified": {
+      const missing = q.missing.join(", ");
+      if (q.policy === "block") {
+        return `${q.person} is not certified for ${q.cell}: missing ${missing}.`;
+      }
+      return `${q.person} is not certified for ${q.cell}: missing ${missing}. Say the reason to schedule anyway, or no.`;
+    }
     case "day_off_board":
       return `${q.text} is not on the board. Move the board to that day first.`;
     case "too_short":

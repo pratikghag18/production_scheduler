@@ -152,6 +152,15 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     // CB-mid-2 (and CB-mid-1) could not see the class of bug the
     // maintainer's real board hit.
     wallOf: clampedWallOf(finalDays),
+    // S61-b (R-425, F-155, landed on `resolve.ts` concurrently with this
+    // lane's own S61-a work): every assign resolution now asks
+    // `ctx.certificateGaps` before it is ever `ok: true`. This file's own
+    // scope is the bar's conversation/trace/day-label behaviour, not the
+    // certificate rule itself -- the default here is "fully eligible, no
+    // gaps", which keeps every case in this file byte for byte its
+    // pre-R-425 behaviour; a case that cares about a real gap overrides it.
+    certificateGaps: () => [],
+    eligibilityPolicy: () => "warn",
     ...over,
   };
 }
@@ -292,9 +301,12 @@ function renderBar(
   // returned spy instead.
   const onShowDay = vi.fn();
   const onRunLot = vi.fn(s51.onRunLot ?? (() => new Promise<LotResult>(() => {})));
-  const element = (ctxOver: Partial<ResolveContext>) => (
+  // R-424: `null` simulates the gap CommandBar's own `ctx` prop must now
+  // survive (CB-keep's own describe block) -- every pre-R-424 caller only
+  // ever passes a `Partial<ResolveContext>`, so this is additive.
+  const element = (ctxOver: Partial<ResolveContext> | null) => (
     <CommandBar
-      ctx={buildCtx(ctxOver)}
+      ctx={ctxOver === null ? null : buildCtx(ctxOver)}
       dateFormat="d_mon_yyyy"
       zone="UTC"
       reader={reader}
@@ -314,10 +326,14 @@ function renderBar(
       onCancelWord={s47.onCancelWord}
     />
   );
-  const { rerender } = render(element(over));
+  const { rerender, unmount } = render(element(over));
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
   return {
     onOpen,
+    // R-424/F-157: exposed so a test can drive a genuine unmount (CB-t-14,
+    // CB-keep's own describe block) without reaching past this helper into
+    // `@testing-library/react` itself.
+    unmount,
     onRetime,
     onBook,
     onRetimeRun,
@@ -332,8 +348,11 @@ function renderBar(
     // callback the SAME mock instance) against a NEW `ctx` built from
     // `nextOver` -- simulates the window actually moving and a fresh
     // `commandCtx` landing from `BoardPage`, without this file reaching into
-    // any board/store code (this file drives `CommandBar` alone).
-    rerenderCtx: (nextOver: Partial<ResolveContext>) => rerender(element(nextOver)),
+    // any board/store code (this file drives `CommandBar` alone). R-424:
+    // `null` simulates `commandCtx` going null for a render (a refetch gap
+    // `BoardPage`'s own fix should prevent in practice, but this component
+    // must survive on its own regardless -- CB-keep's own describe block).
+    rerenderCtx: (nextOver: Partial<ResolveContext> | null) => rerender(element(nextOver)),
   };
 }
 
@@ -370,6 +389,45 @@ function makeFakeRecognizer() {
 /** The one `aria-live="polite"` status element (brief §6). */
 function statusText(): string {
   return document.querySelector('[aria-live="polite"]')?.textContent ?? "";
+}
+
+/**
+ * S59-e (R-421): stubs `fetch` for one test and returns the mock -- moved to
+ * module scope (was local to the "CB-t" describe block) so R-424's own
+ * "CB-keep" and F-154's own "CB-lot-fail" describe blocks below can post
+ * against the SAME stub without a second copy. Every caller still cleans up
+ * with `vi.unstubAllGlobals()` in its own `afterEach`.
+ */
+function stubFetch(): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+/** The trace entry `stubFetch`'s mock posted on call `call` (default the
+ *  first) -- asserts the URL and method along the way. */
+function postedEntry(fetchMock: ReturnType<typeof vi.fn>, call = 0): TraceEntry {
+  const [url, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+  expect(url).toBe("/__trace");
+  expect(init.method).toBe("POST");
+  return JSON.parse(init.body as string) as TraceEntry;
+}
+
+/**
+ * F-153/F-157: mirrors `CommandBar`'s own `renderReadout` (an ISO day
+ * rendered through `zonedTimeToInstant` + `formatDayLabel`, never a bare
+ * `Date`) for a raw readout string one of this file's fixtures produced,
+ * under `renderBar`'s own fixed `dateFormat="d_mon_yyyy"`/`zone="UTC"` --
+ * `zonedTimeToInstant("UTC", ...)` and a plain UTC-midnight `Date` agree for
+ * `zone="UTC"` exactly (zero offset either way), so this is safe to build
+ * the simpler way here. A trace pin asserts against what the bar actually
+ * SHOWED (`status.message`/`entry.asked`), never the raw ISO token
+ * `resolve.ts` wrote into `.readout`.
+ */
+function renderedReadout(rawReadout: string): string {
+  return rawReadout.replace(/\d{4}-\d{2}-\d{2}/, (iso) =>
+    formatDayLabel(new Date(`${iso}T00:00:00Z`), "d_mon_yyyy", "UTC"),
+  );
 }
 
 describe("CommandBar (P1-7a, brief §9)", () => {
@@ -1303,8 +1361,17 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect(onHighlight).toHaveBeenLastCalledWith(null);
   });
 
-  it("CB-lot-3: onRunLot resolving {done:1, error:'boom'} shows the partial-failure message, input kept, highlight cleared", async () => {
-    const onRunLot = vi.fn(async (): Promise<LotResult> => ({ done: 1, error: "boom" }));
+  it("CB-lot-3: onRunLot resolving {done:1, error:'boom.'} shows the partial-failure message, input kept, highlight cleared", async () => {
+    // A typed (if unused) param -- same as CB-lot-2's own `onRunLot` above --
+    // so `mock.calls[0]` types as `[ResolvedAny[]]` for the cast below.
+    // F-154 review fix: `error` is a plain sentence -- every real source
+    // (`buildSchedulerErrorToast`, `LotStepRefused.message`) always ends in
+    // its own terminal punctuation, so the bar no longer adds one; this
+    // fixture matches that shape rather than the bar patching it in.
+    const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: 1,
+      error: "boom.",
+    }));
     const { input, onHighlight } = renderBar(
       { assignments: [BLK1, BLK_SP] },
       null,
@@ -1321,7 +1388,21 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.change(input, { target: { value: "yes" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(statusText()).toBe("Did 1 of 2; the next failed: boom"));
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+
+    // F-154 review fix: a partial lot says what actually stood, not just
+    // the raw failure text -- "boom" pins the "stayed" clause; CB-lot-fail-1
+    // pins that a message `useSchedulerToast.ts` itself would have worded
+    // through `buildSchedulerErrorToast` (which no longer bakes in "—
+    // reverted." at all, that F-154 fix's own clean half) reads verbatim.
+    await waitFor(() =>
+      expect(statusText()).toBe(
+        `Did 1 of 2; the next failed: boom. The 1 done stayed: ${renderedReadout(resolvedList[0].readout)}.`,
+      ),
+    );
+    // Not "boom.." -- the bar doesn't add a period on top of the message's
+    // own.
 
     expect(input.value).toBe("yes");
     expect(onHighlight).toHaveBeenLastCalledWith(null);
@@ -3595,6 +3676,51 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     expect(statusText()).not.toContain("is not on the board");
     expect(screen.queryByRole("button", { name: "Show that day" })).toBeNull();
   });
+
+  it('CB-showday-8 (F-158): a REPEAT day whose week is off the board names the week -- "Show that day" hands onShowDay the week word, and the rerun waits for all seven days of that week', () => {
+    // A three-day board, the shape the typed walk runs on: Monday to
+    // Wednesday, today Monday. "every weekday this week" needs Monday to
+    // Sunday before it can expand (`resolveWeekDays`), so it asks -- and
+    // F-158 is that it must ask by the WEEK, since only a week-word target
+    // makes `BoardPage`'s handler widen the window to seven days. An ISO
+    // target moved a three-day window and asked again about Thursday, for
+    // ever.
+    const { input, onOpen, onShowDay, rerenderCtx } = renderBar({
+      days: MON_WED_DAYS,
+      todayIndex: 0,
+    });
+    fireEvent.change(input, {
+      target: {
+        value: "assign Operator 1 to Housing A on Cell 1 in Line 1 every weekday this week 10 to 2",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("this week is not on the board. Move the board to that day first.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
+    expect(onShowDay).toHaveBeenCalledWith("this week");
+
+    // Six of the seven: still not enough, and the pending rerun must stand
+    // rather than be consumed against a board that cannot answer yet.
+    const monToSat = [
+      ...MON_WED_DAYS,
+      { index: 3, iso: "2026-09-03", weekday: 4 as const },
+      { index: 4, iso: "2026-09-04", weekday: 5 as const },
+      { index: 5, iso: "2026-09-05", weekday: 6 as const },
+    ];
+    rerenderCtx({ days: monToSat, todayIndex: 0 });
+    expect(statusText()).toBe("this week is not on the board. Move the board to that day first.");
+
+    // The whole week: the held sentence re-runs and becomes the lot of five
+    // (Monday to Friday) CB-y-2 pins -- the count is unchanged by F-158.
+    rerenderCtx({
+      days: [...monToSat, { index: 6, iso: "2026-09-06", weekday: 0 as const }],
+      todayIndex: 0,
+    });
+    expect(statusText()).toMatch(/^5 commands ready: /);
+    expect(screen.queryByRole("button", { name: "Show that day" })).toBeNull();
+    expect(onOpen).not.toHaveBeenCalled(); // a lot waits for its own yes
+  });
 });
 
 // S59 (R-418's message, design §19.104/D133 item 1, brief §4): an `unknown`
@@ -3881,19 +4007,6 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     vi.unstubAllEnvs();
   });
 
-  function stubFetch(): ReturnType<typeof vi.fn> {
-    const fetchMock = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("fetch", fetchMock);
-    return fetchMock;
-  }
-
-  function postedEntry(fetchMock: ReturnType<typeof vi.fn>, call = 0): TraceEntry {
-    const [url, init] = fetchMock.mock.calls[call] as [string, RequestInit];
-    expect(url).toBe("/__trace");
-    expect(init.method).toBe("POST");
-    return JSON.parse(init.body as string) as TraceEntry;
-  }
-
   it("CB-t-1: a typed sentence that resolves and runs posts one entry -- by, model, read, ran", () => {
     const fetchMock = stubFetch();
     const parsed = parseCommand(P1_SENTENCE);
@@ -3914,8 +4027,13 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     // No `reader` prop set here -- the model was never consulted.
     expect(entry.model).toEqual({ skipped: "no reader" });
     expect(entry.read).toBe(formatCommand(parsed.command));
-    expect(entry.asked).toBeNull();
-    expect(entry.answered).toBeNull();
+    // F-157 review fix (item 4/5): a plain single raises no question of its
+    // own and is never answered by a word or a button -- it runs straight
+    // off its own readout, so `asked` IS that readout and `answered` is the
+    // literal "auto" (CB-t-11 below covers this directly; kept here too so
+    // this test still speaks for the whole entry it posts).
+    expect(entry.asked).toBe(renderedReadout(resolved.readout));
+    expect(entry.answered).toBe("auto");
     expect(entry.ran).toEqual([resolved.readout]);
   });
 
@@ -4168,5 +4286,468 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const entry = postedEntry(fetchMock);
     expect(entry.by).toBe("browser");
+  });
+
+  // CB-t-11/12/13 (F-157, the maintainer's own 16 Sept trace read against
+  // `data/voice/trace/bar.jsonl`): three of the four shapes that trace
+  // showed with `asked`/`answered` missing even though the bar plainly
+  // showed something and acted on it -- a single's own readout, a parse
+  // failure's shape hint, and a headcount's own readout. (The fourth --
+  // "the Show that day sentence and the split after it are absent
+  // altogether because the bar unmounted" -- is R-424's own fix, covered by
+  // CB-keep below and CB-t-14's unmount flush.) Numbered from 11 rather
+  // than the brief's own 9/10, which CB-t-9/CB-t-10 above already use for a
+  // different pair of Escape-no-op pins.
+  it("CB-t-11: a single's own readout is recorded -- asked is the readout, answered is 'auto' (item 5: no separate yes)", () => {
+    const fetchMock = stubFetch();
+    // A booking with nothing in the way (CB1's own fixture) runs straight
+    // off Enter, exactly like P1_SENTENCE's assign in CB-t-1 -- used here
+    // instead so this pin covers a DIFFERENT resolved shape (`book`, not
+    // `assign`), not a repeat of CB-t-1's own case.
+    const { onBook, input } = renderBar({ runs: [] });
+
+    fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onBook).toHaveBeenCalledTimes(1);
+    const [resolved] = onBook.mock.calls[0] as [ResolvedBook, { x: number; y: number }];
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toBe(renderedReadout(resolved.readout));
+    expect(entry.answered).toBe("auto");
+    expect(entry.ran).toEqual([resolved.readout]);
+  });
+
+  it("CB-t-12: a parse failure's own shape hint is recorded as asked", () => {
+    const fetchMock = stubFetch();
+    const { input } = renderBar();
+
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe(SHAPE);
+    // A shape hint alone is none of the three life-end triggers (a readout,
+    // a cancel, a new sentence) -- the entry stays open until Escape closes
+    // it (CB-t-7a's own pattern), which is what makes it observable here.
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = postedEntry(fetchMock);
+    // `read` is whatever `ParseFailure.kind` this sentence hit -- not this
+    // pin's own concern (`commandParse.test.ts` owns that table); only that
+    // some failure kind was recorded at all.
+    expect(entry.read.length).toBeGreaterThan(0);
+    expect(entry.asked).toBe(SHAPE);
+    expect(entry.answered).toBe("escape");
+  });
+
+  it("CB-t-13: a headcount's own readout is recorded -- asked and ran", () => {
+    const fetchMock = stubFetch();
+    const { onSetHeadcount, input } = renderBar({ runs: [RUN1] });
+
+    // "in Line 1" names which "Cell 1" (the default fixture has two, c1a
+    // under Line 1 and c1b under Line 3) -- without it the sentence asks
+    // which place instead of resolving straight through.
+    fireEvent.change(input, {
+      target: { value: "make the Housing A job on Cell 1 in Line 1 4 people" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSetHeadcount).toHaveBeenCalledTimes(1);
+    const [resolved] = onSetHeadcount.mock.calls[0] as [
+      ResolvedHeadcount,
+      { x: number; y: number },
+    ];
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toBe(renderedReadout(resolved.readout));
+    expect(entry.answered).toBe("auto");
+    expect(entry.ran).toEqual([resolved.readout]);
+  });
+
+  it("CB-t-14: an entry still open when the bar unmounts is flushed with navigator.sendBeacon", () => {
+    const sendBeacon = vi.fn().mockReturnValue(true);
+    const original = (navigator as unknown as { sendBeacon?: typeof sendBeacon }).sendBeacon;
+    Object.defineProperty(navigator, "sendBeacon", {
+      value: sendBeacon,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const { input, unmount } = renderBar();
+      fireEvent.change(input, {
+        target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+      });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(statusText()).toBe('Which person? "Sam" matches 2:');
+
+      unmount();
+
+      expect(sendBeacon).toHaveBeenCalledTimes(1);
+      // A plain string body (`traceServer.ts`'s own handler reads the raw
+      // request body regardless of content type -- no `Blob` needed here).
+      const [url, body] = sendBeacon.mock.calls[0] as [string, string];
+      expect(url).toBe("/__trace");
+      const posted = JSON.parse(body) as TraceEntry;
+      expect(posted.asked).toBe('Which person? "Sam" matches 2:');
+      expect(posted.answered).toBeNull();
+    } finally {
+      if (original) {
+        Object.defineProperty(navigator, "sendBeacon", { value: original, configurable: true });
+      } else {
+        delete (navigator as { sendBeacon?: unknown }).sendBeacon;
+      }
+    }
+  });
+});
+
+// R-424 (the maintainer, 16 Sept, the second walk: "when I went to check it,
+// the chatbot vanished ... after show that day, the chatbot vanished"). The
+// actual cause was `BoardPage`'s own mount gate: `useBoardWindow`'s query key
+// carries the window's `from`/`to`, so a window move (or a same-window
+// refetch after a write) made `boardQuery.data` go back to `undefined` for
+// the gap, and every consumer gated on "the board has data" -- including the
+// whole `{hasData && index && boardQuery.data && (...)}` block the command
+// bar lives inside -- unmounted along with it, destroying every ref and
+// every piece of state this component was holding. `useBoardWindow`'s own
+// fix (`placeholderData: keepPreviousData`) is the real fix -- BoardPage
+// should no longer produce a null `ctx` for this component after its first
+// load -- but this component does not get to assume its caller never
+// regresses that (`ctx`'s own doc above), so it holds its own fallback too:
+// `lastCtxRef` remembers the last real `ResolveContext` and every functional
+// use reads that instead of the prop directly. These pins drive `CommandBar`
+// alone (this file's own header doc) -- `ctx` going `null` and coming back
+// via `rerenderCtx(null)` / `rerenderCtx(over)` stands in for that gap.
+describe("CB-keep: the bar keeps its conversation through a ctx that goes null and back (R-424)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-keep-1: a ctx going null then back keeps the status and the open trace entry", () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input, rerenderCtx } = renderBar();
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+    // The sentence's life has not ended -- a question stands, same as
+    // CB-t-3's own identical case.
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // The window's ctx goes null (a refetch gap) -- must not crash, must
+    // not lose the status, must not flush the still-open entry early.
+    rerenderCtx(null);
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // ... and comes back.
+    rerenderCtx({});
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+
+    // The candidate button still works -- `lastCtxRef` carried the board
+    // through the gap, so resolving the pick never crashed either.
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toBe('Which person? "Sam" matches 2:');
+    expect(entry.answered).toBe("Sam Patel");
+  });
+
+  it("CB-keep-2: Show that day's rerun keeps the entry -- a null ctx in between neither fires early nor crashes, and the real ctx still completes it", () => {
+    const YESTERDAY_SENTENCE =
+      "assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2 yesterday";
+    // The default fixture's own week, shifted back one calendar day -- the
+    // shape `commandCtx` takes once the window has actually moved (mirrors
+    // `CB-showday`'s own `SHIFTED_BACK_ONE_DAY`, kept local here on purpose:
+    // this describe block drives its own scenario, not a shared fixture).
+    const SHIFTED_BACK_ONE_DAY = [
+      { index: 0, iso: "2026-08-30", weekday: 0 as const },
+      { index: 1, iso: "2026-08-31", weekday: 1 as const },
+      { index: 2, iso: "2026-09-01", weekday: 2 as const },
+      { index: 3, iso: "2026-09-02", weekday: 3 as const },
+      { index: 4, iso: "2026-09-03", weekday: 4 as const },
+      { index: 5, iso: "2026-09-04", weekday: 5 as const },
+      { index: 6, iso: "2026-09-05", weekday: 6 as const },
+      { index: 7, iso: "2026-09-06", weekday: 0 as const },
+    ];
+    const fetchMock = stubFetch();
+    const { input, onOpen, rerenderCtx } = renderBar({ todayIndex: 0 });
+    fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
+    // A question stood (the day_off_board one) -- the entry is still open.
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // R-424: the window ctx goes null before the new window's data lands.
+    rerenderCtx(null);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // ... and the real new ctx (the window actually moved) arrives.
+    rerenderCtx({ days: SHIFTED_BACK_ONE_DAY, todayIndex: 1 });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.operatorId).toBe("op1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = postedEntry(fetchMock);
+    expect(entry.ran).toEqual([resolved.readout]);
+  });
+
+  it("CB-keep-3: a pop-up opening from a sentence keeps the status through a ctx that goes null and back", () => {
+    const { onOpen, input, rerenderCtx } = renderBar({ runs: [] });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const shown = statusText();
+    expect(shown.length).toBeGreaterThan(0);
+
+    rerenderCtx(null);
+    expect(statusText()).toBe(shown);
+
+    rerenderCtx({ runs: [] });
+    expect(statusText()).toBe(shown);
+    // A ctx flicker never re-opens the pop-up a second time.
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+});
+
+// F-153: `renderReadout` used to build `new Date(iso + "T00:00:00Z")` and
+// format THAT in the plant's own zone -- a UTC-midnight instant read back in
+// America/Chicago is 19:00 the evening before, so the swap's own listing
+// read "Tue Sep 15" for four blocks whose own readouts, once written, said
+// 2026-09-16. Fixed by building the instant that reads back as midnight of
+// the ISO day IN the zone (`zonedTimeToInstant`) instead.
+describe("CB-day: the readout's ISO day renders in the plant's own zone (F-153)", () => {
+  it("CB-day-1: a readout carrying 2026-09-16 under America/Chicago renders 'Wed Sep 16', never Tue", () => {
+    const onBook = vi.fn();
+    render(
+      <CommandBar
+        ctx={buildCtx({
+          days: [{ index: 0, iso: "2026-09-16", weekday: 3 }],
+          todayIndex: 0,
+        })}
+        dateFormat="d_mon_yyyy"
+        zone="America/Chicago"
+        onOpen={vi.fn()}
+        onRetime={vi.fn()}
+        onBook={onBook}
+        onRetimeRun={vi.fn()}
+        onUnassign={vi.fn()}
+        onMove={vi.fn()}
+        onSetHeadcount={vi.fn()}
+        onRunLot={vi.fn(() => new Promise<LotResult>(() => {}))}
+      />,
+    );
+    const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onBook).toHaveBeenCalledTimes(1);
+    expect(statusText()).toContain("Wed Sep 16");
+    expect(statusText()).not.toContain("Tue Sep 15");
+  });
+});
+
+// F-154: `runLot` (useDragGesture.ts, not this lane's file) stops on the
+// first failed step and returns `{done, error}` -- `error` is worded through
+// `buildSchedulerErrorToast`. THE CLEAN FIX LANDED (S61-a review, 16 Sept):
+// `useSchedulerToast.ts` no longer bakes " — reverted." into that message at
+// all (true for a real drag, which really does revert its own optimistic
+// move, but false for a lot, which writes each step for real and simply
+// stops at the first failure -- "swap Lena Novak and Tom Baker today" wrote
+// three of four and the bar still said "reverted", reading as the whole lot
+// undone). A genuine drag failure gets the suffix from its OWN caller now
+// (`failWith`/`openMoveFromCommand`'s own `toast.reverted(message, kind)`
+// calls, `useDragGesture.ts`), never baked in regardless of whether
+// anything was actually rolled back -- so `LotResult.error` here is exactly
+// what a real one would be: no "reverted" to begin with, nothing for this
+// file to strip any more either.
+// This pin is now just the "stayed" clause, same as CB-lot-3's "boom" case,
+// against a message shaped the way a real certificate refusal reads.
+describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-154)", () => {
+  it("CB-lot-fail-1: 'Did 1 of 2; the next failed: <message>. The 1 done stayed: <readout>.'", async () => {
+    const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: 1,
+      error: "Tom Baker is not certified for Cell 1: missing Welding.",
+    }));
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+
+    await waitFor(() =>
+      expect(statusText()).toBe(
+        `Did 1 of 2; the next failed: Tom Baker is not certified for Cell 1: missing Welding. The 1 done stayed: ${renderedReadout(resolved[0].readout)}.`,
+      ),
+    );
+    expect(statusText()).not.toContain("reverted");
+  });
+});
+
+// S61-a (R-425, F-155, the resolver lane's `not_certified` question and
+// `resolveCommand(command, ctx, { overrideReason })`): a resolved write that
+// would put a person on a cell short a required certificate is asked about
+// BEFORE anything is written. Under "warn", a single sentence's question
+// offers a reason -- ANY typed or spoken text that is not a confirm word and
+// not a cancel word IS that reason, re-resolving the SAME held command with
+// `{ overrideReason }` and running it as usual, the readout suffixed
+// " · override: <reason>". Under "block", or for a LOT's own expansion-time
+// refusal (`inLot: true`), no reason is ever offered or accepted -- a plain
+// refusal, dropped like any other question by a cancel word or fresh text.
+describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
+  /** `certificateGaps` answers one gap ("Welding", never-trained) for
+   *  Operator 1 (op1) on Cell 1 (c1a) -- P1_SENTENCE's own person and cell
+   *  -- everyone/everywhere else stays fully eligible. */
+  function notCertifiedCtx(policy: "warn" | "block"): Partial<ResolveContext> {
+    return {
+      certificateGaps: (operatorId: string, nodeId: string) =>
+        operatorId === "op1" && nodeId === "c1a"
+          ? [{ skill: "Welding", state: "never-trained" as const }]
+          : [],
+      eligibilityPolicy: () => policy,
+    };
+  }
+
+  it("CB-nc-1: warn asks -- exact wording, single, inLot false", () => {
+    const { input } = renderBar(notCertifiedCtx("warn"));
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+    );
+  });
+
+  it("CB-nc-2: a reason runs with the override on the resolved command -- onOpen receives it, the readout is suffixed", () => {
+    const { onOpen, input } = renderBar(notCertifiedCtx("warn"));
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "Covering an absence" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.override).toEqual({ reason: "Covering an absence" });
+    expect(statusText()).toContain("· override: Covering an absence");
+  });
+
+  it("CB-nc-3: a bare confirm word re-asks -- 'Say the reason, not yes.', nothing runs", () => {
+    const { onOpen, input } = renderBar(notCertifiedCtx("warn"));
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("Say the reason, not yes.");
+    expect(onOpen).not.toHaveBeenCalled();
+
+    // The question still stands -- a real reason still runs after the
+    // refused "yes".
+    fireEvent.change(input, { target: { value: "Covering an absence" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("CB-nc-4: a cancel word drops the question -- nothing runs", () => {
+    const { onOpen, input } = renderBar(notCertifiedCtx("warn"));
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("");
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("CB-nc-5: block refuses outright and accepts no reason", () => {
+    const { onOpen, input } = renderBar(notCertifiedCtx("block"));
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("Operator 1 is not certified for Cell 1: missing Welding.");
+
+    // No reason is offered or accepted -- this is ordinary text now, which
+    // fails to parse as a sentence (the shape hint), never an override.
+    fireEvent.change(input, { target: { value: "Covering an absence" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(statusText()).not.toContain("Covering an absence");
+  });
+
+  it("CB-nc-5b: a lot's own refusal (inLot: true) adds 'Nothing was written.' and accepts no reason, regardless of policy", () => {
+    // `inLot: true` is raised by `expandCommand`'s own lot expansion
+    // (`expandReplace`/`expandSwap`/`expandCopy`), never by an ordinary
+    // single sentence -- spied here (same technique "CB-unknown" above
+    // uses) to pin the BAR's own rendering of this exact shape without
+    // hand-building a real several/replace/swap fixture, which is the
+    // resolver lane's own contract, not this file's fixture to construct.
+    const spy = vi.spyOn(resolveLib, "resolveCommand").mockReturnValue({
+      ok: false,
+      question: {
+        kind: "not_certified",
+        person: "Operator 1",
+        cell: "Cell 1",
+        missing: ["Welding"],
+        policy: "warn",
+        inLot: true,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    try {
+      const { onOpen, input } = renderBar(notCertifiedCtx("warn"));
+      fireEvent.change(input, { target: { value: P1_SENTENCE } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(statusText()).toBe(
+        "Operator 1 is not certified for Cell 1: missing Welding. Nothing was written.",
+      );
+
+      fireEvent.change(input, { target: { value: "Covering an absence" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(onOpen).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("CB-nc-6: a second sentence typed while the question stands runs as a NEW sentence, never swallowed as the reason", () => {
+    // The reviewer's own live find: a second sentence typed while a
+    // not_certified question stood was silently treated as the reason
+    // instead of running.
+    const { onOpen, onBook, input } = renderBar(notCertifiedCtx("warn"));
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toContain("Say the reason to schedule anyway, or no.");
+
+    fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onBook).toHaveBeenCalledTimes(1);
+    // Never the not_certified question's own answer -- an ordinary book
+    // resolution ran instead (`ResolvedBook` carries no `override` field at
+    // all -- only `assign`/`move` ever do).
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(statusText()).not.toContain("override");
   });
 });

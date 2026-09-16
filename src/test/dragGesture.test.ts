@@ -44,6 +44,12 @@ vi.mock("@/lib/api", async (importOriginal) => {
     createAssignment: vi.fn(),
     updateAssignmentFields: vi.fn(),
     deleteAssignment: vi.fn(),
+    // S61-a (R-425, F-155): D12 below exercises `openMoveFromCommand`'s new
+    // override branch, which writes directly through `submitMove` ->
+    // `useMoveAssignment` -> this. Every earlier test in this file never
+    // called it (only `openMoveFromCommand`'s POPOVER-opening branch,
+    // D10/D11), so mocking it here changes nothing for them.
+    moveAssignment: vi.fn(),
     // P1-4e: the staffed-run path now goes through `move_run`, and the
     // split flow through `capacity_probe` + `apply_split_coverage`.
     moveRun: vi.fn(),
@@ -1556,6 +1562,72 @@ describe("useDragGesture", () => {
       if (second?.kind !== "create") throw new Error("expected a create popover");
 
       expect(second.seq).not.toBe(first.seq);
+    });
+
+    it("D12 (S61-a, R-425, F-155): openMoveFromCommand with an override writes DIRECTLY through submitMove -- eligibilityOverride: true, overrideReason set, no popover opened", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.moveAssignment).mockResolvedValue(
+        {} as Awaited<ReturnType<typeof api.moveAssignment>>,
+      );
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+
+      act(() => {
+        result.current.openMoveFromCommand({
+          assignmentId: "asg-1",
+          nodeId: "cell-1",
+          range: { startMin: 360, endMin: 480 },
+          operatorId: "op-1",
+          productId: "prod-1",
+          anchor: { x: 10, y: 10 },
+          override: { reason: "Covering an absence" },
+        });
+      });
+
+      await waitFor(() => expect(api.moveAssignment).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.moveAssignment).mock.calls[0][0];
+      expect(sent.assignmentId).toBe("asg-1");
+      expect(sent.nodeId).toBe("cell-1");
+      expect(sent.eligibilityOverride).toBe(true);
+      expect(sent.overrideReason).toBe("Covering an absence");
+      expect(sent.areaOverride).toBe(false);
+      expect(sent.areaOverrideReason).toBeUndefined();
+      // No popover -- the reason was already collected once, in the bar's
+      // own conversation; this never asks a second time.
+      expect(result.current.popover).toBeNull();
+    });
+
+    it("D13 (S61-a review fix, R-425, F-155): openCreateFromCommand with an override writes DIRECTLY through the create mutation -- eligibilityOverride: true, the reason, no popover", async () => {
+      // The reviewer's own live bug: BoardPage's onOpen never passed
+      // `resolved.override` through at all, and this function had no
+      // parameter to carry it even if it had -- the popover opened
+      // unchecked and nothing was ever written, while the bar's own
+      // readout already claimed "· override: ...".
+      const api = await import("@/lib/api");
+      vi.mocked(api.createAssignment).mockResolvedValue(
+        {} as Awaited<ReturnType<typeof api.createAssignment>>,
+      );
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+
+      act(() => {
+        result.current.openCreateFromCommand({
+          nodeId: "cell-1",
+          range: { startMin: 360, endMin: 480 },
+          operatorId: "op-1",
+          target: { kind: "direct", productId: "prod-1" },
+          anchor: { x: 10, y: 10 },
+          override: { reason: "Covering an absence" },
+        });
+      });
+
+      await waitFor(() => expect(api.createAssignment).toHaveBeenCalledTimes(1));
+      const sent = vi.mocked(api.createAssignment).mock.calls[0][0];
+      expect(sent.nodeId).toBe("cell-1");
+      expect(sent.operatorId).toBe("op-1");
+      expect(sent.eligibilityOverride).toBe(true);
+      expect(sent.overrideReason).toBe("Covering an absence");
+      // No popover -- the reason was already collected once, in the bar's
+      // own conversation; this never asks a second time.
+      expect(result.current.popover).toBeNull();
     });
 
     it("endPanelDrag's popover carries no autoCreate (a panel drop never auto-creates)", () => {

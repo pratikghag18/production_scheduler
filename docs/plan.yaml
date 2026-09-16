@@ -11787,7 +11787,107 @@ requirements:
   status: covered
   note: >-
     STATED 15 Sept (session 174): "the operator names being A1, A2, etc is a bit more challenging to understand vs actual people names, should we try modifying plant A with actual people names?" Brief docs/agent-briefs/s60-a-real-names-brief.md.
+- id: R-424
+  title: The bar keeps its conversation for the session --- a board move, a reload of the window or a pop-up never empties it
+  source:
+  - 'session 176 conversation (the maintainer, 16 Sept, the second walk)'
+  stated_by: maintainer
+  claim: >-
+    What the bar has said and asked stays on screen through a window move (Show that day), the board's own
+    refetch after a write, and a pop-up opening from a sentence; a sentence's trace entry is never lost to
+    an unmount. The bar is gated off screen only before the board has EVER loaded, never while it reloads.
+  verified_by:
+  - kind: manual
+    steps: "pinned by the lane's bar tests when it lands; the maintainer's next walk"
+  status: uncovered
+  note: >-
+    STATED 16 Sept (session 176): "when I went to check it, the chatbot vanished, this is why we need the
+    conversation style bot to retain the info for the session" and "after show that day, the chatbot vanished".
+- id: R-425
+  title: The bar asks about a missing certification before the yes, and a lot never writes half of itself
+  source:
+  - 'session 176 conversation (the maintainer, 16 Sept, the second walk)'
+  - CLAUDE.md §4 (a screen that shows what the server will refuse)
+  stated_by: maintainer
+  claim: >-
+    Any sentence that would put a person on a cell whose required training they lack is answered before
+    anything is written, by the same rule the server runs (certificateGaps, F-087's transcript): under the
+    warn policy a single sentence asks for the override reason in the bar and writes with it; a lot is
+    refused before its yes, naming the person and the missing training; under block it is refused. A lot
+    that fails on a step says exactly what stayed and never claims a revert it did not do.
+  verified_by:
+  - kind: manual
+    steps: "pinned by the lanes' resolver and bar tests when they land; the maintainer's next walk"
+  status: uncovered
+  note: >-
+    STATED 16 Sept (session 176): "People not trained are being assigned" --- Lena Novak and Tom Baker
+    hold no Welding, which Line 1 requires; the single opened the reason pop-up, the swap wrote three
+    of four and said reverted.
 findings:
+- id: F-153
+  title: The lot's listing and every readout name the day before the one the block is on
+  tag: A UTC-midnight date formatted in the plant's zone
+  status: open
+  found_by: maintainer
+  stage: S59
+  refs:
+  - R-400
+  - R-406
+  story: >-
+    Found 16 Sept (session 176) in the trace: the swap's listing said "Tue Sep 15" for four blocks whose readouts, once written, said 2026-09-16. The bar's renderReadout builds new Date(iso + "T00:00:00Z") and formats it in America/Chicago, which is 19:00 the evening before. Every date the bar prints to a person on a plant west of UTC is a day early.
+  fix: >-
+    Open.
+- id: F-154
+  title: A lot that fails on a step says reverted, but nothing is put back
+  tag: The drag's error wording reused by a writer that has no undo
+  status: open
+  found_by: maintainer
+  stage: S59
+  refs:
+  - R-400
+  - R-406
+  story: >-
+    Found 16 Sept (session 176): "swap Lena Novak and Tom Baker today" wrote three of four (two removals and Lena's new block), the fourth was refused by the server (Tom Baker holds no Welding), and the bar said "Did 3 of 4; the next failed: ... --- reverted". The database shows the three writes stood: Lena's and Tom's old blocks gone, Lena on Cell 3. runLot stops on the first failure and returns; the word reverted comes from the drag's toast text. The same swap then made "split Tom Baker at 10" answer that Tom has no block.
+  fix: >-
+    Open.
+- id: F-155
+  title: Nothing checks a person's training before the yes; the server refuses after the bar has promised
+  tag: The resolver has no certificate rule while the board and the server both do
+  status: open
+  found_by: maintainer
+  stage: S59
+  refs:
+  - R-400
+  - R-406
+  - R-378
+  story: >-
+    Found 16 Sept (session 176): Lena Novak and Tom Baker hold no Welding; Line 1 requires it. "put Lena Novak on Common Fastener on Cell 1" showed a plain readout and then opened the reason pop-up; the swap onto Cell 1 failed mid-lot (F-154). certificateGaps in boardIndex.ts is the server's rule transcribed, and the create pop-up already asks through it; the bar never asked.
+  fix: >-
+    Open.
+- id: F-156
+  title: A sentence with no day falls to the window's first day when today is off the board
+  tag: resolveDay(null) answers dayIndex 0 instead of asking
+  status: open
+  found_by: maintainer
+  stage: S59
+  refs:
+  - R-419
+  story: >-
+    Found 16 Sept (session 176): after Show that day moved the window to 15 Sept, "split Tom Baker at 10" looked on the 15th and answered "Tom Baker has no block Tue Sep 15" (the label a day early, F-153). A sentence with no day means today; when today is not on the board the bar must ask day_off_board for today, the same question a spoken "today" gets.
+  fix: >-
+    Open.
+- id: F-157
+  title: The trace misses a single's readout and yes, a parse failure's message, and any entry open when the bar unmounts
+  tag: Only questions were recorded as asked; unmount never flushed
+  status: open
+  found_by: maintainer
+  stage: S59
+  refs:
+  - R-421
+  story: >-
+    Found 16 Sept (session 176) reading data/voice/trace/bar.jsonl against the maintainer's report: the five single sentences show asked null and answered null though each showed a readout and was confirmed; the two "make Cell 3 4 people" lines show read no_time and asked null though the bar printed the Say it like message; the Show that day sentence and the split after it are absent altogether because the bar unmounted with the board's window move (R-424).
+  fix: >-
+    Open.
 - id: F-152
   title: Clearing a day wrote the kept part of a midnight-crossing block onto the wrong day
   tag: A block's remainder rendered as bare clocks and dated by the sentence, not by itself

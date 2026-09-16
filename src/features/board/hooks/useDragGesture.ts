@@ -791,7 +791,15 @@ export function useDragGesture(args: UseDragGestureArgs) {
     (err: unknown, label: string) => {
       const se = isSchedulerError(err) ? err : toSchedulerError(err);
       if (se.kind === "CapacityExceeded" || se.kind === "NotEligible" || se.kind === "RunOverlap") {
-        toast.schedulerError(se, ctx);
+        // F-154 review fix (S61-a): `buildSchedulerErrorToast` no longer
+        // bakes " — reverted." into its own message (that word was never
+        // true for `runLot`'s own catch, which never applies an optimistic
+        // move at all) -- THIS caller genuinely reverted one (the drag's
+        // own optimistic patch), so it appends the suffix itself, through
+        // `kind`'s own class rather than hardcoding "crit" (NotEligible is
+        // "warn").
+        const { message, kind } = buildSchedulerErrorToast(se, ctx);
+        toast.reverted(message, kind);
         return;
       }
       toast.reverted(`${label}: ${describeSchedulerError(se)}`);
@@ -1816,6 +1824,54 @@ export function useDragGesture(args: UseDragGestureArgs) {
   );
 
   /**
+   * S51 (R-400/D127): the several-lot's writer for an `assign` resolved to
+   * `direct` or `run` (never `retime` -- that target writes through
+   * `retimeAssignmentFromCommand` instead, same as the single-sentence bar's
+   * own `onRetime`). Sends the SAME `createAssignment` mutation
+   * `submitCreateDirect` sends -- via `mutateAsync` so the lot can await
+   * success or failure, and WITHOUT the capacity probe / split-coverage
+   * popover `submitCreateDirect` opens on a tight fit: a lot write must
+   * never open a SECOND piece of UI mid-sequence (CLAUDE.md §4 -- a stranded
+   * split popover mid-lot would be exactly the hidden partial write the rule
+   * forbids). The probe there is a courtesy too (its own comment: "never a
+   * gate"); skipping it here skips only the fast guess, never the rule -- an
+   * authoritative `CapacityExceeded` refusal, if this write earns one, still
+   * comes back from this SAME mutation and is exactly what the lot reports.
+   *
+   * S61-a review fix (R-425, F-155): also `openCreateFromCommand`'s own
+   * override branch below now calls this directly (declared here, ABOVE
+   * that function, so its own dependency array never reaches for a `const`
+   * before this one has initialised -- the same TDZ reasoning
+   * `openMoveFromCommand`'s own move-below-`submitMove` comment explains).
+   */
+  const createFromCommand = useCallback(
+    (r: {
+      nodeId: string;
+      range: Range;
+      operatorId: string;
+      target: AssignmentTarget;
+      /** S61-a (R-425, F-155): `ResolvedCommand.override`, set ONLY when a
+       *  `not_certified` "warn" question was suppressed by a reason the bar
+       *  collected -- folded into the SAME `eligibilityOverride: true,
+       *  overrideReason` pair `buildCreateAssignmentInput`'s own `overrides`
+       *  parameter already carries for the pop-up's own override checkbox
+       *  (no second shape). `undefined` (a lot's own call, which never
+       *  carries one, R-425: "a lot never writes half of itself", and
+       *  `openCreateFromCommand`'s own non-override branch) is
+       *  byte-identical to before this field existed. */
+      override?: { reason: string };
+    }): Promise<void> => {
+      const input = buildCreateAssignmentInput(
+        index.windowStart,
+        r,
+        r.override ? { eligibilityOverride: true, overrideReason: r.override.reason } : {},
+      );
+      return createAssignment.mutateAsync(input).then(() => undefined);
+    },
+    [index, createAssignment],
+  );
+
+  /**
    * P1-7a: `CommandBar`'s whole write path — opens the SAME create popover a
    * drag opens, direct mode forced (`presetOperatorId`, exactly as D65's panel
    * drop already forces it), with the resolved product or run as a preset.
@@ -1824,6 +1880,19 @@ export function useDragGesture(args: UseDragGestureArgs) {
    * and the target threaded through instead of always being the operator
    * alone. `endPanelDrag` itself is untouched; see its own comment for why the
    * five lines are deliberately duplicated rather than shared.
+   *
+   * S61-a review fix (R-425, F-155): the reviewer's own live walk --
+   * "assign Tom Baker to Housing A on Cell 1 from 8 to 4" -> the
+   * not_certified question -> "covering for Sam" -> the bar's own readout
+   * said "· override: covering for Sam" but NOTHING was written, because
+   * this function used to ALWAYS open the popover, unchecked, ignoring
+   * `resolved.override` entirely (`BoardPage.tsx`'s `onOpen` never even
+   * had it to pass). `r.override`, when set, now skips the popover
+   * ENTIRELY and writes DIRECTLY through `createFromCommand` above (the
+   * SAME fix `openMoveFromCommand`'s own override branch already applies)
+   * -- the reason was already given once, in the bar's own conversation; a
+   * second popover (unchecked, since nothing here ever told it about the
+   * override) asking again is not a fix, it is the bug.
    */
   const openCreateFromCommand = useCallback(
     (r: {
@@ -1832,7 +1901,23 @@ export function useDragGesture(args: UseDragGestureArgs) {
       operatorId: string;
       target: AssignmentTarget;
       anchor: { x: number; y: number };
+      override?: { reason: string };
     }) => {
+      if (r.override) {
+        if (!canPlaceRef.current) return; // DEF-0015, as every other direct writer
+        createFromCommand({
+          nodeId: r.nodeId,
+          range: r.range,
+          operatorId: r.operatorId,
+          target: r.target,
+          override: r.override,
+        }).catch((err: unknown) => {
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          const { message, kind } = buildSchedulerErrorToast(se, ctx);
+          toast.reverted(message, kind);
+        });
+        return;
+      }
       const template = index.templateForNode.get(r.nodeId) ?? null;
       const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
       setPopover({
@@ -1850,35 +1935,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
           : { presetRun: { id: r.target.runId, label: runLabelById(r.target.runId) } }),
       });
     },
-    [index, runLabelById],
-  );
-
-  /**
-   * S51 (R-400/D127): the several-lot's writer for an `assign` resolved to
-   * `direct` or `run` (never `retime` -- that target writes through
-   * `retimeAssignmentFromCommand` instead, same as the single-sentence bar's
-   * own `onRetime`). Sends the SAME `createAssignment` mutation
-   * `submitCreateDirect` sends -- via `mutateAsync` so the lot can await
-   * success or failure, and WITHOUT the capacity probe / split-coverage
-   * popover `submitCreateDirect` opens on a tight fit: a lot write must
-   * never open a SECOND piece of UI mid-sequence (CLAUDE.md §4 -- a stranded
-   * split popover mid-lot would be exactly the hidden partial write the rule
-   * forbids). The probe there is a courtesy too (its own comment: "never a
-   * gate"); skipping it here skips only the fast guess, never the rule -- an
-   * authoritative `CapacityExceeded` refusal, if this write earns one, still
-   * comes back from this SAME mutation and is exactly what the lot reports.
-   */
-  const createFromCommand = useCallback(
-    (r: {
-      nodeId: string;
-      range: Range;
-      operatorId: string;
-      target: AssignmentTarget;
-    }): Promise<void> => {
-      const input = buildCreateAssignmentInput(index.windowStart, r);
-      return createAssignment.mutateAsync(input).then(() => undefined);
-    },
-    [index, createAssignment],
+    [index, runLabelById, createFromCommand, toast, ctx],
   );
 
   /**
@@ -1890,33 +1947,12 @@ export function useDragGesture(args: UseDragGestureArgs) {
    * sends `moveAssignment` instead of `createAssignment` (brief §2 -- no
    * second door, the SAME pop-up, a different door out of it).
    */
-  const openMoveFromCommand = useCallback(
-    (r: {
-      assignmentId: string;
-      nodeId: string;
-      range: Range;
-      operatorId: string;
-      productId: string;
-      anchor: { x: number; y: number };
-    }) => {
-      const template = index.templateForNode.get(r.nodeId) ?? null;
-      const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
-      setPopover({
-        kind: "create",
-        seq: (createSeqRef.current += 1),
-        nodeId: r.nodeId,
-        range: r.range,
-        anchor: r.anchor,
-        shiftChips: chips,
-        presetOperatorId: r.operatorId,
-        presetProductId: r.productId,
-        presetMove: { assignmentId: r.assignmentId },
-        // R-384: the only opener that may auto-press Create.
-        autoCreate: true,
-      });
-    },
-    [index],
-  );
+  // R-425 (S61-a): `openMoveFromCommand` is declared BELOW `submitMove` now
+  // (moved from here) -- its own override branch calls `submitMove`
+  // directly, and a `const` referenced in a `useCallback` dependency array
+  // is a TDZ error if that array is built before the referenced `const`'s
+  // own declaration has run, which this position (before `submitMove`
+  // below) would have been.
 
   /**
    * S41-a: the typed command bar's "book a job" write path for a BRAND-NEW
@@ -2427,6 +2463,75 @@ export function useDragGesture(args: UseDragGestureArgs) {
       }
     },
     [index, move],
+  );
+
+  /**
+   * S41-c: the typed command bar's "move to another cell" write path --
+   * opens the SAME create popover a drag/command-bar assign opens, direct
+   * mode forced by `presetOperatorId` (exactly as `openCreateFromCommand`
+   * already forces it), with `presetMove: { assignmentId }` marking this as
+   * a MOVE rather than a create: `CreatePopover`'s `submitDirect()` then
+   * sends `moveAssignment` instead of `createAssignment` (brief §2 -- no
+   * second door, the SAME pop-up, a different door out of it).
+   *
+   * S61-a (R-425, F-155): `r.override` -- set ONLY when a `not_certified`
+   * "warn" question was suppressed by a reason the bar already collected --
+   * skips the popover ENTIRELY and writes DIRECTLY through `submitMove`
+   * above (`ResolvedMove.override`'s own doc: "the writer's own input is
+   * `submitMove`'s 4th/5th positional arguments"). The reason was already
+   * given once, in the bar's own conversation; a second popover asking for
+   * it again would be a second door. `undefined` (every caller before this
+   * field existed, and a `retime` target, which never asks at all -- same
+   * cell, same person) opens the popover exactly as before.
+   */
+  const openMoveFromCommand = useCallback(
+    (r: {
+      assignmentId: string;
+      nodeId: string;
+      range: Range;
+      operatorId: string;
+      productId: string;
+      anchor: { x: number; y: number };
+      override?: { reason: string };
+    }) => {
+      if (r.override) {
+        if (!canPlaceRef.current) return; // DEF-0015, as every other direct writer
+        submitMove(
+          r.nodeId,
+          r.range,
+          r.assignmentId,
+          true,
+          r.override.reason,
+          false,
+          undefined,
+        ).catch((err: unknown) => {
+          // F-154 review fix (S61-a): a genuine revert (submitMove's own
+          // `move` mutation applies an optimistic patch, same as any other
+          // drag) -- `toast.reverted`, not `schedulerError`, same reasoning
+          // as `failWith` above.
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          const { message, kind } = buildSchedulerErrorToast(se, ctx);
+          toast.reverted(message, kind);
+        });
+        return;
+      }
+      const template = index.templateForNode.get(r.nodeId) ?? null;
+      const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
+      setPopover({
+        kind: "create",
+        seq: (createSeqRef.current += 1),
+        nodeId: r.nodeId,
+        range: r.range,
+        anchor: r.anchor,
+        shiftChips: chips,
+        presetOperatorId: r.operatorId,
+        presetProductId: r.productId,
+        presetMove: { assignmentId: r.assignmentId },
+        // R-384: the only opener that may auto-press Create.
+        autoCreate: true,
+      });
+    },
+    [index, submitMove, toast, ctx],
   );
 
   /** ⭐ R-323: THIS DELETES THE ROW. The comment that stood here said there was

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { DateFormat } from "@/lib/format/dates";
-import { formatDayLabel } from "../lib/time";
+import { formatDayLabel, zonedTimeToInstant } from "../lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./CommandBar.module.css";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
@@ -22,6 +22,7 @@ import type {
 import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
 import type {
   ResolveContext,
+  ResolveOptions,
   ResolvedCommand,
   ResolvedBook,
   ResolvedUnassign,
@@ -175,6 +176,20 @@ type Status =
        *  "the lot's status needs a marker ... since blockHighlight.kind no
        *  longer identifies it"). Never set on a per-command question. */
       lot?: boolean;
+      /**
+       * S61-a (R-425, F-155): set ONLY on a `not_certified` "warn" question
+       * for an ordinary single sentence (`policy === "warn"`, `inLot ===
+       * false`) -- the marker `submitText` needs since THIS question takes
+       * free TEXT as its answer (the override reason), never a candidate
+       * button and never the ordinary block-question confirm/cancel-only
+       * vocabulary. While this stands: a cancel word drops it; a bare
+       * confirm word re-asks ("Say the reason, not yes."); anything else --
+       * typed or the final transcript of a spoken clip -- IS the reason,
+       * re-resolving `heldRef.current` with `{ overrideReason }`. Never set
+       * under `policy === "block"` or `inLot === true` (no reason is ever
+       * accepted there -- a plain refusal, cleared like any other question).
+       */
+      awaitingOverrideReason?: boolean;
     }
   | { kind: "readout"; message: string }
   /** S44-b: shown while `reader(text, signal)` is pending. */
@@ -283,7 +298,20 @@ interface CandidateButton {
 }
 
 export interface CommandBarProps {
-  ctx: ResolveContext;
+  /**
+   * R-424 (the bar keeps its conversation): nullable, belt and braces.
+   * `BoardPage` never has a genuinely EMPTY board to pass once its own
+   * `useBoardWindow` fix lands (`placeholderData: keepPreviousData` keeps
+   * the last window's `ctx` alive across a refetch), but this file does not
+   * get to assume its caller never regresses that -- a `ctx` that goes
+   * `null` and comes back must never crash a resolve/expand call that lands
+   * in the gap, and must never lose the status, the pending question, the
+   * lot or the open trace entry this component is already holding (those
+   * all live in plain `useState`/refs, untouched by a prop changing) --
+   * every functional use below reads `lastCtxRef.current` instead, which
+   * only ever moves forward to a real `ResolveContext`.
+   */
+  ctx: ResolveContext | null;
   dateFormat: DateFormat;
   /** `index.zone` — D88a: the plant's own zone, never optional in spirit. */
   zone: string;
@@ -454,11 +482,18 @@ function commandNamesAWeek(command: Command): boolean {
  *  -- `resolve.ts`'s own `resolveWeekDays` is explicitly "seven, Monday
  *  first" (its own comment), never Sunday first (`SHOW_DAY_WEEKDAY_NAMES`'s
  *  own 0=Sunday convention is for a single weekday NAME, a different axis --
- *  mixing the two up here would silently check the wrong seven days). Built
- *  with the same UTC-noon-safe `Date` arithmetic `renderReadout` below
- *  already uses to turn an ISO token into a label, the one place this file
- *  touches a `Date` at all; never `ctx`'s own day axis
- *  (`wallToOffset`/`wallOf`), which stays untouched. */
+ *  mixing the two up here would silently check the wrong seven days).
+ *
+ *  F-153: unlike `renderReadout` below (fixed to build its instant through
+ *  `zonedTimeToInstant`), this one is SAFE left exactly as it was --
+ *  `getUTCDay`/`setUTCDate`/`toISOString` are used throughout, never a
+ *  zone-aware formatter, so it never reads any real zone's wall clock; a
+ *  calendar day's weekday and the seven ISOs of its week are the same in
+ *  every zone, so pinning the arithmetic to UTC changes nothing it returns.
+ *  It only ever produces ISO STRINGS, compared against other ISO strings
+ *  (`isTargetOnBoard`'s own `have.has(iso)`), never formatted through
+ *  `formatDayLabel`/`Intl` in a zone -- never `ctx`'s own day axis
+ *  (`wallToOffset`/`wallOf`), which stays untouched either way. */
 function isoWeekOf(iso: string): string[] {
   const start = new Date(`${iso}T00:00:00Z`);
   const daysFromMonday = (start.getUTCDay() + 6) % 7; // Sun(0)->6 .. Sat(6)->5, Mon(1)->0
@@ -470,6 +505,36 @@ function isoWeekOf(iso: string): string[] {
     out.push(d.toISOString().slice(0, 10));
   }
   return out;
+}
+
+/**
+ * F-158: the week each WEEK WORD names, as a shift in days from the week
+ * `today` falls in -- the same three words, anchored the same way, as
+ * `BoardPage`'s own `SHOW_DAY_WEEK_WORD_OFFSETS` (that map decides where the
+ * window MOVES; this one decides when the held sentence may re-run, and the
+ * two disagreeing would leave a sentence pending for ever on a board that
+ * already shows its week).
+ *
+ * A repeat day's `day_off_board` now names one of these rather than an ISO
+ * (`resolve.ts`'s own `OffBoardNaming`), so without this case
+ * `isTargetOnBoard` fell through to its final `return false` and the rerun
+ * NEVER fired: the button widened the board and the sentence was never asked
+ * again.
+ */
+const SHOW_DAY_WEEK_WORD_SHIFT: Record<string, number> = {
+  "this week": 0,
+  "next week": 7,
+  "last week": -7,
+};
+
+/** `iso` plus `days`, UTC throughout -- the same reasoning `isoWeekOf`'s own
+ *  F-153 note sets out: this only ever compares ISO strings against other
+ *  ISO strings, never a zone's wall clock, so UTC arithmetic changes nothing
+ *  it returns. */
+function isoPlusDaysUtc(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 /**
@@ -503,6 +568,18 @@ function isTargetOnBoard(
   }
   if (target === "yesterday") {
     return ctx.todayIndex !== null && ctx.days.some((d) => d.index === ctx.todayIndex! - 1);
+  }
+  // F-158: a week WORD -- all seven of that week's days, anchored on the
+  // week `today` falls in, exactly as the window move anchors it.
+  const weekShift = SHOW_DAY_WEEK_WORD_SHIFT[target];
+  if (weekShift !== undefined) {
+    if (ctx.todayIndex === null) return false;
+    const todayIso = ctx.days.find((d) => d.index === ctx.todayIndex)?.iso;
+    if (todayIso === undefined) return false;
+    const have = new Set(ctx.days.map((d) => d.iso));
+    return isoWeekOf(todayIso)
+      .map((iso) => isoPlusDaysUtc(iso, weekShift))
+      .every((iso) => have.has(iso));
   }
   if (FULL_ISO_DAY.test(target)) {
     const need = commandNamesAWeek(command) ? isoWeekOf(target) : [target];
@@ -647,6 +724,17 @@ export function CommandBar({
   // `heldRef`/`lotRef` above: read and written from event handlers and one
   // `.then()`, never rendered.
   const traceRef = useRef<TraceEntry | null>(null);
+  // R-424: the last real (non-null) `ctx` this component has ever seen --
+  // initialised from whatever `ctx` the FIRST render carried (every real
+  // caller's contract: `ctx` is only ever null before the board has EVER
+  // loaded, which is also when this component is not mounted at all), kept
+  // current by the effect below the moment a fresh non-null `ctx` arrives.
+  // Every place that used to read the `ctx` prop directly to resolve or
+  // expand a command reads `lastCtxRef.current` instead, so a `ctx` that
+  // goes `null` and comes back (a refetch gap `BoardPage` should no longer
+  // produce, but this file does not get to assume that) never crashes and
+  // never loses track of the board it was last actually shown.
+  const lastCtxRef = useRef<ResolveContext | null>(ctx);
 
   /** S59-e: posts `entry` to the dev server's `/__trace`, fire-and-forget,
    *  errors swallowed (both a synchronous throw -- an invalid URL under a
@@ -660,6 +748,44 @@ export function CommandBar({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: renderLine(entry),
+      }).catch(() => {});
+    } catch {
+      // Never throws -- see above.
+    }
+  }
+
+  /**
+   * F-157: `postTrace`'s own `fetch` is fire-and-forget with no guarantee it
+   * completes once the page is actually tearing down (the tab closing, or
+   * navigating away) -- the browser is free to cancel an in-flight fetch the
+   * instant the document goes away, which is exactly when a sentence's own
+   * entry is most likely to still be open (nothing has answered it yet).
+   * `navigator.sendBeacon` is built for precisely this: it queues the send
+   * with the browser itself and survives the page going away; where it is
+   * unavailable (or refuses the payload) this falls back to
+   * `fetch(..., { keepalive: true })`, the documented alternative for the
+   * same situation. Both best-effort, same as `postTrace` -- a failure here
+   * is swallowed, never surfaced to someone mid-navigation. */
+  function postTraceOnTeardown(entry: TraceEntry): void {
+    if (!import.meta.env.DEV) return;
+    const line = renderLine(entry);
+    try {
+      // A plain string, not a `Blob` -- `traceServer.ts`'s own handler reads
+      // the raw body regardless of content type, and a string keeps this
+      // (and whatever reads it back in a test) simpler than it needs to be
+      // otherwise.
+      if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+        if (navigator.sendBeacon("/__trace", line)) return;
+      }
+    } catch {
+      // Fall through to the fetch keepalive below.
+    }
+    try {
+      fetch("/__trace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: line,
+        keepalive: true,
       }).catch(() => {});
     } catch {
       // Never throws -- see above.
@@ -713,6 +839,41 @@ export function CommandBar({
     };
   }, []);
 
+  /**
+   * F-157 (R-421 brief §3, "an entry still open ... is flushed"): a
+   * sentence's trace entry can be left open when the bar unmounts (R-424:
+   * rarer now that `BoardPage` no longer unmounts it for a refetch, but the
+   * launcher still unmounts it deliberately when the panel closes), when the
+   * page is hidden (`visibilitychange` -- backgrounding a tab, or a tab
+   * closing, which fires this before it actually goes away in every browser
+   * that matters here), or when the tab closes outright. All three read
+   * `traceRef.current` at the moment they fire and post it through
+   * `postTraceOnTeardown` (sendBeacon, falling back to a keepalive fetch)
+   * rather than `postTrace`'s ordinary fire-and-forget `fetch`, which is not
+   * guaranteed to complete once the document is going away.
+   */
+  useEffect(() => {
+    function flushOnHide(): void {
+      if (document.visibilityState !== "hidden") return;
+      const entry = traceRef.current;
+      if (!entry) return;
+      traceRef.current = null;
+      postTraceOnTeardown(entry);
+    }
+    document.addEventListener("visibilitychange", flushOnHide);
+    return () => {
+      document.removeEventListener("visibilitychange", flushOnHide);
+      // A genuine unmount -- the launcher closing, or a caller that does
+      // not follow R-424's own advice -- must not silently drop whatever
+      // sentence was still in progress.
+      const entry = traceRef.current;
+      if (entry) {
+        traceRef.current = null;
+        postTraceOnTeardown(entry);
+      }
+    };
+  }, []);
+
   // S47: kept in a ref, not the effect's own dependency array, below -- a
   // caller that passes a fresh inline function every render (BoardPage does)
   // must not re-fire the effect on every unrelated render, only when
@@ -752,7 +913,13 @@ export function CommandBar({
   // a `ctx` without the target leaves `pendingRerunRef` standing (this
   // effect simply runs again, a no-op, on the next change) instead.
   useEffect(() => {
-    if (pendingRerunRef.current && isTargetOnBoard(pendingRerunRef.current, ctx)) {
+    // R-424: remember the last real ctx BEFORE anything below reads it, so
+    // a ctx that goes null and comes back never leaves `lastCtxRef` a render
+    // stale. A null ctx here is a no-op for the rerun check below (nothing
+    // to compare `isTargetOnBoard` against yet) -- `pendingRerunRef` simply
+    // stays standing until a ctx that actually carries the target arrives.
+    if (ctx !== null) lastCtxRef.current = ctx;
+    if (ctx !== null && pendingRerunRef.current && isTargetOnBoard(pendingRerunRef.current, ctx)) {
       const command = pendingRerunRef.current.command;
       pendingRerunRef.current = null;
       runCommand(command);
@@ -760,10 +927,24 @@ export function CommandBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
+  /**
+   * F-153: this used to build `new Date(iso + "T00:00:00Z")` and format
+   * THAT in `zone` -- a UTC-midnight instant read back in America/Chicago is
+   * 19:00 the evening before, so every ISO day this bar ever printed to a
+   * plant west of UTC came out a day early (the swap's own "4 commands
+   * ready" listing said "Tue Sep 15" for four blocks whose own readouts,
+   * once written, said 2026-09-16). `iso` names a CALENDAR day already
+   * understood in the plant's own zone (`ctx.days`' own contract, same as
+   * every other ISO token this file touches) -- the fix is to build the
+   * INSTANT that reads back as midnight of THAT day IN `zone`
+   * (`zonedTimeToInstant`, the same seam `time.ts`'s own `startOfDay` is
+   * built on) rather than pin it to UTC and hope the zone is UTC too.
+   */
   function renderReadout(readout: string): string {
-    return readout.replace(ISO_DAY, (iso) =>
-      formatDayLabel(new Date(`${iso}T00:00:00Z`), dateFormat, zone),
-    );
+    return readout.replace(ISO_DAY, (iso) => {
+      const [yyyy, mm, dd] = iso.split("-").map(Number);
+      return formatDayLabel(zonedTimeToInstant(zone, yyyy, mm, dd, 0, 0), dateFormat, zone);
+    });
   }
 
   function anchorOfInput(): { x: number; y: number } {
@@ -782,17 +963,55 @@ export function CommandBar({
    *  `asked`; a "readout" (an ordinary one, or `questionToStatus`'s own
    *  `nothing_to_do` case) ends the entry's life the same as any other
    *  readout. Never touches `status` itself -- called right after the
-   *  `setStatus` that already shows it. */
+   *  `setStatus` that already shows it.
+   *
+   *  F-157 review (item 4/item 5): widened two ways.
+   *   - `"shape"` (a parse failure's own "Say it like…"/`bad_time`/etc.
+   *     hint) now sets `asked` exactly like a `"question"` does -- the
+   *     original bug: the two "make Cell 3 4 people" lines in the
+   *     maintainer's trace showed `read: "no_time"` and `asked: null` even
+   *     though the bar plainly printed that hint on screen. Every caller
+   *     that builds one of these (`submitText`/`fallbackToRules`/
+   *     `pickCandidate`/`pickPartAsPlace`'s own re-parse branches) now
+   *     passes it through here too.
+   *   - `"readout"` only FILLS IN `asked`/`answered` when both are still
+   *     `null` -- item 5's own finding: an ordinary single (no question, no
+   *     candidate, no lot) runs straight off its own readout with no
+   *     separate yes at all, so `asked` becomes that readout text and
+   *     `answered` becomes the literal string `"auto"` (there was no word
+   *     or button to record). A single that DID raise a real question first
+   *     (CB-t-3's own case: a candidate button already set `answered` to
+   *     its label, and this function already set `asked` to the question's
+   *     own text) keeps that truer pair -- the readout that follows is
+   *     what RAN, already captured in `ran`, not a second "question". */
   function traceQuestionStatus(status: Status): void {
     if (!traceRef.current) return;
-    if (status.kind === "question") {
+    if (status.kind === "question" || status.kind === "shape") {
       traceRef.current.asked = status.message;
     } else if (status.kind === "readout") {
+      if (traceRef.current.asked === null) traceRef.current.asked = status.message;
+      if (traceRef.current.answered === null) traceRef.current.answered = "auto";
       finishTrace();
     }
   }
 
-  function runCommand(command: Command, suffix?: string): void {
+  /**
+   * S61-a (R-425, F-155): `options`, when given, is `resolveCommand`'s own
+   * third argument -- read only by an assign/move re-resolve after the bar
+   * collected a `not_certified` "warn" question's override reason
+   * (`submitText`'s own `awaitingOverrideReason` branch). Every other call
+   * site omits it, byte-identical to before this parameter existed.
+   */
+  function runCommand(command: Command, suffix?: string, options?: ResolveOptions): void {
+    // R-424: every functional read of the board's context goes through the
+    // last REAL ctx this component has seen, never the possibly-null prop
+    // directly (see `ctx`'s own doc and `lastCtxRef`'s). A `null` here means
+    // no board has ever loaded for this bar at all -- nothing to resolve
+    // against, so this is a no-op rather than a crash (belt and braces: a
+    // real caller never actually reaches this, since the bar is not even
+    // mounted until its first ctx lands).
+    const activeCtx = lastCtxRef.current;
+    if (activeCtx === null) return;
     // S59-e (brief §3): what the bar read, regardless of how this resolves
     // (a write, a question, or a several) -- `command` here, not whatever
     // `expandCommand` turns it into below, since a lot's own numbered steps
@@ -808,7 +1027,7 @@ export function CommandBar({
     // ordinary form (an already-single command, or an already-several one),
     // so the branch below is byte for byte the pre-S55 several intercept for
     // every sentence that never needed expanding.
-    const expanded = expandCommand(command, ctx);
+    const expanded = expandCommand(command, activeCtx);
     if (!expanded.ok) {
       // `command` here, never `expanded.command` (there is none) -- the
       // ORIGINAL sentence's command is what a candidate button must
@@ -830,7 +1049,7 @@ export function CommandBar({
     // (`expandCommand`'s own contract), so this is unchanged from before S55
     // for every sentence that does not expand.
     heldRef.current = command;
-    const resolution = resolveCommand(resolvedCommand, ctx);
+    const resolution = resolveCommand(resolvedCommand, activeCtx, options);
     if (resolution.ok) {
       const resolved = resolution.resolved;
       if (resolved.intent === "book") {
@@ -857,13 +1076,18 @@ export function CommandBar({
           onOpen(resolved, anchorOfInput());
         }
       }
-      setStatus({ kind: "readout", message: renderReadout(resolved.readout) + (suffix ?? "") });
+      const readoutStatus: Status = {
+        kind: "readout",
+        message: renderReadout(resolved.readout) + (suffix ?? ""),
+      };
+      setStatus(readoutStatus);
       // S59-e (brief §3): a readout written ends the sentence's life --
       // `resolved.readout` is the ONE command this run actually wrote
       // (never the `+ suffix` UI annotation, which says WHY it was read,
-      // not what ran).
+      // not what ran). Pushed to `ran` BEFORE `traceQuestionStatus` below,
+      // which is what actually posts the entry (F-157).
       if (traceRef.current) traceRef.current.ran.push(resolved.readout);
-      finishTrace();
+      traceQuestionStatus(readoutStatus);
       return;
     }
     // `resolvedCommand`, not `command`: when `expandCommand` collapsed a
@@ -900,8 +1124,13 @@ export function CommandBar({
       showLotStatus();
       return;
     }
+    // R-424: same fallback as `runCommand`'s own -- see that function's
+    // identical guard for why this can only ever be reached with a real
+    // ctx in practice.
+    const activeCtx = lastCtxRef.current;
+    if (activeCtx === null) return;
     const command = lot.commands[lot.index];
-    const resolution = resolveCommand(command, ctx);
+    const resolution = resolveCommand(command, activeCtx);
     if (resolution.ok) {
       // S58: `resolveCommand`'s per-shape overloads do not cover the
       // `SingleCommand` union directly (TypeScript overload resolution does
@@ -1131,9 +1360,23 @@ export function CommandBar({
         setStatus({ kind: "readout", message: `Done: ${n} commands.` });
         setText("");
       } else {
+        // F-154 review fix: say what actually stood, never claim a revert
+        // that never happened -- the steps before the failure wrote for
+        // real and are still on the board, so they are named here.
+        // `result.error` no longer carries the drag's own "— reverted."
+        // wording at all (`useSchedulerToast.ts`'s own F-154 fix: that
+        // suffix is now appended only by a caller that genuinely reverted
+        // something, never baked into `buildSchedulerErrorToast`'s message
+        // itself), so this reads it verbatim -- nothing to strip here any
+        // more.
+        const stayedReadouts = resolved.slice(0, result.done).map((r) => renderReadout(r.readout));
+        const stayed =
+          stayedReadouts.length > 0
+            ? ` The ${result.done} done stayed: ${stayedReadouts.join("; ")}.`
+            : "";
         setStatus({
           kind: "shape",
-          message: `Did ${result.done} of ${n}; the next failed: ${result.error}`,
+          message: `Did ${result.done} of ${n}; the next failed: ${result.error}${stayed}`,
         });
       }
     });
@@ -1174,11 +1417,14 @@ export function CommandBar({
       // posted once one of those actually happens.
       if (traceRef.current) traceRef.current.read = parsed.failure.kind;
       const base = failureToStatus(parsed.failure);
-      setStatus(
+      const finalStatus: Status =
         reason === null
           ? base
-          : { ...base, message: `${failurePrefixForReason(reason)}${base.message}` },
-      );
+          : { ...base, message: `${failurePrefixForReason(reason)}${base.message}` };
+      setStatus(finalStatus);
+      // F-157: the shape hint IS what the bar shows now -- `asked` records
+      // it the same way a question's own text is recorded.
+      traceQuestionStatus(finalStatus);
       return;
     }
     runCommand(
@@ -1310,7 +1556,9 @@ export function CommandBar({
       heldRef.current = null;
       // S59-e (brief §3): same as `submitText`'s own identical comment.
       if (traceRef.current) traceRef.current.read = parsed.failure.kind;
-      setStatus(failureToStatus(parsed.failure));
+      const status = failureToStatus(parsed.failure);
+      setStatus(status);
+      traceQuestionStatus(status);
       return;
     }
     runCommand(parsed.command);
@@ -1345,7 +1593,9 @@ export function CommandBar({
     if (!parsed.ok) {
       heldRef.current = null;
       if (traceRef.current) traceRef.current.read = parsed.failure.kind;
-      setStatus(failureToStatus(parsed.failure));
+      const status = failureToStatus(parsed.failure);
+      setStatus(status);
+      traceQuestionStatus(status);
       return;
     }
     runCommand(parsed.command);
@@ -1476,6 +1726,32 @@ export function CommandBar({
       return {
         kind: "question",
         message: `No shift on ${question.cell} covers ${question.time}.`,
+        candidates: [],
+      };
+    }
+    // S61-a (R-425, F-155): the bar's own wording -- `describeQuestion`
+    // carries only a baseline (its own comment: "the bar ... may refine
+    // this further"), and never branches on `inLot` at all, so a lot's own
+    // "warn" refusal (`inLot: true`) would otherwise get the single
+    // sentence's "say the reason" offer, which a lot never honours (R-425:
+    // "a lot never writes half of itself"). No candidates either way --
+    // "warn"/single takes its answer as free TEXT (`awaitingOverrideReason`,
+    // read by `submitText`), never a button; "block" or `inLot: true` accept
+    // nothing at all.
+    if (question.kind === "not_certified") {
+      const missing = question.missing.join(", ");
+      const base = `${question.person} is not certified for ${question.cell}: missing ${missing}.`;
+      if (question.policy === "warn" && !question.inLot) {
+        return {
+          kind: "question",
+          message: `${base} Say the reason to schedule anyway, or no.`,
+          candidates: [],
+          awaitingOverrideReason: true,
+        };
+      }
+      return {
+        kind: "question",
+        message: question.inLot ? `${base} Nothing was written.` : base,
         candidates: [],
       };
     }
@@ -1834,7 +2110,16 @@ export function CommandBar({
     // Brief §6: "Any edit to the input clears the held command and its
     // attach (a new sentence is a new question)." Clearing the held command
     // clears its `existing` (R-385) the same way it clears `attach`.
-    heldRef.current = null;
+    //
+    // S61-a (R-425, F-155) EXCEPTION: while a `not_certified` "warn"
+    // question stands, the box IS the reason being composed, not a new
+    // sentence -- `submitText`'s own `awaitingOverrideReason` branch re-runs
+    // THIS `heldRef.current` on Enter, so clearing it on every keystroke
+    // would silently turn the whole flow into a no-op the moment the person
+    // typed a single character.
+    if (!(status?.kind === "question" && status.awaitingOverrideReason)) {
+      heldRef.current = null;
+    }
     // S59 (R-419): a typed edit drops a "Show that day" press's pending
     // rerun too -- the sentence it would have re-run is gone.
     pendingRerunRef.current = null;
@@ -1944,6 +2229,59 @@ export function CommandBar({
       UNIVERSAL_CONFIRM_WORDS.has(normalized) ||
       normalized === "remove it" ||
       normalized === "move it";
+    // S61-a (R-425, F-155): a `not_certified` "warn" question takes free
+    // TEXT as its answer -- checked BEFORE the ordinary confirm/cancel
+    // block below (which would otherwise either fall through and try to
+    // PARSE a typed reason as a sentence, or -- for a bare "yes" -- treat
+    // it as an ordinary confirm with no question kind that claims it,
+    // losing the standing question entirely). A cancel word drops it, same
+    // as any other question; a bare confirm word is refused in place (the
+    // question is not "yes", it wants a reason); anything else -- typed or
+    // the final transcript of a spoken clip -- IS the reason, and re-runs
+    // `heldRef.current` (the same command this question was raised for)
+    // with `{ overrideReason }`.
+    //
+    if (status?.kind === "question" && status.awaitingOverrideReason) {
+      if (isCancel) {
+        if (traceRef.current) traceRef.current.answered = value;
+        finishTrace();
+        setStatus(null);
+        setText("");
+        heldRef.current = null;
+        return;
+      }
+      if (isConfirmCandidate) {
+        setStatus({ ...status, message: "Say the reason, not yes." });
+        return;
+      }
+      // S61-a review fix (R-425, F-155): EXCEPT when the text itself
+      // parses as a full command (`parseCommand(value).ok`) -- the
+      // reviewer's own live find: a second sentence typed while the
+      // question stood ("assign Priya to ...") was silently swallowed as
+      // the not_certified question's reason instead of running.
+      // `parseCommand` is the same rules-only "shape" check every other
+      // guard here already treats as authoritative (CB-nc-6 pins this) --
+      // a true reason essentially never parses as a command in the first
+      // place ("covering for Sam" has no operator/place/hours clause), so
+      // this costs nothing for the ordinary case. NO return here: this
+      // falls through to the ordinary path below, which starts a FRESH
+      // trace entry (flushing this one -- "a new sentence" is one of its
+      // own three life-end triggers) and runs the parsed command as usual,
+      // exactly as if no question had stood at all.
+      if (!parseCommand(value).ok) {
+        if (traceRef.current) traceRef.current.answered = value;
+        const command = heldRef.current;
+        if (command === null) {
+          // Belt and braces: `heldRef` is always set the moment this
+          // question is raised (`runCommand`'s own success/question path)
+          // and never cleared while it stands -- this is not reachable in
+          // practice.
+          return;
+        }
+        runCommand(command, ` · override: ${value}`, { overrideReason: value });
+        return;
+      }
+    }
     if (isConfirmCandidate || isCancel) {
       // S51 (brief §2 item 2): the LOT's own finished status, checked BEFORE
       // the generic block-question branch below (its `blockHighlight` is a
@@ -2063,7 +2401,9 @@ export function CommandBar({
       // identical comment; the entry stays open, posted once one of the
       // three triggers actually happens.
       if (traceRef.current) traceRef.current.read = parsed.failure.kind;
-      setStatus(failureToStatus(parsed.failure));
+      const status = failureToStatus(parsed.failure);
+      setStatus(status);
+      traceQuestionStatus(status);
       return;
     }
     runCommand(parsed.command);
