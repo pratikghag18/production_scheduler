@@ -2910,7 +2910,31 @@ stages:
     the window's first uncovered minute, in the plant's zone); and how far "not offered" reaches (the
     developer's answer: under block everywhere --- rail, both pop-ups and the bar; under warn out of the rail
     and asked-before-the-yes in the pop-ups and the bar, so the emergency placement warn exists for keeps
-    one door). R-438 and R-439 can run beside S64 once S63 is committed; R-440 rides with S64's absence lane.
+    one door). Both answered yes the same day. R-438 and R-439 run beside S64 once S63 is committed; R-440 rides
+    with S64's absence lane.
+- id: S66
+  track: core
+  num: 66
+  title: A person belongs to a shift --- a home shift per operator, overtime named everywhere, a supervisor's shift or the whole day
+  status: open
+  owner: agent
+  refs:
+  - 'session 178 conversation (the maintainer, 17 Sept)'
+  - §19.108 (D137)
+  delivers:
+  - R-441
+  what: >-
+    **The gap the maintainer found on 17 Sept.** Five pieces (D137): the model and the server (two nullable
+    columns, the board payload, a shift_fit verdict the five writers and the resize guard forward); the
+    admin screens (the Operators tab, a CSV column, the Access tab); the board (the rail measuring free and
+    booked against the person's band with overtime in hours, the pop-ups' chips, the mark on an overtime
+    block); the bar (the grammar, the question before the yes, the sixth run's data); the demo and the walks.
+    About three and a half days of lanes.
+  state: >-
+    **OPEN 17 Sept (session 178).** Scoped the day it was stated. One decision asked: what a person's shift
+    points at (a band NAME resolved against the place's pattern is the developer's recommendation), and
+    whether a shift-bound supervisor is refused a write outside their shift (the developer's default: no).
+    Piece (1) goes before S65's rail so "free 11:30" is measured against the person's own shift.
 - id: M1
   track: matrix
   num: 1
@@ -12242,6 +12266,9 @@ requirements:
     board-wide across nodes that may hold different templates. Either it means the first uncovered minute in
     the window (free, but reads "free 00:00" for a night shift) or the board root's template is threaded
     into `OperatorPanel`, which is given no shift today. Decide before the lane runs.
+    DECIDED 17 Sept (session 178, "Yes to both"): measured against the board root's shift pattern, the
+    source the shift chips already use, in the plant's zone; where the root has none, the first uncovered
+    minute of the window.
     ⚠️ SUPERSEDES R-038 WHEN IT SHIPS --- R-038's claim IS today's chip ("avatar, name, skill badges and a
     count pill ... dimmed when full") and its cases R-038a-d in `src/test/absenceOnBoard.test.tsx` assert it.
     R-038 stays `covered` until the code changes, because until then it is still true.
@@ -12293,6 +12320,10 @@ requirements:
     Filter the pool and NOBODY can place an absent person from the UI, which leaves a plant set to `warn`
     with no route to the emergency placement the warn setting exists for, while the server still implements
     both halves. The scope decision is the maintainer's, and it is what sizes the work.
+    DECIDED 17 Sept (session 178, "Yes to both"): it follows the plant's warn-or-block policy, the
+    server's own switch. Under block an absent person is out of the rail, both pop-ups and the bar. Under
+    warn, out of the rail but still offered in the pop-ups and the bar with the leave named and a question
+    before the yes, so the emergency placement warn exists for keeps one door.
     ⚠️ WHEN THIS SHIPS, R-357 IS NARROWED, NOT RETIRED: its server and admin halves (migration 0066,
     `absence_overlap`, the four writers, the AB0-AB14 SQL suite, the CSV importer, the Absences tab) are
     untouched and still true. Only its two board-facing proofs move here ---
@@ -12301,6 +12332,29 @@ requirements:
     Related, still open: F-113 --- resizing an assignment is the one writer that never checks absence. It is
     server-side and unaffected by hiding people from the rail, so this row does not claim an absent person
     can no longer end up on the board.
+- id: R-441
+  title: A person belongs to a shift --- an operator works their own shift's hours and reaches into another with overtime; a supervisor belongs to one shift or plans the whole day
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept)'
+  stated_by: maintainer
+  claim: >-
+    Every operator has a home shift: the hours they normally work, one of the shifts of the pattern that
+    covers their home node. Placing them inside those hours is ordinary; placing them outside is overtime,
+    which the board allows but names, and which can reach into the next or previous shift. A supervisor
+    (a site member with a grant) likewise belongs to one shift, or to the whole day, and what the board
+    shows and offers that person is their shift's slice unless they plan the day. Until this ships nothing
+    in the model, the rail, the pop-ups, the bar or the server knows which shift a person is on, so every
+    person is offered at every hour and "free" is measured against the whole window.
+  verified_by:
+  - kind: manual
+    steps: "scoped 17 Sept (session 178); a stage card and its proofs follow the maintainer's answer on the scope"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "an operator can be part of a particular shift in the company, I don't
+    think we have made it as a requirement while writing the code so far ... They can be part of a specific
+    shift as a normal work hours and with overtime can extend into different shifts. Same thing with
+    supervisors, they could belong to one shift or plan for the whole day." A gap in the model, not in one
+    screen: found the same day the rail's "free 11:30" was decided against the root's pattern (R-438).
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today
@@ -24312,6 +24366,13 @@ next:
     operatorPool feeds the rail, both pop-ups AND the bar's ctx.operators (BoardPage ~625, ~700), so filtering
     it in one place changes all four; R-357's board half is narrowed and absenceOnBoard's cases assert the
     opposite today. Waits on the reach decision.
+- kind: task
+  stage: S66
+  text: "A person belongs to a shift (R-441): the model and the server first, then the admin screens, the board, the bar and the demo (D137)"
+  why: >-
+    Stated and scoped 17 Sept (session 178). Waits on the maintainer's answer to the one modelling decision
+    (a band name on the person, resolved against the place's pattern) and the supervisor question. Its
+    first piece goes before S65's rail, so free/booked is measured against the person's own shift.
 - kind: task
   text: "A bare pair of hours under 7 asks which half of the day (R-435): 'from 1 to 5' offers 1 am to 5 am and 1 pm to 5 pm"
   why: >-

@@ -9883,3 +9883,53 @@ with the offered buttons inside its bubble. The panel becomes a layer that only 
 close: the close-on-outside-mousedown that S48-a wrote, and the `[role="dialog"]` exemption and
 focus rules that existed only to serve it, go. The size is remembered per person in the browser,
 next to the thread. Nothing in the bar's grammar, readers or writers changes.
+
+## §19.108 — D137: a person belongs to a shift (R-441) — the scope
+
+> The maintainer, 17 Sept, session 178: "an operator can be part of a particular shift in the
+> company, I don't think we have made it as a requirement while writing the code so far ... They can
+> be part of a specific shift as a normal work hours and with overtime can extend into different
+> shifts. Same thing with supervisors, they could belong to one shift or plan for the whole day."
+
+### D137 — what exists, the one decision, the five pieces
+
+**What exists.** Shift patterns belong to PLACES: one pattern per node, inherited down the tree,
+resolved by a definer (DEF-0016), with bands such as Shift 1 06:00–14:00 and an overnight band
+expressed as an end past 1440. People have a home place, skills, certificates and absences; nothing
+ties a person to a band (`operators` has no shift column; a grant is person, node, role). Nothing
+limits a person's hours in a day; the off-shift wash is drawn but no rule refuses a booking there;
+the word overtime appears nowhere. The rail's "free" is measured over the whole loaded window, and
+the bar's "from 2 until end of shift" reads the CELL's band, never the person's.
+
+**The one decision that is not a line of code: what "Ana's shift" points at.** A band is named
+inside a pattern, and a pattern belongs to a place, so a person's shift is only well-defined against
+a place. Three shapes: (A) a band NAME on the person ("Shift 2"), resolved against the pattern of
+the place they are being put on, with the home place's pattern as the anchor for display; (B) a
+band id, which pins the person to one pattern and has no answer on a cell with a different one;
+(C) a clock window on the person, independent of patterns, a second source of truth. The developer
+recommends A: it survives a pattern edit, works across cells whose patterns share names, and reads
+in plain words; a plant whose patterns disagree on names is asked to align them (the admin screen
+can say so).
+
+**Overtime.** A block outside the person's band is overtime. Allowed, never silent: named on the
+block, in the create pop-up before the save, in the bar before the yes (R-431's shape), in the rail
+as hours ("booked, +2h overtime"), and in the write's envelope so the trace and the thread say it.
+Whether a plant may set overtime to block, like eligibility, is a later switch; today it is warn
+always, because the maintainer's words were "can extend".
+
+**Supervisors.** A grant gains a shift or "whole day". The first effect is what the board OPENS ON
+(the shift's hours, the rail's "free" over that slice); it does not change what the grant permits,
+which stays the path rule. Whether a shift-bound supervisor should be refused a write outside their
+shift is the maintainer's to say; the developer's default is no.
+
+**The five pieces, sized in lanes.** (1) The model and the server, a day: two nullable columns
+(operators.home_shift, profile_grants.shift or 'day'), the board payload emitting each person's
+band, a `shift_fit` verdict beside eligibility that the five writers and the resize guard forward,
+the SQL cases. (2) The admin screens, half a day: the Operators tab field, a fifth CSV column, the
+Access tab's shift choice. (3) The board, a day: the rail measuring free and booked against the
+person's band with overtime in hours, the pop-ups' chips marking the person's own band, the mark on
+an overtime block. (4) The bar, half a day plus a retrain: "on overtime" and "into shift 2" in the
+grammar, the question before the yes, the shape in the sixth run's data. (5) The demo and the walks,
+half a day: people spread over the three bands with one overtime block, the role walk's parity,
+the typed walk. Order: (1) before S65's rail, so R-438's "free 11:30" is measured against the
+person's own shift and the root's pattern is only the fallback for a person with none.
