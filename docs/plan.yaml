@@ -16859,6 +16859,69 @@ sessions:
     half (a place-less sentence, the change-the-timing phrasings, several people in one sentence, one
     retrain) is next in the queue, with one decision for the maintainer: R-391 kept "change" and
     "shift" out of every verb list on purpose, and their own spoken sentence began with "change".
+- id: 159t
+  date: 2026-09-14
+  title: "Tester run: the model stages (S43-S47, R-392 to R-395, F-135 to F-144) verified cold; nothing filed"
+  commits: []
+  numbers:
+    app_tests: 3085
+    app_test_files: 143
+    tsc: 0
+    eslint: 0
+    db_checks: 845
+    migrations: 79
+    e2e: 49
+  confirmed: true
+  numbers_note: >-
+    Merged Development (sessions 153-158) onto the tester branch; not a fast-forward, and the plan
+    conflict was Development's own session 152 (the S43 notebook) colliding with the tester's session
+    152 from the prior run --- resolved by taking Development's plan and letting the prior tester entry
+    stay in git history (fa02491), then a fresh entry here. `package.json` gained three scripts
+    (voice:prepare/serve/probe) but `package-lock.json` did not, so no `npm ci`. VITEST: the runner's
+    line reads `Test Files 143 passed (143)`, `Tests 3085 passed (3085)`, copied verbatim --- matches
+    session 158 EXACTLY. `tsc -b` clean; `db:types` regenerated against the tester stack is
+    BYTE-IDENTICAL to the committed file (`cmp`), so the runner's "stale" WARN is again the CRLF
+    pipe artifact, and no model-stage change touched an RPC. `eslint .` clean. SQL: every file green,
+    including 96 and 97. `format:check` FAILs on line endings only (`--end-of-line auto` passes), the
+    tester checkout under `autocrlf`. `voice:score` clean 200/200 PASS; `--bar 1.01` exit 1.
+    ⚠️ `playwright e2e` reported 5 failures (copyWeek, viewerBoard x2, touch T2/T5), ALL one cause:
+    the board had no blocks in the CURRENT week. `dev_demo.sql` anchors runs to `date_trunc('week',
+    now())` --- the current week by design --- and the tester stack was seeded the week of Sep 7, so
+    on Sep 14 the default window (Sep 14-20) held zero assignments and every spec that needs a block
+    on screen failed. Re-applied `dev_demo.sql` to re-anchor (84 assignments in the current week), and
+    the three specs re-ran `13 passed`. Environment, not a regression. The three `voiceBar` cases are
+    gated on VOICE_E2E and skipped; the model-service e2e is the developer's own (S44/S45), not re-run
+    here. ⚠️ the tester-run report was clobbered when the isolated playwright re-run cleared
+    `test-results/` (where the report is written) --- a tester-harness note, its numbers copied above
+    before it was lost.
+  summary: >-
+    Merged six sessions of committed developer work (153-158, the model stages S43-S47) and judged
+    every requirement they touched from outside the code. Nothing filed: the build is green at 3085 in
+    143, the three red/warn lines are this Windows worktree's environment, and the one that looked like
+    a real break was proven to be stale demo data.
+    ⭐ THE FIVE e2e FAILURES ARE ONE DATA-DRIFT CAUSE, PROVEN. `dev_demo.sql` seeds the current week
+    (`date_trunc('week', now())`); the stack was seeded a week ago, so today's window was empty and
+    every spec needing an on-screen block failed. Re-anchoring the demo and re-running gave `13 passed`
+    --- not the model work, which touches none of those files. Worth the maintainer knowing: a demo
+    world seeded in a prior week shows an empty current week until re-seeded.
+    ⭐ R-393 (THE MODEL READER) READ CLEAN. The system prompt the app sends is the training file itself
+    --- `readSentence.ts` imports `scripts/voice/train/system_prompt.txt?raw`, one source, and VR6
+    asserts the bytes; grep found no second copy of the prompt. The decoder (`decode.ts`) is a proper
+    untrusted-input boundary: pure, rebuilds a fresh Command field by field, forces `attach`/`existing`
+    to null, ignores invented keys, never throws. Its validation MECHANISM is non-vacuous --- removing
+    the product check turns VR2 red. ⚠️ NOTED, not filed (the behaviour is correct): VR2 probes a
+    representative missing field (product) and one mistyped field (hour), not every field of every
+    intent, so a mutation to the operator check or the hour bound is not caught; the guards are all
+    present, the coverage is representative rather than exhaustive.
+    ⭐ R-395 (OUTLINE AND SPOKEN/TYPED YES) DRIVEN LIVE AS DANA. A create, then "remove Operator A3
+    from Cell 3 ...": the status read "... 10:00-14:00? --- say or type yes to do it, no to leave it."
+    with one Remove button and exactly ONE red-outlined chip on the board (the `outlineRemove` class).
+    A typed "yes" removed it (the database read one fewer row); a repeat then "no" left the block and
+    cleared the outline. The database ended with exactly one A3 block on the day, the one "no" kept.
+    ⚠️ R-392 (THE COLAB MODEL) IS THE ONE THING I CANNOT VERIFY COLD: the score needs a GPU and a Colab
+    run. The repo-provable half (voiceTrain's chat-row and predictions-format cases) is in the green
+    suite; the score itself (clean 100%, perturbed 93.5%, session 156) I take from the developer's
+    recorded run, not reproduced here --- said plainly rather than called verified.
 - id: 159
   date: 2026-09-13
   title: "The corner launcher: the bar behind a button in the lower right, from an approved mock to shipped in one sitting (S48, R-396)"
