@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-16'
-  tip: 'e525087'
+  tip: 'adaeba8'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -3189,8 +3189,10 @@ requirements:
   - §18.4
   stated_by: maintainer
   claim: >-
-    The default window starts at the start of today's UTC day and spans 3 days. The original Monday-of-the-week
-    anchor was a seed concern that leaked into the product and was reversed.
+    The default window starts on today's calendar day IN THE PLANT'S ZONE and spans 3 days; before the zone is
+    known the UTC day is a first guess the board corrects once, unless the person has moved the window
+    (F-159, session 176). The original Monday-of-the-week anchor was a seed concern that leaked into the
+    product and was reversed.
   verified_by:
   - kind: vitest
     file: src/test/boardViewStore.test.ts
@@ -11873,6 +11875,23 @@ requirements:
     hold no Welding, which Line 1 requires; the single opened the reason pop-up, the swap wrote three
     of four and said reverted.
 findings:
+- id: F-160
+  title: The first paint scrolls to now at 37 percent across the track, not the quarter; Today lands on the quarter
+  tag: The mount scroll runs while the rail width is still settling, and its nonce is then spent
+  status: open
+  found_by: agent
+  stage: S61
+  refs:
+  - R-055
+  story: >-
+    Measured 16 Sept (session 176) at 20:51 Chicago off the DOM while checking F-159's scroll: on first paint
+    now sits 37.1 percent across the track; after Today, 25.0 percent, R-055's quarter to the pixel. Remounting
+    the grid with no re-anchor in play lands on the same 37.1 percent, so it is not F-159's. The mount scroll
+    runs while the rail width and ui-scale are still settling; the nonce is then spent, so the effect does
+    not re-scroll when the measured geometry changes a beat later. Letting geometry re-trigger the scroll
+    is the door "a resize must not move the person's scroll" holds shut, so it is a decision, not a cleanup.
+  fix: >-
+    Open.
 - id: F-159
   title: The board opened on the UTC date, so after 7 pm in Chicago today was not on the board
   tag: A which-day marker set before the zone is known and never corrected
@@ -16067,9 +16086,9 @@ sessions:
   date: 2026-09-16
   title: "The second walk: thirteen sentences, two rules stated, five findings, and the walk becomes a spec (S61, R-424, R-425, F-153 to F-159)"
   shipped: [S61]
-  commits: ['3540826', 'e525087']
+  commits: ['3540826', 'e525087', 'adaeba8']
   numbers:
-    app_tests: 3873
+    app_tests: 3875
     app_test_files: 151
     tsc: 0
     eslint: 0
@@ -16078,7 +16097,7 @@ sessions:
     e2e: 50
   confirmed: true
   numbers_note: >-
-    npm run test, 16 Sept, after the F-159 commit: 3873 tests in 151 files, all passing; tsc and eslint
+    npm run test, 16 Sept, after the scroll-to-now commit: 3875 tests in 151 files, all passing; tsc and eslint
     clean; the role walk passed; the typed walk spec passed twice; no migration or RPC changed.
   summary: >-
     The maintainer ran thirteen sentences of the re-dated list and stopped: a person without the cell's
@@ -16094,7 +16113,9 @@ sessions:
     (a note for the sixth run: real names in the pools). Next: the voice half of the walk from the same
     data file; the smoke switch; 6b. Then, at 19:0x Chicago, the voice walk's first sentence: today was not
     on the board, because the board's own today was the UTC date (F-159) --- the hours were right, the day
-    the board opened on was not; fixed with a frozen-clock pin at 19:30 Chicago.
+    the board opened on was not; fixed with a frozen-clock pin at 19:30 Chicago. The maintainer then saw the
+    board open on the right day but not scrolled to now (R-055): the re-anchor's scroll ran against the
+    previous window's data and gave up; the scroll now waits for the window that holds now.
 - id: 175
   date: 2026-09-16
   title: "The second walk's first sentence: a block across midnight, kept on the wrong day (F-152)"

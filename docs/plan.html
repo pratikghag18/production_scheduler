@@ -114,16 +114,16 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 <section>
   <span class="eyebrow">Where we are right now</span>
   <h2>Session 176 · 2026-09-16 · The second walk: thirteen sentences, two rules stated, five findings, and the walk becomes a spec (S61, R-424, R-425, F-153 to F-159)</h2>
-  <div class="lead"><p>The maintainer ran thirteen sentences of the re-dated list and stopped: a person without the cell's training was scheduled and then refused mid-swap with a false &quot;reverted&quot;, the bar vanished twice, dates read a day early, a day-less sentence looked on the wrong day, and the trace missed what a single showed. Two of the thirteen were the developer's own list (an uncertified person, a headcount form that does not exist). The maintainer said clear the board and have the tests figured out before handing over a walk again. Plant A's leftover rows were deleted through the database container; R-424 and R-425 were written; three lanes and a reviewer closed F-153 to F-157; and the typed half of a walk is now e2e/typedWalk.spec.ts, run twice before anything is handed over. The spec itself found two gaps in the list, not the bar: a repeat day must be on the board (R-416), and a comma-separated list of cells is not a sentence (queued). The served model read Tom Baker as Tom Bakker on a swap, twice, byte-identical (a note for the sixth run: real names in the pools). Next: the voice half of the walk from the same data file; the smoke switch; 6b. Then, at 19:0x Chicago, the voice walk's first sentence: today was not on the board, because the board's own today was the UTC date (F-159) --- the hours were right, the day the board opened on was not; fixed with a frozen-clock pin at 19:30 Chicago.</p></div>
+  <div class="lead"><p>The maintainer ran thirteen sentences of the re-dated list and stopped: a person without the cell's training was scheduled and then refused mid-swap with a false &quot;reverted&quot;, the bar vanished twice, dates read a day early, a day-less sentence looked on the wrong day, and the trace missed what a single showed. Two of the thirteen were the developer's own list (an uncertified person, a headcount form that does not exist). The maintainer said clear the board and have the tests figured out before handing over a walk again. Plant A's leftover rows were deleted through the database container; R-424 and R-425 were written; three lanes and a reviewer closed F-153 to F-157; and the typed half of a walk is now e2e/typedWalk.spec.ts, run twice before anything is handed over. The spec itself found two gaps in the list, not the bar: a repeat day must be on the board (R-416), and a comma-separated list of cells is not a sentence (queued). The served model read Tom Baker as Tom Bakker on a swap, twice, byte-identical (a note for the sixth run: real names in the pools). Next: the voice half of the walk from the same data file; the smoke switch; 6b. Then, at 19:0x Chicago, the voice walk's first sentence: today was not on the board, because the board's own today was the UTC date (F-159) --- the hours were right, the day the board opened on was not; fixed with a frozen-clock pin at 19:30 Chicago. The maintainer then saw the board open on the right day but not scrolled to now (R-055): the re-anchor's scroll ran against the previous window's data and gave up; the scroll now waits for the window that holds now.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">3873</span><span class="l">app tests in 151 files — session 176, 2026-09-16</span></div>
+  <div class="stat ok"><span class="n">3875</span><span class="l">app tests in 151 files — session 176, 2026-09-16</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">856</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">80</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
   <div class="stat "><span class="n">320 / 368</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>e525087</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>adaeba8</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -2320,7 +2320,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>159 things that weren't in the plan</h2>
+  <h2>160 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3715,6 +3715,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <div class="aside"><span class="k">Fix</span><p>Session 176 (e525087). The marker is built from the plant's date (partsInZone of now) once the zone is known; the board re-anchors itself once when the zone arrives if nobody has moved the window; the Today button and Show that day for today use the zone. Pinned TD-1 to TD-6 with a frozen clock at 18:30 and 19:30 Chicago and a zone east of UTC (brief docs/agent-briefs/f-159-today-is-the-plant-day-brief.md).</p></div>
   <p class="fine">R-419 · R-378</p>
 </div>
+<div class="find " id="F-160">
+  <span class="tag">The mount scroll runs while the rail width is still settling, and its nonce is then spent · open · found while building · <a href="#S61">S61</a></span>
+  <h3>The first paint scrolls to now at 37 percent across the track, not the quarter; Today lands on the quarter</h3>
+  <p>Measured 16 Sept (session 176) at 20:51 Chicago off the DOM while checking F-159's scroll: on first paint now sits 37.1 percent across the track; after Today, 25.0 percent, R-055's quarter to the pixel. Remounting the grid with no re-anchor in play lands on the same 37.1 percent, so it is not F-159's. The mount scroll runs while the rail width and ui-scale are still settling; the nonce is then spent, so the effect does not re-scroll when the measured geometry changes a beat later. Letting geometry re-trigger the scroll is the door &quot;a resize must not move the person's scroll&quot; holds shut, so it is a decision, not a cleanup.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Open.</p></div>
+  <p class="fine">R-055</p>
+</div>
 </section>
 
 <hr class="rule">
@@ -3824,7 +3832,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 </tr>
 <tr class="r-covered" id="R-D17">
   <td class="g-n">R-D17</td>
-  <td class="reqmain"><b>The board opens on today with a 3-day window</b><br><span class="fine">The default window starts at the start of today's UTC day and spans 3 days. The original Monday-of-the-week anchor was a seed concern that leaked into the product and was reversed.</span>
+  <td class="reqmain"><b>The board opens on today with a 3-day window</b><br><span class="fine">The default window starts on today's calendar day IN THE PLANT'S ZONE and spans 3 days; before the zone is known the UTC day is a first guess the board corrects once, unless the person has moved the window (F-159, session 176). The original Monday-of-the-week anchor was a seed concern that leaked into the product and was reversed.</span>
       <br><span class="fine">§18, D17, §18.4 · maintainer · Linked 8 Sept (requirement audit) -- new test file.</span></td>
   <td class="fine">vitest · <code>src/test/boardViewStore.test.ts</code> D17a window starts at UTC midnight, D17b default 3-day span, D17c goToToday resets and bumps scrollToNowNonce, D17d setWindowDayCount overrides the default</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
@@ -6309,9 +6317,9 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <details class="donefold" open>
   <summary><b>Session 176</b> · 2026-09-16 · The second walk: thirteen sentences, two rules stated, five findings, and the walk becomes a spec (S61, R-424, R-425, F-153 to F-159) <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
-    <p>The maintainer ran thirteen sentences of the re-dated list and stopped: a person without the cell's training was scheduled and then refused mid-swap with a false &quot;reverted&quot;, the bar vanished twice, dates read a day early, a day-less sentence looked on the wrong day, and the trace missed what a single showed. Two of the thirteen were the developer's own list (an uncertified person, a headcount form that does not exist). The maintainer said clear the board and have the tests figured out before handing over a walk again. Plant A's leftover rows were deleted through the database container; R-424 and R-425 were written; three lanes and a reviewer closed F-153 to F-157; and the typed half of a walk is now e2e/typedWalk.spec.ts, run twice before anything is handed over. The spec itself found two gaps in the list, not the bar: a repeat day must be on the board (R-416), and a comma-separated list of cells is not a sentence (queued). The served model read Tom Baker as Tom Bakker on a swap, twice, byte-identical (a note for the sixth run: real names in the pools). Next: the voice half of the walk from the same data file; the smoke switch; 6b. Then, at 19:0x Chicago, the voice walk's first sentence: today was not on the board, because the board's own today was the UTC date (F-159) --- the hours were right, the day the board opened on was not; fixed with a frozen-clock pin at 19:30 Chicago.</p>
-    <div class="aside"><span class="k">A note on these numbers</span><p>npm run test, 16 Sept, after the F-159 commit: 3873 tests in 151 files, all passing; tsc and eslint clean; the role walk passed; the typed walk spec passed twice; no migration or RPC changed.</p></div>
-    <p class="fine">3873 app tests in 151 files · 856 database checks · 80 migrations · tsc 0 · eslint 0 · commits 3540826, e525087 · shipped <a href="#S61">S61</a></p>
+    <p>The maintainer ran thirteen sentences of the re-dated list and stopped: a person without the cell's training was scheduled and then refused mid-swap with a false &quot;reverted&quot;, the bar vanished twice, dates read a day early, a day-less sentence looked on the wrong day, and the trace missed what a single showed. Two of the thirteen were the developer's own list (an uncertified person, a headcount form that does not exist). The maintainer said clear the board and have the tests figured out before handing over a walk again. Plant A's leftover rows were deleted through the database container; R-424 and R-425 were written; three lanes and a reviewer closed F-153 to F-157; and the typed half of a walk is now e2e/typedWalk.spec.ts, run twice before anything is handed over. The spec itself found two gaps in the list, not the bar: a repeat day must be on the board (R-416), and a comma-separated list of cells is not a sentence (queued). The served model read Tom Baker as Tom Bakker on a swap, twice, byte-identical (a note for the sixth run: real names in the pools). Next: the voice half of the walk from the same data file; the smoke switch; 6b. Then, at 19:0x Chicago, the voice walk's first sentence: today was not on the board, because the board's own today was the UTC date (F-159) --- the hours were right, the day the board opened on was not; fixed with a frozen-clock pin at 19:30 Chicago. The maintainer then saw the board open on the right day but not scrolled to now (R-055): the re-anchor's scroll ran against the previous window's data and gave up; the scroll now waits for the window that holds now.</p>
+    <div class="aside"><span class="k">A note on these numbers</span><p>npm run test, 16 Sept, after the scroll-to-now commit: 3875 tests in 151 files, all passing; tsc and eslint clean; the role walk passed; the typed walk spec passed twice; no migration or RPC changed.</p></div>
+    <p class="fine">3875 app tests in 151 files · 856 database checks · 80 migrations · tsc 0 · eslint 0 · commits 3540826, e525087, adaeba8 · shipped <a href="#S61">S61</a></p>
   </div>
 </details>
 <details class="donefold" >
