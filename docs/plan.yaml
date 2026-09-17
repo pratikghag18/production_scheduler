@@ -2890,7 +2890,7 @@ stages:
   track: core
   num: 65
   title: The operator rail --- two lines per person, a rail that drags wider, and the away not offered
-  status: open
+  status: now
   owner: agent
   refs:
   - 'session 178 conversation (the maintainer, 17 Sept, operator rail review with a second agent)'
@@ -2911,12 +2911,12 @@ stages:
     developer's answer: under block everywhere --- rail, both pop-ups and the bar; under warn out of the rail
     and asked-before-the-yes in the pop-ups and the bar, so the emergency placement warn exists for keeps
     one door). Both answered yes the same day. R-438 and R-439 run beside S64 once S63 is committed; R-440 rides
-    with S64's absence lane.
+    with S64's absence lane. LANE RUNNING 17 Sept (session 178): s65-a-operator-rail-brief.md, beside S63, S66-a and S67.
 - id: S66
   track: core
   num: 66
   title: A person belongs to a shift --- a home shift per operator, overtime named everywhere, a supervisor's shift or the whole day
-  status: open
+  status: now
   owner: agent
   refs:
   - 'session 178 conversation (the maintainer, 17 Sept)'
@@ -2939,12 +2939,14 @@ stages:
     developer's name-on-the-person idea); and
     the supervisor question answered the same turn (R-442: no restriction by default, a setting on the grant
     in the Access tab).
-    Piece (1) goes before S65's rail so "free 11:30" is measured against the person's own shift.
+    Piece (1) goes before S65's rail so "free 11:30" is measured against the person's own shift. LANE RUNNING
+    17 Sept (session 178): s66-a-home-shift-model-brief.md, beside S63, S65 and S67; the rail measures against
+    the root's pattern first and takes the person's band when this lands.
 - id: S67
   track: core
   num: 67
   title: The board toolbar --- one row, and Show more as a layer with labelled groups
-  status: open
+  status: now
   owner: agent
   refs:
   - 'session 178 conversation (the maintainer, 17 Sept, board toolbar review with a second agent)'
@@ -2958,7 +2960,9 @@ stages:
   state: >-
     **OPEN 17 Sept (session 178).** Owns BoardToolbar and its stylesheet and tests, the role walk's toolbar
     assertions; touches BoardPage only for props. Runs beside S64 once S63 is committed (it reuses the
-    per-person remembered state S63 adds and the role walk must not run under two lanes at once).
+    per-person remembered state S63 adds and the role walk must not run under two lanes at once). LANE
+    RUNNING 17 Sept (session 178): s67-a-toolbar-show-more-brief.md, beside S63, S65 and S66-a; the developer
+    runs the walks after all land.
 - id: M1
   track: matrix
   num: 1
