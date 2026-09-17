@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-16'
-  tip: 'adaeba8'
+  updated: '2026-09-17'
+  tip: 'f599932'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2809,6 +2809,30 @@ stages:
   state: >-
     **DONE 16 Sept (session 176, 3540826).** Three lanes and one reviewer; the reviewer drove the real bar
     for the reason flow and read the override back from the database.
+- id: S62
+  track: core
+  num: 62
+  title: Standards --- the plant's zone is the one clock, and what the voice walk's first six sentences found
+  status: now
+  owner: agent
+  refs:
+  - 'session 177 conversation (the maintainer, 17 Sept)'
+  - §19.106 (D135)
+  - CLAUDE.md §7
+  - docs/agent-briefs/s62-a-one-clock-audit-brief.md
+  - docs/agent-briefs/s62-b-answer-box-conversation-store-brief.md
+  delivers:
+  - R-426
+  what: >-
+    **A standard is a requirement with an audit attached.** The plant's zone rule written in one sentence into
+    CLAUDE.md, the plan and the design record; the date-seam audit grown to enforce it; every site that
+    predated it found by grep and fixed (the audit view, the operators, settings, matrix and absence panels,
+    the copy-week dialog, seven private copies of day arithmetic). Then the four findings of the voice walk's
+    first six sentences: the answer box, the conversation surviving a close, the trace's last word, and the
+    swap's fourth step that never landed.
+  state: >-
+    **First half DONE 17 Sept (session 177, f599932).** The standard, the audit and the nine sites. The second
+    half (F-162 to F-165) is in its lane.
 - id: M1
   track: matrix
   num: 1
@@ -11888,9 +11912,18 @@ requirements:
     says so. The date-seam audit enforces it. And from now on, when the maintainer states a standard, the
     same session writes it here, greps the code for what already violates it, and fixes or queues each hit.
   verified_by:
+  - kind: vitest
+    file: src/test/dateSeam.test.ts
+    cases: "the machine's getters, a UTC today and the raw midnight suffix banned outside the seams, each with a positive and a negative case; the one allowlisted line named with F-159; the UTC twins stay legal"
+  - kind: vitest
+    file: src/test/auditView.test.ts
+    cases: "F-161: 2026-09-17T00:30Z is 16 Sept 19:30 under America/Chicago and 17 Sept 09:30 under Asia/Tokyo, through the changed-field column too"
+  - kind: vitest
+    file: src/test/dateFormat.test.ts
+    cases: "isoPlusDays, isoMondayOfWeek, dayMarker, isCalendarDay (30 February refused: V8 normalises it silently)"
   - kind: manual
-    steps: "pinned by the audit lane when it lands (dateSeam.test.ts); the list of sites it walked is in the finding"
-  status: uncovered
+    steps: "the grep in docs/agent-briefs/s62-a-one-clock-audit-brief.md run and every hit classified in the lane's report (session 177); CLAUDE.md §7 carries the three duties"
+  status: covered
   note: >-
     STATED 17 Sept (session 177): "can we make sure the time set by the settings for the plant is the standard
     the whole board should use for any further development happening here on after? And any kind of
@@ -11952,7 +11985,7 @@ findings:
 - id: F-161
   title: The audit view prints dates and times in the browser machine's zone, not the plant's
   tag: Machine-local Date getters in a screen that should read the plant's clock
-  status: open
+  status: fixed
   found_by: agent
   stage: S61
   refs:
@@ -11965,7 +11998,7 @@ findings:
     are calendar arithmetic on YYYY-MM-DD strings (safe by construction) and the store's documented first
     guess before the zone is known (F-159).
   fix: >-
-    Open.
+    Session 177 (f599932). The audit view formats through the plant's zone read by one hook that reuses the settings query; its own test had computed expectations with the same machine getters and is zone-explicit now. The same grep fixed the operators, settings and matrix panels (today from the machine), the absences panel and the copy-week dialog (today from the UTC date), and routed seven copies of day arithmetic through dates.ts.
 - id: F-160
   title: The first paint scrolls to now at 37 percent across the track, not the quarter; Today lands on the quarter
   tag: The mount scroll runs while the rail width is still settling, and its nonce is then spent
@@ -16173,6 +16206,35 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 177
+  date: 2026-09-17
+  title: "Standards --- the plant's zone as the one clock, the duty to ask when a choice repeats, and four findings from six voice sentences (S62, R-426, F-161 to F-165)"
+  shipped: []
+  commits: ['f599932']
+  numbers:
+    app_tests: 3913
+    app_test_files: 151
+    tsc: 0
+    eslint: 0
+    db_checks: 856
+    migrations: 80
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    npm run test, 17 Sept, after the S62 first-half commit: 3913 tests in 151 files, all passing; tsc and
+    eslint clean; the role walk passed; no migration or RPC changed.
+  summary: >-
+    The maintainer asked whether yesterday's walk still held (it does: the sentences say today, the board is
+    empty), then set two rules: the plant's zone is the standard for everything the board shows, reads or
+    writes, and any repeated choice with no standard is asked about, not decided quietly. Both are in
+    CLAUDE.md §7 with the duty to audit old code when a standard is set (R-426). The audit found nine sites
+    that predated the rule and fixed them (F-161 the audit view; the operators, settings, matrix and absence
+    panels; the copy-week dialog). The maintainer then ran six voice sentences: the swap's fourth step never
+    landed (F-165, cause not yet named), the answer cannot be typed without wiping the sentence (F-162), a
+    click outside the bar loses the conversation (F-163), and the trace does not record a lot's failure or
+    a write that never happened (F-164). Seven candidate standards were put to the maintainer, plus one
+    grammar question: a bare pair of hours under 7 ("from 1 to 5") reads literally today. Next: the second
+    half's lane, then the answers.
 - id: 176
   date: 2026-09-16
   title: "The second walk: thirteen sentences, two rules stated, five findings, and the walk becomes a spec (S61, R-424, R-425, F-153 to F-159)"

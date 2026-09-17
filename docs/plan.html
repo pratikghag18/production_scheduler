@@ -113,17 +113,17 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 176 · 2026-09-16 · The second walk: thirteen sentences, two rules stated, five findings, and the walk becomes a spec (S61, R-424, R-425, F-153 to F-159)</h2>
-  <div class="lead"><p>The maintainer ran thirteen sentences of the re-dated list and stopped: a person without the cell's training was scheduled and then refused mid-swap with a false &quot;reverted&quot;, the bar vanished twice, dates read a day early, a day-less sentence looked on the wrong day, and the trace missed what a single showed. Two of the thirteen were the developer's own list (an uncertified person, a headcount form that does not exist). The maintainer said clear the board and have the tests figured out before handing over a walk again. Plant A's leftover rows were deleted through the database container; R-424 and R-425 were written; three lanes and a reviewer closed F-153 to F-157; and the typed half of a walk is now e2e/typedWalk.spec.ts, run twice before anything is handed over. The spec itself found two gaps in the list, not the bar: a repeat day must be on the board (R-416), and a comma-separated list of cells is not a sentence (queued). The served model read Tom Baker as Tom Bakker on a swap, twice, byte-identical (a note for the sixth run: real names in the pools). Next: the voice half of the walk from the same data file; the smoke switch; 6b. Then, at 19:0x Chicago, the voice walk's first sentence: today was not on the board, because the board's own today was the UTC date (F-159) --- the hours were right, the day the board opened on was not; fixed with a frozen-clock pin at 19:30 Chicago. The maintainer then saw the board open on the right day but not scrolled to now (R-055): the re-anchor's scroll ran against the previous window's data and gave up; the scroll now waits for the window that holds now.</p></div>
+  <h2>Session 177 · 2026-09-17 · Standards --- the plant's zone as the one clock, the duty to ask when a choice repeats, and four findings from six voice sentences (S62, R-426, F-161 to F-165)</h2>
+  <div class="lead"><p>The maintainer asked whether yesterday's walk still held (it does: the sentences say today, the board is empty), then set two rules: the plant's zone is the standard for everything the board shows, reads or writes, and any repeated choice with no standard is asked about, not decided quietly. Both are in CLAUDE.md §7 with the duty to audit old code when a standard is set (R-426). The audit found nine sites that predated the rule and fixed them (F-161 the audit view; the operators, settings, matrix and absence panels; the copy-week dialog). The maintainer then ran six voice sentences: the swap's fourth step never landed (F-165, cause not yet named), the answer cannot be typed without wiping the sentence (F-162), a click outside the bar loses the conversation (F-163), and the trace does not record a lot's failure or a write that never happened (F-164). Seven candidate standards were put to the maintainer, plus one grammar question: a bare pair of hours under 7 (&quot;from 1 to 5&quot;) reads literally today. Next: the second half's lane, then the answers.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">3875</span><span class="l">app tests in 151 files — session 176, 2026-09-16</span></div>
+  <div class="stat ok"><span class="n">3913</span><span class="l">app tests in 151 files — session 177, 2026-09-17</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">856</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">80</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
-  <div class="stat "><span class="n">320 / 368</span><span class="l">requirements covered by a test</span></div>
+  <div class="stat "><span class="n">321 / 369</span><span class="l">requirements covered by a test</span></div>
 </div>
-  <p class="fine">Measured at commit <code>adaeba8</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
+  <p class="fine">Measured at commit <code>f599932</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
 
 <section>
@@ -166,6 +166,14 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="state"><p><b>Parked 14 Sept (session 163)</b> at the maintainer's request, as a menu rather than a queue. The developer session's recommendation: the same-form group into the pending retrain at the maintainer's pick, then the board-answers group as its own stage, because &quot;clear Cell 1&quot; and &quot;cover Sam&quot; are what a supervisor says when someone calls in sick. Unpark a group with a word. <b>Groups 1 and 3 unparked 14 Sept (session 168)</b> together, one retrain: S55 (the sentences and the board's lot) and S56 (the data and the fifth run), R-404 to R-410. <b>Group 2 unparked the same day</b> as S58 (R-412 to R-416) to ride the same run. Still parked: &quot;undo that&quot; (its own parked entry); the questions are Stage 8. <b>Groups 1, 2 and 3 are taught and served as of 15 Sept (session 173).</b></p></div>
   <p class="fine">session 163 conversation (the maintainer, 14 Sept: &quot;What other sentences can you think of which could be used in the context of this app?&quot; and &quot;make it part of scheduler buildout as well, so it is visual for me&quot;)</p>
   <span class="tags"><span class="chip q">Parked</span><span class="chip yours">Your run</span></span>
+</div>
+<div class="stage now" id="S62">
+  <span class="num">62</span>
+  <h3>Standards --- the plant's zone is the one clock, and what the voice walk's first six sentences found</h3>
+  <div class="what"><p><b>A standard is a requirement with an audit attached.</b> The plant's zone rule written in one sentence into CLAUDE.md, the plan and the design record; the date-seam audit grown to enforce it; every site that predated it found by grep and fixed (the audit view, the operators, settings, matrix and absence panels, the copy-week dialog, seven private copies of day arithmetic). Then the four findings of the voice walk's first six sentences: the answer box, the conversation surviving a close, the trace's last word, and the swap's fourth step that never landed.</p></div>
+  <div class="state"><p><b>First half DONE 17 Sept (session 177, f599932).</b> The standard, the audit and the nine sites. The second half (F-162 to F-165) is in its lane.</p></div>
+  <p class="fine">session 177 conversation (the maintainer, 17 Sept) · §19.106 (D135) · CLAUDE.md §7 · docs/agent-briefs/s62-a-one-clock-audit-brief.md · docs/agent-briefs/s62-b-answer-box-conversation-store-brief.md</p><p class="fine">Delivers <a href="#R-426">R-426</a></p>
+  <span class="tags"><span class="chip now">In progress</span><span class="chip mine">Mine</span></span>
 </div></div>
   <details class="donefold"><summary>60 stages shipped — open to read them</summary><div class="stages"><div class="stage done" id="S01">
   <span class="num">1</span>
@@ -2320,7 +2328,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>160 things that weren't in the plan</h2>
+  <h2>165 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3723,6 +3731,46 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <div class="aside"><span class="k">Fix</span><p>Open.</p></div>
   <p class="fine">R-055</p>
 </div>
+<div class="find fix" id="F-161">
+  <span class="tag">Machine-local Date getters in a screen that should read the plant's clock · fixed · found while building · <a href="#S61">S61</a></span>
+  <h3>The audit view prints dates and times in the browser machine's zone, not the plant's</h3>
+  <p>Found 17 Sept (session 177) by the grep R-426 asked for: src/features/admin/lib/auditView.ts formats a row's day and time with getFullYear/getMonth/getDate/getHours/getMinutes, the browser machine's zone. A plant admin reading the audit log from another zone (or a laptop left on UTC) sees every change stamped with the wrong hour, and a change made late in the evening on the wrong day. The other hits of the grep are calendar arithmetic on YYYY-MM-DD strings (safe by construction) and the store's documented first guess before the zone is known (F-159).</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 177 (f599932). The audit view formats through the plant's zone read by one hook that reuses the settings query; its own test had computed expectations with the same machine getters and is zone-explicit now. The same grep fixed the operators, settings and matrix panels (today from the machine), the absences panel and the copy-week dialog (today from the UTC date), and routed seven copies of day arithmetic through dates.ts.</p></div>
+  <p class="fine">R-426</p>
+</div>
+<div class="find " id="F-165">
+  <span class="tag">A write the bar promised that the writer refused or left in a pop-up, silently · open · you found it · <a href="#S61">S61</a></span>
+  <h3>The swap's fourth step, Sam Patel onto Cell 3 08:00 to 12:00, did not land, and said on its own it did not land either</h3>
+  <p>Reported 17 Sept (session 177): &quot;it swapped Sam with John, but John's original assignment which Sam should have been assigned is gone.&quot; The trace confirms three of four steps ran. The developer then said the fourth step alone in a fresh browser: the bar printed the readout as run, and the database still had no row for Sam on Cell 3; a replay of the whole sequence removed John's block from Cell 1 (the developer's own replay, not the maintainer's action) before it stalled. Sam holds Welding; Cell 3 requires nothing; no run overlaps 08:00 to 12:00; Sam is not absent. The reason is not known yet: the writer's message was never traced (F-164) and the single path may have opened a pop-up behind the bar that a reason or an override was waiting in. To be reproduced with F-164 in place, and the cause named before it is called fixed.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Open.</p></div>
+  <p class="fine">R-406 · R-425 · F-154</p>
+</div>
+<div class="find " id="F-164">
+  <span class="tag">finishTrace runs before the failure status is set; a single's readout is recorded as ran before the writer answers · open · you found it · <a href="#S61">S61</a></span>
+  <h3>The trace records neither a lot's failure message nor a single's write that never landed</h3>
+  <p>Found 17 Sept (session 177) reading the trace of the maintainer's swap: ran lists three of four readouts and nothing says why the fourth stopped --- runLotNow finishes the entry before setting the Did 3 of 4 status. The same file shows &quot;Sam Patel → Housing A · Cell 3 · 08:00–12:00&quot; under ran for a sentence said on its own in a replay while the database never received the row (F-165). The trace must record the lot's failure text as the entry's last asked, and a single's ran only after the writer confirms --- or record the writer's refusal beside it.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Open.</p></div>
+  <p class="fine">R-421 · F-154</p>
+</div>
+<div class="find " id="F-163">
+  <span class="tag">The launcher unmounts the bar on an outside mousedown; the bar's state lives in the bar · open · you found it · <a href="#S61">S61</a></span>
+  <h3>A click outside the bar closes it and loses the whole conversation, so moving a slider empties it</h3>
+  <p>Reported 17 Sept (session 177): &quot;The chatbot also vanished when I moved the slider something which you claimed would not happen.&quot; R-424 (session 176) fixed the unmount on a board refetch, but CommandLauncher closes the panel on any mousedown outside it by design (Esc closes), and closing unmounts CommandBar, whose status, held command, pending question, lot and trace entry are its own refs. A person who reaches for the toolbar, the day count or the zoom mid-conversation comes back to an empty bar. The conversation must live outside the bar (a store the launcher's open/close does not touch) so reopening shows exactly what stood.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Open.</p></div>
+  <p class="fine">R-424</p>
+</div>
+<div class="find " id="F-162">
+  <span class="tag">The answer box and the sentence box are the same box · open · you found it · <a href="#S61">S61</a></span>
+  <h3>While a question stands, the input still holds the sentence, so yes or a reason cannot be typed without wiping it</h3>
+  <p>Reported 17 Sept (session 177) with two screenshots: &quot;Tom Baker is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.&quot; and a lot's &quot;say or type yes to do them&quot; --- both above an input still holding the sentence. The person has to clear the sentence to type the answer, and clearing the sentence is what the bar reads as abandoning it. The trace shows the Tom Baker sentence typed three times with no answer ever recorded. When a question stands the input must be empty with a placeholder that says what it takes (yes, no, a reason, a name), the sentence must stay readable above it, and typing the answer must never drop the held command.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Open.</p></div>
+  <p class="fine">R-378 · R-425</p>
+</div>
 </section>
 
 <hr class="rule">
@@ -3731,7 +3779,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>368 requirements · 320 covered · 24 uncovered · 0 contradicted · 24 superseded</caption>
+<caption>369 requirements · 321 covered · 24 uncovered · 0 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -6307,6 +6355,13 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
       <br><span class="fine">session 176 conversation (the maintainer, 16 Sept, the second walk), CLAUDE.md §4 (a screen that shows what the server will refuse) · maintainer · STATED 16 Sept (session 176): &quot;People not trained are being assigned&quot; --- Lena Novak and Tom Baker hold no Welding, which Line 1 requires; the single opened the reason pop-up, the swap wrote three of four and said reverted.</span></td>
   <td class="fine">vitest · <code>src/test/commandResolve.test.ts</code> NC1 to NC9 (warn asks with the skill names; block asks and no reason suppresses it; a certified person passes; lapsed is named; a swap, a replace and a copy refuse before the lot; day null with today off the board asks; the override option fills the resolved field)<br>vitest · <code>src/test/commandBar.test.tsx</code> CB-nc-1 to CB-nc-5b (the question's text; a reason runs with the override; yes re-asks; no cancels; block and a lot accept nothing), CB-lot-fail-1 (a failed lot says what stayed)<br>vitest · <code>src/test/dragGesture.test.ts</code> D12 (a move carrying an override writes it directly)<br>vitest · <code>src/test/schedulerToast.test.ts</code> D37c to D37e (no message bakes in a revert it did not do)<br>e2e · <code>e2e/typedWalk.spec.ts</code> an uncertified person on Cell 1 asks, a typed reason writes the block with eligibility_override true; the same inside a swap is refused before the yes<br>manual: the reviewer typed the reason in the real bar and read eligibility_override and override_reason back from the database (session 176)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-covered" id="R-426">
+  <td class="g-n">R-426</td>
+  <td class="reqmain"><b>The plant's zone is the one clock --- every day and hour the app shows, reads or writes is in it, and a new standard audits the code that predates it</b><br><span class="fine">The zone in the plant's settings (company fallback) is the standard for the whole board and everything around it: a calendar day is derived from an instant only through that zone (partsInZone), an instant from a calendar day only through it (zonedTimeToInstant), and no code reads the machine's clock or the UTC date as if it were the plant's; pure day arithmetic on YYYY-MM-DD strings goes through the one helper that says so. The date-seam audit enforces it. And from now on, when the maintainer states a standard, the same session writes it here, greps the code for what already violates it, and fixes or queues each hit.</span>
+      <br><span class="fine">session 177 conversation (the maintainer, 17 Sept), CLAUDE.md §7 · maintainer · STATED 17 Sept (session 177): &quot;can we make sure the time set by the settings for the plant is the standard the whole board should use for any further development happening here on after? And any kind of development we do going forward will also check if a standard exists or a prior code should change based on new standard?&quot; Written into CLAUDE.md §7 so it loads in every session.</span></td>
+  <td class="fine">vitest · <code>src/test/dateSeam.test.ts</code> the machine's getters, a UTC today and the raw midnight suffix banned outside the seams, each with a positive and a negative case; the one allowlisted line named with F-159; the UTC twins stay legal<br>vitest · <code>src/test/auditView.test.ts</code> F-161: 2026-09-17T00:30Z is 16 Sept 19:30 under America/Chicago and 17 Sept 09:30 under Asia/Tokyo, through the changed-field column too<br>vitest · <code>src/test/dateFormat.test.ts</code> isoPlusDays, isoMondayOfWeek, dayMarker, isCalendarDay (30 February refused: V8 normalises it silently)<br>manual: the grep in docs/agent-briefs/s62-a-one-clock-audit-brief.md run and every hit classified in the lane's report (session 177); CLAUDE.md §7 carries the three duties</td>
+  <td class="chipcol"><span class="chip done">covered</span></td>
 </tr></tbody></table></div>
 </section>
 
@@ -6315,6 +6370,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 177</b> · 2026-09-17 · Standards --- the plant's zone as the one clock, the duty to ask when a choice repeats, and four findings from six voice sentences (S62, R-426, F-161 to F-165) <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>The maintainer asked whether yesterday's walk still held (it does: the sentences say today, the board is empty), then set two rules: the plant's zone is the standard for everything the board shows, reads or writes, and any repeated choice with no standard is asked about, not decided quietly. Both are in CLAUDE.md §7 with the duty to audit old code when a standard is set (R-426). The audit found nine sites that predated the rule and fixed them (F-161 the audit view; the operators, settings, matrix and absence panels; the copy-week dialog). The maintainer then ran six voice sentences: the swap's fourth step never landed (F-165, cause not yet named), the answer cannot be typed without wiping the sentence (F-162), a click outside the bar loses the conversation (F-163), and the trace does not record a lot's failure or a write that never happened (F-164). Seven candidate standards were put to the maintainer, plus one grammar question: a bare pair of hours under 7 (&quot;from 1 to 5&quot;) reads literally today. Next: the second half's lane, then the answers.</p>
+    <div class="aside"><span class="k">A note on these numbers</span><p>npm run test, 17 Sept, after the S62 first-half commit: 3913 tests in 151 files, all passing; tsc and eslint clean; the role walk passed; no migration or RPC changed.</p></div>
+    <p class="fine">3913 app tests in 151 files · 856 database checks · 80 migrations · tsc 0 · eslint 0 · commits f599932</p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 176</b> · 2026-09-16 · The second walk: thirteen sentences, two rules stated, five findings, and the walk becomes a spec (S61, R-424, R-425, F-153 to F-159) <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>The maintainer ran thirteen sentences of the re-dated list and stopped: a person without the cell's training was scheduled and then refused mid-swap with a false &quot;reverted&quot;, the bar vanished twice, dates read a day early, a day-less sentence looked on the wrong day, and the trace missed what a single showed. Two of the thirteen were the developer's own list (an uncertified person, a headcount form that does not exist). The maintainer said clear the board and have the tests figured out before handing over a walk again. Plant A's leftover rows were deleted through the database container; R-424 and R-425 were written; three lanes and a reviewer closed F-153 to F-157; and the typed half of a walk is now e2e/typedWalk.spec.ts, run twice before anything is handed over. The spec itself found two gaps in the list, not the bar: a repeat day must be on the board (R-416), and a comma-separated list of cells is not a sentence (queued). The served model read Tom Baker as Tom Bakker on a swap, twice, byte-identical (a note for the sixth run: real names in the pools). Next: the voice half of the walk from the same data file; the smoke switch; 6b. Then, at 19:0x Chicago, the voice walk's first sentence: today was not on the board, because the board's own today was the UTC date (F-159) --- the hours were right, the day the board opened on was not; fixed with a frozen-clock pin at 19:30 Chicago. The maintainer then saw the board open on the right day but not scrolled to now (R-055): the re-anchor's scroll ran against the previous window's data and gave up; the scroll now waits for the window that holds now.</p>
@@ -7644,5 +7707,5 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 </details>
 </section>
 
-<footer>Generated from <code>docs/plan.yaml</code> (updated 2026-09-16) by <code>scripts/render-plan.mjs</code>. Edit the YAML, never this page.</footer>
+<footer>Generated from <code>docs/plan.yaml</code> (updated 2026-09-17) by <code>scripts/render-plan.mjs</code>. Edit the YAML, never this page.</footer>
 </div></body></html>
