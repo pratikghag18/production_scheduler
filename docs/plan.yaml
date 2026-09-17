@@ -2940,6 +2940,25 @@ stages:
     the supervisor question answered the same turn (R-442: no restriction by default, a setting on the grant
     in the Access tab).
     Piece (1) goes before S65's rail so "free 11:30" is measured against the person's own shift.
+- id: S67
+  track: core
+  num: 67
+  title: The board toolbar --- one row, and Show more as a layer with labelled groups
+  status: open
+  owner: agent
+  refs:
+  - 'session 178 conversation (the maintainer, 17 Sept, board toolbar review with a second agent)'
+  delivers:
+  - R-445
+  what: >-
+    **"There is too much here."** The toolbar keeps the plant, the day navigation, the range and the zoom;
+    everything else moves behind Show more, a layer over the board that never changes its height, with
+    "Week plan" and "Key" as labelled groups, the key in even columns over the products actually on the
+    board, and the two first-build leftovers removed (F-170). A viewer's toolbar is shorter, not gappier.
+  state: >-
+    **OPEN 17 Sept (session 178).** Owns BoardToolbar and its stylesheet and tests, the role walk's toolbar
+    assertions; touches BoardPage only for props. Runs beside S64 once S63 is committed (it reuses the
+    per-person remembered state S63 adds and the role walk must not run under two lanes at once).
 - id: M1
   track: matrix
   num: 1
@@ -12427,6 +12446,49 @@ requirements:
     we're using in the activity tab." AuditPanel.module.css's own reasoning applies in reverse here: it chose a
     left bar over a red box because a deletion is not an error; a person with no shift IS something wanting
     attention, so the same bar in --crit with the words is the honest reuse, and one accent system is kept.
+- id: R-445
+  title: The board toolbar is one row, with everything else behind "Show more"
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, board toolbar review, written by a second agent)'
+  stated_by: maintainer
+  claim: >-
+    The board's toolbar shows ONE row at all times: the plant, the day navigation, the date range and the
+    three zoom levels --- what a person touches while reading the board, and nothing else. Everything else
+    sits behind a single control reading "Show more" (and "Show less" once open), which opens a second band
+    as a LAYER OVER the board, never a row that pushes it down --- so the board's height, and the row
+    scaling computed from it, are untouched by opening and closing it. The band is closed on a fresh board
+    and remembers how it was left, for that person. Inside it the contents are LABELLED GROUPS: "Week plan"
+    (Copy week, Apply a template, Save this week as a template, each still offered on its own existing
+    rights check) and "Key" --- so anything added later needs a label and nothing renamed. The key is drawn
+    as aligned even columns rather than a ragged wrap, and lists only the products actually on the board in
+    the shown window, not the whole readable catalogue. Nothing in the toolbar names an internal build step
+    or carries a standing apology: a snap value, if shown at all, is plain words, and the end-of-window note
+    appears only when the person is actually at the edge of the loaded window. And the rights cascade
+    reaches the LAYOUT, not just the buttons: a control nobody at this access level can act on holds no
+    toolbar space, so a viewer's toolbar is shorter rather than the same row with gaps in it.
+  verified_by:
+  - kind: manual
+    steps: "pinned when the toolbar lane lands"
+  status: uncovered
+  note: >-
+    STATED 17 Sept, of the admin board's toolbar: "I do not like this structure or presentation, there is
+    too much here", then "we could add more options to it in the future" of the second band's name, and
+    "Show more is what I want to use". "Even columns" chosen over a family-by-variant matrix, which stays
+    available but not as the default because it has to GUESS the family by splitting the product name and
+    is only right when a plant's naming happens to be systematic. Floating chosen over pushing the board
+    down, for the scaling reason in the claim.
+    ⚠️ TWO LEFTOVERS FROM THE FIRST BOARD BUILD ARE WHAT THE MAINTAINER SAW FIRST, both in
+    `BoardToolbar.tsx` today (verified 17 Sept, lines 377-386): the literal "snap: 30 min (P1-4b)" --- an
+    internal brief id shown to users --- under a comment saying it names a future behaviour, and "window
+    ends at edge --- widen Days to see more" rendered unconditionally with a title reading "Scrolling never
+    extends the loaded window in P1-4a". Neither is described by any requirement; filed as F-170 so the lane
+    cannot ship without removing them.
+    DECIDED 17 Sept (session 178, the developer's call on the two open points, the maintainer to overrule):
+    the key sorts by the name as it reads, alphabetically, because that is how a person scans a key; and the
+    key is filtered on the client from the runs in the shown window, which the board index already holds,
+    while the payload's product list stays the readable catalogue the pop-ups need.
+    Related, not contradicted: the three zoom levels and their snap values keep their own rows; this changes
+    only where the control sits, not what it does.
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today
@@ -12460,6 +12522,22 @@ findings:
     the thread while the block is still on the board. CLAUDE.md §4's own warning, in the bar's words. Fix:
     every writer prop returns the outcome (written, refused with the server's reason) the way onOpen and
     onBook already do, and a void return is a type error, not a success.
+- id: F-170
+  title: The board toolbar shows an internal brief id and an unconditional end-of-window apology
+  tag: A build note shipped as a label
+  status: open
+  found_by: agent
+  stage: S67
+  refs:
+  - R-445
+  story: >-
+    Found 17 Sept (session 178) by the second agent reviewing the toolbar with the maintainer, verified in
+    BoardToolbar.tsx lines 377-386. The toolbar renders "snap: 30 min (P1-4b)" --- a brief id from the first
+    board build --- under a comment that says it names a future behaviour, which has shipped since; and
+    "window ends at edge --- widen Days to see more" is rendered on every board, with a title attribute
+    that says scrolling never extends the window "in P1-4a". Both are the developer's notes to itself, shown
+    to every person on every board. Fix: with R-445, the snap becomes plain words or goes, and the edge note
+    appears only at the edge of the loaded window.
 - id: F-169
   title: A spoken sentence keeps a stale "Show that day" rerun alive, which then writes under the new sentence's name
   tag: A pending rerun cleared on typing but not on a new sentence
@@ -24445,6 +24523,12 @@ next:
     Stated and scoped 17 Sept (session 178). Waits on the maintainer's answer to the one modelling decision
     (a band name on the person, resolved against the place's pattern) and the supervisor question. Its
     first piece goes before S65's rail, so free/booked is measured against the person's own shift.
+- kind: task
+  stage: S67
+  text: "The board toolbar as one row with Show more (R-445, F-170) --- beside S64, after S63 is committed"
+  why: >-
+    Stated 17 Sept (session 178) with a second agent. Independent of the bar and the resolver; only the role
+    walk is shared, so it waits for S63's e2e runs to finish.
 - kind: task
   text: "A bare pair of hours under 7 asks which half of the day (R-435): 'from 1 to 5' offers 1 am to 5 am and 1 pm to 5 pm"
   why: >-
