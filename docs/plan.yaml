@@ -2924,6 +2924,7 @@ stages:
   delivers:
   - R-441
   - R-442
+  - R-443
   what: >-
     **The gap the maintainer found on 17 Sept.** Five pieces (D137): the model and the server (two nullable
     columns, the board payload, a shift_fit verdict the five writers and the resize guard forward); the
@@ -2932,8 +2933,9 @@ stages:
     block); the bar (the grammar, the question before the yes, the sixth run's data); the demo and the walks.
     About three and a half days of lanes.
   state: >-
-    **OPEN 17 Sept (session 178).** Scoped the day it was stated. One decision asked: what a person's shift
-    points at (a band NAME resolved against the place's pattern is the developer's recommendation), and
+    **OPEN 17 Sept (session 178).** Scoped and decided the day it was stated: the person points at the band
+    by id, retiring warns with the count and asks where people go (R-443, the maintainer's correction of the
+    developer's name-on-the-person idea); and
     the supervisor question answered the same turn (R-442: no restriction by default, a setting on the grant
     in the Access tab).
     Piece (1) goes before S65's rail so "free 11:30" is measured against the person's own shift.
@@ -12378,6 +12380,31 @@ requirements:
     default, but can we explore if these restrictions can be dynamic? Something which a site admin and above
     can decide through the access tab?" Answered yes the same turn: two nullable fields on the grant, the
     Access tab row, the server's check in the same writers.
+- id: R-443
+  title: A person's shift is the band itself --- editing the band carries them along, retiring it warns with the count and asks where they go, and nobody is left without a shift silently
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept)'
+  stated_by: maintainer
+  claim: >-
+    The person's record points at a shift band by id, never by its words. The Operators tab offers the bands
+    of the home place's pattern, so the options are exactly the shift names. Renaming a band or changing its
+    hours changes nothing on the person. Retiring a band, or the pattern that holds it, first says how many
+    people work it and asks where they go, offering the other bands of that pattern and of any newer pattern
+    on the place, and says the straightforward order: create the new shift first, then retire the old one.
+    Retired anyway, those people have no shift: the Operators tab lists them at the top until each has one,
+    the rail shows them without hours, and nobody is moved to a shift they were not given. On a cell whose
+    pattern is not the home's, the band is matched by name, ignoring case, else the person has no shift there.
+  verified_by:
+  - kind: manual
+    steps: "pinned when S66's model and admin pieces land"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178) over three turns: "the band options should be analogous to shift name
+    options and should go hand in hand"; "When an admin is deleting a shift, we should give them a warning
+    that doing so would make X operators orphan and would they want them to be moved to a new shift? We
+    could suggest them to create a new shift first before retiring existing shift"; "If they do it anyway
+    then they must assign shifts to orphan operators." Supersedes D137's first recommendation (a band NAME
+    on the person), which the maintainer correctly rejected: a rename would have orphaned everyone.
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today

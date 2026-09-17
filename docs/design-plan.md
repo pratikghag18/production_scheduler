@@ -9933,3 +9933,11 @@ grammar, the question before the yes, the shape in the sixth run's data. (5) The
 half a day: people spread over the three bands with one overtime block, the role walk's parity,
 the typed walk. Order: (1) before S65's rail, so R-438's "free 11:30" is measured against the
 person's own shift and the root's pattern is only the fallback for a person with none.
+
+**D137, corrected the same hour (R-443).** The maintainer asked what a rename does to a band NAME
+stored on the person: it orphans everyone. Right. The person points at the band by id; the
+Operators tab's options are the pattern's own bands, so the names go hand in hand; a rename or a
+change of hours carries everyone along; retiring a band or its pattern warns with the count, offers
+the other bands, says to create the new shift first, and leaves anyone retired anyway visibly
+without a shift until given one. Only on a cell whose pattern is not the home's is the band matched
+by name, ignoring case.
