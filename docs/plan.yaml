@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-17'
-  tip: 'f599932'
+  tip: 'b17c858'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2813,7 +2813,7 @@ stages:
   track: core
   num: 62
   title: Standards --- the plant's zone is the one clock, and what the voice walk's first six sentences found
-  status: now
+  status: done
   owner: agent
   refs:
   - 'session 177 conversation (the maintainer, 17 Sept)'
@@ -2834,6 +2834,10 @@ stages:
   state: >-
     **First half DONE 17 Sept (session 177, f599932).** The standard, the audit and the nine sites. The second
     half (F-162 to F-165) is in its lane.
+    **DONE 17 Sept (session 177, b17c858).** The answer box, the conversation store and the thread (R-427), the
+    trace's last word, the area gate before the yes (F-165's cause), a bare yes never reaching the model (F-166),
+    the pop-up's result back in the thread (F-167). A reviewer drove the real bar across close/reopen, two
+    plants, the storage limits, the past turns, both gates and the typed walk.
 - id: M1
   track: matrix
   num: 1
@@ -11943,19 +11947,55 @@ requirements:
     turn runs a command. Where it lives is the browser (decision 17 Sept); a server-side thread shared across
     devices is a later choice.
   verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CH-1, CH-2, CH-6 (a finished turn with its chips and the chosen one marked; a refused write shows Refused; nothing in a past turn runs a command), CB-ans-1 to CB-ans-5 (the empty answer box)"
+  - kind: vitest
+    file: src/test/commandLauncher.test.tsx
+    cases: "CH-5, CB-keep-4 to CB-keep-6 (the thread and the standing question survive close and reopen)"
+  - kind: vitest
+    file: src/test/commandConversation.test.ts
+    cases: "CH-3 to CH-4, CS-1 to CS-3 (persisted per user and plant, 24 h pruned, capped at 200, corrupt storage ignored)"
   - kind: manual
-    steps: "pinned by the S62-b lane when it lands (CH-1 to CH-6); the maintainer's next walk"
-  status: uncovered
+    steps: "the lane drove the real bar and screenshotted the thread (test-results/r427-thread.png, session 177); the reviewer drove close and reopen, the storage limits, the past turns and both gates; the maintainer's next walk"
+  status: covered
   note: >-
     STATED 17 Sept (session 177): "The sentence clearing is not going to help unless we have conversation
     history, why is that difficult to implement? We can have history for the last day for that particular
     user. Is conversation style chatbot difficult? It will be a good sanity check to see what options were
-    provided and what was chosen?"
+    provided and what was chosen?" The history is keyed per person and per board ROOT (the place a grant
+    opens on), not per plant: two roots inside one plant are two threads (reviewer, session 177).
 findings:
+- id: F-166
+  title: A bare yes with nothing standing went to the model, which read it as clear everyone today
+  tag: A confirm word with no question falls through to the readers
+  status: fixed
+  found_by: agent
+  stage: S62
+  refs:
+  - R-395
+  - R-400
+  story: >-
+    Found 17 Sept (session 177) by the S62-b lane driving the real bar: "yes" typed with no question standing was sent to the model, which answered a form --- unassign everyone on today --- and the bar offered a two-command removal lot. S47's fall-through, pre-existing; a harmless word read destructively.
+  fix: >-
+    Session 177 (b17c858). A confirm or cancel word with no question standing is answered "Nothing to say yes to." / "Nothing to cancel." and never reaches a reader; the trace records the model skipped for that reason; a spoken yes still reaches a create pop-up a sentence opened (CB-yes-none-1 to CB-yes-none-3).
+- id: F-167
+  title: A single that hands off to the create pop-up left the trace and the thread saying Waiting for ever
+  tag: The pop-up's own result never came back to the bar
+  status: fixed
+  found_by: agent
+  stage: S62
+  refs:
+  - R-421
+  - R-427
+  story: >-
+    Found 17 Sept (session 177) once the writers answered honestly (F-164): an ordinary assign traces as popup with ran empty, so what the pop-up's auto-create went on to write, refuse or cancel was never in the file or the thread --- the exact silence F-165 hid in.
+  fix: >-
+    Session 177 (b17c858). CreatePopover reports written, refused or cancelled through a callback the bar passes on the hand-off; the bar sets the entry's outcome and ran from it and only then finishes the entry; the thread's Waiting line becomes Written, Refused or Cancelled (CB-t-18 to CB-t-20 and the pop-up's own pin).
 - id: F-162
   title: While a question stands, the input still holds the sentence, so yes or a reason cannot be typed without wiping it
   tag: The answer box and the sentence box are the same box
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S61
   refs:
@@ -11964,11 +12004,11 @@ findings:
   story: >-
     Reported 17 Sept (session 177) with two screenshots: "Tom Baker is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no." and a lot's "say or type yes to do them" --- both above an input still holding the sentence. The person has to clear the sentence to type the answer, and clearing the sentence is what the bar reads as abandoning it. The trace shows the Tom Baker sentence typed three times with no answer ever recorded. When a question stands the input must be empty with a placeholder that says what it takes (yes, no, a reason, a name), the sentence must stay readable above it, and typing the answer must never drop the held command.
   fix: >-
-    Open.
+    Session 177 (b17c858). When a question stands the box empties and its placeholder says what it takes (yes or no; a name, or no; the reason, or no; the job's name); the sentence stays readable above it; typing the answer never drops the held command, and only text that parses as a whole new sentence replaces it; Escape restores the sentence to the box (CB-ans-1 to CB-ans-5).
 - id: F-163
   title: A click outside the bar closes it and loses the whole conversation, so moving a slider empties it
   tag: The launcher unmounts the bar on an outside mousedown; the bar's state lives in the bar
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S61
   refs:
@@ -11976,11 +12016,11 @@ findings:
   story: >-
     Reported 17 Sept (session 177): "The chatbot also vanished when I moved the slider something which you claimed would not happen." R-424 (session 176) fixed the unmount on a board refetch, but CommandLauncher closes the panel on any mousedown outside it by design (Esc closes), and closing unmounts CommandBar, whose status, held command, pending question, lot and trace entry are its own refs. A person who reaches for the toolbar, the day count or the zoom mid-conversation comes back to an empty bar. The conversation must live outside the bar (a store the launcher's open/close does not touch) so reopening shows exactly what stood.
   fix: >-
-    Open.
+    Session 177 (b17c858). The conversation lives in a store the launcher creates per board mount and open/close never resets: status, held command, pending question, lot, rerun, trace entry, input text and the thread; candidate buttons are data, not closures, so a status survives a remount and still works (CB-keep-4 to CB-keep-6, CS-1 to CS-3).
 - id: F-164
   title: The trace records neither a lot's failure message nor a single's write that never landed
   tag: finishTrace runs before the failure status is set; a single's readout is recorded as ran before the writer answers
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S61
   refs:
@@ -11989,11 +12029,11 @@ findings:
   story: >-
     Found 17 Sept (session 177) reading the trace of the maintainer's swap: ran lists three of four readouts and nothing says why the fourth stopped --- runLotNow finishes the entry before setting the Did 3 of 4 status. The same file shows "Sam Patel → Housing A · Cell 3 · 08:00–12:00" under ran for a sentence said on its own in a replay while the database never received the row (F-165). The trace must record the lot's failure text as the entry's last asked, and a single's ran only after the writer confirms --- or record the writer's refusal beside it.
   fix: >-
-    Open.
+    Session 177 (b17c858). A lot's failure text is the entry's outcome before it finishes; a single's ran is written only when the writer answers written, and a refusal or a hand-off to a pop-up is recorded as the outcome (T-7, T-8, CB-t-15 to CB-t-17).
 - id: F-165
   title: The swap's fourth step, Sam Patel onto Cell 3 08:00 to 12:00, did not land, and said on its own it did not land either
   tag: A write the bar promised that the writer refused or left in a pop-up, silently
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S61
   refs:
@@ -12003,7 +12043,7 @@ findings:
   story: >-
     Reported 17 Sept (session 177): "it swapped Sam with John, but John's original assignment which Sam should have been assigned is gone." The trace confirms three of four steps ran. The developer then said the fourth step alone in a fresh browser: the bar printed the readout as run, and the database still had no row for Sam on Cell 3; a replay of the whole sequence removed John's block from Cell 1 (the developer's own replay, not the maintainer's action) before it stalled. Sam holds Welding; Cell 3 requires nothing; no run overlaps 08:00 to 12:00; Sam is not absent. The reason is not known yet: the writer's message was never traced (F-164) and the single path may have opened a pop-up behind the bar that a reason or an override was waiting in. To be reproduced with F-164 in place, and the cause named before it is called fixed.
   fix: >-
-    Open.
+    Session 177 (b17c858). Named: the server's area rule (migration 0072, R-345) on operators.site_node_id --- Sam Patel is the one Plant A person owned by Line 1, so Cell 3 refuses him without an area override; the lot got the refusal after three writes and the single left a pop-up behind the bar. The resolver now asks outside_area before the yes through the same helper the create pop-up marks people with, a single takes the reason and writes the area override, a lot is refused before its yes (R-425's shape for the area rule; pinned through the typed walk and CB-t-15/17).
 - id: F-161
   title: The audit view prints dates and times in the browser machine's zone, not the plant's
   tag: Machine-local Date getters in a screen that should read the plant's clock
@@ -16231,11 +16271,11 @@ sessions:
 - id: 177
   date: 2026-09-17
   title: "Standards --- the plant's zone as the one clock, the duty to ask when a choice repeats, and four findings from six voice sentences (S62, R-426, F-161 to F-165)"
-  shipped: []
-  commits: ['f599932']
+  shipped: [S62]
+  commits: ['f599932', 'b17c858']
   numbers:
-    app_tests: 3913
-    app_test_files: 151
+    app_tests: 3958
+    app_test_files: 152
     tsc: 0
     eslint: 0
     db_checks: 856
@@ -16243,7 +16283,7 @@ sessions:
     e2e: 50
   confirmed: true
   numbers_note: >-
-    npm run test, 17 Sept, after the S62 first-half commit: 3913 tests in 151 files, all passing; tsc and
+    npm run test, 17 Sept, after the S62 commit: 3958 tests in 152 files, all passing; tsc and
     eslint clean; the role walk passed; no migration or RPC changed.
   summary: >-
     The maintainer asked whether yesterday's walk still held (it does: the sentences say today, the board is
@@ -16255,8 +16295,10 @@ sessions:
     landed (F-165, cause not yet named), the answer cannot be typed without wiping the sentence (F-162), a
     click outside the bar loses the conversation (F-163), and the trace does not record a lot's failure or
     a write that never happened (F-164). Seven candidate standards were put to the maintainer, plus one
-    grammar question: a bare pair of hours under 7 ("from 1 to 5") reads literally today. Next: the second
-    half's lane, then the answers.
+    grammar question: a bare pair of hours under 7 ("from 1 to 5") reads literally today. The maintainer then
+    asked for the conversation itself on screen (R-427): the bar is a thread now, kept per person and plant
+    for a day. The second half named F-165 (the area rule on site_node_id), fixed F-162 to F-167 and R-427.
+    Next: the maintainer's answers on the seven candidate standards and the bare-pair hours; the smoke switch; 6b.
 - id: 176
   date: 2026-09-16
   title: "The second walk: thirteen sentences, two rules stated, five findings, and the walk becomes a spec (S61, R-424, R-425, F-153 to F-159)"
