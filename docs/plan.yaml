@@ -2842,7 +2842,7 @@ stages:
   track: core
   num: 63
   title: The bar as a chat panel --- bubbles, a layer that stays open, resizable
-  status: open
+  status: now
   owner: agent
   refs:
   - 'session 177 conversation (the maintainer, 17 Sept)'
@@ -2850,16 +2850,17 @@ stages:
   delivers:
   - R-428
   - R-429
+  - R-437
   what: >-
     **The thread the maintainer liked, in the shape people know.** Bubbles right and left in two colours
     (R-428); the bar a persistent, resizable layer over the board that only its own close control or
     Escape inside it closes (R-429). Wording unchanged; the launcher's close-on-outside-click retired; a
-    remembered size per person. Two small wording items ride along: a bar refusal that borrows the drag's
+    remembered size per person; Enter empties the box every time (R-437, 17 Sept). Two small wording items ride along: a bar refusal that borrows the drag's
     "try the split again" (the capacity refusal of 17 Sept), and the lot's own "Do all N" button label
     inside a bubble.
   state: >-
-    **OPEN 17 Sept (session 177).** Next after the maintainer's answers on the candidate standards. Brief to
-    write: s63-a-chat-panel-brief.md.
+    **NOW 17 Sept (session 178).** The maintainer answered the candidates (R-430 to R-437); building. Brief:
+    s63-a-chat-panel-brief.md.
 - id: M1
   track: matrix
   num: 1
@@ -12022,6 +12023,146 @@ requirements:
     STATED 17 Sept (session 177): "The chat window should be resizable, the data did not disappear when I went
     out of it, however I feel it should stay open unless I close it even if I'm scrolling, it should be like a
     separate layer on top of the board."
+- id: R-430
+  title: A dead end offers the nearest choices --- the bar never answers with only "no such thing"
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, answer 1 of the seven candidates)'
+  - CLAUDE.md §7
+  stated_by: maintainer
+  claim: >-
+    When a sentence names something the board cannot find --- a person, a place, a product, a day off the
+    board --- the bar offers the closest matches as buttons and asks which, for every kind of thing, the way
+    names already do (R-418). An answer that ends with "no such X" and no choice is a defect. Standard: it
+    applies to every dead end the bar has and every one added later.
+  verified_by:
+  - kind: manual
+    steps: "the audit this standard triggers (queued 17 Sept): grep the resolver's refusals for every dead end with no choices, fix or queue each hit, and pin the ones fixed"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "1. Yes". Candidate put on 17 Sept (session 177) under R-426's third duty
+    after the swap's near-miss and the walk's "There is no Cell 1 in Cell 2".
+- id: R-431
+  title: Nothing offered that the server refuses --- capacity, absence and area are asked before the yes, by the server's own predicate
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, answer 2)'
+  - CLAUDE.md §4 and §7
+  stated_by: maintainer
+  claim: >-
+    Every button the bar offers and every readout it prints as done is decided by the same check the server
+    runs: certificates (certificateGaps), the area rule (isAtOrBelow, F-165), capacity and absence. A refusal
+    that arrives after the yes (the 17 Sept capacity refusal) is a defect: the bar asks or refuses before the
+    yes, with the server's reason in the plant's words. This is CLAUDE.md §4's "a screen that shows what the
+    server will refuse" applied to words as well as buttons, made a standard.
+  verified_by:
+  - kind: manual
+    steps: "the audit this standard triggers (queued 17 Sept): capacity and absence checked before the yes in the bar, each pinned; area and certificates already are (R-425, F-165)"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "2. Yes".
+- id: R-432
+  title: A lot is all or nothing --- several writes from one sentence land together or not at all, and the thread says which
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, answer 3)'
+  - CLAUDE.md §7
+  stated_by: maintainer
+  claim: >-
+    A sentence that becomes several writes (a swap, a copy, "everyone", a comma list) either lands every write
+    or none. If one is refused, the ones already written are reverted and the thread says Refused with the
+    reason and "nothing changed". Today a lot writes what it can and refuses the rest (F-165's three writes
+    then a refusal); that is the defect this standard names.
+  verified_by:
+  - kind: manual
+    steps: "the audit this standard triggers (queued 17 Sept): every lot builder in the bar, the revert on a refusal, pinned with a lot whose last write is refused"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "3. Yes".
+- id: R-433
+  title: A walk is a spec first --- no sentence list is handed to the maintainer before it runs green twice as an end-to-end spec
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, answer 4)'
+  - CLAUDE.md §7
+  stated_by: maintainer
+  claim: >-
+    Every walk the maintainer is asked to run exists first as an e2e spec over the same data file
+    (e2e/typedWalk.spec.ts is the first), run green twice before the hand-over. A sentence the spec cannot
+    drive (the spoken half) is named as such in the hand-over. Practice since session 176, a rule from 17 Sept.
+  verified_by:
+  - kind: e2e
+    file: e2e/typedWalk.spec.ts
+    cases: "the ten-sentence typed walk of 17 Sept"
+  - kind: manual
+    steps: "each hand-over names the spec and its two green runs in the session summary"
+  status: covered
+  note: >-
+    STATED 17 Sept (session 178): "4. Yes".
+- id: R-434
+  title: Every bar feature traces --- anything the bar does writes a trace entry, which is also the thread
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, answer 5)'
+  - CLAUDE.md §7
+  stated_by: maintainer
+  claim: >-
+    Anything the bar hears, asks, offers, writes or refuses is a trace entry (R-421) and so a turn in the
+    thread (R-427); a bar feature with no trace line is not done, and a pin for a bar feature asserts its
+    trace entry. F-164 (the trace missing a lot's failure and a write that never happened) is the defect this
+    standard names.
+  verified_by:
+  - kind: manual
+    steps: "the audit this standard triggers (queued 17 Sept): every path through the bar that ends without a trace entry, fixed or queued"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "5. Yes".
+- id: R-435
+  title: When in doubt, ask --- the bar never guesses; a bare pair of hours under 7 asks which half of the day
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, answer 7)'
+  - CLAUDE.md §7
+  stated_by: maintainer
+  claim: >-
+    Where a sentence has two honest readings the bar asks which, with both as buttons, and never picks one
+    quietly; the grammar's afternoon rule (F-134) stays because it resolves an impossible span, not a doubt.
+    First case: "from 1 to 5" with no am or pm on either hour and both under 7 asks "1 am to 5 am, or 1 pm to
+    5 pm?" instead of reading 01:00-05:00.
+  verified_by:
+  - kind: manual
+    steps: "pinned when the bare-pair question lands (queued 17 Sept); then the grammar's own cases"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "7. Yes, definitely ask, always ask when in doubt."
+- id: R-436
+  title: '"Clear" empties the place --- the people and the job go, unless the sentence names a part; and the activity log gives an undo'
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, answer 8)'
+  stated_by: maintainer
+  claim: >-
+    "Clear Cell 3 today" removes everyone on Cell 3 today AND the job scheduled there; the readout names both
+    ("3 people and the Bracket A run"). A sentence that names a part ("clear the operators", "take everyone
+    off") removes only that. Because every write is in the activity log, a cleared place can be put back
+    with one undo from the thread.
+  verified_by:
+  - kind: manual
+    steps: "pinned when the clear grammar and the undo land (queued 17 Sept)"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "Unless specified clear means clearing everything, we can program an undo
+    option since we have the activity data, it should be easy." Today clear removes the people and leaves the
+    run (the Bracket A run on Cell 3 stayed on 17 Sept).
+- id: R-437
+  title: Enter empties the box --- a sent sentence lives in the thread, never in the input
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept)'
+  stated_by: maintainer
+  claim: >-
+    When the person presses Enter the input empties, whether the sentence was written, refused or is standing
+    on a question; the sentence is readable in the thread (R-427), so nothing needs clearing by hand before
+    the next one. Escape still leaves the box empty.
+  verified_by:
+  - kind: manual
+    steps: "pinned by the S63 lane when it lands"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "when I hit enter after typing the sentence, the bar should clear out as
+    well, it should not retain previous sentence. It is not value add to clear and type all the time."
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today
@@ -23975,14 +24116,27 @@ next:
     The maintainer's words on 17 Sept after the first thread: the best one so far, now make it read as a chat
     and stay open. Small UI work on the launcher and the bar; the conversation store already holds the state.
 - kind: task
-  text: "The maintainer's answers on seven candidate standards and the bare-pair hours, then the audit each yes triggers"
+  text: "The audits the five new standards trigger (R-430 to R-434): every dead end offers choices; capacity and absence asked before the yes; a lot reverts on a refusal; every bar path traces"
   why: >-
-    Asked 17 Sept (session 177) under R-426's third duty: a dead end offers the nearest choices; nothing offered
-    that the server refuses (capacity, absence and area still to do in the bar --- the 17 Sept capacity refusal
-    came after the yes); a lot is all or nothing; a walk is a spec first; every bar feature traces; a floor-worded
-    message with a banned-word list; and whether "from 1 to 5" reads as the afternoon. Also: what "clear" means
-    --- today it removes people and leaves the job (the Bracket A run on Cell 3 stayed on 17 Sept); the maintainer
-    expected the job gone too. A decision, then the grammar ("clear Cell 3 completely" or "cancel the job").
+    Answered yes on 17 Sept (session 178). R-426's second duty: a standard declared and left for the next
+    person to trip over is not set. Each is a grep of the resolver and the writers, a fix or a queued card per
+    hit, and a pin. R-433 (a walk is a spec first) is practice already and has its spec.
+- kind: task
+  text: "A bare pair of hours under 7 asks which half of the day (R-435): 'from 1 to 5' offers 1 am to 5 am and 1 pm to 5 pm"
+  why: >-
+    The maintainer, 17 Sept: "definitely ask, always ask when in doubt." Grammar work in parse.ts beside the
+    afternoon rule (F-134), the question through the resolver's ask shape (R-425), a pin in both directions.
+- kind: task
+  text: "Clear empties the place (R-436): the people and the job, the readout naming both; a part named keeps the rest; and an undo from the activity log"
+  why: >-
+    The maintainer, 17 Sept: unless specified, clear means everything; the Bracket A run stayed on Cell 3
+    after "clear Cell 3 today". The undo is the activity log read backwards for the turn's writes; size it
+    when it is next. The model's data needs the new shape in the sixth run.
+- kind: task
+  text: "Floor-worded messages with a banned-word list (candidate 6): the maintainer asked for examples before deciding"
+  why: >-
+    Put with examples on 17 Sept (session 178); decided when the maintainer answers. Two wording items on
+    S63's card would be its first hits.
 - kind: task
   text: "The voice half of the walk through Whisper, read from the trace and the thread"
   why: >-

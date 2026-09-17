@@ -152,3 +152,17 @@ Each is also a `requirements` row in `docs/plan.yaml`. Three duties come with th
 - **Extract, never retype** (§4) and **the server's rule, transcribed** (`certificateGaps`,
   `isAtOrBelow`) are standards of the same kind: what the client shows or offers is decided by the
   same predicate the server runs, taken from the server's own text, never re-derived.
+- **A dead end offers the nearest choices (R-430).** When a sentence names something the board
+  cannot find (a person, a place, a product, a day off the board), the bar offers the closest
+  matches as buttons and asks which. "No such X" with no choice is a defect.
+- **Nothing offered that the server refuses (R-431).** Every button the bar offers and every readout
+  it prints as done is decided by the check the server runs: certificates, the area rule, capacity,
+  absence. A refusal that arrives after the yes is a defect. §4's screen rule, applied to words.
+- **A lot is all or nothing (R-432).** Several writes from one sentence land together or not at all;
+  on a refusal the written ones are reverted and the thread says Refused and nothing changed.
+- **A walk is a spec first (R-433).** No sentence list is handed to the maintainer before it runs
+  green twice as an e2e spec over the same data file (`e2e/typedWalk.spec.ts` is the first).
+- **Every bar feature traces (R-434).** Anything the bar hears, asks, offers, writes or refuses is a
+  trace entry and a turn in the thread; a pin for a bar feature asserts its trace entry.
+- **When in doubt, ask (R-435).** Two honest readings of a sentence become a question with both as
+  buttons, never a quiet pick. "From 1 to 5" with no am/pm asks which half of the day.
