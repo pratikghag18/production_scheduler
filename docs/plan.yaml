@@ -2925,6 +2925,7 @@ stages:
   - R-441
   - R-442
   - R-443
+  - R-444
   what: >-
     **The gap the maintainer found on 17 Sept.** Five pieces (D137): the model and the server (two nullable
     columns, the board payload, a shift_fit verdict the five writers and the resize guard forward); the
@@ -12405,6 +12406,27 @@ requirements:
     could suggest them to create a new shift first before retiring existing shift"; "If they do it anyway
     then they must assign shifts to orphan operators." Supersedes D137's first recommendation (a band NAME
     on the person), which the maintainer correctly rejected: a rename would have orphaned everyone.
+- id: R-444
+  title: A person without a shift is marked in red in the Operators tab, the activity tab's own mark, until an admin gives them one
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept)'
+  stated_by: maintainer
+  claim: >-
+    In the Operators tab every person whose home shift is empty carries the activity tab's red left-edge
+    bar (the inset accent AuditPanel draws for a deletion, in --crit) and the words "No shift" in the shift
+    column, and those rows sort to the top of the list so the gap is seen before anything else. The mark
+    goes the moment a shift is chosen. Colour never carries the meaning alone: the words are always there.
+    The count of people without a shift is said at the top of the tab ("3 people have no shift").
+  verified_by:
+  - kind: manual
+    steps: "pinned when S66's admin piece lands; the rem audit's list if a stylesheet is added"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "Operators without a shift should be assigned a red panel or something
+    visible to remind the admin to assign the shift and help them see the gap clearly, we can repurpose what
+    we're using in the activity tab." AuditPanel.module.css's own reasoning applies in reverse here: it chose a
+    left bar over a red box because a deletion is not an error; a person with no shift IS something wanting
+    attention, so the same bar in --crit with the words is the honest reuse, and one accent system is kept.
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today

@@ -121,7 +121,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">856</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">80</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
-  <div class="stat "><span class="n">323 / 386</span><span class="l">requirements covered by a test</span></div>
+  <div class="stat "><span class="n">323 / 387</span><span class="l">requirements covered by a test</span></div>
 </div>
   <p class="fine">Measured at commit <code>b17c858</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -205,7 +205,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h3>A person belongs to a shift --- a home shift per operator, overtime named everywhere, a supervisor's shift or the whole day</h3>
   <div class="what"><p><b>The gap the maintainer found on 17 Sept.</b> Five pieces (D137): the model and the server (two nullable columns, the board payload, a shift_fit verdict the five writers and the resize guard forward); the admin screens (the Operators tab, a CSV column, the Access tab); the board (the rail measuring free and booked against the person's band with overtime in hours, the pop-ups' chips, the mark on an overtime block); the bar (the grammar, the question before the yes, the sixth run's data); the demo and the walks. About three and a half days of lanes.</p></div>
   <div class="state"><p><b>OPEN 17 Sept (session 178).</b> Scoped and decided the day it was stated: the person points at the band by id, retiring warns with the count and asks where people go (R-443, the maintainer's correction of the developer's name-on-the-person idea); and the supervisor question answered the same turn (R-442: no restriction by default, a setting on the grant in the Access tab). Piece (1) goes before S65's rail so &quot;free 11:30&quot; is measured against the person's own shift.</p></div>
-  <p class="fine">session 178 conversation (the maintainer, 17 Sept) · §19.108 (D137)</p><p class="fine">Delivers <a href="#R-441">R-441</a>, <a href="#R-442">R-442</a>, <a href="#R-443">R-443</a></p>
+  <p class="fine">session 178 conversation (the maintainer, 17 Sept) · §19.108 (D137)</p><p class="fine">Delivers <a href="#R-441">R-441</a>, <a href="#R-442">R-442</a>, <a href="#R-443">R-443</a>, <a href="#R-444">R-444</a></p>
   <span class="tags"><span class="chip next">Open</span><span class="chip mine">Mine</span></span>
 </div></div>
   <details class="donefold"><summary>61 stages shipped — open to read them</summary><div class="stages"><div class="stage done" id="S01">
@@ -3852,7 +3852,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>386 requirements · 323 covered · 39 uncovered · 0 contradicted · 24 superseded</caption>
+<caption>387 requirements · 323 covered · 40 uncovered · 0 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -6553,6 +6553,13 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="reqmain"><b>A person's shift is the band itself --- editing the band carries them along, retiring it warns with the count and asks where they go, and nobody is left without a shift silently</b><br><span class="fine">The person's record points at a shift band by id, never by its words. The Operators tab offers the bands of the home place's pattern, so the options are exactly the shift names. Renaming a band or changing its hours changes nothing on the person. Retiring a band, or the pattern that holds it, first says how many people work it and asks where they go, offering the other bands of that pattern and of any newer pattern on the place, and says the straightforward order: create the new shift first, then retire the old one. Retired anyway, those people have no shift: the Operators tab lists them at the top until each has one, the rail shows them without hours, and nobody is moved to a shift they were not given. On a cell whose pattern is not the home's, the band is matched by name, ignoring case, else the person has no shift there.</span>
       <br><span class="fine">session 178 conversation (the maintainer, 17 Sept) · maintainer · STATED 17 Sept (session 178) over three turns: &quot;the band options should be analogous to shift name options and should go hand in hand&quot;; &quot;When an admin is deleting a shift, we should give them a warning that doing so would make X operators orphan and would they want them to be moved to a new shift? We could suggest them to create a new shift first before retiring existing shift&quot;; &quot;If they do it anyway then they must assign shifts to orphan operators.&quot; Supersedes D137's first recommendation (a band NAME on the person), which the maintainer correctly rejected: a rename would have orphaned everyone.</span></td>
   <td class="fine">manual: pinned when S66's model and admin pieces land</td>
+  <td class="chipcol"><span class="chip q">uncovered</span></td>
+</tr>
+<tr class="r-uncovered" id="R-444">
+  <td class="g-n">R-444</td>
+  <td class="reqmain"><b>A person without a shift is marked in red in the Operators tab, the activity tab's own mark, until an admin gives them one</b><br><span class="fine">In the Operators tab every person whose home shift is empty carries the activity tab's red left-edge bar (the inset accent AuditPanel draws for a deletion, in --crit) and the words &quot;No shift&quot; in the shift column, and those rows sort to the top of the list so the gap is seen before anything else. The mark goes the moment a shift is chosen. Colour never carries the meaning alone: the words are always there. The count of people without a shift is said at the top of the tab (&quot;3 people have no shift&quot;).</span>
+      <br><span class="fine">session 178 conversation (the maintainer, 17 Sept) · maintainer · STATED 17 Sept (session 178): &quot;Operators without a shift should be assigned a red panel or something visible to remind the admin to assign the shift and help them see the gap clearly, we can repurpose what we're using in the activity tab.&quot; AuditPanel.module.css's own reasoning applies in reverse here: it chose a left bar over a red box because a deletion is not an error; a person with no shift IS something wanting attention, so the same bar in --crit with the words is the honest reuse, and one accent system is kept.</span></td>
+  <td class="fine">manual: pinned when S66's admin piece lands; the rem audit's list if a stylesheet is added</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr></tbody></table></div>
 </section>
