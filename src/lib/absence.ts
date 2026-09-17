@@ -45,8 +45,11 @@
  * 88_absences_test.sql's AB15/AB16/AB17.
  *
  * Dependency-free, so it runs under `node --experimental-strip-types` and
- * `src/test/absence.test.ts` covers it without a network.
+ * `src/test/absence.test.ts` covers it without a network. The one import is the
+ * date seam by RELATIVE path with its extension, which strip-types resolves and
+ * the `@/` bundler alias would not.
  */
+import { isoPlusDays } from "./format/dates.ts";
 
 /**
  * One absence, in the server's terms. `from`/`to` are the inclusive
@@ -95,11 +98,11 @@ function isUtcMidnight(d: Date): boolean {
   );
 }
 
-/** The day after a `YYYY-MM-DD`, still `YYYY-MM-DD`. Built at explicit UTC. */
+/** The day after a `YYYY-MM-DD`, still `YYYY-MM-DD` -- the seam's calendar
+ *  arithmetic (R-426). The relative `.ts` path keeps this module runnable
+ *  under `node --experimental-strip-types`, which the `@/` alias would not. */
 function nextDay(day: string): string {
-  const d = new Date(`${day}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return utcDay(d);
+  return isoPlusDays(day, 1);
 }
 
 /**

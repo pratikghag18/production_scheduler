@@ -17,7 +17,7 @@ import {
   buildDayAxis,
   wallOf,
 } from "@/features/board/lib/time";
-import { partsInZone } from "@/lib/format/timezones";
+import { isoDayInZone, partsInZone, todayIsoInZone } from "@/lib/format/timezones";
 
 /**
  * F-125: `formatClock`/`formatDayLabel` (and `partsInZone` beneath them) used
@@ -274,5 +274,56 @@ describe("wallOf (S55, D130 item 3)", () => {
         expect(wallOf(axis, day * 1440 + m)).toEqual({ dayIndex: day, minuteOfDay: m });
       }
     }
+  });
+});
+
+/**
+ * ⭐⭐ R-426 (S62-a) — "WHICH DAY IS IT" IS A QUESTION FOR THE ZONE, AND THESE
+ * ARE THE NUMBERS.
+ *
+ * Both of the wrong answers shipped, and neither was visible in the afternoon:
+ * `toISOString().slice(0,10)` (the UTC day, already tomorrow through the
+ * evening west of Greenwich — F-159, found at 19:09 in Chicago) and
+ * `getFullYear()/getMonth()/getDate()` (the browser machine's day — F-161).
+ * `isoDayInZone` is what replaced both, and `todayIsoInZone` is it asked of now.
+ *
+ * ⚠️ THE INSTANT IS FIXED AND THE EXPECTATIONS ARE WRITTEN OUT, so these cases
+ * hold on a machine in any zone — which is the property the two bugs cost us.
+ */
+describe("R-426: an instant's calendar day belongs to a zone, not to a machine", () => {
+  // 00:30 UTC on 17 September: three zones, three different DAYS.
+  const AT = new Date("2026-09-17T00:30:00Z");
+
+  it("reads the day the plant is having, not the UTC one", () => {
+    expect(isoDayInZone(AT, "UTC")).toBe("2026-09-17");
+    expect(isoDayInZone(AT, "America/Chicago")).toBe("2026-09-16");
+    expect(isoDayInZone(AT, "Asia/Tokyo")).toBe("2026-09-17");
+  });
+
+  it("⭐ F-159's own instant: 19:09 Chicago is still the 16th there and the 17th in UTC", () => {
+    const evening = new Date("2026-09-17T00:09:00Z");
+    expect(isoDayInZone(evening, "America/Chicago")).toBe("2026-09-16");
+    expect(evening.toISOString().slice(0, 10)).toBe("2026-09-17");
+  });
+
+  it("agrees with the zoned day axis, which is the whole point of sharing partsInZone", () => {
+    const p = partsInZone(AT, "America/Chicago");
+    expect(isoDayInZone(AT, "America/Chicago")).toBe(
+      `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`,
+    );
+  });
+
+  it("todayIsoInZone is isoDayInZone asked of an instant, defaulting to now", () => {
+    expect(todayIsoInZone("America/Chicago", AT)).toBe("2026-09-16");
+    expect(todayIsoInZone("Asia/Tokyo", AT)).toBe("2026-09-17");
+    // The default argument is the real clock, so only its SHAPE can be pinned.
+    expect(todayIsoInZone("UTC")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("holds across a DST changeover, where the offset itself moves", () => {
+    // 8 March 2026, 07:30 UTC — 01:30 Chicago, before the 02:00 spring forward.
+    expect(isoDayInZone(new Date("2026-03-08T07:30:00Z"), "America/Chicago")).toBe("2026-03-08");
+    // 04:30 UTC on 8 March is 22:30 on the 7th, before the change.
+    expect(isoDayInZone(new Date("2026-03-08T04:30:00Z"), "America/Chicago")).toBe("2026-03-07");
   });
 });

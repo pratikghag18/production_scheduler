@@ -42,7 +42,7 @@ import {
   type SetAbsenceInput,
 } from "@/lib/api";
 import { formatCalendarDay, coerceDateFormat, DEFAULT_DATE_FORMAT } from "@/lib/format/dates";
-import { coerceTimezone } from "@/lib/format/timezones";
+import { coerceTimezone, todayIsoInZone } from "@/lib/format/timezones";
 import { formatClock, zonedTimeToInstant } from "@/features/board/lib/time";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
@@ -88,11 +88,11 @@ function parseHm(s: string): { h: number; mi: number } | null {
   return m === null ? null : { h: Number(m[1]), mi: Number(m[2]) };
 }
 
-/** Today, as the UTC `YYYY-MM-DD` the rest of the absence machinery compares
- *  days in (absence.ts's header) — used only to sort past from upcoming. */
-function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+// R-426: `todayUtc()` used to sit here. The UTC day is already TOMORROW through
+// the evening west of Greenwich (F-159), which filed a whole-day absence for
+// today under "Past" for anyone looking after 19:00 Chicago. "Today" is now
+// asked of the person's own plant zone — `todayIsoInZone(zone)`, below, where
+// that zone is already resolved.
 
 /** Soonest first: by effective day, then whole-day before part-day on a tied
  *  day — the same order `absenceGaps` sorts by (src/lib/absence.ts). */
@@ -143,7 +143,7 @@ export function OperatorAbsences({ operatorId, displayName, homeNodeId }: Props)
   );
 
   const [showPast, setShowPast] = useState(false);
-  const today = todayUtc();
+  const today = todayIsoInZone(zone);
   const upcoming = useMemo(() => mine.filter((a) => a.to >= today), [mine, today]);
   const past = useMemo(() => mine.filter((a) => a.to < today), [mine, today]);
   const shown = showPast ? mine : upcoming;

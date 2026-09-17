@@ -24,6 +24,7 @@
 import { supabase } from "@/lib/supabase";
 import { shapeMismatch, toSchedulerError } from "./errors";
 import { fetchAll } from "./paging";
+import { isoPlusDays } from "@/lib/format/dates";
 
 /** The one column list. Reads and fixtures are built from this and nothing else. */
 export const ABSENCE_COLUMNS =
@@ -90,11 +91,10 @@ function strOrNull(v: unknown): string | null | undefined {
   return v === null || typeof v === "string" ? (v as string | null) : undefined;
 }
 
-/** The day before a `YYYY-MM-DD`, built at explicit UTC (never a naive parse). */
+/** The day before a `YYYY-MM-DD` -- the seam's calendar arithmetic (R-426),
+ *  never a naive parse. */
 function prevDay(day: string): string {
-  const d = new Date(`${day}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
+  return isoPlusDays(day, -1);
 }
 
 /**

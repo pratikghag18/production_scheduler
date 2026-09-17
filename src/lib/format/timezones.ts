@@ -270,3 +270,42 @@ export function zonedTimeToInstant(
   if (off2 !== off1) ts = utcGuess - off2;
   return new Date(ts);
 }
+
+/**
+ * ⭐ WHICH CALENDAR DAY AN INSTANT FALLS ON, IN `zone` — as `"YYYY-MM-DD"`.
+ *
+ * ⚠️⚠️ THE QUESTION R-426 IS ABOUT. An instant has no day of its own; a day is
+ * what a ZONE says it is, and the two readings differ for several hours out of
+ * every twenty-four. A 22:00 run in Chicago is already tomorrow in UTC; a
+ * 06:00 one in Tokyo was yesterday. Every "did these two happen on the same
+ * day", every "is this absence in the past", every date printed beside a time
+ * asks this, and it must ask it of the plant.
+ */
+export function isoDayInZone(d: Date, zone: string): string {
+  const p = partsInZone(d, zone);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+}
+
+/**
+ * ⭐ TODAY, AS THE PLANT HAS IT (R-426) — `isoDayInZone` asked of now.
+ *
+ * ⚠️⚠️ THIS IS THE ONLY HONEST WAY TO SAY "TODAY" IN THIS APP, and the two
+ * wrong ways both shipped and both had to be found by somebody noticing a
+ * screen at the wrong hour:
+ *
+ *   - `new Date().toISOString().slice(0, 10)` is the UTC day, which is
+ *     TOMORROW for the evening hours west of Greenwich. That is F-159 exactly
+ *     — the board opened on the 17th at 19:09 on the 16th in Chicago.
+ *   - `getFullYear()/getMonth()/getDate()` is the BROWSER MACHINE's day, which
+ *     is whatever zone the laptop is set to — right by luck for somebody
+ *     standing in the plant, wrong for a regional admin, a laptop left on UTC,
+ *     or anyone travelling. F-161 is that shape.
+ *
+ * The plant's zone is the one clock, so "today" is asked of the zone. Callers
+ * that have no zone yet must treat their answer as a first guess and correct
+ * it when the setting lands (`BoardPage`'s `anchorToZone`), never freeze it.
+ */
+export function todayIsoInZone(zone: string, at: Date = new Date()): string {
+  return isoDayInZone(at, zone);
+}

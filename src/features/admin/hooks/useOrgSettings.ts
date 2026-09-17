@@ -149,6 +149,35 @@ export function useCompanyTimezone(enabled: boolean): string {
   return DEFAULT_TIMEZONE;
 }
 
+/**
+ * ⭐ THE ZONE IN FORCE — at `plantNodeId` when one is given, and the company's
+ * when one is not. The exact twin of `useDateFormat` above, and it exists for
+ * the same reason F-090 made that one take a plant: a screen narrowed to a
+ * plant must read that plant's answer, not the company's.
+ *
+ * ⚠️⚠️ THIS IS THE ADMIN SIDE'S ANSWER TO R-426. The board gets the zone on its
+ * payload, resolved on the SERVER for its own root (`board_window.timezone`,
+ * migration 0063) — the admin screens have no such payload, so they resolve it
+ * from the two reads they already make. No new query: `useCompanyTimezone` and
+ * `usePlantOverridesFor("timezone")` are the same two cache entries the
+ * Settings panel is already filling, so a screen that adds this costs nothing.
+ *
+ * ⛔ ONLY CORRECT FOR A ROOT, exactly as `useDateFormat` is — "its own override,
+ * else the company's" is the server's rule reduced to a node with no ancestors.
+ * A deeper node must be resolved on the server (`fetchNodeSetting`, which is
+ * what `OperatorAbsences` and `AbsencesPanel` use for a person's HOME node).
+ *
+ * ⚠️ WHILE THE READS ARE IN FLIGHT THIS ANSWERS `DEFAULT_TIMEZONE`. A caller
+ * that freezes the first answer into `useState` freezes UTC — that is F-159's
+ * shape. Derive from it on every render, or correct it when it lands.
+ */
+export function useTimezone(enabled: boolean, plantNodeId: string | null = null): string {
+  const company = useCompanyTimezone(enabled);
+  const overrides = usePlantOverridesFor(enabled && plantNodeId !== null, "timezone");
+  if (plantNodeId === null) return company;
+  return asTimezone(ownOverride(overrides.data, plantNodeId)) ?? company;
+}
+
 /** Set the COMPANY-wide fallback zone. Refused server-side unless a system
  *  admin; invalidate-and-refetch, no optimistic update — the twin of
  *  `useSetDateFormat`. */

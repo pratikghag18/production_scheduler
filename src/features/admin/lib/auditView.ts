@@ -21,12 +21,15 @@
  * answer after a rename: a log saying "Widget Z was renamed" when the row is now
  * called something else is a log that rewrites its own past.
  *
- * ⚠️ NO RUNTIME DEPENDENCY BEYOND THE DATE SEAM. This module imports
+ * ⚠️ NO RUNTIME DEPENDENCY BEYOND THE TWO SEAMS. This module imports
  * `src/lib/format/dates.ts` (itself pure) so that a date in the log reads the
  * way every other date in the app reads — the maintainer, 3 Sept: *"can we make
  * sure we add something so any new date displayed on the app in future
- * automatically adopts this?"* The org's token is passed IN; nothing here
- * fetches anything.
+ * automatically adopts this?"* — and, since F-161, `format/timezones.ts` plus
+ * `board/lib/time.ts`'s `formatClock`, so that an HOUR in the log reads in the
+ * PLANT's zone (R-426) rather than in whatever zone the reader's laptop is set
+ * to. The org's token and the zone are both passed IN; nothing here fetches
+ * anything, and neither seam touches the network.
  *
  * AUDIT-LOG-SPECIFIC AND DELIBERATELY DUMB ABOUT THE DOMAIN. It knows six table
  * names and a handful of column labels, and falls back to a readable default for
@@ -34,6 +37,8 @@
  * by triggers on the database and can grow without this file being told.
  */
 import { formatCalendarDay, type DateFormat } from "@/lib/format/dates";
+import { isoDayInZone } from "@/lib/format/timezones";
+import { formatClock } from "@/features/board/lib/time";
 
 export type AuditAction = "insert" | "update" | "delete";
 
@@ -203,41 +208,60 @@ function parseTimestamp(raw: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** The LOCAL calendar day of an instant, as `YYYY-MM-DD`.
- *  ⚠️ NOT `toISOString().slice(0,10)`, which is the UTC day and is a day out
- *  west of Greenwich — the same trap `SettingsPanel`'s `todayIso` documents. */
-function localDay(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate(),
-  ).padStart(2, "0")}`;
-}
+/**
+ * The calendar day of an instant IN THE PLANT'S ZONE, as `YYYY-MM-DD`.
+ *
+ * ⭐⭐ F-161 (R-426). This was `d.getFullYear()/getMonth()/getDate()` — the
+ * BROWSER MACHINE's zone — and it was wrong in a way nobody standing in the
+ * plant could see. A regional admin reading the log from another zone, or
+ * anyone on a laptop left on UTC, got every change stamped with the wrong hour
+ * and an evening change filed under the wrong day. "Times are in your
+ * timezone" was even written on the screen, which made a bug read as a
+ * feature: the log is a record of what happened AT THE PLANT, so the plant's
+ * clock is the only one that can date it.
+ *
+ * The old comment here was half right — it rejected `toISOString().slice(0,10)`
+ * (the UTC day, a day out west of Greenwich) and reached for the machine
+ * instead. Both are wrong; the zone is the answer to both.
+ */
+const dayInZone = isoDayInZone;
 
-function localHm(d: Date): string {
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+/** "19:30" in `zone` — the board's own clock formatter, so a time in the log
+ *  and a time on the board are the same string for the same instant. */
+function hmInZone(d: Date, zone: string): string {
+  return formatClock(d, zone);
 }
 
 /**
- * An instant, through the app's date seam plus a local clock time.
+ * An instant, through the app's date seam plus the plant's clock.
+ *
+ * `zone` is the IANA name in force where the reader is looking — the chosen
+ * plant's setting, else the company's (`AuditPanel` resolves it the same way it
+ * resolves `fmt`). It defaults to UTC so a caller that has not threaded one
+ * gets the pre-zone board default rather than the machine's guess.
  *
  * Returns the raw string untouched when it cannot be parsed — evidence a reader
  * can still act on beats a tidy "Invalid Date", and this is a log.
  */
-export function formatInstant(iso: string, fmt: DateFormat): string {
+export function formatInstant(iso: string, fmt: DateFormat, zone: string = "UTC"): string {
   const d = parseTimestamp(iso);
   if (d === null) return iso;
-  return `${formatCalendarDay(localDay(d), fmt)}, ${localHm(d)}`;
+  return `${formatCalendarDay(dayInZone(d, zone), fmt)}, ${hmInZone(d, zone)}`;
 }
 
-/** `[a, b)` -> "day, hh:mm → hh:mm", collapsing the day when both ends share it. */
-function formatRange(fromRaw: string, toRaw: string, fmt: DateFormat): string | null {
+/** `[a, b)` -> "day, hh:mm → hh:mm", collapsing the day when both ends share it.
+ *  ⚠️ "SHARE A DAY" IS ASKED OF THE PLANT'S ZONE (F-161), which is the only
+ *  reading under which a 22:00–06:00 night shift spans two days for everybody
+ *  looking at it rather than for whoever's laptop happens to be west of it. */
+function formatRange(fromRaw: string, toRaw: string, fmt: DateFormat, zone: string): string | null {
   const from = parseTimestamp(fromRaw);
   const to = parseTimestamp(toRaw);
   if (from === null || to === null) return null;
-  const fromDay = localDay(from);
-  if (fromDay === localDay(to)) {
-    return `${formatCalendarDay(fromDay, fmt)}, ${localHm(from)} → ${localHm(to)}`;
+  const fromDay = dayInZone(from, zone);
+  if (fromDay === dayInZone(to, zone)) {
+    return `${formatCalendarDay(fromDay, fmt)}, ${hmInZone(from, zone)} → ${hmInZone(to, zone)}`;
   }
-  return `${formatInstant(fromRaw, fmt)} → ${formatInstant(toRaw, fmt)}`;
+  return `${formatInstant(fromRaw, fmt, zone)} → ${formatInstant(toRaw, fmt, zone)}`;
 }
 
 /**
@@ -251,7 +275,7 @@ function formatRange(fromRaw: string, toRaw: string, fmt: DateFormat): string | 
  * `String(v)` — `[object Object]` is the classic way a value silently stops
  * being evidence.
  */
-export function formatAuditValue(value: unknown, fmt: DateFormat): string {
+export function formatAuditValue(value: unknown, fmt: DateFormat, zone: string = "UTC"): string {
   if (value === null || value === undefined) return "—";
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "number") return String(value);
@@ -259,7 +283,7 @@ export function formatAuditValue(value: unknown, fmt: DateFormat): string {
     if (value === "") return "(blank)";
     const range = RANGE_LITERAL.exec(value);
     if (range !== null) {
-      const shown = formatRange(range[1], range[2], fmt);
+      const shown = formatRange(range[1], range[2], fmt, zone);
       // A range whose bounds this code cannot read is still shown as stored;
       // swallowing it would delete evidence to keep the column tidy.
       if (shown !== null) return shown;
@@ -584,6 +608,7 @@ function changesBetween(
   after: Record<string, unknown> | null,
   fmt: DateFormat,
   names: AuditNames | undefined,
+  zone: string,
 ): AuditFieldChange[] {
   /**
    * ⚠️ EACH SIDE IS NAMED FROM ITS OWN SNAPSHOT. `before.product_name`
@@ -598,7 +623,7 @@ function changesBetween(
    */
   const show = (field: string, v: unknown, row: Record<string, unknown> | null): string =>
     (names === undefined ? null : resolveIdentity(field, v, row, names)) ??
-    formatAuditValue(v, fmt);
+    formatAuditValue(v, fmt, zone);
   const keys = new Set<string>([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]);
   const out: AuditFieldChange[] = [];
   for (const field of keys) {
@@ -643,6 +668,7 @@ export function describeEntry(
   entry: DescribableEntry,
   fmt: DateFormat,
   names?: AuditNames,
+  zone: string = "UTC",
 ): AuditLine {
   const kind = describeTable(entry.tableName);
   const before = isRecord(entry.before) ? entry.before : null;
@@ -652,6 +678,6 @@ export function describeEntry(
     subject: subjectFor({ ...entry, before, after }),
     headline: `${kind} ${VERB[entry.action] ?? entry.action}`,
     removed: entry.action === "delete",
-    changes: changesBetween(before, after, fmt, names),
+    changes: changesBetween(before, after, fmt, names, zone),
   };
 }

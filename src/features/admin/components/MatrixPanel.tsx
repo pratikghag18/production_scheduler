@@ -39,6 +39,8 @@ import {
 } from "../hooks/useOperators";
 import { useEditRights } from "../hooks/useEditRights";
 import { usePlantFilter } from "../hooks/usePlantFilter";
+import { useTimezone } from "../hooks/useOrgSettings";
+import { todayIsoInZone } from "@/lib/format/timezones";
 import { buildMatrix } from "../lib/matrix";
 import {
   MatrixChip,
@@ -64,10 +66,6 @@ import styles from "./MatrixPanel.module.css";
 /** Read by `AdminPage`'s rail, the same way `TRAININGS_PANEL_READY` is. */
 export const MATRIX_PANEL_READY = true;
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function MatrixPanel() {
   const { session, profile, loading: sessionLoading } = useSession();
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
@@ -88,6 +86,10 @@ export function MatrixPanel() {
 
   const nodes = useMemo(() => data?.nodes ?? [], [data]);
   const plantFilter = usePlantFilter(nodes);
+  /* R-426: "today" decides which cells read EXPIRED and which read EXPIRING,
+     so it is the plant's today, never the UTC one (which is tomorrow for the
+     evening hours west of Greenwich -- F-159) and never the browser's. */
+  const zone = useTimezone(canQuery, plantFilter.choice);
 
   // ⭐ M5: the "expiring soon" window and the area / line the reader last chose,
   // remembered PER VIEWER (per org) the way the plant filter is — see
@@ -183,10 +185,10 @@ export function MatrixPanel() {
       skills: data.skills,
       operatorSkills: data.operatorSkills,
       scopeNodeId,
-      today: todayIso(),
+      today: todayIsoInZone(zone),
       windowDays,
     });
-  }, [data, scopeNodeId, windowDays]);
+  }, [data, scopeNodeId, windowDays, zone]);
 
   const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n] as const)), [nodes]);
   const holdings = useMemo(() => {

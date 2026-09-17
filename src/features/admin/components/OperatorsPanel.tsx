@@ -45,7 +45,8 @@ import type { OperatorSkillRecord } from "@/lib/api";
 // function that renders a `YYYY-MM-DD` with it. `../lib/operators` cannot import
 // these (it is dependency-free, see below), so the token is applied here.
 import { formatCalendarDay } from "@/lib/format/dates";
-import { useDateFormat } from "../hooks/useOrgSettings";
+import { useDateFormat, useTimezone } from "../hooks/useOrgSettings";
+import { todayIsoInZone } from "@/lib/format/timezones";
 // ⚠️ THE SCOPE HELPERS ARE IMPORTED HERE AND NOT INTO `../lib/operators`. That
 // module is dependency-free by design — its header says so, and that is what
 // lets `operators.test.ts` run it under `node --experimental-strip-types`. An
@@ -196,20 +197,14 @@ import styles from "./OperatorsPanel.module.css";
 /** Flip to `true` in the same commit that gives this panel a real body. */
 export const OPERATORS_PANEL_READY = true;
 
-/**
- * Today, as a `YYYY-MM-DD` LOCAL day.
- *
- * Not `toISOString().slice(0, 10)`, which is the UTC day and is a day out for
- * anybody west of Greenwich for part of every evening. `expires_at` is a
- * Postgres `date` with no timezone at all, so the honest comparison is against
- * the day the person at the screen is actually having.
- */
-function todayIso(): string {
-  const now = new Date();
-  const mm = `${now.getMonth() + 1}`.padStart(2, "0");
-  const dd = `${now.getDate()}`.padStart(2, "0");
-  return `${now.getFullYear()}-${mm}-${dd}`;
-}
+// R-426: `todayIso()` used to sit here, built from the browser machine's
+// getters. Its own comment had the right half of the argument -- the UTC day is
+// a day out west of Greenwich for part of every evening -- and reached for the
+// wrong replacement: the MACHINE's day is whatever zone a laptop is set to,
+// which is right by luck for somebody standing in the plant and wrong for a
+// regional admin or anyone travelling. `expires_at` is a Postgres `date` with
+// no timezone at all, so the honest comparison is against the PLANT'S day, and
+// that is `todayIsoInZone(zone)` below, resolved after the plant filter.
 
 /**
  * The three place verdicts, as chips that borrow the matrix chip's SHAPE and
@@ -245,7 +240,13 @@ export function OperatorsPanel() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
-  const [asOf, setAsOf] = useState<string>(todayIso);
+  /* ⚠️ `null` IS "TODAY", AND IT IS NOT THE SAME AS TODAY'S STRING. This was
+     `useState<string>(todayIso)`, a lazy initialiser -- which freezes whatever
+     the zone happened to be at MOUNT, and at mount the zone reads are still in
+     flight and answer UTC. Freezing a first guess and never correcting it is
+     F-159 exactly. Held as "nobody has chosen a day" instead, and resolved
+     against the zone on every render until somebody picks one. */
+  const [asOf, setAsOf] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const [draftName, setDraftName] = useState("");
@@ -323,6 +324,11 @@ export function OperatorsPanel() {
    * a list spanning plants has no one plant to ask.
    */
   const dateFormat = useDateFormat(canQuery, plant.choice);
+  /* R-426: the same resolution, for the CLOCK -- "work booked up to" defaults
+     to the PLANT'S today, so a certification that lapses tonight reads the
+     same way for the supervisor on the floor and the admin two zones away. */
+  const zone = useTimezone(canQuery, plant.choice);
+  const asOfDay = asOf ?? todayIsoInZone(zone);
 
   // ⭐ THE LIST AS IT WOULD BE WITH NO PLANT FILTER, KEPT SO THE TRIM CAN BE
   // COUNTED. `scope.ts`'s header is the reason it is not simply dropped:
@@ -364,9 +370,9 @@ export function OperatorsPanel() {
         skills: data.skills,
         operatorSkills: data.operatorSkills,
       },
-      asOf,
+      asOfDay,
     );
-  }, [selected, data, asOf]);
+  }, [selected, data, asOfDay]);
 
   // ⭐ TWO TRIMS, IN THIS ORDER, AND THE ORDER IS THE POINT. First to the
   // person's own plant (see the header), then to the places that are active
@@ -1005,7 +1011,7 @@ export function OperatorsPanel() {
                   <input
                     className={styles.input}
                     type="date"
-                    value={asOf}
+                    value={asOfDay}
                     onChange={(e) => setAsOf(e.target.value)}
                   />
                 </label>

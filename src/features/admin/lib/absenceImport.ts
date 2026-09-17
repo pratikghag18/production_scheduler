@@ -53,6 +53,7 @@ import type { AbsenceImportRow } from "@/lib/api";
 import type { CsvError, CsvTable } from "./csv";
 import type { FieldDef, ImportView } from "./importView";
 import { zonedTimeToInstant } from "@/lib/format/timezones";
+import { isCalendarDay } from "@/lib/format/dates";
 
 /* ===========================================================================
  * §1. Columns.
@@ -204,14 +205,10 @@ export interface ImportPlan {
   missingRequired: readonly ("from" | "to" | "reason")[];
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** A real calendar day in `YYYY-MM-DD`, checked at explicit UTC (no naive parse). */
-function isValidDay(s: string): boolean {
-  if (!ISO_DATE.test(s)) return false;
-  const d = new Date(`${s}T00:00:00.000Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
-}
+/** A real calendar day in `YYYY-MM-DD` -- the seam's validator (R-426), which
+ *  rejects 2026-02-30 as well as 2026-13-01 and is the reason no screen builds
+ *  a midnight instant of its own to find out. */
+const isValidDay = isCalendarDay;
 
 /**
  * R-359. A wall-clock reading from the sheet, as hours and minutes, or null.

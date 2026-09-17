@@ -6,7 +6,12 @@ import { ZOOMS, type ZoomIndex } from "../lib/geometry";
 import { formatDayLabel, addMinutes, zonedTimeToInstant, MINUTES_PER_DAY } from "../lib/time";
 import { shouldOfferRootPicker, type BoardRoot } from "../lib/rootSelection";
 import { boardKeys } from "../hooks/useBoardWindow";
-import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
+import {
+  DEFAULT_DATE_FORMAT,
+  dayMarker,
+  isoOfDayMarker,
+  type DateFormat,
+} from "@/lib/format/dates";
 import { Chevron } from "@/components/icons";
 import { CopyWeekDialog } from "./CopyWeekDialog";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
@@ -65,7 +70,9 @@ export function BoardToolbar({
   dateFormat?: DateFormat;
   zone?: string;
 }) {
-  const startInputValue = windowStartDate.toISOString().slice(0, 10);
+  // The store holds a WHICH-DAY MARKER, not an instant; the seam owns both
+  // directions of that encoding (R-426), so the input never re-derives it.
+  const startInputValue = isoOfDayMarker(windowStartDate);
 
   // D88a (R-353): the displayed range must read the PLANT's days, the same ones
   // the board axis draws. `windowStartDate` is the store's UTC-midnight "which
@@ -276,7 +283,7 @@ export function BoardToolbar({
           onChange={(e) => {
             const v = e.target.value;
             if (!v) return;
-            const next = new Date(`${v}T00:00:00.000Z`);
+            const next = dayMarker(v);
             if (!Number.isNaN(next.getTime())) onWindowChange(next, windowDayCount);
           }}
         />

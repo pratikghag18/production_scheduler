@@ -28,6 +28,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { formatCalendarDay, type DateFormat } from "@/lib/format/dates";
+import { partsInZone } from "@/lib/format/timezones";
 import {
   OMITTED_FIELDS,
   describeActor,
@@ -40,21 +41,30 @@ import {
 
 const FMT: DateFormat = "d_mon_yyyy";
 
-/** The local calendar day of an instant, built the way the module must build
- *  it: LOCAL, never `toISOString().slice(0,10)` (which is the UTC day and is a
- *  day out west of Greenwich). Computed here so no case hard-codes a string
- *  that only holds in one timezone. */
-function localDay(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate(),
-  ).padStart(2, "0")}`;
+/**
+ * The calendar day and the clock of an instant IN A NAMED ZONE.
+ *
+ * ⭐ F-161 (R-426). These used to be `localDay`/`localHm`, built from
+ * `getFullYear()/getMonth()/getDate()/getHours()` — the MACHINE's zone, the
+ * same mistake the module under test was making, so the test agreed with the
+ * bug and could never have caught it. A test that computes its expectation the
+ * way the code does is not an assertion, it is an echo.
+ *
+ * Asked of a zone instead, so every case below states which clock it means and
+ * holds on any machine.
+ */
+function dayIn(iso: string, zone: string): string {
+  const p = partsInZone(new Date(iso), zone);
+  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
 }
 
-function localHm(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+function hmIn(iso: string, zone: string): string {
+  const p = partsInZone(new Date(iso), zone);
+  return `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
 }
+
+/** `formatInstant`'s own default when a caller threads no zone. */
+const UTC = "UTC";
 
 describe("the six audited tables are named in words, not in table names", () => {
   it("names every table that carries the trigger", () => {
@@ -125,10 +135,10 @@ describe("values are rendered for a reader", () => {
    */
   it("decodes a Postgres range into a start and an end", () => {
     const out = formatAuditValue('["2026-09-04 16:30:00+00","2026-09-04 19:30:00+00")', FMT);
-    const day = formatCalendarDay(localDay("2026-09-04T16:30:00Z"), FMT);
+    const day = formatCalendarDay(dayIn("2026-09-04T16:30:00Z", UTC), FMT);
     expect(out).toContain(day);
-    expect(out).toContain(localHm("2026-09-04T16:30:00Z"));
-    expect(out).toContain(localHm("2026-09-04T19:30:00Z"));
+    expect(out).toContain(hmIn("2026-09-04T16:30:00Z", UTC));
+    expect(out).toContain(hmIn("2026-09-04T19:30:00Z", UTC));
     expect(out).toContain("→");
     expect(out).not.toContain("NaN");
     expect(out).not.toContain('"');
@@ -147,22 +157,102 @@ describe("values are rendered for a reader", () => {
 });
 
 describe("an instant is shown through the app's date seam", () => {
-  it("renders the org's chosen format and the local time of day", () => {
+  it("renders the org's chosen format and the time of day", () => {
     const iso = "2026-09-04T19:11:44.921206+00:00";
     const out = formatInstant(iso, "iso");
-    expect(out).toContain(formatCalendarDay(localDay(iso), "iso"));
-    expect(out).toContain(localHm(iso));
+    expect(out).toContain(formatCalendarDay(dayIn(iso, UTC), "iso"));
+    expect(out).toContain(hmIn(iso, UTC));
   });
 
   it("follows the org's format token rather than hard-coding one", () => {
     const iso = "2026-09-04T19:11:44.921206+00:00";
     expect(formatInstant(iso, "mdy_slash")).toContain(
-      formatCalendarDay(localDay(iso), "mdy_slash"),
+      formatCalendarDay(dayIn(iso, UTC), "mdy_slash"),
     );
   });
 
   it("shows an unparseable timestamp as stored rather than as NaN", () => {
     expect(formatInstant("not a time", FMT)).toBe("not a time");
+  });
+});
+
+/**
+ * ⭐⭐ F-161 (R-426) — THE PLANT'S ZONE IS THE ONE CLOCK, AND THIS IS THE CASE
+ * THAT SAYS SO IN NUMBERS.
+ *
+ * The instant is half an hour past midnight UTC on 17 September. That is the
+ * single most informative instant to pin, because the three answers a reader
+ * could be shown are three DIFFERENT DAYS as well as three different hours:
+ *
+ *   America/Chicago (UTC-5)  ->  16 Sep, 19:30   the day BEFORE
+ *   UTC                      ->  17 Sep, 00:30
+ *   Asia/Tokyo    (UTC+9)    ->  17 Sep, 09:30
+ *
+ * A screen that shows a change "made on the 17th at 00:30" to a plant manager
+ * in Chicago is describing an evening that, for her, was yesterday. The old
+ * code read the BROWSER MACHINE's zone, so the answer depended on the laptop
+ * and not on the plant — right by luck for somebody standing in it, wrong for a
+ * regional admin, and wrong on a machine left on UTC. The zone is now threaded
+ * in from the plant setting (`AuditPanel`'s `useTimezone(canQuery,
+ * plant.choice)`, the exact twin of how it resolves the date format).
+ *
+ * ⚠️ THE DAYS ARE HARD-CODED HERE, ON PURPOSE. Everywhere else in this file the
+ * expectation is computed, so no case is accidentally pinned to one timezone.
+ * This case is ABOUT the timezone, so computing the expectation would be the
+ * echo the helper's own note warns against: the numbers are written out, and if
+ * the code ever reads a different clock this test says which one it should have
+ * read.
+ */
+describe("F-161: the audit log is dated by the plant's clock, not the reader's machine", () => {
+  const AT = "2026-09-17T00:30:00Z";
+
+  it("shows 16 Sept 19:30 under America/Chicago", () => {
+    expect(formatInstant(AT, "iso", "America/Chicago")).toBe("2026-09-16, 19:30");
+  });
+
+  it("shows 17 Sept 09:30 under Asia/Tokyo", () => {
+    expect(formatInstant(AT, "iso", "Asia/Tokyo")).toBe("2026-09-17, 09:30");
+  });
+
+  it("shows 17 Sept 00:30 under UTC, which is also the default", () => {
+    expect(formatInstant(AT, "iso", "UTC")).toBe("2026-09-17, 00:30");
+    expect(formatInstant(AT, "iso")).toBe("2026-09-17, 00:30");
+  });
+
+  it("dates a RANGE inside a changed field by the same clock", () => {
+    // The same instant as the range's start, so the day flip is the same fact
+    // as above — and a range is where a reader most often reads an hour.
+    const raw = '["2026-09-17 00:30:00+00","2026-09-17 02:30:00+00")';
+    expect(formatAuditValue(raw, "iso", "America/Chicago")).toBe("2026-09-16, 19:30 → 21:30");
+    expect(formatAuditValue(raw, "iso", "Asia/Tokyo")).toBe("2026-09-17, 09:30 → 11:30");
+  });
+
+  it("splits a range across two days when the PLANT's midnight falls inside it", () => {
+    // 22:00–02:00 Chicago: one calendar day in UTC (03:00–07:00 on the 17th),
+    // two in the plant's zone. Collapsing the day is decided by the plant.
+    const raw = '["2026-09-17 03:00:00+00","2026-09-17 07:00:00+00")';
+    expect(formatAuditValue(raw, "iso", "UTC")).toBe("2026-09-17, 03:00 → 07:00");
+    expect(formatAuditValue(raw, "iso", "America/Chicago")).toBe(
+      "2026-09-16, 22:00 → 2026-09-17, 02:00",
+    );
+  });
+
+  it("threads the zone all the way through describeEntry, not just the When column", () => {
+    const line = describeEntry(
+      {
+        action: "update",
+        tableName: "runs",
+        rowId: "r1",
+        before: { timerange: '["2026-09-17 00:30:00+00","2026-09-17 02:30:00+00")' },
+        after: { timerange: '["2026-09-17 04:30:00+00","2026-09-17 06:30:00+00")' },
+      },
+      "iso",
+      undefined,
+      "America/Chicago",
+    );
+    const when = line.changes.find((c) => c.field === "timerange");
+    expect(when?.before).toBe("2026-09-16, 19:30 → 21:30");
+    expect(when?.after).toBe("2026-09-16, 23:30 → 2026-09-17, 01:30");
   });
 });
 

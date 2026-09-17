@@ -274,10 +274,18 @@ vi.mock("@/features/admin/components/AbsencesImport", () => ({
 // reading the COMPANY answer pass every case in this file. That is exactly the
 // state the Activity tab shipped in (F-090), found on screen rather than here.
 const dateFormatArgs: unknown[][] = [];
+// R-426: and the ZONE the same way, for the same reason. "Work booked up to"
+// defaults to the plant's today; a stub that ignored its arguments would let a
+// panel reading the COMPANY zone -- or the browser machine's clock -- pass.
+const timezoneArgs: unknown[][] = [];
 vi.mock("@/features/admin/hooks/useOrgSettings", () => ({
   useDateFormat: (...args: unknown[]) => {
     dateFormatArgs.push(args);
     return "d_mon_yyyy";
+  },
+  useTimezone: (...args: unknown[]) => {
+    timezoneArgs.push(args);
+    return "America/Chicago";
   },
 }));
 

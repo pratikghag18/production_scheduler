@@ -96,7 +96,7 @@ import {
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { DATE_FORMATS, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
-import { supportedTimezones, timezoneLabel } from "@/lib/format/timezones";
+import { supportedTimezones, timezoneLabel, todayIsoInZone } from "@/lib/format/timezones";
 import {
   canAdministerPlant,
   INHERIT_CHOICE,
@@ -245,18 +245,6 @@ const COMMAND_BAR_SHORT: Record<CommandBarMode, string> = {
   voice: "typed and voice",
 };
 
-/** Today as `YYYY-MM-DD` in LOCAL time — the same reasoning as OperatorsPanel's
- *  `todayIso`: `toISOString().slice(0,10)` is the UTC day and is a day out west
- *  of Greenwich. This is date construction, not display formatting, so it is not
- *  a seam concern. */
-function todayIso(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
 /* ---------------------------------------------------------------------------
    THE STATE SENTENCE UNDER A PLANT'S PICKER.
 
@@ -286,7 +274,6 @@ export function SettingsPanel() {
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
   // Mirrors `app_is_admin()`, which is the gate on BOTH org-wide writers.
   const isSystemAdmin = profile?.role === "admin";
-  const today = todayIso();
 
   /* -- which scope this tab is editing ---------------------------------- */
 
@@ -337,6 +324,13 @@ export function SettingsPanel() {
   const policy = own.policy ?? companyPolicy;
   const timezone = own.timezone ?? companyTimezone;
   const commandBar = own.commandBar ?? companyCommandBar;
+  /* ⭐ R-426: the sample day the format picker previews is THIS PLANT'S today.
+     It used to be built from the browser machine's getters -- right by luck
+     for somebody standing in the plant, a day out for a regional admin after
+     19:00, and reading the machine's clock is exactly what the one-clock
+     standard refuses. Resolved BELOW `timezone`, not above it, so the sample
+     and the zone shown two rows down can never disagree. */
+  const today = todayIsoInZone(timezone);
   const currentPolicy = POLICY_CHOICES.find((c) => c.value === policy) ?? POLICY_CHOICES[0];
   const currentCommandBar =
     COMMAND_BAR_CHOICES.find((c) => c.value === commandBar) ?? COMMAND_BAR_CHOICES[2];

@@ -197,7 +197,8 @@ import { formatCalendarMonth, type DateFormat } from "@/lib/format/dates";
 import fieldStyles from "@/components/Field.module.css";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { useDateFormat } from "../hooks/useOrgSettings";
+import { useDateFormat, useTimezone } from "../hooks/useOrgSettings";
+import { partsInZone, timezoneLabel, zonedTimeToInstant } from "@/lib/format/timezones";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import { nodesInPlant } from "../lib/plantFilter";
 import { type ScopeNode } from "../lib/scope";
@@ -279,13 +280,18 @@ interface AuditPeriod {
   toMs: number | null;
 }
 
-/** Midnight at the start of the day `ms` falls in, IN THE READER'S TIMEZONE —
- *  the same timezone the When column is rendered in, so a period boundary and
- *  the dates beside it agree. */
-function startOfLocalDay(ms: number): number {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+/** Midnight at the start of the day `ms` falls in, IN THE PLANT'S TIMEZONE —
+ *  the same zone the When column is rendered in, so a period boundary and the
+ *  dates beside it agree.
+ *
+ *  ⭐ F-161 (R-426): this was `d.setHours(0,0,0,0)`, the BROWSER MACHINE's
+ *  midnight. It agreed with the When column only because that column was wrong
+ *  in the same direction; both now ask the plant. "Yesterday" on this screen is
+ *  the plant's yesterday, which is the only yesterday the changes in the log
+ *  actually happened on. */
+function startOfPlantDay(ms: number, zone: string): number {
+  const p = partsInZone(new Date(ms), zone);
+  return zonedTimeToInstant(zone, p.year, p.month, p.day, 0, 0).getTime();
 }
 
 /**
@@ -303,22 +309,23 @@ function startOfLocalDay(ms: number): number {
  * August" — plus the whole log, which stays the default so that arriving at
  * this screen shows the same thing it always did.
  */
-function buildPeriods(nowMs: number, fmt: DateFormat): readonly AuditPeriod[] {
-  const midnight = startOfLocalDay(nowMs);
-  const yesterday = new Date(midnight);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const monthStart = new Date(midnight);
-  monthStart.setDate(1);
-  const lastMonthStart = new Date(monthStart);
-  lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+function buildPeriods(nowMs: number, fmt: DateFormat, zone: string): readonly AuditPeriod[] {
+  // ⚠️ EVERY BOUNDARY BELOW IS A PLANT-LOCAL MIDNIGHT resolved through
+  // `zonedTimeToInstant`, which normalises an out-of-range day or month — so
+  // "the 1st of the month before" is `month - 1` with no special case for
+  // January, and the arithmetic never goes near a machine-local `setMonth`.
+  const here = partsInZone(new Date(nowMs), zone);
+  const midnight = startOfPlantDay(nowMs, zone);
+  const yesterday = zonedTimeToInstant(zone, here.year, here.month, here.day - 1, 0, 0);
+  const monthStart = zonedTimeToInstant(zone, here.year, here.month, 1, 0, 0);
+  const lastMonthStart = zonedTimeToInstant(zone, here.year, here.month - 1, 1, 0, 0);
   // ⚠️ THROUGH THE SEAM, NOT A MONTH ARRAY OF OUR OWN. This file grew twelve
   // English month names and `dateSeam.test.ts` refused them, correctly: the
   // names belong to `dates.ts`, which already owns them for every other date on
   // this screen. `formatCalendarMonth` also follows the ORG's chosen format, so
   // the picker cannot read "August 2026" beside a column reading "2026-08-14".
-  const lastMonthDay = `${lastMonthStart.getFullYear()}-${String(
-    lastMonthStart.getMonth() + 1,
-  ).padStart(2, "0")}-01`;
+  const lastMonthParts = partsInZone(lastMonthStart, zone);
+  const lastMonthDay = `${lastMonthParts.year}-${String(lastMonthParts.month).padStart(2, "0")}-01`;
   const lastMonth = formatCalendarMonth(lastMonthDay, fmt);
   const ago = (hours: number) => nowMs - hours * 3_600_000;
   return [
@@ -499,6 +506,12 @@ export function AuditPanel() {
    * own screens read them.
    */
   const fmt = useDateFormat(canQuery, plant.choice);
+  /* ⭐ F-161 (R-426): the same resolution, for the CLOCK. Every hour and every
+     day on this screen -- the When column, the period boundaries, a range
+     inside a changed field -- is read in the plant's zone, because the log is
+     a record of what happened AT THE PLANT. It used to be read in whatever
+     zone the reader's machine was set to, and the screen said so out loud. */
+  const zone = useTimezone(canQuery, plant.choice);
 
   const [periodId, setPeriodId] = useState<string>("all");
   const [actionId, setActionId] = useState<string>("all");
@@ -511,7 +524,7 @@ export function AuditPanel() {
      longer exists. Freezing can only ever make the window slightly WIDER than
      the label promises as the minutes pass, which over-shows rather than
      under-claims — the safe direction for a log. */
-  const periods = useMemo(() => buildPeriods(Date.now(), fmt), [fmt]);
+  const periods = useMemo(() => buildPeriods(Date.now(), fmt, zone), [fmt, zone]);
   const period = periods.find((p) => p.id === periodId) ?? periods[0];
 
   /**
@@ -847,7 +860,13 @@ export function AuditPanel() {
           purpose. `OMITTED_FIELDS` still governs what is hidden and
           `auditView.test.ts` still pins it — what went is the paragraph, not
           the rule. */}
-      <p className={styles.intro}>Every change, newest first. Times are in your timezone.</p>
+      {/* F-161: this used to say "Times are in your timezone", which was true
+          and was the bug — it described the machine's clock as though that
+          were the answer. The log records what happened at the plant, so it is
+          dated by the plant's clock, and the sentence names which one. */}
+      <p className={styles.intro}>
+        Every change, newest first. Times are in {timezoneLabel(zone)}.
+      </p>
 
       {/* ⭐⭐ THE SCREEN SAYS WHAT ITS OWN PLANT FILTER MEANS. Without this
           paragraph a reader would meet a product's change under "Plant A" and
@@ -992,7 +1011,7 @@ export function AuditPanel() {
                 </thead>
                 <tbody>
                   {entries.map((e) => {
-                    const line = describeEntry(e, fmt, names);
+                    const line = describeEntry(e, fmt, names, zone);
                     /* ⚠️ ONLY WHILE A PLANT IS APPLIED. On "All plants" every
                        row is in scope and the mark would answer a question
                        nobody asked; it is meaningful exactly when the reader
@@ -1003,7 +1022,7 @@ export function AuditPanel() {
                          accent is an ADDITION to `line.headline` ("Run deleted"),
                          never a replacement for it. See the header. */
                       <tr key={e.id} className={styles.row} data-action={e.action}>
-                        <td className={styles.when}>{formatInstant(e.at, fmt)}</td>
+                        <td className={styles.when}>{formatInstant(e.at, fmt, zone)}</td>
                         <td className={styles.who}>
                           {describeActor(e.actorId, viewerUserId, roles, actorEmails, actorNames)}
                         </td>

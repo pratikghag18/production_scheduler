@@ -172,10 +172,32 @@ export function mondayOfWeek(d: Date, zone: string = BOARD_ZONE): Date {
 // `mondayOfWeek(d, "UTC")` by construction.
 // ---------------------------------------------------------------------------
 
+/**
+ * ⚠️⚠️ WHAT THIS RETURNS IS A WHICH-DAY MARKER, NOT A MOMENT IN TIME (R-426).
+ * A marker is a `Date` whose UTC calendar day IS the day meant; its time of day
+ * and its UTC-ness are an ENCODING, and `buildBoardIndex` decodes it by reading
+ * that calendar day back with `getUTC*` and anchoring it at the plant zone's own
+ * midnight (`zonedTimeToInstant`). `dayMarker`/`isoOfDayMarker` in
+ * `@/lib/format/dates` are the same encoding for a day STRING, and carry the
+ * long-form note.
+ *
+ * ⛔ SO `startOfUtcDay(new Date())` IS NOT "TODAY" — it is the UTC date, which
+ * is TOMORROW for the evening hours west of Greenwich. That is F-159 verbatim:
+ * the board opened on the 17th at 19:09 on the 16th in Chicago. The ONE caller
+ * allowed to make that guess is `boardView.ts`'s `defaultWindowStart` with no
+ * zone, where the plant's zone is not knowable yet (it rides on the payload the
+ * board has not fetched) and `BoardPage` corrects the guess the moment it lands.
+ * `dateSeam.test.ts` allowlists that single line and refuses every other.
+ * Anywhere the zone IS known, the answer is `partsInZone` /
+ * `todayIsoInZone(zone)`.
+ */
 export function startOfUtcDay(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
+/** The Monday-of-week marker, with `startOfUtcDay`'s whole warning above:
+ *  a WHICH-DAY marker read back with `getUTC*`, and never "this week" asked of
+ *  a real clock — `mondayOfWeek(d, zone)` is that question's answer. */
 export function utcMondayOfWeek(d: Date): Date {
   const start = startOfUtcDay(d);
   const day = start.getUTCDay();

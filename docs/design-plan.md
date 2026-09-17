@@ -9779,3 +9779,28 @@ back to the window's first day and would have written onto tomorrow without a wo
 the typed spec had run in the afternoon, when the two dates agree. The marker is now the plant's
 date, re-anchored once the zone arrives if nobody has moved the window, and pinned with a frozen
 clock at 19:30 Chicago. The typed walk spec is clock-blind; a frozen page clock is its next step.
+
+## §19.106 — D135: standards, and the audit a new one triggers (S62)
+
+> The maintainer, 17 Sept, session 177: "can we make sure the time set by the settings for the
+> plant is the standard the whole board should use for any further development happening here on
+> after? And any kind of development we do going forward will also check if a standard exists or a
+> prior code should change based on new standard?"
+
+### D135 — a standard is a requirement with an audit attached
+
+**1. The plant's zone is the one clock (R-426).** Not a new intention — the timezone migration of
+September and D88a already put the axis, the fetch bounds, the blocks and the readouts in the
+plant's zone — but the intention had no fence, and two places had stayed outside it: the board's
+own "today" (F-159, the UTC date) and the audit view (F-161, the browser machine's zone). The rule
+is now one sentence with three verbs: a calendar day comes from an instant only through
+`partsInZone`; an instant comes from a calendar day only through `zonedTimeToInstant`; day
+arithmetic on a `YYYY-MM-DD` string goes through the helper that says it is arithmetic. The
+date-seam audit enforces it, and a clock-dependent rule gets a frozen-clock pin in both directions.
+
+**2. What "standard" means from now on.** A standard lives in three places: CLAUDE.md §7, so it
+loads into every session before any code is read; a `requirements` row, so it has a test; and the
+finding that prompted it, so the reason is kept. When the maintainer states one, the same session
+greps the code for what already violates it and fixes or queues every hit — the standard is not
+declared and left for the next person to trip over. The board's today was a UTC date for months
+because nobody had written the sentence down.

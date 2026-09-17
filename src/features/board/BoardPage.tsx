@@ -5,7 +5,13 @@ import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import { productsOfferedAtNode } from "@/features/admin/lib/scope";
-import { DEFAULT_DATE_FORMAT } from "@/lib/format/dates";
+import {
+  DEFAULT_DATE_FORMAT,
+  dayMarker,
+  isoMondayOfWeek,
+  isoPlusDays,
+  weekdayOfIso,
+} from "@/lib/format/dates";
 import { DEFAULT_TIMEZONE, partsInZone } from "@/lib/format/timezones";
 import type { ResolveContext, BoardDay, ContextRun } from "@/lib/command/resolve";
 import { voiceServiceUrl, readSentence, type Reader } from "@/lib/voice/readSentence";
@@ -138,24 +144,11 @@ const SHOW_DAY_WEEKDAY_NAMES = [
   "saturday",
 ];
 
-/** Adds `delta` CALENDAR days to an ISO "YYYY-MM-DD" string -- pure
- *  arithmetic through a UTC-midnight `Date`, the same trick `CommandBar.tsx`'s
- *  own `renderReadout` already uses for the same reason: an ISO calendar date
- *  is zone-invariant (D88a is about which day an INSTANT falls on, not this),
- *  so adding whole days to one needs no real clock read and no `Intl` call. */
-function isoPlusDays(iso: string, delta: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
-}
-
-/** The Monday of the calendar week containing `iso` (Monday-first) -- pure
- *  arithmetic, same reasoning as `isoPlusDays` above. */
-function mondayIsoOfWeekContaining(iso: string): string {
-  const weekday = new Date(`${iso}T00:00:00Z`).getUTCDay(); // 0=Sun .. 6=Sat
-  const back = weekday === 0 ? 6 : weekday - 1;
-  return isoPlusDays(iso, -back);
-}
+// R-426 (S62-a): `isoPlusDays` and `mondayIsoOfWeekContaining` used to live
+// here, each with its own paragraph explaining why UTC arithmetic on a day
+// STRING is zone-free. Both are now `isoPlusDays`/`isoMondayOfWeek` in
+// `@/lib/format/dates` — one implementation, one explanation, and the seam
+// audit refuses a sixth copy.
 
 /** S59 (R-419, design §19.104/D133 item 3): a week word's own start-of-week
  *  offset from the week containing the anchor day, in days -- `this_week`'s
@@ -647,15 +640,14 @@ export default function BoardPage() {
     for (let i = 0; i < axis.dayCount; i++) {
       const p = partsInZone(axis.dayStarts[i], index.zone);
       const iso = `${p.year}-${pad(p.month)}-${pad(p.day)}`;
-      // A UTC method on a UTC-CONSTRUCTED instant, not a local-time read --
-      // D88a is about which day an instant falls ON (`partsInZone` above,
-      // already in the plant's zone), not about how a weekday number is read
-      // off an ISO string once that day is known. The date-seam audit bans
-      // `Intl`/`toLocale*`/month arrays, not this.
+      // WHICH day this is was decided above, in the plant's zone
+      // (`partsInZone`) -- that is D88a. `weekdayOfIso` then reads the weekday
+      // off the NAMED day, which is the same number in every zone; the seam
+      // owns that arithmetic (R-426) so no screen re-derives it.
       days.push({
         index: i,
         iso,
-        weekday: new Date(`${iso}T00:00:00Z`).getUTCDay() as BoardDay["weekday"],
+        weekday: weekdayOfIso(iso) as BoardDay["weekday"],
       });
     }
     const now = new Date();
@@ -836,11 +828,11 @@ export default function BoardPage() {
       const anchor = commandCtx.days[0];
       const delta = (((weekdayIndex - anchor.weekday) % 7) + 7) % 7;
       const iso = isoPlusDays(anchor.iso, delta);
-      setWindowStartDate(new Date(`${iso}T00:00:00.000Z`));
+      setWindowStartDate(dayMarker(iso));
       return;
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(target)) {
-      setWindowStartDate(new Date(`${target}T00:00:00.000Z`));
+      setWindowStartDate(dayMarker(target));
       return;
     }
     // F-158: this is the branch a REPEAT DAY's own "Show that day" lands on.
@@ -856,9 +848,9 @@ export default function BoardPage() {
         commandCtx.todayIndex !== null
           ? commandCtx.days[commandCtx.todayIndex]
           : commandCtx.days[0];
-      const monday = mondayIsoOfWeekContaining(anchorDay.iso);
+      const monday = isoMondayOfWeek(anchorDay.iso);
       const iso = isoPlusDays(monday, SHOW_DAY_WEEK_WORD_OFFSETS[target]);
-      setWindowStartDate(new Date(`${iso}T00:00:00.000Z`));
+      setWindowStartDate(dayMarker(iso));
       setWindowDayCount(Math.max(windowDayCount, 7));
       return;
     }

@@ -12,9 +12,15 @@ import {
   type CopyWeekResult,
   type WeekTemplate,
 } from "@/lib/api";
-import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
+import {
+  DEFAULT_DATE_FORMAT,
+  dayMarker,
+  isoOfDayMarker,
+  type DateFormat,
+} from "@/lib/format/dates";
 import fieldStyles from "@/components/Field.module.css";
 import { addMinutes, formatClock, formatDayLabel, formatFull, MINUTES_PER_DAY } from "../lib/time";
+import { isoDayInZone } from "@/lib/format/timezones";
 import { useSchedulerToast } from "../hooks/useSchedulerToast";
 import { BoardPopover } from "./BoardPopover";
 import styles from "./CopyWeekDialog.module.css";
@@ -626,7 +632,13 @@ function describeRow(
 }
 
 function describeWhen(start: Date, end: Date, dateFormat: DateFormat, zone?: string): string {
-  const sameDay = start.toISOString().slice(0, 10) === end.toISOString().slice(0, 10);
+  // ⚠️ "THE SAME DAY" IS ASKED OF THE PLANT (R-426, F-161's shape). This
+  // compared the two UTC days while formatting both ends in `zone`, so a
+  // 22:00-02:00 Chicago run -- one UTC day, two plant days -- printed its end
+  // as a bare clock time under a date that had already turned over, and a
+  // 06:00-14:00 Tokyo run printed a redundant second date for one plant day.
+  const z = zone ?? "UTC";
+  const sameDay = isoDayInZone(start, z) === isoDayInZone(end, z);
   return `${formatFull(start, dateFormat, zone)}–${
     sameDay ? formatClock(end, zone) : formatFull(end, dateFormat, zone)
   }`;
@@ -675,11 +687,11 @@ function describeNotOffered(clash: CopyWeekClash): string {
  * ------------------------------------------------------------------------- */
 
 function toInputValue(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return isoOfDayMarker(d);
 }
 
 function fromInputValue(v: string): Date | null {
   if (!v) return null;
-  const next = new Date(`${v}T00:00:00.000Z`);
+  const next = dayMarker(v);
   return Number.isNaN(next.getTime()) ? null : next;
 }

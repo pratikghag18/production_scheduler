@@ -123,3 +123,32 @@ break it — before it is called done.
 `docs/conventions.md` for layout and naming. Migrations are append-only. One CSS Module per
 component. Nothing committed names the maintainer or the machine. Prettier and ESLint run in
 CI over everything they are not told to ignore; `docs/` is ignored by Prettier.
+
+## 7. Standards the maintainer has set (every piece of work checks these first)
+
+A standard is a rule the maintainer stated that applies to the whole codebase, not one feature.
+Each is also a `requirements` row in `docs/plan.yaml`. Three duties come with them (R-426):
+
+1. **Before building anything, read this list** and ask whether the work touches one of them.
+2. **When the maintainer states a new one, the same session writes it here and in the plan,
+   greps the code for what already violates it, and fixes or queues every hit** before calling
+   the piece done. A standard declared and left for the next person to trip over is not set.
+3. **When the developer notices the same choice being made a second or third time** — the same
+   shape of question, the same guard, the same wording rule, the same test pattern — and no
+   standard covers it, **the developer asks the maintainer whether it should become one**, in
+   plain language with the candidate rule written out, before deciding it quietly again. The
+   maintainer decides; the answer is recorded either as a standard here or as "not a standard,
+   because…" in the session summary, so the question is not asked twice.
+
+- **The plant's zone is the one clock (R-426, F-159, F-161).** Every day and hour the app shows,
+  reads or writes is in the zone from the plant's settings (company fallback). A calendar day is
+  derived from an instant only through `partsInZone`; an instant from a calendar day only through
+  `zonedTimeToInstant`; nothing reads `getHours()`/`getDate()`/`toLocale*` (the machine's zone) or
+  takes a UTC date as "today". Pure day arithmetic on `YYYY-MM-DD` strings goes through the helper
+  in `src/lib/format/dates.ts` that says so. `src/test/dateSeam.test.ts` enforces it; a new date
+  site that fails the audit is wrong, not the audit. The board's own "today" was the UTC date until
+  16 Sept 2026 and nobody saw it until a walk ran after 7 pm in Chicago — a clock-dependent bug
+  needs a pin with a frozen clock, in both directions (west and east of UTC).
+- **Extract, never retype** (§4) and **the server's rule, transcribed** (`certificateGaps`,
+  `isAtOrBelow`) are standards of the same kind: what the client shows or offers is decided by the
+  same predicate the server runs, taken from the server's own text, never re-derived.

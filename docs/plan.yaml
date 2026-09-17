@@ -11874,7 +11874,98 @@ requirements:
     STATED 16 Sept (session 176): "People not trained are being assigned" --- Lena Novak and Tom Baker
     hold no Welding, which Line 1 requires; the single opened the reason pop-up, the swap wrote three
     of four and said reverted.
+- id: R-426
+  title: The plant's zone is the one clock --- every day and hour the app shows, reads or writes is in it, and a new standard audits the code that predates it
+  source:
+  - 'session 177 conversation (the maintainer, 17 Sept)'
+  - CLAUDE.md §7
+  stated_by: maintainer
+  claim: >-
+    The zone in the plant's settings (company fallback) is the standard for the whole board and everything
+    around it: a calendar day is derived from an instant only through that zone (partsInZone), an instant from
+    a calendar day only through it (zonedTimeToInstant), and no code reads the machine's clock or the UTC date
+    as if it were the plant's; pure day arithmetic on YYYY-MM-DD strings goes through the one helper that
+    says so. The date-seam audit enforces it. And from now on, when the maintainer states a standard, the
+    same session writes it here, greps the code for what already violates it, and fixes or queues each hit.
+  verified_by:
+  - kind: manual
+    steps: "pinned by the audit lane when it lands (dateSeam.test.ts); the list of sites it walked is in the finding"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 177): "can we make sure the time set by the settings for the plant is the standard
+    the whole board should use for any further development happening here on after? And any kind of
+    development we do going forward will also check if a standard exists or a prior code should change based
+    on new standard?" Written into CLAUDE.md §7 so it loads in every session.
 findings:
+- id: F-162
+  title: While a question stands, the input still holds the sentence, so yes or a reason cannot be typed without wiping it
+  tag: The answer box and the sentence box are the same box
+  status: open
+  found_by: maintainer
+  stage: S61
+  refs:
+  - R-378
+  - R-425
+  story: >-
+    Reported 17 Sept (session 177) with two screenshots: "Tom Baker is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no." and a lot's "say or type yes to do them" --- both above an input still holding the sentence. The person has to clear the sentence to type the answer, and clearing the sentence is what the bar reads as abandoning it. The trace shows the Tom Baker sentence typed three times with no answer ever recorded. When a question stands the input must be empty with a placeholder that says what it takes (yes, no, a reason, a name), the sentence must stay readable above it, and typing the answer must never drop the held command.
+  fix: >-
+    Open.
+- id: F-163
+  title: A click outside the bar closes it and loses the whole conversation, so moving a slider empties it
+  tag: The launcher unmounts the bar on an outside mousedown; the bar's state lives in the bar
+  status: open
+  found_by: maintainer
+  stage: S61
+  refs:
+  - R-424
+  story: >-
+    Reported 17 Sept (session 177): "The chatbot also vanished when I moved the slider something which you claimed would not happen." R-424 (session 176) fixed the unmount on a board refetch, but CommandLauncher closes the panel on any mousedown outside it by design (Esc closes), and closing unmounts CommandBar, whose status, held command, pending question, lot and trace entry are its own refs. A person who reaches for the toolbar, the day count or the zoom mid-conversation comes back to an empty bar. The conversation must live outside the bar (a store the launcher's open/close does not touch) so reopening shows exactly what stood.
+  fix: >-
+    Open.
+- id: F-164
+  title: The trace records neither a lot's failure message nor a single's write that never landed
+  tag: finishTrace runs before the failure status is set; a single's readout is recorded as ran before the writer answers
+  status: open
+  found_by: maintainer
+  stage: S61
+  refs:
+  - R-421
+  - F-154
+  story: >-
+    Found 17 Sept (session 177) reading the trace of the maintainer's swap: ran lists three of four readouts and nothing says why the fourth stopped --- runLotNow finishes the entry before setting the Did 3 of 4 status. The same file shows "Sam Patel → Housing A · Cell 3 · 08:00–12:00" under ran for a sentence said on its own in a replay while the database never received the row (F-165). The trace must record the lot's failure text as the entry's last asked, and a single's ran only after the writer confirms --- or record the writer's refusal beside it.
+  fix: >-
+    Open.
+- id: F-165
+  title: The swap's fourth step, Sam Patel onto Cell 3 08:00 to 12:00, did not land, and said on its own it did not land either
+  tag: A write the bar promised that the writer refused or left in a pop-up, silently
+  status: open
+  found_by: maintainer
+  stage: S61
+  refs:
+  - R-406
+  - R-425
+  - F-154
+  story: >-
+    Reported 17 Sept (session 177): "it swapped Sam with John, but John's original assignment which Sam should have been assigned is gone." The trace confirms three of four steps ran. The developer then said the fourth step alone in a fresh browser: the bar printed the readout as run, and the database still had no row for Sam on Cell 3; a replay of the whole sequence removed John's block from Cell 1 (the developer's own replay, not the maintainer's action) before it stalled. Sam holds Welding; Cell 3 requires nothing; no run overlaps 08:00 to 12:00; Sam is not absent. The reason is not known yet: the writer's message was never traced (F-164) and the single path may have opened a pop-up behind the bar that a reason or an override was waiting in. To be reproduced with F-164 in place, and the cause named before it is called fixed.
+  fix: >-
+    Open.
+- id: F-161
+  title: The audit view prints dates and times in the browser machine's zone, not the plant's
+  tag: Machine-local Date getters in a screen that should read the plant's clock
+  status: open
+  found_by: agent
+  stage: S61
+  refs:
+  - R-426
+  story: >-
+    Found 17 Sept (session 177) by the grep R-426 asked for: src/features/admin/lib/auditView.ts formats a
+    row's day and time with getFullYear/getMonth/getDate/getHours/getMinutes, the browser machine's zone. A
+    plant admin reading the audit log from another zone (or a laptop left on UTC) sees every change stamped
+    with the wrong hour, and a change made late in the evening on the wrong day. The other hits of the grep
+    are calendar arithmetic on YYYY-MM-DD strings (safe by construction) and the store's documented first
+    guess before the zone is known (F-159).
+  fix: >-
+    Open.
 - id: F-160
   title: The first paint scrolls to now at 37 percent across the track, not the quarter; Today lands on the quarter
   tag: The mount scroll runs while the rail width is still settling, and its nonce is then spent

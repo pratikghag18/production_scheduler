@@ -10,13 +10,17 @@
  * about to become a third. `src/test/dateSeam.test.ts` fails the build if a
  * calendar date is formatted anywhere but here.
  *
- * ⚠️ PURE STRING WORK — no `Date`, no `Intl`, no timezone. A Postgres `date`
- * (`operator_skills.certified_at` / `expires_at`) arrives as `"YYYY-MM-DD"` and
- * is timezone-less by construction; parsing it through `new Date("2026-09-03")`
- * would reinterpret it as UTC midnight and print the day before it for anyone
- * west of Greenwich (the reasoning `operators.ts` recorded when it first wrote
- * `formatDay` by hand). Reformatting the string sidesteps that class of bug
- * entirely.
+ * ⚠️ FORMATTING IS PURE STRING WORK — no `Date`, no `Intl`, no timezone. A
+ * Postgres `date` (`operator_skills.certified_at` / `expires_at`) arrives as
+ * `"YYYY-MM-DD"` and is timezone-less by construction; parsing it through
+ * `new Date("2026-09-03")` would reinterpret it as UTC midnight and print the
+ * day before it for anyone west of Greenwich (the reasoning `operators.ts`
+ * recorded when it first wrote `formatDay` by hand). Reformatting the string
+ * sidesteps that class of bug entirely.
+ *
+ * ⚠️ THE SECOND HALF OF THIS FILE (R-426) IS CALENDAR ARITHMETIC, AND IT DOES
+ * TOUCH `Date` — as a calendar machine at explicit UTC, never as a clock. See
+ * its own banner. Nothing in either half reads the machine's zone.
  *
  * ⚠️ THIS SETTING GOVERNS DISPLAYED TEXT, NOT INPUTS. A native
  * `<input type="date">` renders in the browser/OS locale regardless, and its
@@ -179,4 +183,113 @@ export function formatCalendarDay(day: string, fmt: DateFormat = DEFAULT_DATE_FO
       return `${Number(dd)} ${monShort} ${yyyy}`;
     }
   }
+}
+
+/* ===========================================================================
+ * CALENDAR ARITHMETIC ON A DAY STRING (R-426, S62-a).
+ *
+ * ⭐⭐ THE ONE PLACE THAT ADDS DAYS TO A `YYYY-MM-DD`. Five copies of this
+ * arithmetic had grown — `BoardPage`'s `isoPlusDays` and
+ * `mondayIsoOfWeekContaining`, `CommandBar`'s `isoWeekOf` and
+ * `isoPlusDaysUtc`, `matrix.ts`'s `addDays`, `absence.ts`'s `nextDay`,
+ * `api/absences.ts`'s `prevDay` — each with its own paragraph explaining why
+ * UTC was safe here. The explanation was right every time and that is exactly
+ * why it belongs in ONE place: the sixth copy is the one that gets it wrong.
+ *
+ * ⚠️⚠️ A DAY STRING IS NOT AN INSTANT, AND THIS FILE NEVER TREATS IT AS ONE.
+ * The plant's zone is the one clock (R-426): which calendar day an INSTANT
+ * falls on is decided by `partsInZone` in `src/lib/format/timezones.ts`, and
+ * the instant a wall-clock names is decided by `zonedTimeToInstant` there.
+ * Neither question is asked here. Once a day is already NAMED as
+ * `"YYYY-MM-DD"`, its weekday and the day seven before it are the same in
+ * every zone on earth, so the arithmetic below is zone-free by construction —
+ * it uses `Date` only as `Date.UTC`'s calendar normaliser (month overflow,
+ * leap years) and reads every part back with `getUTC*`. It must NEVER grow a
+ * `getHours()`/`getDate()`/`toLocale*` call, and `dateSeam.test.ts` refuses
+ * one anywhere outside this file and `time.ts`.
+ *
+ * ⚠️ MALFORMED IN, MALFORMED OUT — the same contract `formatCalendarDay`
+ * keeps: an input that is not a real calendar day comes back unchanged rather
+ * than mangled into a neighbouring one.
+ * ======================================================================== */
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Is `iso` a well-formed AND REAL calendar day? `"2026-02-30"` and
+ * `"2026-13-01"` are both shaped right and neither exists, so the shape test
+ * alone is not enough — the round trip through UTC is what rejects them.
+ *
+ * The import parsers (`absenceImport`, `certificationImport`) validate through
+ * this rather than each building their own midnight instant, which is what lets
+ * the audit ban a raw `T00:00:00` literal everywhere but the seams.
+ */
+export function isCalendarDay(iso: string): boolean {
+  if (!ISO_DAY.test(iso)) return false;
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso;
+}
+
+/**
+ * A WHICH-DAY MARKER for `iso`: the UTC-midnight `Date` whose UTC calendar day
+ * IS `iso`.
+ *
+ * ⚠️⚠️ A MARKER IS NOT A MOMENT IN TIME, and everything that consumes one says
+ * so. The board's window start (`boardView.ts`'s `windowStartDate`) is one:
+ * `buildBoardIndex` reads its calendar day back with `getUTC*` and anchors THAT
+ * DAY at the plant zone's own midnight through `zonedTimeToInstant`. So the
+ * marker's job is to carry a date through code that wants a `Date` object; its
+ * time-of-day and its UTC-ness are an encoding, not a claim about when
+ * anything happens. Reading a marker with `getHours()`/`getDate()` — the
+ * machine's zone — is the bug this encoding exists to make impossible.
+ *
+ * ⚠️⚠️ AN UNREAL DAY GIVES AN INVALID DATE, AND IT TAKES THE EXPLICIT CHECK TO
+ * GET THAT. `new Date("2026-02-30T00:00:00.000Z")` does NOT throw and is NOT
+ * Invalid in V8 — it silently normalises to 2 March, so a typo'd or corrupt day
+ * would come back as a real one two days along with nothing to show for it.
+ * Measured while pinning this. `isCalendarDay` is the round trip that catches
+ * it, so every marker goes through it first and callers that take a day from a
+ * typed `<input type="date">` keep their `Number.isNaN(d.getTime())` guard.
+ */
+export function dayMarker(iso: string): Date {
+  return isCalendarDay(iso) ? new Date(`${iso}T00:00:00.000Z`) : new Date(NaN);
+}
+
+/** The calendar day a marker names, `"YYYY-MM-DD"` — `dayMarker`'s inverse.
+ *  Empty string for an Invalid Date, which no caller can render as a day. */
+export function isoOfDayMarker(marker: Date): string {
+  return Number.isNaN(marker.getTime()) ? "" : marker.toISOString().slice(0, 10);
+}
+
+/** `iso` plus `days` calendar days (negative to go back), still `"YYYY-MM-DD"`.
+ *  Month lengths and leap years are `Date.UTC`'s problem, which is the whole
+ *  reason this is not string maths. */
+export function isoPlusDays(iso: string, days: number): string {
+  const d = dayMarker(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The weekday of `iso`, `0` = Sunday .. `6` = Saturday — `-1` if `iso` is not
+ *  a real day. Zone-free: a named calendar day has one weekday everywhere. */
+export function weekdayOfIso(iso: string): number {
+  const d = dayMarker(iso);
+  return Number.isNaN(d.getTime()) ? -1 : d.getUTCDay();
+}
+
+/** The MONDAY of the week containing `iso` (Monday-first, so a Sunday resolves
+ *  to the Monday six days behind it). `iso` unchanged if it is not a real day. */
+export function isoMondayOfWeek(iso: string): string {
+  const w = weekdayOfIso(iso);
+  if (w === -1) return iso;
+  return isoPlusDays(iso, w === 0 ? -6 : 1 - w);
+}
+
+/** The seven days of the week containing `iso`, Monday first. */
+export function isoWeekDays(iso: string): string[] {
+  const monday = isoMondayOfWeek(iso);
+  const out: string[] = [];
+  for (let i = 0; i < 7; i++) out.push(isoPlusDays(monday, i));
+  return out;
 }

@@ -64,6 +64,8 @@ const h = vi.hoisted(() => ({
   fetchPage: vi.fn(),
   fetchActors: vi.fn(),
   dateFormatArgs: [] as unknown[][],
+  /** The same, for the zone (R-426/F-161). */
+  timezoneArgs: [] as unknown[][],
   /** The hierarchy read the plant filter is resolved against. Empty is the
    *  default, which is the "no roots -> All plants" state most cases want. */
   tree: { nodes: [] as Array<Record<string, unknown>> },
@@ -129,10 +131,18 @@ vi.mock("@/lib/api", async () => {
 // column has to follow the CHOSEN PLANT, and a stub that ignored its arguments
 // would let a panel resolving the company answer pass every case in this file —
 // which is exactly the state this screen shipped in until the maintainer noticed.
+// R-426/F-161: the ZONE is resolved the same way and recorded the same way.
+// Every hour and every day on this screen is the PLANT's, and a stub that
+// ignored its arguments would let the company answer -- or the reader's own
+// laptop clock, which is what shipped -- pass every case here.
 vi.mock("@/features/admin/hooks/useOrgSettings", () => ({
   useDateFormat: (...args: unknown[]) => {
     h.dateFormatArgs.push(args);
     return "iso";
+  },
+  useTimezone: (...args: unknown[]) => {
+    h.timezoneArgs.push(args);
+    return "America/Chicago";
   },
 }));
 
@@ -252,6 +262,7 @@ beforeEach(() => {
   useAdminViewStore.setState({ plantChoice: null });
   h.fetchPage.mockReset();
   h.dateFormatArgs.length = 0;
+  h.timezoneArgs.length = 0;
   h.fetchActors.mockReset();
   h.fetchPage.mockResolvedValue({ entries: [entry()], hasMore: false });
   // `audit_actor_identities()` (0046) returns an object per actor, not a role
@@ -1183,6 +1194,12 @@ describe("the plant filter narrows the log, and the server does the narrowing", 
     show();
     await screen.findByText(/Showing Plant A\./);
     expect(h.dateFormatArgs.at(-1)?.[1]).toBe(PLANT_A);
+    // ⭐ F-161: and so is the CLOCK, asked of the same plant in the same breath.
+    // The When column read the browser machine's zone until 17 Sept -- a
+    // change made at 19:30 in Chicago was filed under the next day for anyone
+    // whose laptop sat east of it, and the screen said "Times are in your
+    // timezone" as though that were the intent.
+    expect(h.timezoneArgs.at(-1)?.[1]).toBe(PLANT_A);
   });
 
   it("⭐ and falls back to the company answer on All plants", async () => {
@@ -1192,6 +1209,7 @@ describe("the plant filter narrows the log, and the server does the narrowing", 
     show();
     await screen.findByText(/whole log/);
     expect(h.dateFormatArgs.at(-1)?.[1] ?? null).toBeNull();
+    expect(h.timezoneArgs.at(-1)?.[1] ?? null).toBeNull();
   });
 
   it("one readable root means nothing is narrowed, whatever is remembered", async () => {

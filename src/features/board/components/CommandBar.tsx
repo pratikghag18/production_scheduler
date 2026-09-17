@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { DateFormat } from "@/lib/format/dates";
+import { isoPlusDays, isoWeekDays } from "@/lib/format/dates";
 import { formatDayLabel, zonedTimeToInstant } from "../lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./CommandBar.module.css";
@@ -493,18 +494,14 @@ function commandNamesAWeek(command: Command): boolean {
  *  It only ever produces ISO STRINGS, compared against other ISO strings
  *  (`isTargetOnBoard`'s own `have.has(iso)`), never formatted through
  *  `formatDayLabel`/`Intl` in a zone -- never `ctx`'s own day axis
- *  (`wallToOffset`/`wallOf`), which stays untouched either way. */
+ *  (`wallToOffset`/`wallOf`), which stays untouched either way.
+ *
+ *  R-426 (S62-a): the arithmetic itself now lives in `@/lib/format/dates`
+ *  (`isoWeekDays`), which is where the F-153 reasoning above is written down
+ *  once for every caller. This wrapper is kept only for the name the rest of
+ *  this file reads by. */
 function isoWeekOf(iso: string): string[] {
-  const start = new Date(`${iso}T00:00:00Z`);
-  const daysFromMonday = (start.getUTCDay() + 6) % 7; // Sun(0)->6 .. Sat(6)->5, Mon(1)->0
-  start.setUTCDate(start.getUTCDate() - daysFromMonday);
-  const out: string[] = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(start);
-    d.setUTCDate(start.getUTCDate() + i);
-    out.push(d.toISOString().slice(0, 10));
-  }
-  return out;
+  return isoWeekDays(iso);
 }
 
 /**
@@ -527,15 +524,11 @@ const SHOW_DAY_WEEK_WORD_SHIFT: Record<string, number> = {
   "last week": -7,
 };
 
-/** `iso` plus `days`, UTC throughout -- the same reasoning `isoWeekOf`'s own
- *  F-153 note sets out: this only ever compares ISO strings against other
- *  ISO strings, never a zone's wall clock, so UTC arithmetic changes nothing
- *  it returns. */
-function isoPlusDaysUtc(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+/** `iso` plus `days` -- the seam's calendar arithmetic (R-426), kept under its
+ *  local name because the reasoning `isoWeekOf`'s F-153 note sets out is what
+ *  makes it safe HERE: this only ever compares ISO strings against other ISO
+ *  strings, never a zone's wall clock. */
+const isoPlusDaysUtc = isoPlusDays;
 
 /**
  * S60-b (the S59 reviewer, 15 Sept): is `pending.target` -- the exact word
