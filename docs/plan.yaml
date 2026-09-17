@@ -2923,6 +2923,7 @@ stages:
   - §19.108 (D137)
   delivers:
   - R-441
+  - R-442
   what: >-
     **The gap the maintainer found on 17 Sept.** Five pieces (D137): the model and the server (two nullable
     columns, the board payload, a shift_fit verdict the five writers and the resize guard forward); the
@@ -2933,7 +2934,8 @@ stages:
   state: >-
     **OPEN 17 Sept (session 178).** Scoped the day it was stated. One decision asked: what a person's shift
     points at (a band NAME resolved against the place's pattern is the developer's recommendation), and
-    whether a shift-bound supervisor is refused a write outside their shift (the developer's default: no).
+    the supervisor question answered the same turn (R-442: no restriction by default, a setting on the grant
+    in the Access tab).
     Piece (1) goes before S65's rail so "free 11:30" is measured against the person's own shift.
 - id: M1
   track: matrix
@@ -12355,6 +12357,27 @@ requirements:
     shift as a normal work hours and with overtime can extend into different shifts. Same thing with
     supervisors, they could belong to one shift or plan for the whole day." A gap in the model, not in one
     screen: found the same day the rail's "free 11:30" was decided against the root's pattern (R-438).
+- id: R-442
+  title: A supervisor places anyone by default; a shift restriction is a setting on their grant, set in the Access tab by a site admin or above
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept)'
+  stated_by: maintainer
+  claim: >-
+    A supervisor's grant carries two settings beside the role: the shift they plan (one band, or the whole
+    day; the whole day by default) and whether they may place people outside that shift (yes by default).
+    The Access tab shows both on the same row as the role, changeable by a site admin or above for grants
+    at or below their own place, the same test the role change runs. The server enforces the restriction
+    in the writers that enforce the place rule, so what the board, the pop-ups and the bar offer a
+    restricted supervisor is decided by the same predicate. With the defaults nothing changes for anyone.
+  verified_by:
+  - kind: manual
+    steps: "pinned when S66's model and admin pieces land"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 178): "the supervisor should be able to staff/assign anyone, no restrictions by
+    default, but can we explore if these restrictions can be dynamic? Something which a site admin and above
+    can decide through the access tab?" Answered yes the same turn: two nullable fields on the grant, the
+    Access tab row, the server's check in the same writers.
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today
