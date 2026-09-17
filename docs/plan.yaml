@@ -2861,6 +2861,31 @@ stages:
   state: >-
     **NOW 17 Sept (session 178).** The maintainer answered the candidates (R-430 to R-437); building. Brief:
     s63-a-chat-panel-brief.md.
+- id: S64
+  track: core
+  num: 64
+  title: The standards' audits, fixed --- choices at every dead end, absence and capacity before the yes, a lot in one transaction, a trace line on every path
+  status: open
+  owner: agent
+  refs:
+  - 'session 178 conversation (the maintainer, 17 Sept)'
+  - §19.107 (D136)
+  - docs/agent-briefs/s64-a-dead-ends-and-pre-yes-audit.md
+  - docs/agent-briefs/s64-b-lots-and-trace-audit.md
+  delivers:
+  - R-430
+  - R-431
+  - R-432
+  - R-434
+  what: >-
+    **What the five yeses cost.** The two audit briefs hold every hit. Four lanes' worth: (a) the twenty dead
+    ends, reusing the resolver's own suggestion builders; (b) an absenceGate beside certificateGate from the
+    rows BoardPage already loads, and a capacity probe on the context so the bar asks before the yes;
+    (c) apply_command_lot --- one server RPC in the mould of apply_copy_week, so a refused step rolls the lot
+    back and the thread says nothing changed (a migration, then runLot is one call); (d) one endTurn in the
+    store that every life-ending path calls, so no turn has a blank last line, plus F-168 and F-169.
+  state: >-
+    **OPEN 17 Sept (session 178).** Audits run and written; fixes after S63 lands.
 - id: M1
   track: matrix
   num: 1
@@ -12177,6 +12202,41 @@ findings:
     Found 17 Sept (session 177) by the S62-b lane driving the real bar: "yes" typed with no question standing was sent to the model, which answered a form --- unassign everyone on today --- and the bar offered a two-command removal lot. S47's fall-through, pre-existing; a harmless word read destructively.
   fix: >-
     Session 177 (b17c858). A confirm or cancel word with no question standing is answered "Nothing to say yes to." / "Nothing to cancel." and never reaches a reader; the trace records the model skipped for that reason; a spoken yes still reaches a create pop-up a sentence opened (CB-yes-none-1 to CB-yes-none-3).
+- id: F-168
+  title: A refused unassign or retime from the bar is recorded as Written, because four writers answer nothing and nothing is read as written
+  tag: A write that reports success can have changed nothing
+  status: open
+  found_by: agent
+  stage: S64
+  refs:
+  - R-421
+  - R-427
+  - R-434
+  story: >-
+    Found 17 Sept (session 178) by the read-only audit R-434 triggered. On the single path the bar's
+    onUnassign, onRetime, onRetimeRun and the retime half of onMove (BoardPage.tsx) return nothing, and
+    settleWrite reads an undefined outcome as written; the writers underneath (removeAssignment,
+    retimeAssignmentFromCommand) are fire-and-forget mutations with a toast on error. So a removal or a
+    retime the server refuses (an RLS-filtered delete, a resize guard) is a Written line in the trace and
+    the thread while the block is still on the board. CLAUDE.md §4's own warning, in the bar's words. Fix:
+    every writer prop returns the outcome (written, refused with the server's reason) the way onOpen and
+    onBook already do, and a void return is a type error, not a success.
+- id: F-169
+  title: A spoken sentence keeps a stale "Show that day" rerun alive, which then writes under the new sentence's name
+  tag: A pending rerun cleared on typing but not on a new sentence
+  status: open
+  found_by: agent
+  stage: S64
+  refs:
+  - R-419
+  - R-421
+  story: >-
+    Found 17 Sept (session 178) by the same audit. The pending rerun a "Show that day" press sets is
+    cleared by a typed edit, a cancel word and Escape, but submitText does not clear it, and a spoken
+    sentence never passes through the typed-edit handler. So "show Friday" then, by voice, a different
+    sentence before the window lands: the effect that waits for the window runs the OLD command and
+    overwrites the NEW sentence's read, ran and outcome in the trace and the thread. Fix: submitText
+    clears the rerun as it clears the lot; a pin that speaks a sentence while a rerun is pending.
 - id: F-167
   title: A single that hands off to the create pop-up left the trace and the thread saying Waiting for ever
   tag: The pop-up's own result never came back to the bar
@@ -24116,11 +24176,15 @@ next:
     The maintainer's words on 17 Sept after the first thread: the best one so far, now make it read as a chat
     and stay open. Small UI work on the launcher and the bar; the conversation store already holds the state.
 - kind: task
-  text: "The audits the five new standards trigger (R-430 to R-434): every dead end offers choices; capacity and absence asked before the yes; a lot reverts on a refusal; every bar path traces"
+  stage: S64
+  text: "The audits the five new standards trigger, run and written down (R-430 to R-434): docs/agent-briefs/s64-a-dead-ends-and-pre-yes-audit.md and s64-b-lots-and-trace-audit.md hold every hit; now the fixes, and F-168 and F-169 found on the way"
   why: >-
-    Answered yes on 17 Sept (session 178). R-426's second duty: a standard declared and left for the next
-    person to trip over is not set. Each is a grep of the resolver and the writers, a fix or a queued card per
-    hit, and a pin. R-433 (a walk is a spec first) is practice already and has its spec.
+    Answered yes on 17 Sept (session 178); the grep ran the same session (R-426's second duty). Twenty dead
+    ends without choices, five of which already build the buttons and throw them away; absence never asked
+    before the yes though the predicate and the rows are loaded; capacity never asked because the bar's
+    write path skips even the pop-up's probe; a lot that half-lands can only be made all-or-nothing by a
+    server RPC in the mould of apply_copy_week (a migration --- the shape is in the brief); and twenty-odd
+    paths that end a sentence with no trace line. F-168 (a refused unassign recorded as Written) first.
 - kind: task
   text: "A bare pair of hours under 7 asks which half of the day (R-435): 'from 1 to 5' offers 1 am to 5 am and 1 pm to 5 pm"
   why: >-

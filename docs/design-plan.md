@@ -9834,3 +9834,52 @@ conversation store already made the state survive a close; S63 removes the close
 itself and gives the panel its edge. Wording is unchanged: the bubbles carry the same sentences
 the thread already says. Two wording items ride along — a bar refusal still borrowing the drag's
 "try the split again", and the lot's "Do all N" inside a bubble.
+
+## §19.107 — D136: six standards answered, and what "clear" and Enter mean (S63)
+
+> The maintainer, 17 Sept, session 178, answering the seven candidates put in session 177: "1. Yes
+> 2. Yes 3. Yes 4. Yes 5. Yes 6. Need more information to understand this, use examples. 7. Yes,
+> definitely ask, always ask when in doubt. 8. Unless specified clear means clearing everything, we
+> can program an undo option since we have the activity data, it should be easy. Another parallel
+> thing, when I hit enter after typing the sentence, the bar should clear out as well, it should not
+> retain previous sentence."
+
+### D136 — a yes is a standard, an audit and a queue card, in that order
+
+**1. Five standards at once (R-430 to R-434), and the sixth (R-435).** Each was a choice the
+developer had made two or three times in the bar without a rule: offer the nearest names but not
+the nearest places; ask about a certificate and the area rule before the yes but let capacity refuse
+after it; write three steps of a swap and refuse the fourth; run the walk as a spec because session
+176 hurt, not because anyone said so; trace most things. D135 said a standard is written into
+CLAUDE.md §7, into `requirements`, and then audited. The audit is the part that costs: each yes
+became a queue card naming its grep, and the first pass of that grep ran while S63 was being built
+(the hits are in session 178's summary). "When in doubt, ask" is the never-guess rule (R-425,
+F-134's afternoon rule) generalised to the whole grammar; its first case is the bare pair of hours.
+
+**2. The one candidate that needed examples.** "A floor-worded message with a banned-word list" was
+put back to the maintainer with three real lines from the code ("try the split again" arriving in
+the bar from the drag's toast; "An adjust cannot also carry a new cell, span or shift"; the lot's
+"Do all N") beside what a person on the floor would understand. It stays a queue card until the
+maintainer answers; the rule as drafted is the icon audit's shape (`iconStandard.test.ts`) over
+every user-facing string.
+
+**3. "Clear" means everything (R-436).** The grammar's `clear` removes people and leaves the job;
+the maintainer expected the job gone, and said the word means everything unless the sentence names
+a part. The safety the old reading gave — a job is harder to put back than a person — is to be
+provided the other way round: an undo, read from the activity log, which already holds every write
+of a turn. Queued as one card: the grammar, the readout that names both, and the undo. The model's
+training data needs the new shape in its sixth run.
+
+**4. Enter empties the box (R-437).** F-162 made the box an answer box while a question stood and
+deliberately left the sentence in it otherwise, so a sentence the bar could not read could be edited
+rather than retyped. With the thread on screen (R-427) that reasoning is gone: the sentence is
+readable in its bubble, and the maintainer's words were that clearing by hand is "not value add".
+Enter always empties the box; Escape no longer puts the sentence back. Rides on S63 because it is
+the same render tree.
+
+**5. S63 itself (R-428, R-429).** Bubbles are a shape over the thread the store already holds:
+the person's words on the right in the launcher button's own colour pair, the board's on the left
+with the offered buttons inside its bubble. The panel becomes a layer that only its own controls
+close: the close-on-outside-mousedown that S48-a wrote, and the `[role="dialog"]` exemption and
+focus rules that existed only to serve it, go. The size is remembered per person in the browser,
+next to the thread. Nothing in the bar's grammar, readers or writers changes.

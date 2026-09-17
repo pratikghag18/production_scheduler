@@ -131,7 +131,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h2>What comes next: 12 tasks</h2>
   <p class="fine">The order is a guess about priority, not a fact. If it has drifted from what the maintainer wants, ask rather than working down the list. Only the numbered items are live work; the rest are parked by the maintainer's decision or are standing notes.</p>
   <h3 class="grouphead">Next, in order</h3><div class="glance"><table><tbody><tr class="g-now"><td class="g-n">1</td><td><a href="#S63">S63</a> The bar as a chat panel --- bubbles right and left, a layer that stays open until closed, resizable (R-428, R-429)<br><span class="fine">The maintainer's words on 17 Sept after the first thread: the best one so far, now make it read as a chat and stay open. Small UI work on the launcher and the bar; the conversation store already holds the state.</span></td></tr>
-<tr class="g-next"><td class="g-n">2</td><td>The audits the five new standards trigger (R-430 to R-434): every dead end offers choices; capacity and absence asked before the yes; a lot reverts on a refusal; every bar path traces<br><span class="fine">Answered yes on 17 Sept (session 178). R-426's second duty: a standard declared and left for the next person to trip over is not set. Each is a grep of the resolver and the writers, a fix or a queued card per hit, and a pin. R-433 (a walk is a spec first) is practice already and has its spec.</span></td></tr>
+<tr class="g-next"><td class="g-n">2</td><td><a href="#S64">S64</a> The audits the five new standards trigger, run and written down (R-430 to R-434): docs/agent-briefs/s64-a-dead-ends-and-pre-yes-audit.md and s64-b-lots-and-trace-audit.md hold every hit; now the fixes, and F-168 and F-169 found on the way<br><span class="fine">Answered yes on 17 Sept (session 178); the grep ran the same session (R-426's second duty). Twenty dead ends without choices, five of which already build the buttons and throw them away; absence never asked before the yes though the predicate and the rows are loaded; capacity never asked because the bar's write path skips even the pop-up's probe; a lot that half-lands can only be made all-or-nothing by a server RPC in the mould of apply_copy_week (a migration --- the shape is in the brief); and twenty-odd paths that end a sentence with no trace line. F-168 (a refused unassign recorded as Written) first.</span></td></tr>
 <tr class="g-next"><td class="g-n">3</td><td>A bare pair of hours under 7 asks which half of the day (R-435): 'from 1 to 5' offers 1 am to 5 am and 1 pm to 5 pm<br><span class="fine">The maintainer, 17 Sept: &quot;definitely ask, always ask when in doubt.&quot; Grammar work in parse.ts beside the afternoon rule (F-134), the question through the resolver's ask shape (R-425), a pin in both directions.</span></td></tr>
 <tr class="g-next"><td class="g-n">4</td><td>Clear empties the place (R-436): the people and the job, the readout naming both; a part named keeps the rest; and an undo from the activity log<br><span class="fine">The maintainer, 17 Sept: unless specified, clear means everything; the Bracket A run stayed on Cell 3 after &quot;clear Cell 3 today&quot;. The undo is the activity log read backwards for the turn's writes; size it when it is next. The model's data needs the new shape in the sixth run.</span></td></tr>
 <tr class="g-next"><td class="g-n">5</td><td>Floor-worded messages with a banned-word list (candidate 6): the maintainer asked for examples before deciding<br><span class="fine">Put with examples on 17 Sept (session 178); decided when the maintainer answers. Two wording items on S63's card would be its first hits.</span></td></tr>
@@ -180,6 +180,14 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="state"><p><b>NOW 17 Sept (session 178).</b> The maintainer answered the candidates (R-430 to R-437); building. Brief: s63-a-chat-panel-brief.md.</p></div>
   <p class="fine">session 177 conversation (the maintainer, 17 Sept) · §19.106 (D135)</p><p class="fine">Delivers <a href="#R-428">R-428</a>, <a href="#R-429">R-429</a>, <a href="#R-437">R-437</a></p>
   <span class="tags"><span class="chip now">In progress</span><span class="chip mine">Mine</span></span>
+</div>
+<div class="stage open" id="S64">
+  <span class="num">64</span>
+  <h3>The standards' audits, fixed --- choices at every dead end, absence and capacity before the yes, a lot in one transaction, a trace line on every path</h3>
+  <div class="what"><p><b>What the five yeses cost.</b> The two audit briefs hold every hit. Four lanes' worth: (a) the twenty dead ends, reusing the resolver's own suggestion builders; (b) an absenceGate beside certificateGate from the rows BoardPage already loads, and a capacity probe on the context so the bar asks before the yes; (c) apply_command_lot --- one server RPC in the mould of apply_copy_week, so a refused step rolls the lot back and the thread says nothing changed (a migration, then runLot is one call); (d) one endTurn in the store that every life-ending path calls, so no turn has a blank last line, plus F-168 and F-169.</p></div>
+  <div class="state"><p><b>OPEN 17 Sept (session 178).</b> Audits run and written; fixes after S63 lands.</p></div>
+  <p class="fine">session 178 conversation (the maintainer, 17 Sept) · §19.107 (D136) · docs/agent-briefs/s64-a-dead-ends-and-pre-yes-audit.md · docs/agent-briefs/s64-b-lots-and-trace-audit.md</p><p class="fine">Delivers <a href="#R-430">R-430</a>, <a href="#R-431">R-431</a>, <a href="#R-432">R-432</a>, <a href="#R-434">R-434</a></p>
+  <span class="tags"><span class="chip next">Open</span><span class="chip mine">Mine</span></span>
 </div></div>
   <details class="donefold"><summary>61 stages shipped — open to read them</summary><div class="stages"><div class="stage done" id="S01">
   <span class="num">1</span>
@@ -2342,7 +2350,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>167 things that weren't in the plan</h2>
+  <h2>169 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3792,6 +3800,22 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   <div class="aside"><span class="k">Fix</span><p>Session 177 (b17c858). CreatePopover reports written, refused or cancelled through a callback the bar passes on the hand-off; the bar sets the entry's outcome and ran from it and only then finishes the entry; the thread's Waiting line becomes Written, Refused or Cancelled (CB-t-18 to CB-t-20 and the pop-up's own pin).</p></div>
   <p class="fine">R-421 · R-427</p>
+</div>
+<div class="find " id="F-169">
+  <span class="tag">A pending rerun cleared on typing but not on a new sentence · open · found while building · <a href="#S64">S64</a></span>
+  <h3>A spoken sentence keeps a stale &quot;Show that day&quot; rerun alive, which then writes under the new sentence's name</h3>
+  <p>Found 17 Sept (session 178) by the same audit. The pending rerun a &quot;Show that day&quot; press sets is cleared by a typed edit, a cancel word and Escape, but submitText does not clear it, and a spoken sentence never passes through the typed-edit handler. So &quot;show Friday&quot; then, by voice, a different sentence before the window lands: the effect that waits for the window runs the OLD command and overwrites the NEW sentence's read, ran and outcome in the trace and the thread. Fix: submitText clears the rerun as it clears the lot; a pin that speaks a sentence while a rerun is pending.</p>
+  
+  
+  <p class="fine">R-419 · R-421</p>
+</div>
+<div class="find " id="F-168">
+  <span class="tag">A write that reports success can have changed nothing · open · found while building · <a href="#S64">S64</a></span>
+  <h3>A refused unassign or retime from the bar is recorded as Written, because four writers answer nothing and nothing is read as written</h3>
+  <p>Found 17 Sept (session 178) by the read-only audit R-434 triggered. On the single path the bar's onUnassign, onRetime, onRetimeRun and the retime half of onMove (BoardPage.tsx) return nothing, and settleWrite reads an undefined outcome as written; the writers underneath (removeAssignment, retimeAssignmentFromCommand) are fire-and-forget mutations with a toast on error. So a removal or a retime the server refuses (an RLS-filtered delete, a resize guard) is a Written line in the trace and the thread while the block is still on the board. CLAUDE.md §4's own warning, in the bar's words. Fix: every writer prop returns the outcome (written, refused with the server's reason) the way onOpen and onBook already do, and a void return is a type error, not a success.</p>
+  
+  
+  <p class="fine">R-421 · R-427 · R-434</p>
 </div>
 <div class="find fix" id="F-166">
   <span class="tag">A confirm word with no question falls through to the readers · fixed · found while building · <a href="#S62">S62</a></span>
