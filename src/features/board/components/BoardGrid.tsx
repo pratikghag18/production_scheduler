@@ -451,12 +451,28 @@ export function BoardGrid({
     // mean the initial scroll silently never happens (T9).
     if (viewport.width <= 0) return;
     if (lastNowNonceRef.current === scrollToNowNonce) return;
-    lastNowNonceRef.current = scrollToNowNonce;
 
     const nowMin = (Date.now() - index.windowStart.getTime()) / MS_PER_MINUTE;
     // "now" outside the loaded window is normal (the user paged to another
     // week) — leave their scroll position alone rather than jumping to an edge.
+    //
+    // ⚠️ RETURN WITHOUT CONSUMING THE NONCE (F-159 follow-up). `index` here can
+    // still be the PREVIOUS window's: `useBoardWindow` keeps previous data
+    // across a refetch (R-424), so between a window move and its payload
+    // landing this effect runs once against the old index. The nonce used to be
+    // spent on that run — `nowMin < 0`, return, and when the new window's index
+    // arrived the nonce was already marked done and the board never scrolled.
+    // That is exactly what F-159's own `anchorToZone` produced: it bumps the
+    // nonce at the same moment it moves the window, so R-055's "on first mount
+    // the board scrolls so now sits a quarter of the way across" silently did
+    // not happen. The nonce is a PROMISE OF A SCROLL and is only discharged by
+    // one; `index.windowStart`/`windowMinutes` are in the deps below, so the
+    // promise is kept the moment an index whose window holds now arrives.
+    //
+    // Prev/Next still never re-scroll: their nonce is unchanged AND already
+    // consumed by the mount scroll, so the guard above returns before this.
     if (nowMin < 0 || nowMin > index.windowMinutes) return;
+    lastNowNonceRef.current = scrollToNowNonce;
 
     const trackViewport = Math.max(0, viewport.width - railWidth);
     const target = minutesToPx(nowMin, pxPerHour) - trackViewport * NOW_LEAD_FRACTION;
