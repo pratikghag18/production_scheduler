@@ -2886,6 +2886,31 @@ stages:
     store that every life-ending path calls, so no turn has a blank last line, plus F-168 and F-169.
   state: >-
     **OPEN 17 Sept (session 178).** Audits run and written; fixes after S63 lands.
+- id: S65
+  track: core
+  num: 65
+  title: The operator rail --- two lines per person, a rail that drags wider, and the away not offered
+  status: open
+  owner: agent
+  refs:
+  - 'session 178 conversation (the maintainer, 17 Sept, operator rail review with a second agent)'
+  delivers:
+  - R-438
+  - R-439
+  - R-440
+  what: >-
+    **The rail the maintainer chose from six layouts.** Each person on two lines, the name never squeezed,
+    two badges and "+n", and "free / free 11:30 / booked" in words instead of the count pill (R-438); the
+    rail's edge drags wider and the width is remembered per person, reusing S63's panelSize (R-439); a
+    person away over any part of the window is not offered (R-440) --- which reaches the bar too, since
+    operatorPool feeds ctx.operators, so it lands with S64's absence gate as one rule.
+  state: >-
+    **OPEN 17 Sept (session 178).** Two decisions open, asked the same day: what "free 11:30" is measured
+    against (the developer's answer: the board root's shift pattern, as the shift chips already are, else
+    the window's first uncovered minute, in the plant's zone); and how far "not offered" reaches (the
+    developer's answer: under block everywhere --- rail, both pop-ups and the bar; under warn out of the rail
+    and asked-before-the-yes in the pop-ups and the bar, so the emergency placement warn exists for keeps
+    one door). R-438 and R-439 can run beside S64 once S63 is committed; R-440 rides with S64's absence lane.
 - id: M1
   track: matrix
   num: 1
@@ -12021,7 +12046,9 @@ requirements:
   claim: >-
     Each turn is two or more bubbles: what the person said on the right, what the board asked, offered and
     wrote on the left, separate bubbles in two colours, the offered buttons inside the board's bubble with
-    the chosen one marked. The wording of every bubble is the thread's today; only the shape changes.
+    the chosen one marked. The wording of every bubble is the thread's today; only the shape changes. The
+    board's bubble stands clearly off the panel's background (the maintainer, 17 Sept, on the first build:
+    "not popping enough"): a fill at least as far from the panel as --grid, never --page on --surface.
   verified_by:
   - kind: manual
     steps: "pinned by the S63 lane when it lands; the maintainer's next walk"
@@ -12188,6 +12215,92 @@ requirements:
   note: >-
     STATED 17 Sept (session 178): "when I hit enter after typing the sentence, the bar should clear out as
     well, it should not retain previous sentence. It is not value add to clear and type all the time."
+- id: R-438
+  title: The operator rail gives each person two lines, and the name is never squeezed
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, operator rail review, written by a second agent)'
+  stated_by: maintainer
+  claim: >-
+    Each person in the board's operator rail is drawn on two lines. The first carries the name alone, so
+    nothing can shorten it. The second carries up to TWO skill badges with a "+n" standing for the rest,
+    and, on the right, how booked that person is over the shown window said in words --- "free", "free
+    11:30", "booked". Badges are ordered by the skills the cell requires first, so what "+n" hides is never
+    the one that decides the assignment, and the "+n" names the rest on hover. The count pill and the
+    dimming that stood for "fully allocated" are both replaced by that wording.
+  verified_by:
+  - kind: manual
+    steps: "pinned when the rail lane lands"
+  status: uncovered
+  note: >-
+    STATED 17 Sept, from six rail layouts rendered at true 190px width: "I like option A", and of the
+    capacity bar offered beside it, "the bar is not very useful, we don't know what a full bar would mean".
+    The maintainer is right about the bar: `isFullyAllocated` returns a BOOLEAN --- covered at or above the cap at every
+    instant of the window with no gaps --- so there is no percentage in the data to draw, and the window is
+    the whole loaded board (a week = 10,080 minutes), against which nobody is ever a full bar.
+    ⚠️ ONE THING IS NOT SETTLED: what "free 11:30" is measured against. There is no board-level shift span
+    --- `DayAxis` is calendar days only, working hours live in a per-node `ShiftTemplate`, and the rail is
+    board-wide across nodes that may hold different templates. Either it means the first uncovered minute in
+    the window (free, but reads "free 00:00" for a night shift) or the board root's template is threaded
+    into `OperatorPanel`, which is given no shift today. Decide before the lane runs.
+    ⚠️ SUPERSEDES R-038 WHEN IT SHIPS --- R-038's claim IS today's chip ("avatar, name, skill badges and a
+    count pill ... dimmed when full") and its cases R-038a-d in `src/test/absenceOnBoard.test.tsx` assert it.
+    R-038 stays `covered` until the code changes, because until then it is still true.
+- id: R-439
+  title: The operator rail can be dragged wider, and remembers the width
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, operator rail review, written by a second agent)'
+  stated_by: maintainer
+  claim: >-
+    The operator rail's right edge is a drag handle: the person sets the rail's width, it is clamped to a
+    sensible range rather than free, and it is remembered for that person and restored when the board is
+    opened again. Collapsing the rail and re-opening it returns to the width they chose, not to the
+    default. The rail is 190px wide today with no way to change it.
+  verified_by:
+  - kind: manual
+    steps: "pinned when the rail lane lands"
+  status: uncovered
+  note: >-
+    STATED 17 Sept: "I like this with the resizable rail", after being shown that the rail is fixed at
+    `calc(190px * var(--ui-scale))` with only an open/collapsed boolean (`operatorPanelOpen`) and a
+    once-only auto-collapse below a 900px viewport.
+    The command bar already does this (R-429, same day): `src/features/board/lib/panelSize.ts` holds the
+    clamp and the localStorage round-trip, with cases PS-1..4 --- reuse it rather than writing a second
+    resize, generalising its storage key. Two cautions found while reading: the remembered width must
+    survive the auto-collapse, and the rail's width changes the grid's available WIDTH, so the horizontal
+    zoom reflows (it does NOT feed `computeFitScale`, which takes row heights and available height only).
+- id: R-440
+  title: A person who is away is not offered on the board
+  source:
+  - 'session 178 conversation (the maintainer, 17 Sept, operator rail review, written by a second agent)'
+  stated_by: maintainer
+  claim: >-
+    A person absent over any part of the shown window is not listed in the board's operator rail at all.
+    The rail stops marking them "on leave" and offering them like anyone else; they simply are not there
+    to be dragged.
+  verified_by:
+  - kind: manual
+    steps: "pinned when the rail lane lands"
+  status: uncovered
+  note: >-
+    STATED 17 Sept: "the requirement to not show people on leave". This REVERSES the board half of R-357,
+    which the maintainer was shown first --- R-357 records absence as a clash the screen SHOWS (an "on leave" mark on
+    the panel, the leave named in the pop-up before the save, the server warning or refusing under the
+    plant's warn-or-block policy, the R-338 shape) --- and the maintainer decided against it with that in front of him.
+    ⚠️ ONE THING IS NOT SETTLED: how far "not offered" reaches. `operatorPool` in `BoardPage` is ONE array
+    feeding the rail, the create pop-up and the reassign pop-up alike, and those pop-ups list absent people
+    in the dropdown with an "on leave" suffix (`e2e/absenceOnBoard.spec.ts` walks exactly that). Filter the
+    rail alone and the app contradicts itself: the rail says they are gone, the pop-up still offers them.
+    Filter the pool and NOBODY can place an absent person from the UI, which leaves a plant set to `warn`
+    with no route to the emergency placement the warn setting exists for, while the server still implements
+    both halves. The scope decision is the maintainer's, and it is what sizes the work.
+    ⚠️ WHEN THIS SHIPS, R-357 IS NARROWED, NOT RETIRED: its server and admin halves (migration 0066,
+    `absence_overlap`, the four writers, the AB0-AB14 SQL suite, the CSV importer, the Absences tab) are
+    untouched and still true. Only its two board-facing proofs move here ---
+    `src/test/absenceOnBoard.test.tsx` and `e2e/absenceOnBoard.spec.ts` --- and both currently assert the
+    OPPOSITE, so this row stays `uncovered` until they are rewritten.
+    Related, still open: F-113 --- resizing an assignment is the one writer that never checks absence. It is
+    server-side and unaffected by hiding people from the rail, so this row does not claim an absent person
+    can no longer end up on the board.
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today
@@ -24185,6 +24298,20 @@ next:
     write path skips even the pop-up's probe; a lot that half-lands can only be made all-or-nothing by a
     server RPC in the mould of apply_copy_week (a migration --- the shape is in the brief); and twenty-odd
     paths that end a sentence with no trace line. F-168 (a refused unassign recorded as Written) first.
+- kind: task
+  stage: S65
+  text: "The operator rail (R-438, R-439): two lines per person with free/booked in words, and a rail that drags wider and remembers its width --- beside S64, after S63 is committed"
+  why: >-
+    Stated 17 Sept (session 178) with a second agent from six rendered layouts. Owns OperatorPanel and its
+    test and absenceOnBoard's R-038 cases (R-038 superseded when it ships); reuses panelSize.ts. Waits on the
+    "free 11:30" decision.
+- kind: task
+  stage: S65
+  text: "The away are not offered (R-440), as one rule with S64's absence gate: the rail, both pop-ups and the bar decide from the same predicate and the plant's warn-or-block policy"
+  why: >-
+    operatorPool feeds the rail, both pop-ups AND the bar's ctx.operators (BoardPage ~625, ~700), so filtering
+    it in one place changes all four; R-357's board half is narrowed and absenceOnBoard's cases assert the
+    opposite today. Waits on the reach decision.
 - kind: task
   text: "A bare pair of hours under 7 asks which half of the day (R-435): 'from 1 to 5' offers 1 am to 5 am and 1 pm to 5 pm"
   why: >-
