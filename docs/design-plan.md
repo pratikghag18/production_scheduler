@@ -9770,3 +9770,12 @@ question named a date, and the Show-that-day handler widens the window only for 
 question now carries the week word, so one press widens to seven days on that Monday and the five
 commands list. Two hand-written walks had never said a repeat on a short window; the spec did on
 its first run, twice, byte-identical. That is the point of the spec.
+
+**What the evening found (F-159).** At 19:09 Chicago the voice walk's first sentence said today
+was not on the board. The board's hours are drawn in the plant's zone and were right; the DAY the
+board opens on was the UTC date, chosen at page load before the zone is known and never corrected,
+so from 19:00 to midnight Chicago the board opened on tomorrow. Before F-156 the bar had fallen
+back to the window's first day and would have written onto tomorrow without a word. Every walk and
+the typed spec had run in the afternoon, when the two dates agree. The marker is now the plant's
+date, re-anchored once the zone arrives if nobody has moved the window, and pinned with a frozen
+clock at 19:30 Chicago. The typed walk spec is clock-blind; a frozen page clock is its next step.

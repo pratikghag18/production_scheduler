@@ -354,6 +354,39 @@ export default function BoardPage() {
   const zone = boardQuery.data?.timezone ?? DEFAULT_TIMEZONE;
 
   /**
+   * ⭐ F-159: THE BOARD OPENS ON THE PLANT'S CALENDAR DAY. The store is
+   * created before any payload exists, so its "which day" marker is the UTC
+   * date — a first guess that is the plant's date for most of the day and
+   * TOMORROW's for the evening hours west of UTC (19:00 America/Chicago is
+   * already 00:00Z). The reproduction was exactly that: the board opened on
+   * the 17th at 19:09 on the 16th, `todayIndex` was -1, and the command bar
+   * answered "today is not on the board".
+   *
+   * So the moment the payload says which zone the plant keeps, correct the
+   * guess — ONCE, and only if nobody has moved the window themselves
+   * (`windowMovedByUser`, which every store move including `goToToday` sets).
+   * `anchorToZone` sets `anchoredToZone`, which is what makes this a
+   * correction and not a loop. Read through `getState()` rather than
+   * subscribed selectors on purpose: these two flags must not re-render the
+   * board, and this effect's only trigger is the zone arriving.
+   */
+  const payloadZone = boardQuery.data?.timezone ?? null;
+  const anchorToZone = useBoardViewStore((s) => s.anchorToZone);
+  useEffect(() => {
+    if (payloadZone === null) return;
+    const state = useBoardViewStore.getState();
+    if (state.windowMovedByUser || state.anchoredToZone) return;
+    const plantToday = partsInZone(new Date(), payloadZone);
+    const marker = state.windowStartDate;
+    const sameDay =
+      marker.getUTCFullYear() === plantToday.year &&
+      marker.getUTCMonth() + 1 === plantToday.month &&
+      marker.getUTCDate() === plantToday.day;
+    if (sameDay) return;
+    anchorToZone(payloadZone);
+  }, [payloadZone, anchorToZone]);
+
+  /**
    * R-403 / migration 0081 (D129): the command bar mode, read off the payload
    * exactly as `dateFormat`/`zone` are -- resolved for this board's own root
    * on the server. Falls back to the key's own default ('voice', the board's
@@ -779,7 +812,12 @@ export default function BoardPage() {
   function handleShowDay(target: string): void {
     if (!commandCtx || commandCtx.days.length === 0) return;
     if (target === "today") {
-      goToToday();
+      // F-159: the plant's today, the same day the question judged itself
+      // against (`todayIndex` is read off the axis, which is in `zone`).
+      // `goToToday()` computed the UTC date, so after 19:00 Chicago the
+      // button moved the board to tomorrow -- where the sentence was
+      // already sitting -- and nothing on screen changed.
+      goToToday(zone);
       return;
     }
     if (target === "yesterday") {
@@ -1017,7 +1055,7 @@ export default function BoardPage() {
           setWindowDayCount(days);
         }}
         onShiftWindowByDays={shiftWindowByDays}
-        onGoToToday={goToToday}
+        onGoToToday={() => goToToday(zone)}
         products={boardQuery.data?.products ?? []}
         isFetching={boardQuery.isFetching && hasData}
         dateFormat={dateFormat}
