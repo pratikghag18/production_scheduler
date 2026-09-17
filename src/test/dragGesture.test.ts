@@ -1564,6 +1564,95 @@ describe("useDragGesture", () => {
       expect(second.seq).not.toBe(first.seq);
     });
 
+    // -----------------------------------------------------------------
+    // S62-b re-check fixes (2) and (3): the split-coverage pop-up is where a
+    // sentence's write can end up, and it never told the bar anything. Both
+    // pins drive `openCreateFromCommand` -> the capacity probe answering
+    // "does not fit" -> the split pop-up, which is the real route.
+    // -----------------------------------------------------------------
+    async function reachSplitFromASentence(
+      onResult: (r: { kind: string; message?: string }) => void,
+      strict = false,
+    ) {
+      const api = await import("@/lib/api");
+      vi.mocked(api.probeCapacity).mockResolvedValue({
+        fits: false,
+        cap: 1,
+        peak: 1.5,
+        overlapping: [],
+      } as unknown as Awaited<ReturnType<typeof api.probeCapacity>>);
+      const strictWrapper = ({ children }: { children: ReactNode }) =>
+        createElement(StrictMode, null, createElement(wrapper, null, children));
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), {
+        wrapper: strict ? strictWrapper : wrapper,
+      });
+
+      act(() => {
+        result.current.openCreateFromCommand({
+          nodeId: "cell-1",
+          range: { startMin: 360, endMin: 480 },
+          operatorId: "op-1",
+          target: { kind: "direct", productId: "prod-1" },
+          anchor: { x: 10, y: 10 },
+          onResult: onResult as never,
+        });
+      });
+      // The create pop-up opens first; its own Create is what probes.
+      expect(result.current.popover?.kind).toBe("create");
+      await act(async () => {
+        await result.current.submitCreateDirect(
+          "cell-1",
+          { startMin: 360, endMin: 480 },
+          "op-1",
+          { kind: "direct", productId: "prod-1" },
+          100,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          false,
+          undefined,
+          { x: 10, y: 10 },
+        );
+      });
+      await waitFor(() => expect(result.current.popover?.kind).toBe("split"));
+      return result;
+    }
+
+    it("D14 (S62-b re-check fix 2/3): cancelSplit reports `cancelled` to the sentence that reached the split pop-up", async () => {
+      const seen: { kind: string }[] = [];
+      const result = await reachSplitFromASentence((r) => seen.push(r));
+      // The reporter the create pop-up was given is carried onto the split
+      // pop-up -- otherwise nothing here could ever answer the sentence.
+      expect(result.current.popover?.kind === "split").toBe(true);
+
+      act(() => {
+        result.current.cancelSplit();
+      });
+
+      expect(seen).toEqual([{ kind: "cancelled" }]);
+      expect(result.current.popover).toBeNull();
+    });
+
+    it("D15 (S62-b re-check fix 3, F-128's shape again): the reporter fires ONCE under StrictMode, with no latch of its own", async () => {
+      // The report used to run INSIDE `setPopover`'s updater, which StrictMode
+      // invokes twice on purpose. The reporter passed here deliberately has NO
+      // "fire once" latch, so a second call would be visible -- the bar's own
+      // latch must not be what makes this right.
+      const seen: { kind: string }[] = [];
+      const result = await reachSplitFromASentence((r) => seen.push(r), true);
+
+      act(() => {
+        result.current.cancelSplit();
+      });
+      // Give a second, double-invoked call every chance to land before counting.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      expect(seen).toEqual([{ kind: "cancelled" }]);
+    });
+
     it("D12 (S61-a, R-425, F-155): openMoveFromCommand with an override writes DIRECTLY through submitMove -- eligibilityOverride: true, overrideReason set, no popover opened", async () => {
       const api = await import("@/lib/api");
       vi.mocked(api.moveAssignment).mockResolvedValue(

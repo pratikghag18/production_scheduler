@@ -197,6 +197,34 @@ export interface ResolveContext {
    *  (`policyForNode`, `boardIndex.ts`'s own R-331 answer) -- a function of
    *  `nodeId` so a lot's several different cells each ask their own. */
   eligibilityPolicy: (nodeId: string) => "warn" | "block";
+  /**
+   * F-165 (S62-b): THE SERVER'S AREA RULE, TRANSCRIBED -- true when placing
+   * this person on this cell would need `assignments.area_override`, i.e.
+   * when the node that OWNS them does not cover the cell (migration 0072's
+   * `app_guard_assignment_scope`: "if not app_owner_covers_in_org(...) then
+   * ... if not new.area_override then api_raise('not_offered_here', 'That
+   * person does not belong to this part of the structure.')").
+   *
+   * `BoardPage` feeds this from the SAME `outsideAreaOperatorIds` helper the
+   * create pop-up already marks people with (`lib/outsideArea.ts`, whose
+   * `isAtOrBelow` IS the ltree `@>` test the server's own
+   * `app_owner_covers_in_org` runs) -- CLAUDE.md 4: "whatever a client hides
+   * or offers must be decided by the same test the server runs".
+   *
+   * ⚠️ THE OWNER IS `operators.site_node_id`, NOT `home_node_id`, and the two
+   * are different columns with different answers. The guard reads
+   * `o.site_node_id`; the board payload sends that same node's path as
+   * `site_path` (migration 0058's `app_operator_homes`, whose NAME says home
+   * and whose COLUMN says site). On Plant A today five of the six demo people
+   * are owned by the plant and one, Sam Patel, by Line 1 -- which is exactly
+   * why the maintainer's swap stopped on HIM and on no one else.
+   *
+   * Optional, and `undefined` means "nobody is outside their area": the same
+   * fail-open `outsideArea.ts`'s own header documents for a place it cannot
+   * resolve, and byte for byte the pre-F-165 behaviour for any caller (every
+   * fixture in the resolver's own tests included) that does not supply it.
+   */
+  outsideArea?: (operatorId: string, nodeId: string) => boolean;
 }
 
 /**
@@ -232,6 +260,12 @@ export interface ResolvedCommand {
    *  overrideReason` pair `buildCreateAssignmentInput`'s own `overrides`
    *  parameter already carries for the pop-up's own override checkbox. */
   override?: { reason: string };
+  /** F-165 (S62-b): set ONLY when an `outside_area` question was suppressed
+   *  by a re-resolve carrying `{ areaReason }`. The writer folds it into the
+   *  SAME `areaOverride: true, areaOverrideReason` pair the pop-up's own
+   *  "not from this area" checkbox already sends (migration 0072's second
+   *  door) -- never the eligibility pair, which is a different rule. */
+  areaOverride?: { reason: string };
 }
 
 /** S41-a: a "book a job" sentence resolves to either a brand-new job (never
@@ -297,6 +331,9 @@ export interface ResolvedMove {
    *  positional arguments (`eligibilityOverride`, `overrideReason`,
    *  `src/features/board/hooks/useDragGesture.ts`), NOT this module's. */
   override?: { reason: string };
+  /** F-165 (S62-b): the AREA twin -- `submitMove`'s own 6th/7th positional
+   *  arguments (`areaOverride`, `areaOverrideReason`). */
+  areaOverride?: { reason: string };
 }
 
 export type Candidate = {
@@ -391,6 +428,23 @@ export type Question =
       policy: "warn" | "block";
       inLot: boolean;
     }
+  /**
+   * F-165 (S62-b, R-425's shape for the AREA rule): a resolved write would
+   * put `person` on a cell their home does not cover, which the server
+   * refuses outright unless the row carries `area_override` and a reason
+   * (migration 0072). Asked BEFORE anything is written, exactly as
+   * `not_certified` is -- the maintainer's swap wrote three of its four
+   * steps and stopped on this refusal, and the same sentence said on its own
+   * opened a create pop-up behind the bar that was silently waiting for the
+   * very same reason.
+   *
+   * There is no `policy` here: unlike a certificate gap, the area door is
+   * ALWAYS open on the server (there is no "block" setting for it), so a
+   * single sentence always gets to give a reason. `inLot: true` marks a
+   * question raised at expansion time for a lot -- a lot never asks a reason
+   * and never writes half of itself (R-425), so it is refused there.
+   */
+  | { kind: "outside_area"; person: string; cell: string; inLot: boolean }
   | { kind: "day_off_board"; text: string }
   | { kind: "too_short"; minutes: number; min: number }
   /** R-383: the span sits inside one or more jobs for this part on this cell,
@@ -1231,13 +1285,22 @@ function missingSkillWords(gaps: { skill: string; state: "never-trained" | "laps
  *  (`overrideReason.trim() === ""`). */
 export interface ResolveOptions {
   overrideReason?: string;
+  /** F-165 (S62-b): the AREA twin of `overrideReason` -- the reason an
+   *  `outside_area` question was answered with. A different field on the
+   *  write (`area_override`/`area_override_reason`, migration 0072's own
+   *  second door), so it is a different field here; a sentence that raised
+   *  both questions carries both. */
+  areaReason?: string;
+}
+
+function usableReason(raw: string | undefined): string | null {
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 function usableOverrideReason(options: ResolveOptions | undefined): string | null {
-  const r = options?.overrideReason;
-  if (r === undefined) return null;
-  const trimmed = r.trim();
-  return trimmed === "" ? null : trimmed;
+  return usableReason(options?.overrideReason);
 }
 
 /** S61-b (R-425, F-155): the one gate a resolved write that puts a person on
@@ -1273,6 +1336,42 @@ function certificateGate(
       cell: cell.name,
       missing: missingSkillWords(gaps),
       policy,
+      inLot,
+    },
+  };
+}
+
+/**
+ * F-165 (S62-b): the AREA gate -- `certificateGate`'s twin, run beside it
+ * wherever a write would put a person on a cell. `ctx.outsideArea` is the
+ * server's own `app_owner_covers_in_org` test transcribed (see that field's
+ * doc); a person it answers `true` for cannot be written to that cell at all
+ * unless the row carries `area_override` and a reason, so the bar asks for
+ * one BEFORE the yes rather than letting the server refuse afterwards
+ * (CLAUDE.md 4) -- or, worse, letting a create pop-up sit behind the bar
+ * waiting for it while the bar printed the readout as done (F-165).
+ *
+ * `inLot: true` never honours `options`, for exactly the reason
+ * `certificateGate`'s does not: a lot never asks a reason and never writes
+ * half of itself (R-425).
+ */
+function areaGate(
+  operator: { id: string; displayName: string },
+  cell: Node,
+  inLot: boolean,
+  ctx: ResolveContext,
+  options: ResolveOptions | undefined,
+): { ok: true; areaOverride?: { reason: string } } | { ok: false; question: Question } {
+  if (ctx.outsideArea === undefined) return { ok: true };
+  if (!ctx.outsideArea(operator.id, cell.id)) return { ok: true };
+  const reason = inLot ? null : usableReason(options?.areaReason);
+  if (reason !== null) return { ok: true, areaOverride: { reason } };
+  return {
+    ok: false,
+    question: {
+      kind: "outside_area",
+      person: operator.displayName,
+      cell: cell.name,
       inLot,
     },
   };
@@ -2158,10 +2257,19 @@ function resolveAssignCommand(
   // own door, has no override field to carry a reason to in the first
   // place, and the person is already on this cell either way).
   let override: { reason: string } | undefined;
+  let areaOverride: { reason: string } | undefined;
   if (target.kind !== "retime") {
     const gate = certificateGate(operator, cell, endMin, false, ctx, options);
     if (!gate.ok) return gate;
     override = gate.override;
+    // F-165 (S62-b): the AREA question, beside the certificate one and for
+    // the same reason -- the server refuses this write outright without a
+    // reason, so the bar asks before the yes rather than after (R-425's
+    // shape). Skipped for the same `retime` case above: the person is
+    // already on this cell.
+    const area = areaGate(operator, cell, false, ctx, options);
+    if (!area.ok) return area;
+    areaOverride = area.areaOverride;
   }
 
   // Readout.
@@ -2189,6 +2297,7 @@ function resolveAssignCommand(
       range: { startMin, endMin },
       readout,
       ...(override ? { override } : {}),
+      ...(areaOverride ? { areaOverride } : {}),
     },
   };
 }
@@ -2667,6 +2776,7 @@ function resolveMoveCommand(
   // an adjust or a move-in-time never leaves the block's own cell, so the
   // operator is already certified there (or was never asked when placed).
   let override: { reason: string } | undefined;
+  let areaOverride: { reason: string } | undefined;
 
   if (command.adjust !== null) {
     // S58 (R-412, D132 item 1): a re-time by ONE edge -- the top-of-function
@@ -2803,6 +2913,12 @@ function resolveMoveCommand(
     const gate = certificateGate(operator, newCell, endMin, false, ctx, options);
     if (!gate.ok) return gate;
     override = gate.override;
+    // F-165 (S62-b): the AREA question, same placement and same reason as
+    // the assign path's -- only a move to ANOTHER cell can leave a person's
+    // own area.
+    const area = areaGate(operator, newCell, false, ctx, options);
+    if (!area.ok) return area;
+    areaOverride = area.areaOverride;
   }
 
   // Readout -- the chain names the BLOCK's own cell (S49: it may have come
@@ -2833,6 +2949,7 @@ function resolveMoveCommand(
       target,
       readout,
       ...(override ? { override } : {}),
+      ...(areaOverride ? { areaOverride } : {}),
     },
   };
 }
@@ -3743,6 +3860,13 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
     // that block's own real end, the exact window `b` would take over.
     const gate = certificateGate(b, xCell, x.endMin, true, ctx, undefined);
     if (!gate.ok) return gate;
+    // F-165 (S62-b): and the AREA question, at the same moment and for the
+    // same reason -- a lot is refused before its one yes rather than
+    // stopping half-written on the server's refusal (R-425). This is the
+    // exact shape the maintainer's swap hit: three steps written, the
+    // fourth refused, John's block gone and Sam never placed.
+    const area = areaGate(b, xCell, true, ctx, undefined);
+    if (!area.ok) return area;
 
     removals.push({
       intent: "unassign",
@@ -3923,8 +4047,18 @@ function expandSwap(command: SwapCommand, ctx: ResolveContext): Expansion {
   // written: `a` moving onto `cellB` first, then `b` onto `cellA`.
   const gateA = certificateGate(a, cellB, blkB.endMin, true, ctx, undefined);
   if (!gateA.ok) return gateA;
+  const areaA = areaGate(a, cellB, true, ctx, undefined);
+  if (!areaA.ok) return areaA;
   const gateB = certificateGate(b, cellA, blkA.endMin, true, ctx, undefined);
   if (!gateB.ok) return gateB;
+  // F-165 (S62-b): THE SWAP THE MAINTAINER REPORTED. "swap John Kim and Sam
+  // Patel today" wrote three of its four steps and stopped: Sam's home is
+  // Cell 1 under Line 1, John's slot is Cell 3 under Line 2, and the server
+  // refuses that row without an area override -- by which time John's own
+  // block had already been removed. Both people are checked HERE, before a
+  // single readout is shown.
+  const areaB = areaGate(b, cellA, true, ctx, undefined);
+  if (!areaB.ok) return areaB;
 
   const commands: SingleCommand[] = [
     {
@@ -4289,6 +4423,9 @@ function expandCopy(command: CopyCommand, ctx: ResolveContext): Expansion {
           undefined,
         );
         if (!gate.ok) return gate;
+        // F-165 (S62-b): and the area question, same timing.
+        const area = areaGate(op, cell, true, ctx, undefined);
+        if (!area.ok) return area;
 
         commands.push({
           intent: "assign",
@@ -4740,6 +4877,11 @@ export function describeQuestion(q: Question): string {
       }
       return `${q.person} is not certified for ${q.cell}: missing ${missing}. Say the reason to schedule anyway, or no.`;
     }
+    // F-165 (S62-b): the baseline wording; `CommandBar.tsx` refines it for a
+    // lot (which never takes a reason) exactly as it already does for
+    // `not_certified`.
+    case "outside_area":
+      return `${q.person} is not from ${q.cell}'s area. Say the reason to schedule anyway, or no.`;
     case "day_off_board":
       return `${q.text} is not on the board. Move the board to that day first.`;
     case "too_short":

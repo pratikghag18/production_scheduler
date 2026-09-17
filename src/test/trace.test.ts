@@ -15,6 +15,8 @@ function baseEntry(over: Partial<TraceEntry> = {}): TraceEntry {
     asked: null,
     answered: null,
     ran: [],
+    // F-164: the entry's last word -- `null` until a writer has answered.
+    outcome: null,
     ...over,
   };
 }
@@ -59,6 +61,32 @@ describe("trace: renderLine (S59-e, R-421)", () => {
     const short = "z".repeat(10);
     const parsedShort = JSON.parse(renderLine(baseEntry({ model: { raw: short } }))) as TraceEntry;
     expect("raw" in parsedShort.model && parsedShort.model.raw).toBe(short);
+  });
+
+  // F-164 (the maintainer's swap, 17 Sept): the entry's LAST WORD -- what
+  // became of the write, in the writer's own words. `asked` already holds
+  // the question or the readout that STOOD; without a field of its own,
+  // neither a lot's failure text nor a single's refusal had anywhere to go,
+  // which is why the trace of the swap said nothing about why the fourth
+  // step stopped and why a sentence that never wrote a row read exactly like
+  // one that did.
+  it("T-7: outcome round-trips -- written, a refusal, a pop-up, and a lot's own last line", () => {
+    for (const outcome of [
+      "written",
+      "refused: That person does not belong to this part of the structure.",
+      "popup: the create pop-up",
+      "Did 3 of 4; the next failed: That person does not belong to this part of the structure.",
+    ]) {
+      const entry = baseEntry({ outcome });
+      expect((JSON.parse(renderLine(entry)) as TraceEntry).outcome).toBe(outcome);
+    }
+  });
+
+  it("T-8: outcome is null when nothing was ever attempted, and survives the round trip as null", () => {
+    const entry = baseEntry({ asked: "Which person?", answered: null });
+    const parsed = JSON.parse(renderLine(entry)) as TraceEntry;
+    expect(parsed.outcome).toBeNull();
+    expect(parsed).toEqual(entry);
   });
 
   it("T-6: ran lists several readouts, in order", () => {

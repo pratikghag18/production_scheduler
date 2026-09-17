@@ -54,6 +54,7 @@ import {
 } from "./lib/time";
 import { BoardToolbar } from "./components/BoardToolbar";
 import { CommandLauncher } from "./components/CommandLauncher";
+import { historyStorageKey } from "./store/commandConversation";
 import { BoardGrid } from "./components/BoardGrid";
 import { OperatorPanel } from "./components/OperatorPanel";
 import { BoardEmptyState } from "./components/BoardEmptyState";
@@ -752,6 +753,15 @@ export default function BoardPage() {
       // S61-b (R-425, F-155): the SAME per-node policy the create pop-up
       // reads (`policyForNode`, R-331's own answer) -- never a second copy.
       eligibilityPolicy: (nodeId: string) => policyForNode(index, nodeId),
+      // F-165 (S62-b): the server's AREA rule, through the SAME helper the
+      // create pop-up already marks people with -- `outsideAreaOperatorIds`
+      // over the cell's own ltree path, whose `isAtOrBelow` IS the `@>` test
+      // `app_owner_covers_in_org` runs (migration 0072). Never a second copy
+      // of the rule, and never a guess: a node this window does not carry
+      // resolves to no path, which the helper itself reads as "mark nobody"
+      // (its own documented fail-open -- the server still decides).
+      outsideArea: (operatorId: string, nodeId: string) =>
+        outsideAreaFor(operatorPool, index.nodeById.get(nodeId)?.path ?? null).has(operatorId),
     };
   }, [boardQuery.data, index, operatorPool]);
 
@@ -1095,17 +1105,30 @@ export default function BoardPage() {
               requirement's own words, "a viewer's view, for everyone". */}
           {canPlace && commandCtx !== null && commandBarLaunch.show && (
             <CommandLauncher
+              // R-427: this person, THIS BOARD -- the key the conversation
+              // thread is kept under (last 24 hours, in localStorage). The
+              // second half is the board ROOT, not the plant (S62-b reviewer
+              // fix F): a line supervisor and a plant admin are looking at
+              // different boards, and the turns are about the cells in front
+              // of you. Null until both are known, which only happens before
+              // the board has loaded at all; a change to either flushes the
+              // sentence in progress and starts the other thread clean.
+              historyKey={
+                session?.user.id && rootPath ? historyStorageKey(session.user.id, rootPath) : null
+              }
               ctx={commandCtx}
               dateFormat={dateFormat}
               zone={index.zone}
               reader={COMMAND_BAR_READER}
               recognizer={commandBarLaunch.voice ? BOARD_RECOGNIZER : null}
               recognizerName={() => engineRef.current}
-              onOpen={(resolved, anchor) => {
+              onOpen={(resolved, anchor, report) => {
                 // R-385: a `retime` target is never a create; `onRetime`
                 // below is the caller for that branch of the union.
                 if (resolved.target.kind === "retime") return;
-                dragApi.openCreateFromCommand({
+                // F-164: the outcome is RETURNED, so the bar's trace records
+                // what the writer answered rather than assuming it wrote.
+                return dragApi.openCreateFromCommand({
                   nodeId: resolved.nodeId,
                   range: resolved.range,
                   operatorId: resolved.operatorId,
@@ -1119,6 +1142,11 @@ export default function BoardPage() {
                   // bug: the readout said "· override: ..." and nothing was
                   // written).
                   override: resolved.override,
+                  // F-165 (S62-b): the AREA twin -- set only when an
+                  // `outside_area` question was answered with a reason.
+                  areaOverride: resolved.areaOverride,
+                  // F-167: the pop-up this opens reports back through here.
+                  onResult: report,
                 });
               }}
               onRetime={(resolved, anchor) => {
@@ -1129,14 +1157,15 @@ export default function BoardPage() {
                   anchor,
                 });
               }}
-              onBook={(resolved, anchor) => {
+              onBook={(resolved, anchor, report) => {
                 if (resolved.target.kind !== "run_create") return;
-                dragApi.openCreateRunFromCommand({
+                return dragApi.openCreateRunFromCommand({
                   nodeId: resolved.nodeId,
                   range: resolved.range,
                   productId: resolved.target.productId,
                   headcount: resolved.target.headcount,
                   anchor,
+                  onResult: report,
                 });
               }}
               onRetimeRun={(resolved, anchor) => {
@@ -1155,15 +1184,16 @@ export default function BoardPage() {
               // the drag's own path (R-385's, no second path for the
               // move-in-time half); a `move_cell` opens the create pop-up
               // preset under `presetMove` (no second door).
-              onMove={(resolved, anchor) => {
+              onMove={(resolved, anchor, report) => {
                 if (resolved.target.kind === "retime") {
                   dragApi.retimeAssignmentFromCommand({
                     assignmentId: resolved.assignmentId,
                     range: resolved.range,
                     anchor,
                   });
+                  return;
                 } else {
-                  dragApi.openMoveFromCommand({
+                  return dragApi.openMoveFromCommand({
                     assignmentId: resolved.assignmentId,
                     nodeId: resolved.nodeId,
                     range: resolved.range,
@@ -1174,6 +1204,10 @@ export default function BoardPage() {
                     // `onOpen` above -- a `move_cell` target is the only
                     // shape `ResolvedMove.override` is ever set for.
                     override: resolved.override,
+                    // F-165 (S62-b): the AREA twin, same reasoning as
+                    // `onOpen`'s above.
+                    areaOverride: resolved.areaOverride,
+                    onResult: report,
                   });
                 }
               }}
@@ -1183,6 +1217,8 @@ export default function BoardPage() {
               // headcount field uses (`saveRunFields`'s own door, no second
               // one), keyed on the run and number the resolver already
               // found.
+              // F-164: `setHeadcountFromCommand` answers with a promise
+              // now -- the bar waits for it before recording the readout.
               onSetHeadcount={(resolved) =>
                 dragApi.setHeadcountFromCommand(resolved.runId, resolved.headcount)
               }
@@ -1204,8 +1240,28 @@ export default function BoardPage() {
               // reads R-384's `clean` and refuses a second fire.
               onConfirmWord={() => createPopoverRef.current?.submitIfClean() ?? "none"}
               onCancelWord={() => {
+                // S62-b re-check fix (2): the SPLIT pop-up counts too. A create
+                // pop-up a sentence opened can hand its write on to the
+                // split-coverage one (F-167's `handed_off`), and from that
+                // moment the create pop-up is gone -- so a spoken or typed
+                // "no" found nothing to claim, said "Nothing to cancel" and
+                // left the split pop-up standing over a sentence that was
+                // still waiting. `commandResult` is set on it only when a
+                // sentence opened the pop-up it came from, which is exactly
+                // the case a cancel word may claim.
+                if (popover?.kind === "split" && popover.commandResult) {
+                  dragApi.cancelSplit();
+                  return true;
+                }
                 if (popover?.kind === "create" && popover.autoCreate) {
-                  dragApi.closePopover();
+                  // S62-b reviewer fix (C): through the POP-UP's own cancel,
+                  // never `dragApi.closePopover()` -- closing it from outside
+                  // unmounts it without its `onResult` ever firing, and the
+                  // sentence that opened it waits for an answer that can no
+                  // longer come. `cancel()` closes it the same way the Cancel
+                  // button does, reporting `cancelled` on the way out.
+                  if (createPopoverRef.current) createPopoverRef.current.cancel();
+                  else dragApi.closePopover();
                   return true;
                 }
                 return false;
@@ -1332,6 +1388,9 @@ export default function BoardPage() {
           autoCreate={popover.autoCreate}
           dateFormat={dateFormat}
           onCancel={dragApi.closePopover}
+          /* F-167: set only when the typed command bar opened this pop-up --
+             its way of telling the bar whether the write landed. */
+          onResult={popover.commandResult}
           onSubmitRun={dragApi.submitCreateRun}
           onSubmitDirect={dragApi.submitCreateDirect}
           onSubmitMove={dragApi.submitMove}

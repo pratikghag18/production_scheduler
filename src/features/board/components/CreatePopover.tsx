@@ -7,6 +7,7 @@ import { certificateGaps, type CertificateGap } from "../lib/boardIndex";
 import { absenceGaps, type AbsenceRow, type AbsenceHit } from "@/lib/absence";
 import { leaveLine } from "../lib/leave";
 import { DEFAULT_DATE_FORMAT, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
+import type { PopupReporter } from "../store/commandConversation";
 import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
 import fieldStyles from "@/components/Field.module.css";
@@ -117,6 +118,17 @@ export interface PopoverConfirmHandle {
    *     for a spoken yes to do here at all.
    */
   submitIfClean(): "created" | "needs-decision" | "none";
+  /**
+   * S62-b reviewer fix (C): the CANCEL twin of `submitIfClean`, for a spoken
+   * or typed "no" while this pop-up is the thing standing. `BoardPage`'s
+   * `onCancelWord` used to call `dragApi.closePopover()` directly, which
+   * unmounts this component without ever going through its own `cancel` --
+   * so the sentence that opened it was never told it had been cancelled and
+   * its turn said "Waiting: the create pop-up" for ever. This is the same
+   * `cancel` the Cancel button and the shell's own close call, so the report
+   * happens exactly once however the pop-up goes away.
+   */
+  cancel(): void;
 }
 
 export function CreatePopover({
@@ -144,6 +156,7 @@ export function CreatePopover({
   presetMove,
   autoCreate,
   onCancel,
+  onResult,
   onSubmitRun,
   onSubmitDirect,
   onSubmitMove,
@@ -320,12 +333,33 @@ export function CreatePopover({
    */
   autoCreate?: boolean;
   onCancel: () => void;
+  /**
+   * F-167 (the other half of F-165's silence): set ONLY when the typed
+   * command bar opened this pop-up. The bar printed a readout the moment it
+   * handed the write over, and before this nothing ever came back — so a
+   * sentence whose write was still sitting in an unanswered pop-up read, in
+   * the trace and on screen, exactly like one that had landed.
+   *
+   * Called EXACTLY ONCE, on whichever of the three things happens first:
+   *   - Create (or R-384's auto-press) is accepted by the server → `written`;
+   *   - the server refuses it → `refused`, with the server's own sentence;
+   *   - Cancel is pressed, or the pop-up is closed → `cancelled`.
+   *
+   * It is deliberately NOT called on unmount: a successful Create unmounts
+   * this pop-up too, and a "cancelled" fired from there would be a lie about
+   * the commonest path. A pop-up that goes away some other way simply never
+   * reports, which the bar reads as "still waiting" and flushes on teardown.
+   */
+  onResult?: PopupReporter;
   onSubmitRun: (
     nodeId: string,
     range: { startMin: number; endMin: number },
     productId: string,
     plannedHeadcount: number | undefined,
-  ) => void;
+    // F-167: `"written"` once the row is in; a rejection carries the
+    // refusal. A caller that answers nothing (a test double, a drag's own
+    // wiring) is read as written, which is the pre-F-167 assumption.
+  ) => void | Promise<"written" | void>;
   onSubmitDirect: (
     nodeId: string,
     range: { startMin: number; endMin: number },
@@ -342,7 +376,11 @@ export function CreatePopover({
     areaOverride: boolean,
     areaOverrideReason: string | undefined,
     anchor: { x: number; y: number },
-  ) => void;
+    // F-167: `"written"` once the row is in; `"handed-off"` when this Create
+    // opened ANOTHER pop-up (D61's split coverage) and nothing has been
+    // written yet, so nothing is reported and the sentence keeps waiting; a
+    // rejection carries the server's own refusal.
+  ) => void | Promise<"written" | "handed-off" | void>;
   /**
    * S41-c: called instead of `onSubmitDirect` when `presetMove` is set --
    * `move_assignment`'s own argument shape (no operator, no target, no
@@ -554,6 +592,37 @@ export function CreatePopover({
   // and the pop-up prints it, as a reassign does") and awaits the server's
   // own answer to print it, mirroring `reassignAssignment`'s own shape in
   // `useDragGesture.ts`.
+  /** F-167: at most once -- a pop-up that submits and is then closed must not
+   *  report twice, and the second report would be the wrong one. */
+  const reportedRef = useRef(false);
+  function report(result: Parameters<PopupReporter>[0]): void {
+    if (reportedRef.current) return;
+    // S62-b reviewer fix (C): `handed_off` is a NOTE, not an answer -- the
+    // write went to ANOTHER pop-up, which owes the real one. It must not
+    // close this latch, or the split pop-up's own written/cancelled would be
+    // swallowed and the sentence would say "Waiting" for ever.
+    if (result.kind !== "handed_off") reportedRef.current = true;
+    onResult?.(result);
+  }
+
+  /** F-167: Cancel, and the shell's own close (Escape, the backdrop) -- the
+   *  one place `onCancel` is reached from, so the bar hears it every time. */
+  function cancel(): void {
+    report({ kind: "cancelled" });
+    onCancel();
+  }
+
+  /** F-167: a thrown refusal, in the server's own words. A SchedulerError
+   *  gets the app's own sentence for it (the same one the toast would show);
+   *  anything else keeps its own message rather than being flattened to
+   *  `toSchedulerError`'s generic 'Something went wrong', which tells a person
+   *  reading the trace nothing at all. */
+  function refusalMessage(err: unknown): string {
+    if (isSchedulerError(err)) return describeSchedulerError(err);
+    if (err instanceof Error && err.message !== "") return err.message;
+    return describeSchedulerError(toSchedulerError(err));
+  }
+
   async function submitDirect() {
     if (presetMove) {
       if (!onSubmitMove) return; // never true in practice: BoardPage always wires both together
@@ -569,8 +638,10 @@ export function CreatePopover({
           selectedOutsideArea && areaChecked,
           selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
         );
+        report({ kind: "written" });
       } catch (err) {
         setMoveRefusal(isSchedulerError(err) ? err : toSchedulerError(err));
+        report({ kind: "refused", message: refusalMessage(err) });
       } finally {
         setMoveSending(false);
       }
@@ -590,33 +661,56 @@ export function CreatePopover({
     // `needsOverride && overrideChecked` is the only path that sends
     // `eligibilityOverride: true`; every other case (fully eligible, or
     // blocked-and-disabled so unreachable) sends `false`/`undefined`.
-    onSubmitDirect(
-      nodeId,
-      range,
-      operatorId,
-      assignmentTarget,
-      eff,
-      target.qty ?? undefined,
-      target.unit ?? undefined,
-      needsOverride && overrideChecked,
-      needsOverride && overrideChecked ? overrideReason.trim() : undefined,
-      // D113: sent only when it actually overrode something. The server
-      // normalises the flag off anyway, so this is belt and braces — but
-      // a client that always sent `true` would make every screen reading
-      // the flag say "overridden" about rows nobody decided anything
-      // about.
-      selectedOutsideArea && areaChecked,
-      selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
-      anchor,
-    );
+    // F-167: awaited, so the bar hears what the server said. A caller that
+    // answers nothing resolves to `undefined`, which is read as written --
+    // byte for byte the pre-F-167 behaviour for every other opener.
+    try {
+      const verdict = await onSubmitDirect(
+        nodeId,
+        range,
+        operatorId,
+        assignmentTarget,
+        eff,
+        target.qty ?? undefined,
+        target.unit ?? undefined,
+        needsOverride && overrideChecked,
+        needsOverride && overrideChecked ? overrideReason.trim() : undefined,
+        // D113: sent only when it actually overrode something. The server
+        // normalises the flag off anyway, so this is belt and braces — but
+        // a client that always sent `true` would make every screen reading
+        // the flag say "overridden" about rows nobody decided anything
+        // about.
+        selectedOutsideArea && areaChecked,
+        selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
+        anchor,
+      );
+      // A split-coverage hand-off has written nothing and is not over:
+      // saying either "written" or "cancelled" here would be a lie. It is
+      // reported as what it is (S62-b reviewer fix C), so the thread says
+      // what the sentence is actually waiting on and the split pop-up's own
+      // Confirm/Cancel can finish it through this same reporter.
+      if (verdict === "handed-off") {
+        report({ kind: "handed_off", what: "split coverage" });
+        return;
+      }
+      report({ kind: "written" });
+    } catch (err) {
+      report({ kind: "refused", message: refusalMessage(err) });
+    }
   }
 
   // S41-a: the run-mode Create branch, extracted the same way `submitDirect`
   // was (R-384) — so the button's click and the auto-press below can never
   // send different arguments for a booked job either.
-  function submitRun() {
+  async function submitRun() {
     const hc = Math.max(1, Math.round(Number(plannedHeadcount)) || 1);
-    onSubmitRun(nodeId, range, productId, hc);
+    // F-167: same shape as `submitDirect`'s own await -- see its note.
+    try {
+      await onSubmitRun(nodeId, range, productId, hc);
+      report({ kind: "written" });
+    } catch (err) {
+      report({ kind: "refused", message: refusalMessage(err) });
+    }
   }
 
   // R-384: NOT a new copy of "is it clean" — the pop-up's OWN
@@ -658,7 +752,7 @@ export function CreatePopover({
     if (autoCreate && clean && !autoFiredRef.current) {
       autoFiredRef.current = true;
       if (mode === "run") {
-        submitRun();
+        void submitRun();
       } else {
         void submitDirect();
       }
@@ -683,16 +777,17 @@ export function CreatePopover({
       if (!clean) return "needs-decision";
       autoFiredRef.current = true;
       if (mode === "run") {
-        submitRun();
+        void submitRun();
       } else {
         void submitDirect();
       }
       return "created";
     },
+    cancel,
   }));
 
   return (
-    <BoardPopover anchor={anchor} onClose={onCancel} title="New">
+    <BoardPopover anchor={anchor} onClose={cancel} title="New">
       <div className={styles.body}>
         <div className={styles.seg}>
           <button
@@ -983,7 +1078,7 @@ export function CreatePopover({
         <div className={styles.time}>{timeLabel}</div>
 
         <div className={styles.row}>
-          <button type="button" onClick={onCancel}>
+          <button type="button" onClick={cancel}>
             Cancel
           </button>
           <button
@@ -992,7 +1087,7 @@ export function CreatePopover({
             disabled={createDisabled}
             onClick={() => {
               if (mode === "run") {
-                submitRun();
+                void submitRun();
               } else {
                 void submitDirect();
               }

@@ -37,6 +37,96 @@
   color: var(--ink-2);
 }
 
+/* R-427: the conversation thread above the input -- the finished turns of
+   the last day. A record, so it is quieter than the live status line and
+   bounded in height; the newest turn sits at the bottom, next to the answer
+   box. No new colour (F-130's rule stays). */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  min-width: 0;
+}
+
+.threadHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: calc(11px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+}
+
+.threadClear {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ink-2);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.threadBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: calc(11px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+}
+
+.turnYou,
+.turnBoard,
+.turnChips,
+.turnResult {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.turnResult:empty {
+  display: none;
+}
+
+.turnChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  border: 1px solid var(--line, currentColor);
+  border-radius: 999px;
+  padding: 0 6px;
+  opacity: 0.7;
+}
+
+.chipChosen {
+  opacity: 1;
+  border-color: var(--ring);
+}
+
+/* F-162: the sentence the answer box took out of the input, kept readable
+   while the question stands. Quieter than the status line itself (the
+   question is what to read; this is only what it is about) -- same tokens,
+   no new colour (F-130's rule stays). */
+.saidLine {
+  margin: 0;
+  font-size: calc(11px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+
 /* S44-b: the pending-reading status, "Reading…" -- style only, no new
    colour (F-130's rule stays: `--ink-1` is never used here). */
 .reading {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SpeechBubble } from "@/components/icons";
 import { CommandBar, type CommandBarProps } from "./CommandBar";
+import { createConversationStore, flushTraceOnTeardown } from "../store/commandConversation";
 import styles from "./CommandLauncher.module.css";
 
 /**
@@ -32,6 +33,31 @@ import styles from "./CommandLauncher.module.css";
  * outright, and unmounting is already the bar's own cue (S46-a/S47) to stop a
  * listening session, and (via the `onHighlight` cleanup effect) report the
  * highlight `null` — nothing here duplicates that.
+ *
+ * ⭐ F-163 — WHAT CLOSING MUST NOT TAKE WITH IT (the maintainer, 17 Sept:
+ * "The chatbot also vanished when I moved the slider something which you
+ * claimed would not happen"). That unmount used to destroy the whole
+ * conversation, because the status, the held command, the pending question,
+ * the lot and the open trace entry were `CommandBar`'s own refs. They are now
+ * a store this component creates ONCE per board mount
+ * (`../store/commandConversation.ts`) and hands to whichever bar is mounted,
+ * so an outside mousedown — the toolbar, the day count, the zoom slider — and
+ * Escape both close a panel that reopens showing exactly what stood.
+ *
+ * ⚠️ WHICH KEY CLOSES AND WHICH CANCELS. **Escape closes** — the header says
+ * so and means it: inside the bar's input it first drops a standing question
+ * (putting the sentence back in the box, F-162), then clears the input, then
+ * reaches `onEscapeIdle` = `close`; from anywhere else in the panel it closes
+ * outright. None of those cancels the conversation — closing is a person
+ * looking at the board. **A cancel word cancels** ("no", "cancel", "stop",
+ * "nope", "never mind", typed or spoken): that is the only thing that ends a
+ * standing question without answering it, and the only thing besides a
+ * finished readout or a new sentence that resets the store.
+ *
+ * This component also owns the trace entry's LAST resort (F-157): the bar
+ * only flushes an entry still open at unmount when it owns its own store,
+ * which it does not here — so the flush moves to this component's own
+ * unmount, which is the board itself going away.
  *
  * `close` also decides where focus goes next (review fix: it used to leave
  * focus wherever the closing event found it, which for Escape and for a
@@ -77,7 +103,16 @@ const BAR_INPUT_ID = "command-bar-input";
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export type CommandLauncherProps = CommandBarProps;
+export interface CommandLauncherProps extends CommandBarProps {
+  /**
+   * R-427: which thread this board is showing -- one person, one plant
+   * (`historyStorageKey`). `null` (or omitted) while the board does not yet
+   * know both: the thread still works for the session, it is simply not
+   * persisted. Owned here rather than in `CommandBar` because the STORE is
+   * owned here; the bar only renders whatever thread its store holds.
+   */
+  historyKey?: string | null;
+}
 
 /** True when `target` is (or is inside) an input, a textarea, or any
  *  contenteditable element -- the slash key must not open the panel while
@@ -88,10 +123,29 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target.isContentEditable;
 }
 
-export function CommandLauncher(props: CommandLauncherProps) {
+export function CommandLauncher({ historyKey = null, ...props }: CommandLauncherProps) {
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+  // F-163: ONE conversation per board mount. `useState`'s initialiser form,
+  // never `createConversationStore()` inline -- a fresh store per render
+  // would be a fresh conversation per render.
+  const [conversation] = useState(createConversationStore);
+
+  // F-157, moved here from `CommandBar` (see the module doc): this component
+  // going away IS the board going away, so an entry still open then is the
+  // one that would genuinely be lost. The panel merely closing is not.
+  useEffect(() => {
+    return () => flushTraceOnTeardown(conversation);
+  }, [conversation]);
+
+  // R-427: point the store at this person's thread for this plant and load
+  // whatever it already holds (pruned to the last day). Runs whenever either
+  // half changes -- signing in as somebody else, or opening another plant's
+  // board, is a different thread, never a continuation of this one.
+  useEffect(() => {
+    conversation.getState().useHistoryKey(historyKey);
+  }, [conversation, historyKey]);
 
   /** Review fix 2: `refocusButton` defaults to true (Escape, and a mousedown
    *  on something not itself focusable) -- the one caller that must NOT
@@ -202,7 +256,7 @@ export function CommandLauncher(props: CommandLauncherProps) {
             <span className={styles.headerLabel}>Tell the board</span>
             <span>Esc closes</span>
           </div>
-          <CommandBar {...props} onEscapeIdle={close} />
+          <CommandBar {...props} onEscapeIdle={close} conversation={conversation} />
         </div>
       )}
     </>

@@ -386,9 +386,29 @@ function makeFakeRecognizer() {
   };
 }
 
-/** The one `aria-live="polite"` status element (brief §6). */
+/** The one `aria-live="polite"` status element (brief 6). */
 function statusText(): string {
   return document.querySelector('[aria-live="polite"]')?.textContent ?? "";
+}
+
+/**
+ * R-427 (CONTRACT CHANGED, CLAUDE.md 4): the bar renders a conversation
+ * THREAD above the input now, and that thread has a "Clear history" control
+ * of its own -- so a pin that means "this question offers no buttons" can no
+ * longer ask the whole component. It asks the candidate strip, which is what
+ * it was ever about. Same `[class*="..."]` convention `typedWalk.spec.ts`
+ * already uses for the same strip.
+ */
+function candidateButtons(): HTMLElement[] {
+  const strip = document.querySelector('[class*="candidates"]');
+  return strip ? Array.from(strip.querySelectorAll("button")) : [];
+}
+
+/** R-427: the thread's own turns, in order. */
+function threadTurns(): HTMLElement[] {
+  return Array.from(document.querySelectorAll('[class*="turn"]')).filter((el) =>
+    /(^|\s)[^\s]*turn_[^\s]*(\s|$)/.test(el.className),
+  ) as HTMLElement[];
 }
 
 /**
@@ -561,13 +581,21 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it("C10: joining the run sends the run target, unchanged input; Separate block sends direct", () => {
+  it("C10: joining the run sends the run target, the answer box is empty; Separate block sends direct", () => {
     const { onOpen, input } = renderBar({ runs: [RUN1] });
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Housing A 08:00–16:00" }));
 
-    expect(input.value).toBe(P1_SENTENCE);
+    // F-162 (CONTRACT CHANGED, CLAUDE.md 4 -- "say in writing whether they
+    // were wrong or the contract changed"): the contract changed. While a
+    // question stands the input is the ANSWER box, not the sentence box --
+    // it was emptied when the question was raised, and answering with a
+    // BUTTON never puts the sentence back. The sentence is not lost: it is
+    // readable above the question line while it stands, and Escape restores
+    // it to the input. Every one of these pins used to read `toBe(<the
+    // sentence>)`.
+    expect(input.value).toBe("");
     expect(onOpen).toHaveBeenCalledTimes(1);
     const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
     expect(resolved.target).toEqual({ kind: "run", runId: "run1" });
@@ -602,13 +630,21 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onRetime).not.toHaveBeenCalled();
   });
 
-  it("C12: pressing Change re-times the block through onRetime, input unchanged, readout says changing", () => {
+  it("C12: pressing Change re-times the block through onRetime, the answer box is empty, readout says changing", () => {
     const { onOpen, onRetime, input } = renderBar({ assignments: [BLK1] });
     fireEvent.change(input, { target: { value: P1_RETIME_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Change 10:00–14:00" }));
 
-    expect(input.value).toBe(P1_RETIME_SENTENCE);
+    // F-162 (CONTRACT CHANGED, CLAUDE.md 4 -- "say in writing whether they
+    // were wrong or the contract changed"): the contract changed. While a
+    // question stands the input is the ANSWER box, not the sentence box --
+    // it was emptied when the question was raised, and answering with a
+    // BUTTON never puts the sentence back. The sentence is not lost: it is
+    // readable above the question line while it stands, and Escape restores
+    // it to the input. Every one of these pins used to read `toBe(<the
+    // sentence>)`.
+    expect(input.value).toBe("");
     expect(onOpen).not.toHaveBeenCalled();
     expect(onRetime).toHaveBeenCalledTimes(1);
     const [resolved] = onRetime.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
@@ -702,7 +738,15 @@ describe("CommandBar (P1-7a, brief §9)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Change 08:00–16:00" }));
 
-    expect(input.value).toBe(BOOK_SENTENCE);
+    // F-162 (CONTRACT CHANGED, CLAUDE.md 4 -- "say in writing whether they
+    // were wrong or the contract changed"): the contract changed. While a
+    // question stands the input is the ANSWER box, not the sentence box --
+    // it was emptied when the question was raised, and answering with a
+    // BUTTON never puts the sentence back. The sentence is not lost: it is
+    // readable above the question line while it stands, and Escape restores
+    // it to the input. Every one of these pins used to read `toBe(<the
+    // sentence>)`.
+    expect(input.value).toBe("");
     expect(onRetimeRun).toHaveBeenCalledTimes(1);
     const [resolved] = onRetimeRun.mock.calls[0] as [ResolvedBook, { x: number; y: number }];
     expect(resolved.target).toEqual({ kind: "retime_run", runId: "run1" });
@@ -772,13 +816,21 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onUnassign).not.toHaveBeenCalled();
   });
 
-  it("CU2: pressing Remove it calls onUnassign once with blk1, input unchanged, readout shown", () => {
+  it("CU2: pressing Remove it calls onUnassign once with blk1, the answer box is empty, readout shown", () => {
     const { onUnassign, input } = renderBar({ assignments: [BLK1] });
     fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
 
-    expect(input.value).toBe(UNASSIGN_SENTENCE);
+    // F-162 (CONTRACT CHANGED, CLAUDE.md 4 -- "say in writing whether they
+    // were wrong or the contract changed"): the contract changed. While a
+    // question stands the input is the ANSWER box, not the sentence box --
+    // it was emptied when the question was raised, and answering with a
+    // BUTTON never puts the sentence back. The sentence is not lost: it is
+    // readable above the question line while it stands, and Escape restores
+    // it to the input. Every one of these pins used to read `toBe(<the
+    // sentence>)`.
+    expect(input.value).toBe("");
     expect(onUnassign).toHaveBeenCalledTimes(1);
     const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
     expect(resolved.assignmentId).toBe("blk1");
@@ -944,7 +996,11 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onUnassign).not.toHaveBeenCalled();
-    expect(statusText()).toBe("");
+    // S62-b re-check fix (1) (CONTRACT CHANGED, CLAUDE.md 4): a cancel used
+    // to leave the status line BLANK, which on a screen whose input has just
+    // been cleared too is indistinguishable from a bar that never heard the
+    // word. Every cancel says the same two words now (`cancelStanding`).
+    expect(statusText()).toBe("Left it.");
     expect(input.value).toBe("");
     expect(onHighlight).toHaveBeenLastCalledWith(null);
   });
@@ -1022,7 +1078,12 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onConfirmWordNone).toHaveBeenCalledTimes(1);
-    expect(statusText()).toBe(SHAPE);
+    // F-166 (CONTRACT CHANGED, CLAUDE.md 4): "none" no longer falls through
+    // to the rules -- with a model reader wired, falling through MEANT
+    // sending "yes" to the model, which has to answer with a form and so
+    // invented one (a live run read a bare "yes" as `unassign "everyone" on
+    // today`). A confirm word with nothing standing is answered, not parsed.
+    expect(statusText()).toBe("Nothing to say yes to.");
     expect(input.value).toBe("yes");
 
     cleanup();
@@ -1058,22 +1119,37 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     expect(onHighlight).toHaveBeenLastCalledWith(null);
   });
 
-  it("CB-yes-10: a typed edit while a block question stands clears the question, the outline and the stale button", () => {
+  // F-162 (CONTRACT CHANGED, CLAUDE.md 4): this pin used to read "a typed
+  // edit while a block question stands clears the question, the outline and
+  // the stale button". That WAS the bug the maintainer reported: the input
+  // still held the sentence while the question stood, so the only way to
+  // type an answer was to edit the sentence, and editing the sentence was
+  // read as abandoning it. The input is the ANSWER box now, and typing in it
+  // keeps the question standing -- unless what is typed PARSES as a whole new
+  // sentence, which is a new sentence and drops it (the CB-nc-6 rule,
+  // widened to every question). Both halves are pinned here.
+  it("CB-yes-10: typing an answer keeps the block question; typing a whole new sentence drops it, the outline and the stale button", () => {
     const { input, onUnassign, onHighlight } = renderBar({ assignments: [BLK1] });
     fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    // The answer box: emptied, and asking for what this question takes.
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("yes or no");
 
+    // Half-typed nonsense is an ANSWER being composed, not a new sentence --
+    // the question, its button and its outline all stand.
     fireEvent.change(input, { target: { value: `${UNASSIGN_SENTENCE}x` } });
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    expect(statusText().startsWith("Remove Operator 1's Housing A block")).toBe(true);
+
+    // A whole new sentence IS a new sentence: the question, the button and
+    // the outline go.
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
 
     expect(statusText()).toBe("");
     expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
     expect(onHighlight).toHaveBeenLastCalledWith(null);
-
-    // The stale button is really gone, not just hidden -- confirm words
-    // now go to the ordinary path (the sentence-plus-"x" makes "yes" alone
-    // moot here, so this instead proves nothing is bound to click any more:
-    // there is no button left to click).
     expect(onUnassign).not.toHaveBeenCalled();
   });
 
@@ -1201,8 +1277,228 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     fireEvent.change(third.input, { target: { value: "yes" } });
     fireEvent.keyDown(third.input, { key: "Enter" });
     expect(none).toHaveBeenCalledTimes(1);
-    expect(statusText()).toBe(SHAPE);
+    // F-166 (CONTRACT CHANGED, CLAUDE.md 4): "none" no longer falls through
+    // to the rules -- with a model reader wired, falling through MEANT
+    // sending "yes" to the model, which has to answer with a form and so
+    // invented one (a live run read a bare "yes" as `unassign "everyone" on
+    // today`). A confirm word with nothing standing is answered, not parsed.
+    expect(statusText()).toBe("Nothing to say yes to.");
     expect(third.input.value).toBe("yes");
+  });
+
+  // -------------------------------------------------------------------
+  // F-166 (found in S62-b's own live run of the real bar, 17 Sept): a bare
+  // confirm or cancel word with NOTHING STANDING used to fall through to the
+  // ordinary sentence path -- which, with the model reader wired, meant
+  // sending it to the model. The model must answer with a form, so it made
+  // one up: "yes" came back as `unassign "everyone" on today` and the bar
+  // offered a lot that would have cleared the board. The word is answered
+  // now, and never reaches the reader or the rules.
+  // -------------------------------------------------------------------
+  it("CB-yes-none-1: 'yes' with nothing standing is answered, never sent to the model", async () => {
+    const fetchMock = stubFetch();
+    const reader: Reader = vi.fn(async (): Promise<Reading> => ({ ok: false, reason: "garbled" }));
+    const { input, onOpen } = renderBar({}, reader);
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("Nothing to say yes to.");
+    expect(reader).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
+    // The turn is finished here -- nothing can ever answer it.
+    const entry = postedEntry(fetchMock);
+    expect(entry.heard).toBe("yes");
+    expect(entry.model).toEqual({ skipped: "no question standing" });
+    expect(entry.asked).toBe("Nothing to say yes to.");
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-yes-none-2: 'no' and 'never mind' with nothing standing say so, and never reach the model either", () => {
+    const reader: Reader = vi.fn(async (): Promise<Reading> => ({ ok: false, reason: "garbled" }));
+    const first = renderBar({}, reader);
+    fireEvent.change(first.input, { target: { value: "no" } });
+    fireEvent.keyDown(first.input, { key: "Enter" });
+    expect(statusText()).toBe("Nothing to cancel.");
+    expect(reader).not.toHaveBeenCalled();
+
+    cleanup();
+    const second = renderBar({}, reader);
+    fireEvent.change(second.input, { target: { value: "never mind" } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+    expect(statusText()).toBe("Nothing to cancel.");
+    expect(reader).not.toHaveBeenCalled();
+  });
+
+  it("CB-yes-none-3: 'ok' says the same -- but the create pop-up hand-off still fires when a sentence opened one", () => {
+    const reader: Reader = vi.fn(async (): Promise<Reading> => ({ ok: false, reason: "garbled" }));
+    // Nothing standing, and no pop-up either.
+    const first = renderBar({}, reader, null, { onConfirmWord: () => "none" });
+    fireEvent.change(first.input, { target: { value: "ok" } });
+    fireEvent.keyDown(first.input, { key: "Enter" });
+    expect(statusText()).toBe("Nothing to say yes to.");
+    expect(reader).not.toHaveBeenCalled();
+
+    cleanup();
+    // R-384, unchanged: a sentence-opened create pop-up still claims the word.
+    const onConfirmWord = vi.fn((): ConfirmWordResult => "created");
+    const second = renderBar({}, reader, null, { onConfirmWord });
+    fireEvent.change(second.input, { target: { value: "ok" } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+    expect(onConfirmWord).toHaveBeenCalledTimes(1);
+    expect(second.input.value).toBe("");
+    expect(statusText()).not.toBe("Nothing to say yes to.");
+
+    cleanup();
+    // ... and a cancel word still closes it.
+    const onCancelWord = vi.fn(() => true);
+    const third = renderBar({}, reader, null, { onCancelWord });
+    fireEvent.change(third.input, { target: { value: "no" } });
+    fireEvent.keyDown(third.input, { key: "Enter" });
+    expect(onCancelWord).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe("");
+  });
+
+  // -------------------------------------------------------------------
+  // S62-b reviewer fix (A): F-166's first guard only covered "no question
+  // standing". At a question that did not itself take the word, "no" still
+  // fell through to the model -- which read it as a removal, and the bar
+  // WROTE it ("Removing Tom Baker's Housing A block"). A word that means
+  // "leave it" must never delete anything. These three drive the shapes that
+  // hole was open on.
+  // -------------------------------------------------------------------
+  it("CB-yes-none-4: 'no' at a run_exists question leaves it -- the reader is never asked, nothing is written", async () => {
+    // The reader answers "no service", so the SENTENCE falls back to the
+    // rules and raises its question exactly as it would with no reader at
+    // all. What these pins count is the calls: one for the sentence, and
+    // never one for the word.
+    const reader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: false,
+      reason: "no-service",
+    }));
+    const { input, onOpen, onRetime } = renderBar({ runs: [RUN1] }, reader);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe(
+      "A Housing A job is already booked on Cell 1, Housing A 08:00–16:00. Join it, or make a separate block?",
+    );
+    // The placeholder names what this question actually takes -- never "yes",
+    // which it does not (reviewer fix A's other half).
+    expect(input.placeholder).toBe("a name, or no");
+
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRetime).not.toHaveBeenCalled();
+    expect(statusText()).toBe("Left it.");
+    expect(screen.queryByRole("button", { name: "Separate block" })).toBeNull();
+    expect(input.value).toBe("");
+  });
+
+  it("CB-yes-none-5: 'yes' at a run_exists question re-asks rather than picking one -- and never reaches the reader", async () => {
+    const reader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: false,
+      reason: "no-service",
+    }));
+    const { input, onOpen } = renderBar({ runs: [RUN1] }, reader);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(statusText()).toBe("Say which one.");
+    // The question stands, with both its buttons.
+    expect(screen.getByRole("button", { name: "Housing A 08:00–16:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
+  });
+
+  it("CB-yes-none-6: 'no' at an ambiguous person question leaves it, drops the held sentence, and never reaches the reader", async () => {
+    const reader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: false,
+      reason: "no-service",
+    }));
+    const { input, onOpen } = renderBar({ runs: [] }, reader);
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+    expect(input.placeholder).toBe("a name, or no");
+
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(statusText()).toBe("Left it.");
+    expect(screen.queryByRole("button", { name: "Sam Patel" })).toBeNull();
+    // The held sentence went with it -- a later "yes" has nothing to act on.
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Nothing to say yes to.");
+    expect(reader).toHaveBeenCalledTimes(1);
+  });
+
+  it("CB-yes-none-7: every cancel says the same thing -- the lot's question, a block question and the reason question all leave it", () => {
+    // S62-b re-check fix (1): three branches returned before F-166's floor
+    // and called `setStatus(null)`, so a cancel at any of them left the status
+    // line blank -- on a screen whose input had just been emptied, that is
+    // indistinguishable from a bar that never heard the word.
+
+    // 1. a block question (remove_which).
+    const first = renderBar({ assignments: [BLK1] });
+    fireEvent.change(first.input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(first.input, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    fireEvent.change(first.input, { target: { value: "never mind" } });
+    fireEvent.keyDown(first.input, { key: "Enter" });
+    expect(statusText()).toBe("Left it.");
+    expect(first.onUnassign).not.toHaveBeenCalled();
+
+    cleanup();
+
+    // 2. the lot's own "N commands ready".
+    const second = renderBar({ assignments: [BLK1, BLK_SP] });
+    fireEvent.change(second.input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(statusText()).toMatch(/^2 commands ready: /);
+    fireEvent.change(second.input, { target: { value: "no" } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+    expect(statusText()).toBe("Left it.");
+    expect(second.onRunLot).not.toHaveBeenCalled();
+    // The lot went with it: a later "yes" has nothing to run.
+    fireEvent.change(second.input, { target: { value: "yes" } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+    expect(statusText()).toBe("Nothing to say yes to.");
+    expect(second.onRunLot).not.toHaveBeenCalled();
+
+    cleanup();
+
+    // 3. the override-reason question.
+    const third = renderBar({
+      runs: [],
+      certificateGaps: () => [{ skill: "Welding", state: "never-trained" as const }],
+      eligibilityPolicy: () => "warn" as const,
+    });
+    fireEvent.change(third.input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(third.input, { key: "Enter" });
+    expect(statusText()).toContain("Say the reason to schedule anyway");
+    fireEvent.change(third.input, { target: { value: "no" } });
+    fireEvent.keyDown(third.input, { key: "Enter" });
+    expect(statusText()).toBe("Left it.");
+    expect(third.onOpen).not.toHaveBeenCalled();
   });
 });
 
@@ -1485,7 +1781,11 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     const { onUnassign } = first;
     fireEvent.change(input, { target: { value: "no" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(statusText()).toBe("");
+    // S62-b re-check fix (1) (CONTRACT CHANGED, CLAUDE.md 4): a cancel used
+    // to leave the status line BLANK, which on a screen whose input has just
+    // been cleared too is indistinguishable from a bar that never heard the
+    // word. Every cancel says the same two words now (`cancelStanding`).
+    expect(statusText()).toBe("Left it.");
     expect(input.value).toBe("");
     expect(onHighlight).toHaveBeenLastCalledWith(null);
     expect(onUnassign).not.toHaveBeenCalled();
@@ -1500,9 +1800,14 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
 
     cleanup();
 
-    // a typed edit
+    // a typed edit. F-162 (CONTRACT CHANGED, CLAUDE.md 4): the lot's own
+    // listing is an answer box too ("yes or no"), so half-typed nonsense
+    // keeps it standing -- only a whole new sentence drops it. This leg used
+    // to type `${LOT_REMOVE_SENTENCE}x` and expect the lot gone.
     ({ input, onHighlight } = reachLotStatus());
     fireEvent.change(input, { target: { value: `${LOT_REMOVE_SENTENCE}x` } });
+    expect(statusText()).toMatch(/^2 commands ready: /);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
     expect(statusText()).toBe("");
     expect(onHighlight).toHaveBeenLastCalledWith(null);
   });
@@ -1966,7 +2271,9 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
 
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
     expect(statusText()).toBe(`Cell 3 has nobody on it ${dayLabel}.`);
-    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    // R-427: the candidate strip, not the whole bar -- the thread's "Clear
+    // history" control is a button too (see `candidateButtons`).
+    expect(candidateButtons()).toHaveLength(0);
   });
 
   it("CB-x-6: the model path decodes a 'replace' form into the same lot the rules would build", async () => {
@@ -2247,7 +2554,11 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     const { onRunLot } = first;
     fireEvent.change(input, { target: { value: "no" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(statusText()).toBe("");
+    // S62-b re-check fix (1) (CONTRACT CHANGED, CLAUDE.md 4): a cancel used
+    // to leave the status line BLANK, which on a screen whose input has just
+    // been cleared too is indistinguishable from a bar that never heard the
+    // word. Every cancel says the same two words now (`cancelStanding`).
+    expect(statusText()).toBe("Left it.");
     expect(input.value).toBe("");
     expect(onHighlight).toHaveBeenLastCalledWith(null);
     expect(onRunLot).not.toHaveBeenCalled();
@@ -2262,9 +2573,14 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
 
     cleanup();
 
-    // a typed edit -- a brand-new sentence works right after
+    // a typed edit -- a brand-new sentence works right after. F-162
+    // (CONTRACT CHANGED, CLAUDE.md 4): "something else entirely" parses as
+    // nothing, so it is an ANSWER being composed and the lot stands; the
+    // sentence after it is what drops the lot.
     ({ input } = reachExpandedLot());
     fireEvent.change(input, { target: { value: "something else entirely" } });
+    expect(statusText()).toMatch(/^2 commands ready: /);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
     expect(statusText()).toBe("");
     expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
@@ -2407,7 +2723,8 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
     expect(statusText()).toBe(`Cell 1 has nobody on it ${dayLabel}.`);
     expect(statusText()).not.toContain("name the same block");
-    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    // R-427: see CB-x-5's own note.
+    expect(candidateButtons()).toHaveLength(0);
     expect(onRunLot).not.toHaveBeenCalled();
   });
 });
@@ -3454,7 +3771,8 @@ describe("CB-confirm: the floor's own confirm/cancel words (S59, F-150)", () => 
       fireEvent.change(input, { target: { value: word } });
       fireEvent.keyDown(input, { key: "Enter" });
 
-      expect(statusText()).toBe("");
+      // S62-b re-check fix (1): every cancel says so (was `toBe("")`).
+      expect(statusText()).toBe("Left it.");
       expect(onUnassign).not.toHaveBeenCalled();
     });
   }
@@ -4611,6 +4929,513 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
 // " · override: <reason>". Under "block", or for a LOT's own expansion-time
 // refusal (`inLot: true`), no reason is ever offered or accepted -- a plain
 // refusal, dropped like any other question by a cancel word or fresh text.
+// ---------------------------------------------------------------------------
+// F-162 (the maintainer, 17 Sept, two screenshots): THE ANSWER BOX.
+//
+// "Tom Baker is not certified for Cell 1: missing Welding. Say the reason to
+// schedule anyway, or no." and a lot's "say or type yes to do them" -- both
+// above an input still holding the sentence. The person had to clear the
+// sentence to type the answer, and clearing the sentence was what the bar read
+// as abandoning it; the trace shows the Tom Baker sentence typed three times
+// with no answer ever recorded.
+// ---------------------------------------------------------------------------
+describe("CB-ans: the answer box (F-162)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-ans-1: a candidate question empties the input, says what it takes, and keeps the sentence readable above", () => {
+    const { input } = renderBar();
+    const sentence = "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
+    fireEvent.change(input, { target: { value: sentence } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("a name, or no");
+    // The sentence is still on screen -- in its OWN line, never inside the
+    // aria-live status (which is the question).
+    expect(document.body.textContent).toContain(`You said: ${sentence}`);
+  });
+
+  it("CB-ans-2: typing a candidate's name answers the question -- the held command is never dropped and the pick runs", () => {
+    const { onOpen, input } = renderBar({ runs: [] });
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+
+    // Typed one character at a time is still an ANSWER, not a new sentence:
+    // the question and its buttons stand throughout.
+    fireEvent.change(input, { target: { value: "Sam" } });
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+    fireEvent.change(input, { target: { value: "Sam Patel" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.operatorId).toBe("sp");
+  });
+
+  it("CB-ans-3: a not_certified warn question takes the reason in the empty box, with the placeholder that says so", () => {
+    const { onOpen, input } = renderBar({
+      runs: [],
+      certificateGaps: () => [{ skill: "Welding", state: "never-trained" as const }],
+      eligibilityPolicy: () => "warn" as const,
+    });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+    );
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("the reason, or no");
+
+    fireEvent.change(input, { target: { value: "covering for Sam" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.override).toEqual({ reason: "covering for Sam" });
+  });
+
+  it("CB-ans-4: text that PARSES as a whole new sentence is a new sentence -- the question goes and the sentence runs", () => {
+    const { onOpen, input } = renderBar({ runs: [] });
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    expect(statusText()).toBe("");
+    expect(input.placeholder).toBe("Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.operatorId).toBe("op1");
+  });
+
+  it("CB-ans-5: Escape drops the question and puts the sentence back in the box, ready to edit", () => {
+    stubFetch();
+    const { input } = renderBar();
+    const sentence = "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
+    fireEvent.change(input, { target: { value: sentence } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(statusText()).toBe("");
+    expect(input.value).toBe(sentence);
+    expect(input.placeholder).toBe("Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
+    expect(document.body.textContent).not.toContain("You said:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-164 (found reading the trace of the maintainer's swap, 17 Sept): the
+// trace's LAST WORD. `runLotNow` used to finish the entry BEFORE it set the
+// "Did 3 of 4" status, so nothing in `bar.jsonl` said why the fourth step
+// stopped; and a single pushed its readout into `ran` the instant it called
+// the writer, so a sentence whose write never landed read exactly like one
+// that did (F-165).
+// ---------------------------------------------------------------------------
+describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("CB-t-15: a lot that stops part-way records its failure text as the entry's outcome, and only the steps that ran", async () => {
+    const fetchMock = stubFetch();
+    let settle: (r: LotResult) => void = () => {};
+    const { input, onRunLot } = renderBar(
+      { assignments: [BLK1, BLK_SP] },
+      null,
+      null,
+      {},
+      { onRunLot: () => new Promise<LotResult>((res) => (settle = res)) },
+    );
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(statusText()).toMatch(/^2 commands ready: /);
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      settle({ done: 1, error: "That person belongs to a different part of the structure." });
+    });
+
+    expect(statusText()).toContain("Did 1 of 2; the next failed:");
+    const entry = postedEntry(fetchMock);
+    // The one thing the maintainer's own trace could not tell him.
+    expect(entry.outcome).toBe(
+      "Did 1 of 2; the next failed: That person belongs to a different part of the structure.",
+    );
+    // And only the step that actually ran.
+    expect(entry.ran).toHaveLength(1);
+  });
+
+  it("CB-t-16: a single whose writer answers `popup` writes NOTHING under ran, and (F-167) keeps its entry OPEN until the pop-up answers", () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input, unmount } = renderBar({ runs: [] });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: "the create pop-up" });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    // F-167 (CONTRACT CHANGED, CLAUDE.md 4): this pin used to read the posted
+    // entry HERE. Nothing is posted yet -- the write is with the pop-up and
+    // the sentence is not over. What the person sees meanwhile is the turn in
+    // the thread, waiting.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Waiting: the create pop-up");
+
+    // A pop-up that never answers is still flushed when the bar goes away
+    // (F-157), carrying what was actually known.
+    unmount();
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("popup: the create pop-up");
+    expect(entry.ran).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------
+  // F-167 (the other half of F-165's silence): `popup` is honest but not
+  // final. Every writer prop is handed a REPORTER as its third argument,
+  // which the pop-up it opened calls once -- when Create succeeds, when the
+  // server refuses, or when it is cancelled. The entry's `outcome`/`ran` come
+  // from THAT, and only then is the entry finished.
+  // -------------------------------------------------------------------
+  it("CB-t-18: the pop-up reporting `written` fills ran and the outcome, posts ONE line, and the thread stops saying Waiting", () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: "the create pop-up" });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const [, , report] = onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: "written"; readout?: string }) => void,
+    ];
+    expect(document.body.textContent).toContain("Waiting: the create pop-up");
+
+    act(() => report({ kind: "written", readout: "Operator 1 → Housing A · Cell 1" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("written");
+    expect(entry.ran).toEqual(["Operator 1 → Housing A · Cell 1"]);
+    expect(document.body.textContent).not.toContain("Waiting: the create pop-up");
+    expect(document.body.textContent).toContain("Written: Operator 1 → Housing A · Cell 1");
+    // Reporting twice (a pop-up that submits and then closes) changes nothing.
+    act(() => report({ kind: "written" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("CB-t-19: the pop-up reporting `refused` records the server's own message and leaves ran empty", () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: "the create pop-up" });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const [, , report] = onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: "refused"; message: string }) => void,
+    ];
+
+    act(() =>
+      report({
+        kind: "refused",
+        message: "That person does not belong to this part of the structure.",
+      }),
+    );
+
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe(
+      "refused: That person does not belong to this part of the structure.",
+    );
+    expect(entry.ran).toEqual([]);
+    expect(document.body.textContent).toContain(
+      "Refused: That person does not belong to this part of the structure.",
+    );
+  });
+
+  it("CB-t-20: the pop-up reporting `cancelled` says so -- neither written nor refused", () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: "the create pop-up" });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const [, , report] = onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: "cancelled" }) => void,
+    ];
+
+    act(() => report({ kind: "cancelled" }));
+
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.ran).toEqual([]);
+    expect(document.body.textContent).toContain("Cancelled");
+  });
+
+  it("CB-t-17: a writer that answers through a promise -- `written` fills ran, `refused` fills the outcome with the message", async () => {
+    let fetchMock = stubFetch();
+    let onOpenResult = renderBar({ runs: [] });
+    onOpenResult.onOpen.mockResolvedValue({ kind: "written" });
+    fireEvent.change(onOpenResult.input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(onOpenResult.input, { key: "Enter" });
+    // Nothing is posted until the writer has answered.
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => {});
+    let entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("written");
+    expect(entry.ran).toHaveLength(1);
+
+    cleanup();
+    vi.unstubAllGlobals();
+    fetchMock = stubFetch();
+    onOpenResult = renderBar({ runs: [] });
+    onOpenResult.onOpen.mockResolvedValue({
+      kind: "refused",
+      message: "That person does not belong to this part of the structure.",
+    });
+    fireEvent.change(onOpenResult.input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(onOpenResult.input, { key: "Enter" });
+    await act(async () => {});
+    entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe(
+      "refused: That person does not belong to this part of the structure.",
+    );
+    expect(entry.ran).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------
+  // S62-b reviewer fixes (C) and (D): the two ways the answer never arrived.
+  // -------------------------------------------------------------------
+  it("CB-t-21: a split-coverage hand-off is reported as what it is, and the pop-up that took it over still finishes the sentence", () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: "the create pop-up" });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const [, , report] = onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: string; what?: string; readout?: string }) => void,
+    ];
+
+    // The create pop-up hands the write to the split pop-up: still nothing
+    // written, still not over, and the thread says what it is waiting on now.
+    act(() => report({ kind: "handed_off", what: "split coverage" }));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Waiting: split coverage");
+
+    // The split pop-up's own Confirm finishes it through the SAME reporter.
+    act(() => report({ kind: "written", readout: "Operator 1 → Housing A · Cell 1" }));
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("written");
+    expect(entry.ran).toEqual(["Operator 1 → Housing A · Cell 1"]);
+    expect(document.body.textContent).not.toContain("Waiting:");
+  });
+
+  it("CB-t-22: a cancel through the pop-up's own door is reported, even after a hand-off", () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: "the create pop-up" });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const [, , report] = onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: string; what?: string }) => void,
+    ];
+
+    act(() => report({ kind: "handed_off", what: "split coverage" }));
+    act(() => report({ kind: "cancelled" }));
+
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.ran).toEqual([]);
+    expect(document.body.textContent).toContain("Cancelled");
+  });
+
+  it("CB-t-23: a write that lands AFTER the next sentence has started corrects both the thread and the file", async () => {
+    const fetchMock = stubFetch();
+    let settleFirst: (o: { kind: "written" }) => void = () => {};
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockImplementationOnce(
+      () => new Promise<{ kind: "written" }>((res) => (settleFirst = res)),
+    );
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // A second sentence, before the first writer answered: the first entry is
+    // flushed as it stands -- ran empty, outcome null.
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstLine = postedEntry(fetchMock, 0);
+    expect(firstLine.heard).toBe(P1_SENTENCE);
+    expect(firstLine.ran).toEqual([]);
+    expect(firstLine.outcome).toBeNull();
+
+    // Now the first sentence's write lands.
+    await act(async () => {
+      settleFirst({ kind: "written" });
+    });
+
+    // The file gets a CORRECTED line -- same `at`, `revises: true` -- since it
+    // is append-only and the first line is already in it.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const corrected = postedEntry(fetchMock, 1);
+    expect(corrected.at).toBe(firstLine.at);
+    expect(corrected.revises).toBe(true);
+    expect(corrected.outcome).toBe("written");
+    expect(corrected.ran).toHaveLength(1);
+    // And the thread's own turn says it too, rather than staying blank.
+    expect(document.body.textContent).toContain("Written:");
+  });
+
+  it("CB-t-24: after a hand-off, 'no' still reaches the pop-up that took the write over -- the turn ends Cancelled, never 'Nothing to cancel.'", () => {
+    // S62-b re-check fix (2): `BoardPage`'s `onCancelWord` only ever claimed
+    // a CREATE pop-up, and a hand-off replaces that with the split-coverage
+    // one -- so a cancel word found nothing to claim, said "Nothing to
+    // cancel.", and left the split pop-up standing over a sentence that was
+    // still waiting. `BoardPage` now claims a split pop-up a sentence opened
+    // too (`popover.commandResult` is set only then) and cancels it through
+    // `dragApi.cancelSplit`, which reports. This drives the bar against that
+    // contract: `onCancelWord` claims the word and the pop-up reports.
+    const fetchMock = stubFetch();
+    let report: ((r: { kind: "cancelled" }) => void) | null = null;
+    const onCancelWord = vi.fn(() => {
+      // What `dragApi.cancelSplit()` does: closes the pop-up and reports.
+      report?.({ kind: "cancelled" });
+      return true;
+    });
+    const { onOpen, input } = renderBar({ runs: [] }, null, null, { onCancelWord });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: "the create pop-up" });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const [, , reporter] = onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: string; what?: string }) => void,
+    ];
+    report = reporter as (r: { kind: "cancelled" }) => void;
+
+    act(() => reporter({ kind: "handed_off", what: "split coverage" }));
+    expect(document.body.textContent).toContain("Waiting: split coverage");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onCancelWord).toHaveBeenCalledTimes(1);
+    // Never the "nothing standing" answer -- the pop-up claimed the word.
+    expect(statusText()).not.toBe("Nothing to cancel.");
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.ran).toEqual([]);
+    expect(document.body.textContent).toContain("Cancelled");
+    expect(document.body.textContent).not.toContain("Waiting:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-427 (the maintainer, 17 Sept): "The sentence clearing is not going to help
+// unless we have conversation history ... It will be a good sanity check to
+// see what options were provided and what was chosen." The store's own half
+// (persistence, the day, the cap) is `commandConversation.test.ts`; these are
+// what the BAR renders.
+// ---------------------------------------------------------------------------
+describe("CH: the conversation thread (R-427)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("CH-1: a finished turn appears in the thread with the buttons that were offered, and the one chosen marked", () => {
+    stubFetch();
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+
+    const thread = document.body.textContent ?? "";
+    expect(thread).toContain("You: assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
+    expect(thread).toContain('Board: Which person? "Sam" matches 2:');
+    // Both options are shown; the chosen one carries the tick.
+    expect(thread).toContain("Sam Ortiz");
+    expect(thread).toContain("Sam Patel ✓");
+    expect(thread).toContain("Written:");
+    expect(screen.getByRole("button", { name: "Clear history" })).toBeTruthy();
+  });
+
+  it("CH-2: a refused write shows Refused with the writer's own message", async () => {
+    stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockResolvedValue({
+      kind: "refused",
+      message: "That person does not belong to this part of the structure.",
+    });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+
+    expect(document.body.textContent).toContain(
+      "Refused: That person does not belong to this part of the structure.",
+    );
+  });
+
+  it("CH-6: nothing in a past turn runs a command -- the thread is a record, and only the CURRENT question has live buttons", () => {
+    stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    // The past turn's chips are not buttons at all.
+    expect(candidateButtons()).toHaveLength(0);
+    const chips = Array.from(document.querySelectorAll('[class*="chip"]'));
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chip of chips) {
+      expect(chip.tagName).toBe("SPAN");
+      fireEvent.click(chip);
+    }
+    // Clicking every one of them changed nothing.
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    // The only button the thread offers is its own "Clear history".
+    expect(threadTurns().length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
+    expect(threadTurns()).toHaveLength(0);
+  });
+});
+
 describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
   /** `certificateGaps` answers one gap ("Welding", never-trained) for
    *  Operator 1 (op1) on Cell 1 (c1a) -- P1_SENTENCE's own person and cell
@@ -4676,7 +5501,8 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     fireEvent.change(input, { target: { value: "no" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe("");
+    // S62-b re-check fix (1): every cancel says so (was `toBe("")`).
+    expect(statusText()).toBe("Left it.");
     expect(onOpen).not.toHaveBeenCalled();
   });
 
@@ -4749,5 +5575,44 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     // all -- only `assign`/`move` ever do).
     expect(onOpen).not.toHaveBeenCalled();
     expect(statusText()).not.toContain("override");
+  });
+
+  it("CB-nc-7: a person failing BOTH gates is asked twice, and the readout names BOTH overrides", () => {
+    // Uncertified for the cell AND not from its area -- the two gates run
+    // one after the other (certificate first), so the sentence is answered
+    // twice before anything is written.
+    const { onOpen, input } = renderBar({
+      runs: [],
+      certificateGaps: () => [{ skill: "Welding", state: "never-trained" as const }],
+      eligibilityPolicy: () => "warn" as const,
+      outsideArea: () => true,
+    });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe(
+      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+    );
+
+    fireEvent.change(input, { target: { value: "covering for Sam" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // The certificate answer is kept, so the second question is a NEW one --
+    // never the first asked again.
+    expect(statusText()).toBe(
+      "Operator 1 is not from Cell 1's area. Say the reason to schedule anyway, or no.",
+    );
+    expect(onOpen).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "short-handed on Line 1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.override).toEqual({ reason: "covering for Sam" });
+    expect(resolved.areaOverride).toEqual({ reason: "short-handed on Line 1" });
+    // S62-b reviewer fix (E): the readout named only the LAST reason given,
+    // so a block written with two overrides read as if it carried one.
+    expect(statusText()).toContain("· override: covering for Sam");
+    expect(statusText()).toContain("· area override: short-handed on Line 1");
   });
 });

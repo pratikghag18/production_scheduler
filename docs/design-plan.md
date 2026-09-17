@@ -9804,3 +9804,24 @@ finding that prompted it, so the reason is kept. When the maintainer states one,
 greps the code for what already violates it and fixes or queues every hit — the standard is not
 declared and left for the next person to trip over. The board's today was a UTC date for months
 because nobody had written the sentence down.
+
+**3. The bar is a thread (R-427).** Emptying the answer box (F-162) only works if the sentence and
+the question stay readable, and the maintainer named the larger thing: a conversation history, so
+what was offered and what was chosen can be checked afterwards. The trace entry the bar already
+writes for the developer IS that history; it is now kept in a store outside the bar (the same store
+that lets a click outside close the panel without losing anything, F-163), rendered as a thread —
+You said / Board asked, with the buttons offered and the one chosen / Written or Refused — and
+persisted in the browser per person and plant for the last day. Nothing in a past turn is live. A
+server-side thread shared across devices is a later decision; the writes themselves are already in
+the audit log.
+
+**4. What the swap's fourth step was (F-165).** The server's area rule, working as designed: a
+person is owned by `operators.site_node_id`, and Sam Patel is the one Plant A person owned by Line 1,
+so Cell 3 under Line 2 refuses him without an area override. The lot got the refusal after three
+writes; a single sentence left a create pop-up behind the bar with the override box unchecked while
+the bar printed the readout as done. Two silences, one rule. The resolver now asks `outside_area`
+before the yes through the same helper the create pop-up already marks people with — R-425's shape
+applied to the area rule — and the writers answer honestly, so the trace and the thread say
+Written, Refused or Waiting rather than assuming. The lesson is the same one CLAUDE.md §4 already
+carries: a screen that promises what the server will refuse; the new part is that the promise was
+made in words, by the bar, and words need the same predicate as buttons.

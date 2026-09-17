@@ -54,7 +54,12 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
   return {
     cells: [nodes[4], nodes[5], nodes[6]],
     nodeById: new Map(nodes.map((n) => [n.id, n] as const)),
-    operators: [{ id: "op1", displayName: "Operator 1", employeeRef: "E100", active: true }],
+    operators: [
+      { id: "op1", displayName: "Operator 1", employeeRef: "E100", active: true },
+      // F-163 (CB-keep-5): a second person, so a several sentence can reach
+      // the lot's own "Do all N" status in this file too.
+      { id: "sp", displayName: "Sam Patel", employeeRef: "E101", active: true },
+    ],
     products: [{ id: "ha", sku: "HA-1", name: "Housing A" }],
     offeredAt: () => [{ id: "ha" }],
     days: [
@@ -104,6 +109,11 @@ const BLK1: ContextAssignment = {
 };
 
 const UNASSIGN_SENTENCE = "Unassign Operator 1 from Cell 1 in Line 1 from 10 to 2";
+
+/** F-163 (CB-keep-5): BLK1's twin for Sam Patel -- the second block the lot
+ *  sentence below names. */
+const BLK_SP: ContextAssignment = { ...BLK1, id: "blkSp", operatorId: "sp" };
+const LOT_REMOVE_SENTENCE = "Unassign Operator 1 and Sam Patel from Cell 1 in Line 1 from 10 to 2";
 
 function renderLauncher(over: Partial<ResolveContext> = {}, recognizer: Recognizer | null = null) {
   const onOpen = vi.fn();
@@ -305,5 +315,111 @@ describe("CommandLauncher (S48-a, R-396)", () => {
 
     expect(screen.queryByRole("dialog", { name: "Tell the board" })).toBeNull();
     expect(document.activeElement).toBe(outside);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-163 (the maintainer, 17 Sept): "The chatbot also vanished when I moved the
+// slider something which you claimed would not happen." R-424 stopped
+// `BoardPage` unmounting the bar for a refetch; it never touched THIS unmount
+// -- the launcher closes its panel on any mousedown outside it, by design, and
+// closing unmounted `CommandBar` with the whole conversation inside it. The
+// conversation lives in a store this component owns now, so closing takes
+// nothing with it.
+//
+// ⚠️ WHICH KEY CLOSES AND WHICH CANCELS: Escape CLOSES (it drops a standing
+// question first, putting the sentence back in the box -- F-162 -- then clears
+// the input, then closes), and a CANCEL WORD is the only cancel. These three
+// pin that closing, by either route, keeps what stood.
+// ---------------------------------------------------------------------------
+describe("CB-keep: closing the panel never loses the conversation (F-163)", () => {
+  it("CB-keep-4: a mousedown outside with a question standing closes the panel; reopening shows the same question and buttons", () => {
+    renderLauncher({ assignments: [BLK1] });
+    fireEvent.click(launcherButton());
+    const input = screen.getByRole("textbox", { name: "Tell the board" });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const question = statusLine()?.textContent ?? "";
+    expect(question.startsWith("Remove Operator 1's Housing A block")).toBe(true);
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+
+    // The slider, the day count, the zoom -- anything on the board.
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "Tell the board" })).toBeNull();
+
+    fireEvent.click(launcherButton());
+
+    expect(statusLine()?.textContent).toBe(question);
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    // And the answer box is still an answer box, with the sentence above it.
+    const reopened = screen.getByRole("textbox", {
+      name: "Tell the board",
+    }) as HTMLInputElement;
+    expect(reopened.value).toBe("");
+    expect(reopened.placeholder).toBe("yes or no");
+    expect(document.body.textContent).toContain(`You said: ${UNASSIGN_SENTENCE}`);
+  });
+
+  it("CB-keep-5: closing with a lot listing standing and reopening still offers 'Do all 2'", () => {
+    renderLauncher({ assignments: [BLK1, BLK_SP] });
+    fireEvent.click(launcherButton());
+    const input = screen.getByRole("textbox", { name: "Tell the board" });
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    const listing = statusLine()?.textContent ?? "";
+    expect(listing.startsWith("2 commands ready: ")).toBe(true);
+
+    fireEvent.mouseDown(document.body);
+    fireEvent.click(launcherButton());
+
+    expect(statusLine()?.textContent).toBe(listing);
+    expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
+  });
+
+  it("CB-keep-6: Escape closes the panel (R-396's own promise) and does NOT lose the conversation", () => {
+    const { onUnassign } = renderLauncher({ assignments: [BLK1] });
+    fireEvent.click(launcherButton());
+    const input = screen.getByRole("textbox", { name: "Tell the board" });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const question = statusLine()?.textContent ?? "";
+
+    // Escape from somewhere else in the panel is the panel's OWN rule: it
+    // closes outright, without even reaching the bar's Escape ladder.
+    const panel = screen.getByRole("dialog", { name: "Tell the board" });
+    fireEvent.keyDown(panel, { key: "Escape", target: panel });
+    expect(screen.queryByRole("dialog", { name: "Tell the board" })).toBeNull();
+
+    fireEvent.click(launcherButton());
+
+    expect(statusLine()?.textContent).toBe(question);
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    // Nothing ran in the meantime -- closing is not answering.
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+
+  it("CH-5: the conversation thread survives close and reopen too (R-427)", () => {
+    const fetchMock = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      renderLauncher({ assignments: [BLK1] });
+      fireEvent.click(launcherButton());
+      const input = screen.getByRole("textbox", { name: "Tell the board" });
+      fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+      expect(document.body.textContent).toContain(`You: ${UNASSIGN_SENTENCE}`);
+
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole("dialog", { name: "Tell the board" })).toBeNull();
+      fireEvent.click(launcherButton());
+
+      expect(document.body.textContent).toContain(`You: ${UNASSIGN_SENTENCE}`);
+      expect(document.body.textContent).toContain("Remove it ✓");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

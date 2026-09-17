@@ -12,11 +12,12 @@
  */
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   CreatePopover,
   type PopoverConfirmHandle,
 } from "@/features/board/components/CreatePopover";
+import type { PopupReporter } from "@/features/board/store/commandConversation";
 import type { Product, BoardOperator, Skill } from "@/lib/api";
 import type { AbsenceRow } from "@/lib/absence";
 
@@ -83,6 +84,10 @@ function renderPopover(
      * read the way `BoardPage` reads it -- `ref.current?.submitIfClean()`.
      */
     ref?: { current: PopoverConfirmHandle | null };
+    /** F-167: the bar's own way back -- set only when a typed sentence
+     *  opened this pop-up. Omitted everywhere else in this file, which is
+     *  byte for byte the pre-F-167 behaviour. */
+    onResult?: PopupReporter;
   } = {},
 ) {
   const onSubmitRun = vi.fn();
@@ -114,6 +119,7 @@ function renderPopover(
       presetMove={over.presetMove}
       autoCreate={over.autoCreate}
       onCancel={onCancel}
+      onResult={over.onResult}
       onSubmitRun={onSubmitRun}
       onSubmitDirect={onSubmitDirect}
       onSubmitMove={onSubmitMove}
@@ -587,5 +593,89 @@ describe("CreatePopover — R-395: submitIfClean() through the ref", () => {
 
     expect(noAutoRef.current!.submitIfClean()).toBe("none");
     expect(cleanSubmit).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-167 (the other half of F-165's silence): this pop-up is where a typed
+// sentence's write actually happens, and before this it never told the bar
+// what became of it. `onResult` is called exactly once, on whichever of the
+// three things happens first.
+// ---------------------------------------------------------------------------
+describe("CreatePopover — what it tells the command bar (F-167)", () => {
+  it("CP-R1: onResult fires `written` when Create is accepted, `refused` with the server's words when it is not, and `cancelled` when the pop-up is closed -- once each, never twice", async () => {
+    // 1. written.
+    const written: { kind: string; message?: string }[] = [];
+    const first = renderPopover({
+      defaultCreateMode: "direct",
+      presetProductId: product.id,
+      presetOperatorId: operator.id,
+      onResult: (r) => written.push(r),
+    });
+    first.onSubmitDirect.mockResolvedValue("written");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await act(async () => {});
+    expect(written).toEqual([{ kind: "written" }]);
+    // A close after a successful Create must not turn it into a cancel.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(written).toHaveLength(1);
+
+    cleanup();
+
+    // 2. refused -- the server's own sentence, not the bar's guess at one.
+    const refused: { kind: string; message?: string }[] = [];
+    const second = renderPopover({
+      defaultCreateMode: "direct",
+      presetProductId: product.id,
+      presetOperatorId: operator.id,
+      onResult: (r) => refused.push(r),
+    });
+    second.onSubmitDirect.mockRejectedValue(
+      new Error("That person does not belong to this part of the structure."),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await act(async () => {});
+    expect(refused).toHaveLength(1);
+    expect(refused[0].kind).toBe("refused");
+    expect(refused[0].message).toContain(
+      "That person does not belong to this part of the structure.",
+    );
+
+    cleanup();
+
+    // 3. cancelled -- Cancel, and nothing written.
+    const cancelled: { kind: string }[] = [];
+    const third = renderPopover({
+      defaultCreateMode: "direct",
+      presetProductId: product.id,
+      presetOperatorId: operator.id,
+      onResult: (r) => cancelled.push(r),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(cancelled).toEqual([{ kind: "cancelled" }]);
+    expect(third.onSubmitDirect).not.toHaveBeenCalled();
+    expect(third.onCancel).toHaveBeenCalledTimes(1);
+
+    cleanup();
+
+    // 4. a split-coverage hand-off has written NOTHING and is not over --
+    // saying written or cancelled would be a lie, so it is reported as what
+    // it IS (S62-b reviewer fix C). That is a NOTE, not an answer: the latch
+    // stays open so the split pop-up's own Confirm/Cancel can still finish
+    // the sentence through this same reporter.
+    const handed: { kind: string }[] = [];
+    const fourth = renderPopover({
+      defaultCreateMode: "direct",
+      presetProductId: product.id,
+      presetOperatorId: operator.id,
+      onResult: (r) => handed.push(r),
+    });
+    fourth.onSubmitDirect.mockResolvedValue("handed-off");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await act(async () => {});
+    expect(handed).toEqual([{ kind: "handed_off", what: "split coverage" }]);
+    // Still open: a terminal result from the pop-up that took it over lands.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(handed).toEqual([{ kind: "handed_off", what: "split coverage" }, { kind: "cancelled" }]);
   });
 });

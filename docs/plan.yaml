@@ -2823,6 +2823,7 @@ stages:
   - docs/agent-briefs/s62-b-answer-box-conversation-store-brief.md
   delivers:
   - R-426
+  - R-427
   what: >-
     **A standard is a requirement with an audit attached.** The plant's zone rule written in one sentence into
     CLAUDE.md, the plan and the design record; the date-seam audit grown to enforce it; every site that
@@ -11929,6 +11930,27 @@ requirements:
     the whole board should use for any further development happening here on after? And any kind of
     development we do going forward will also check if a standard exists or a prior code should change based
     on new standard?" Written into CLAUDE.md §7 so it loads in every session.
+- id: R-427
+  title: The bar shows its conversation --- every turn with what was said, asked, offered, chosen and written, kept for the last day per person
+  source:
+  - 'session 177 conversation (the maintainer, 17 Sept)'
+  stated_by: maintainer
+  claim: >-
+    The bar is a thread: each finished sentence stays on screen as You said / Board asked (with the buttons
+    offered and the one chosen) / Written or Refused, oldest first, the current question and an empty answer
+    box at the bottom. The history is the trace's own entry rendered on screen, kept in the browser per user
+    and plant for the last 24 hours (capped), survives closing and reopening the bar, and nothing in a past
+    turn runs a command. Where it lives is the browser (decision 17 Sept); a server-side thread shared across
+    devices is a later choice.
+  verified_by:
+  - kind: manual
+    steps: "pinned by the S62-b lane when it lands (CH-1 to CH-6); the maintainer's next walk"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 177): "The sentence clearing is not going to help unless we have conversation
+    history, why is that difficult to implement? We can have history for the last day for that particular
+    user. Is conversation style chatbot difficult? It will be a good sanity check to see what options were
+    provided and what was chosen?"
 findings:
 - id: F-162
   title: While a question stands, the input still holds the sentence, so yes or a reason cannot be typed without wiping it

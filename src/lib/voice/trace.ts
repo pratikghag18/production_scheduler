@@ -33,6 +33,44 @@ export interface TraceEntry {
   answered: string | null;
   /** The readout of each command actually written, in order. */
   ran: string[];
+  /**
+   * F-164 (the maintainer's swap, 17 Sept): THE LAST WORD -- what actually
+   * became of the write this sentence asked for, in the writer's own words,
+   * or `null` when nothing was ever attempted (a question still standing, a
+   * cancel, a sentence the bar could not read).
+   *
+   * `asked` already holds the question or the readout that STOOD; it cannot
+   * also hold the answer that arrived after it, which is exactly what the
+   * maintainer's trace was missing twice over:
+   *   - a lot that stopped at step 4 finished its entry BEFORE `runLotNow`
+   *     set the "Did 3 of 4; the next failed: ..." status, so nothing in the
+   *     file said why the fourth stopped;
+   *   - a single wrote its readout into `ran` the instant it called the
+   *     writer, so a sentence whose write never landed (a pop-up left
+   *     waiting, a server refusal) read in the file exactly like one that
+   *     did.
+   *
+   * Written by `CommandBar.tsx` in the four words the writers answer in:
+   * `"written"`, `"refused: <message>"`, `"popup: <what it waits for>"`, and
+   * a lot's own finished sentence (`"Done: N commands."` / `"Did k of N; the
+   * next failed: ..."`). `ran` now carries ONLY the readouts a writer
+   * actually confirmed.
+   */
+  outcome: string | null;
+  /**
+   * S62-b reviewer fix (D): TRUE ON A CORRECTED LINE.
+   *
+   * A write can land after the person has already said something else — the
+   * entry was posted when the new sentence flushed it, and only then did the
+   * writer answer. The file is append-only (`traceServer.ts` appends one line
+   * and never rewrites), so the correction is a SECOND line carrying the same
+   * `at` and this flag.
+   *
+   * ⭐ HOW TO READ THE FILE: take the LAST line for each `at`. Every earlier
+   * line with that `at` is a snapshot of the same sentence before its writer
+   * answered. Omitted (undefined) on every ordinary line.
+   */
+  revises?: true;
 }
 
 /** Long enough to read a form or a garbled answer back, short enough that
