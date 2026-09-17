@@ -2838,6 +2838,28 @@ stages:
     trace's last word, the area gate before the yes (F-165's cause), a bare yes never reaching the model (F-166),
     the pop-up's result back in the thread (F-167). A reviewer drove the real bar across close/reopen, two
     plants, the storage limits, the past turns, both gates and the typed walk.
+- id: S63
+  track: core
+  num: 63
+  title: The bar as a chat panel --- bubbles, a layer that stays open, resizable
+  status: open
+  owner: agent
+  refs:
+  - 'session 177 conversation (the maintainer, 17 Sept)'
+  - §19.106 (D135)
+  delivers:
+  - R-428
+  - R-429
+  what: >-
+    **The thread the maintainer liked, in the shape people know.** Bubbles right and left in two colours
+    (R-428); the bar a persistent, resizable layer over the board that only its own close control or
+    Escape inside it closes (R-429). Wording unchanged; the launcher's close-on-outside-click retired; a
+    remembered size per person. Two small wording items ride along: a bar refusal that borrows the drag's
+    "try the split again" (the capacity refusal of 17 Sept), and the lot's own "Do all N" button label
+    inside a bubble.
+  state: >-
+    **OPEN 17 Sept (session 177).** Next after the maintainer's answers on the candidate standards. Brief to
+    write: s63-a-chat-panel-brief.md.
 - id: M1
   track: matrix
   num: 1
@@ -11965,6 +11987,41 @@ requirements:
     user. Is conversation style chatbot difficult? It will be a good sanity check to see what options were
     provided and what was chosen?" The history is keyed per person and per board ROOT (the place a grant
     opens on), not per plant: two roots inside one plant are two threads (reviewer, session 177).
+- id: R-428
+  title: The thread reads as a chat --- the person's words in bubbles on the right, the board's on the left, in two colours
+  source:
+  - 'session 177 conversation (the maintainer, 17 Sept, on the first thread screenshot)'
+  stated_by: maintainer
+  claim: >-
+    Each turn is two or more bubbles: what the person said on the right, what the board asked, offered and
+    wrote on the left, separate bubbles in two colours, the offered buttons inside the board's bubble with
+    the chosen one marked. The wording of every bubble is the thread's today; only the shape changes.
+  verified_by:
+  - kind: manual
+    steps: "pinned by the S63 lane when it lands; the maintainer's next walk"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 177): "We should use the industry standard for communication, the bubbles, my
+    prompts should be on the right and the boards responses/prompts should be on the left in separate bubbles
+    in different colors."
+- id: R-429
+  title: The bar is a panel that stays open until closed --- a layer over the board, resizable, untouched by clicks and scrolling on the board
+  source:
+  - 'session 177 conversation (the maintainer, 17 Sept)'
+  stated_by: maintainer
+  claim: >-
+    The bar is its own layer over the board: it stays open while the person scrolls, drags, clicks the board
+    or the toolbar, and closes only by its own close control or Escape inside it; it can be resized by its
+    edge and remembers its size; the board stays fully usable beside it. A click outside no longer closes it
+    (the R-424/F-163 conversation store already survives a close; this removes the close itself).
+  verified_by:
+  - kind: manual
+    steps: "pinned by the S63 lane when it lands; the maintainer's next walk"
+  status: uncovered
+  note: >-
+    STATED 17 Sept (session 177): "The chat window should be resizable, the data did not disappear when I went
+    out of it, however I feel it should stay open unless I close it even if I'm scrolling, it should be like a
+    separate layer on top of the board."
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today
@@ -16298,7 +16355,10 @@ sessions:
     grammar question: a bare pair of hours under 7 ("from 1 to 5") reads literally today. The maintainer then
     asked for the conversation itself on screen (R-427): the bar is a thread now, kept per person and plant
     for a day. The second half named F-165 (the area rule on site_node_id), fixed F-162 to F-167 and R-427.
-    Next: the maintainer's answers on the seven candidate standards and the bare-pair hours; the smoke switch; 6b.
+    The maintainer then ran the ten-sentence typed walk clean end to end (the capacity refusal on #8 was the list's
+    own doing, Sam on two cells at once, and the thread showed Refused with the reason) and asked for bubbles, a
+    resizable panel that stays open, and a fresh session for the voice half (R-428, R-429, S63). Next: S63 after
+    the answers on the seven candidate standards and the bare-pair hours; the voice walk; the smoke switch; 6b.
 - id: 176
   date: 2026-09-16
   title: "The second walk: thirteen sentences, two rules stated, five findings, and the walk becomes a spec (S61, R-424, R-425, F-153 to F-159)"
@@ -23845,6 +23905,26 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
+- kind: task
+  stage: S63
+  text: "The bar as a chat panel --- bubbles right and left, a layer that stays open until closed, resizable (R-428, R-429)"
+  why: >-
+    The maintainer's words on 17 Sept after the first thread: the best one so far, now make it read as a chat
+    and stay open. Small UI work on the launcher and the bar; the conversation store already holds the state.
+- kind: task
+  text: "The maintainer's answers on seven candidate standards and the bare-pair hours, then the audit each yes triggers"
+  why: >-
+    Asked 17 Sept (session 177) under R-426's third duty: a dead end offers the nearest choices; nothing offered
+    that the server refuses (capacity, absence and area still to do in the bar --- the 17 Sept capacity refusal
+    came after the yes); a lot is all or nothing; a walk is a spec first; every bar feature traces; a floor-worded
+    message with a banned-word list; and whether "from 1 to 5" reads as the afternoon. Also: what "clear" means
+    --- today it removes people and leaves the job (the Bracket A run on Cell 3 stayed on 17 Sept); the maintainer
+    expected the job gone too. A decision, then the grammar ("clear Cell 3 completely" or "cancel the job").
+- kind: task
+  text: "The voice half of the walk through Whisper, read from the trace and the thread"
+  why: >-
+    The typed half passes as a spec (e2e/typedWalk.spec.ts); the maintainer's 17 Sept typed walk of ten sentences
+    ran clean end to end. Next is the same list spoken, in a fresh session (the maintainer's call, 17 Sept).
 - kind: task
   text: "A list of places in one sentence --- clear Cell 1, Cell 2 and Cell 6 today; the everyone forms take one place today and read a comma list as a place chain"
   why: >-

@@ -9825,3 +9825,12 @@ applied to the area rule — and the writers answer honestly, so the trace and t
 Written, Refused or Waiting rather than assuming. The lesson is the same one CLAUDE.md §4 already
 carries: a screen that promises what the server will refuse; the new part is that the promise was
 made in words, by the bar, and words need the same predicate as buttons.
+
+**5. The thread, in the shape people know (R-428, R-429).** The maintainer on the first thread
+screenshot: "This does look like a conversation" — then the two things every chat has and this one
+did not: bubbles, the person's on the right and the board's on the left in two colours; and a panel
+that stays open while the board is scrolled and clicked, closed only on purpose, resizable. The
+conversation store already made the state survive a close; S63 removes the close-on-outside-click
+itself and gives the panel its edge. Wording is unchanged: the bubbles carry the same sentences
+the thread already says. Two wording items ride along — a bar refusal still borrowing the drag's
+"try the split again", and the lot's "Do all N" inside a bubble.
