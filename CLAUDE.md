@@ -110,6 +110,13 @@ it into `requirements` in that turn, before the code.
   order is a guess about priority, not a fact — ask when it seems to have drifted.
 - **Plain language.** Explain in the maintainer's register; when asked for simple terms, draw
   it — a small table, or two candidate answers side by side.
+- **Ask where and how before placing anything new on a screen.** When a requirement or a brief
+  says WHAT but not WHERE a control, a column or a panel goes, or HOW it reads, ask the maintainer
+  before the lane starts, with two candidates drawn side by side. On 18 Sept 2026 three pieces were
+  built, torn down and rebuilt in one morning (the toolbar band, the shift on the Operators tab, the
+  Access tab's columns) because the brief chose the placement and the maintainer already knew what
+  was expected: "Make it a point to ask me how and where to put new stuff in if the brief is not
+  clear." A guess about placement is not a judgment call; it is a question.
 
 ## 5. Parallel agents
 
