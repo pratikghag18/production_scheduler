@@ -267,6 +267,10 @@ describe("every list read in src/lib/api goes through the pager", () => {
         "hierarchy.ts:hierarchy_levels",
         "hierarchy.ts:nodes",
         "operators.ts:operators",
+        // S66-b (session 179): fetchHomeShiftHolders, the people on a band the
+        // Shifts panel counts before a retire -- a second routed read of the
+        // same table from the same file.
+        "operators.ts:operators",
         "operators.ts:skills",
         "operators.ts:operator_skills",
         "operators.ts:node_skill_requirements",

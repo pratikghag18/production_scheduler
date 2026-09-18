@@ -21,6 +21,10 @@ import { canQueryAsUser } from "@/features/auth/session";
 import { hierarchyKeys } from "../hooks/useHierarchyMutations";
 import { useOperatorsAdmin } from "../hooks/useOperators";
 import { useOperatorImport } from "../hooks/useOperatorImport";
+// R-441/R-443 (S66-b): the same shift-pattern read `OperatorsPanel` and
+// `ShiftsPanel` already make, so the Shift column can be matched against a
+// real pattern rather than always refusing every name.
+import { useShiftPatterns } from "../hooks/useShifts";
 import type { CsvTable } from "../lib/csv";
 import {
   detectColumns,
@@ -52,6 +56,7 @@ export function OperatorsImport() {
     queryFn: fetchHierarchyTree,
     enabled: canQuery,
   });
+  const shiftPatternsQuery = useShiftPatterns(canQuery);
   const importMutation = useOperatorImport();
 
   // Memoised so the callbacks below stay stable — see ProductsImport.
@@ -64,17 +69,25 @@ export function OperatorsImport() {
 
   const buildView = useCallback(
     (table: CsvTable, columns: Record<string, string | null>) =>
-      operatorPlanToView(planOperatorImport(table, existing, asColumnMap(columns), plants)),
-    [existing, plants],
+      operatorPlanToView(
+        planOperatorImport(table, existing, asColumnMap(columns), plants, shiftPatternsQuery.data),
+      ),
+    [existing, plants, shiftPatternsQuery.data],
   );
 
   const onApply = useCallback(
     (table: CsvTable, columns: Record<string, string | null>, source: string) => {
       if (profile === null) return;
-      const plan = planOperatorImport(table, existing, asColumnMap(columns), plants);
+      const plan = planOperatorImport(
+        table,
+        existing,
+        asColumnMap(columns),
+        plants,
+        shiftPatternsQuery.data,
+      );
       importMutation.mutate({ plan, ctx: { orgId: profile.orgId, source } });
     },
-    [existing, plants, profile, importMutation],
+    [existing, plants, profile, importMutation, shiftPatternsQuery.data],
   );
 
   return (
@@ -96,7 +109,15 @@ export function OperatorsImport() {
       }}
       applyResult={importMutation.data ?? null}
       onResetApply={() => importMutation.reset()}
-      dataLoading={!canQuery || operatorsQuery.isLoading || treeQuery.isLoading}
+      // ⚠️ `shiftPatternsQuery.isLoading` JOINS THE GATE, unlike the two
+      // read-only panels' own copy of this query: there the Shift column
+      // simply degrades to an empty picker while it settles, but here a
+      // plan built against `undefined` reads every "Shift" cell as "no
+      // pattern here" and refuses a name the pattern would have matched —
+      // a false refusal on an Apply the reader could otherwise have trusted.
+      dataLoading={
+        !canQuery || operatorsQuery.isLoading || treeQuery.isLoading || shiftPatternsQuery.isLoading
+      }
       dataError={
         operatorsQuery.isError ? ((operatorsQuery.error as SchedulerError | null) ?? null) : null
       }

@@ -657,8 +657,20 @@ check("SA5: the two are mutually exclusive for a row a system admin may act on",
 // LV1–LV9 — the ONE access-level dropdown (R-377): currentLevel / levelLabel /
 // levelOptions. System admin / Site admin / Supervisor / Viewer in one control.
 // ---------------------------------------------------------------------------
-const siteAdminAtRoot = { nodeId: PLANT, role: "admin" as GrantRole, direct: true };
-const supOnLine = { nodeId: DEPT, role: "supervisor" as GrantRole, direct: true };
+const siteAdminAtRoot = {
+  nodeId: PLANT,
+  role: "admin" as GrantRole,
+  direct: true,
+  plansShiftId: null,
+  outsideShift: true,
+};
+const supOnLine = {
+  nodeId: DEPT,
+  role: "supervisor" as GrantRole,
+  direct: true,
+  plansShiftId: null,
+  outsideShift: true,
+};
 
 check("LV1: the labels read System admin / Site admin / Supervisor / Viewer", () => {
   const got = ["system", "admin", "supervisor", "viewer"]
@@ -1356,8 +1368,24 @@ check(
 // removal refusals to that grant, direct or a single one below.
 // ---------------------------------------------------------------------------
 
-const directGrant = { nodeId: PLANT, role: "supervisor" as GrantRole, direct: true };
-const lineGrant = { nodeId: LINE1, role: "supervisor" as GrantRole, direct: false };
+// R-442 (S66-b): every `RowGrant` fixture below carries `plansShiftId: null,
+// outsideShift: true` -- the "unrestricted" default -- because this block is
+// about the ROLE menu and the removal rules, not the shift-plan controls,
+// which have their own block further down.
+const directGrant = {
+  nodeId: PLANT,
+  role: "supervisor" as GrantRole,
+  direct: true,
+  plansShiftId: null,
+  outsideShift: true,
+};
+const lineGrant = {
+  nodeId: LINE1,
+  role: "supervisor" as GrantRole,
+  direct: false,
+  plansShiftId: null,
+  outsideShift: true,
+};
 
 check("R-368 rowGrant: a grant on the viewed node is the editable one, marked direct", () => {
   const g = rowGrant(byId(P_SAM), PLANT);
@@ -1376,6 +1404,31 @@ check(
       : `got ${JSON.stringify(g)}`;
   },
 );
+
+check(
+  "R-442 rowGrant: a direct grant carries its OWN plansShiftId/outsideShift, never an inherited one's",
+  () => {
+    const withPlan = stranger({
+      directRole: "supervisor",
+      hasAccess: true,
+      plansShiftId: "shift-1",
+      outsideShift: false,
+      inheritedGrants: [{ ...grant(DEPT, "Assembly", "viewer"), plansShiftId: "shift-9" }],
+    });
+    const g = rowGrant(withPlan, PLANT);
+    return g !== null && g.plansShiftId === "shift-1" && g.outsideShift === false
+      ? true
+      : `got ${JSON.stringify(g)}`;
+  },
+);
+
+check("R-442 rowGrant: a single INHERITED grant carries its OWN plansShiftId/outsideShift", () => {
+  const g = rowGrant(byId(P_RAJ), PLANT);
+  // raj's one grant (Assembly, admin) is the default, unrestricted shape.
+  return g !== null && g.plansShiftId === null && g.outsideShift === true
+    ? true
+    : `got ${JSON.stringify(g)}`;
+});
 
 check(
   "R-368 rowGrant: more than one grant below is ambiguous -- null, so the row opens a node",
@@ -1407,7 +1460,13 @@ check(
     ) {
       return "line grant offered admin";
     }
-    const adminBelow = { nodeId: DEPT, role: "admin" as GrantRole, direct: false };
+    const adminBelow = {
+      nodeId: DEPT,
+      role: "admin" as GrantRole,
+      direct: false,
+      plansShiftId: null,
+      outsideShift: true,
+    };
     const opts = grantRoleOptions(byId(P_RAJ), false, adminBelow, PLANT);
     return opts.includes("admin") ? true : `admin-below-root lost admin: ${opts.join(",")}`;
   },
@@ -1415,7 +1474,13 @@ check(
 
 check("R-368 grantRoleOptions: you cannot strip your own admin -- only admin offered", () => {
   const self = stranger({ isSelf: true, directRole: "admin", hasAccess: true });
-  const g = { nodeId: PLANT, role: "admin" as GrantRole, direct: true };
+  const g = {
+    nodeId: PLANT,
+    role: "admin" as GrantRole,
+    direct: true,
+    plansShiftId: null,
+    outsideShift: true,
+  };
   return grantRoleOptions(self, false, g, PLANT).join(",") === "admin"
     ? true
     : "self admin was offered a downgrade";
@@ -1428,7 +1493,15 @@ check(
     if (canRemoveGrant(boss, false, directGrant))
       return "a company admin's row was removable by a site admin";
     const selfAdmin = stranger({ isSelf: true, directRole: "admin", hasAccess: true });
-    if (canRemoveGrant(selfAdmin, false, { nodeId: PLANT, role: "admin", direct: true })) {
+    if (
+      canRemoveGrant(selfAdmin, false, {
+        nodeId: PLANT,
+        role: "admin",
+        direct: true,
+        plansShiftId: null,
+        outsideShift: true,
+      })
+    ) {
       return "own admin was removable";
     }
     return canRemoveGrant(byId(P_SAM), false, directGrant)

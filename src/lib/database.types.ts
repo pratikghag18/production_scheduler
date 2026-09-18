@@ -1684,7 +1684,13 @@ export type Database = {
         Returns: Json
       }
       set_site_member: {
-        Args: { p_node_id: string; p_profile_id: string; p_role: string }
+        Args: {
+          p_node_id: string
+          p_outside_shift?: boolean
+          p_plans_shift_id?: string
+          p_profile_id: string
+          p_role: string
+        }
         Returns: Json
       }
       set_system_admin: {

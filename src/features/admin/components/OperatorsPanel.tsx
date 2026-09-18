@@ -31,12 +31,14 @@ import {
   validateOperatorDraft,
   workPlacesFor,
   type OperatorLike,
+  type OperatorRow,
   type PlaceVerdict,
 } from "../lib/operators";
 import { buildColumns, trainingApplies, type CellState } from "../lib/matrix";
 import { MatrixChip, RecordPopover, type RecordFields } from "./matrixCells";
 import cellStyles from "./matrixCells.module.css";
 import { Popover } from "@/components/Popover";
+import { Chevron } from "@/components/icons";
 // R-360: this person's own absences, on their record — its own file, its own
 // query (see OperatorAbsences.tsx's header for why the query lives there).
 import { OperatorAbsences } from "./OperatorAbsences";
@@ -64,6 +66,12 @@ import {
   useUpdateOperator,
   useUpdateSkillRecord,
 } from "../hooks/useOperators";
+// R-441/R-443/R-444, migration 0082 (S66-b): the same shift-pattern read
+// `ShiftsPanel` already makes, reused here rather than a second copy of "which
+// bands does this place run" -- `bandsForNode` is the pure resolver both
+// panels (and the CSV importer, and the Access tab) share.
+import { useShiftPatterns } from "../hooks/useShifts";
+import { bandsForNode } from "../lib/shiftDraft";
 import { DeleteDialog } from "./DeleteDialog";
 import styles from "./OperatorsPanel.module.css";
 
@@ -237,7 +245,34 @@ export function OperatorsPanel() {
   // as though it were the answer.
   const loading = !canQuery || isLoading;
 
+  // ⭐ R-443: "use what the admin data already carries; if the admin payload
+  // has no pattern per place, add the smallest read." The admin payload above
+  // has no shift pattern in it at all, so this is that smallest read — the
+  // same `useShiftPatterns` query `ShiftsPanel` already runs, cached under the
+  // same key, never a second copy of `fetchShiftPatterns`.
+  //
+  // ⚠️ DELIBERATELY NOT FOLDED INTO `loading`. The Edit form's shift picker
+  // (and the create form's) degrades to an empty "No shift"-only list while
+  // this is still in flight, and the row's own mark reads "No shift" for the
+  // same reason, rather than holding the whole roster back for a read the
+  // rest of the screen does not otherwise need.
+  const shiftPatternsQuery = useShiftPatterns(canQuery);
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The maintainer, 18 Sept: "Is it possible to create a sorting here for
+  // names and shifts? Like we do columns in a table?" `null` is R-444's own
+  // default order (no shift first, then name) — nothing here overrides it
+  // until a heading is actually clicked, and it lives in plain state, never
+  // storage, so it does not survive past this mount (the maintainer's own
+  // words: "kept for the session only").
+  const [sort, setSort] = useState<{ key: "name" | "shift"; dir: "asc" | "desc" } | null>(null);
+  function toggleSort(key: "name" | "shift") {
+    setSort((cur) =>
+      cur === null || cur.key !== key
+        ? { key, dir: "asc" }
+        : { key, dir: cur.dir === "asc" ? "desc" : "asc" },
+    );
+  }
   const [query, setQuery] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   /* ⚠️ `null` IS "TODAY", AND IT IS NOT THE SAME AS TODAY'S STRING. This was
@@ -252,10 +287,17 @@ export function OperatorsPanel() {
   const [draftName, setDraftName] = useState("");
   const [draftRef, setDraftRef] = useState("");
   const [draftSite, setDraftSite] = useState("");
+  // R-443: "" means "no shift" on the create form, exactly as it does on the
+  // row's own dropdown below — a real uuid is the only other value it holds.
+  const [draftShift, setDraftShift] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [editName, setEditName] = useState("");
   const [editRef, setEditRef] = useState("");
   const [editSite, setEditSite] = useState<string>("");
+  // R-443/R-444, CORRECTED 18 Sept (session 179): the shift lives beside
+  // "Belongs to" on this same form now — see `saveRename`. "" is "no shift",
+  // exactly as it is on the create form's own picker (`draftShift`, above).
+  const [editShift, setEditShift] = useState<string>("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   /* ---------------------------------------------------------------------
@@ -348,6 +390,74 @@ export function OperatorsPanel() {
   // where they are standing — the same reason the places headline counts what
   // the list actually shows rather than all of `places`.
   const hiddenPeople = allRows.length - rows.length;
+
+  // ⭐ R-444: "the tab's head says 'N people have no shift'" — counted against
+  // the same list `hiddenPeople` counts against (what the tab is actually
+  // showing: this plant, this search, deactivated people only if asked for),
+  // not against the whole company, for the same reason that footnote gives.
+  const noShiftCount = rows.filter((r) => r.homeShiftId === null).length;
+
+  // ⭐ R-444/R-443, CORRECTED 18 Sept (session 179): the row's own dropdown is
+  // withdrawn — see the render — and what replaced it is the WORDS, not a
+  // per-site bands list. A person's band can predate whatever pattern is
+  // attached to their site NOW (`bandsForNode` only ever answers "the bands
+  // of what is attached today"), so the row's mark and the header both read
+  // the band by its own id, flat across every shift the org holds — exactly
+  // the FK's own guarantee: `home_shift_id` cannot point at a row that does
+  // not exist, so a non-null id always resolves here.
+  const shiftNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of shiftPatternsQuery.data?.shifts ?? []) {
+      if (s !== null) m.set(s.id, s.name);
+    }
+    return m;
+  }, [shiftPatternsQuery.data]);
+
+  /** "No shift", or the band's own name — never a raw id. Shared by the row's
+   *  mark and the header line beside "Belongs to" (R-444, corrected 18 Sept:
+   *  one fact, drawn wherever it is read, from the one map above). */
+  const shiftMarkLabel = (homeShiftId: string | null): string =>
+    homeShiftId === null ? "No shift" : (shiftNameById.get(homeShiftId) ?? "No shift");
+
+  // ⭐ THE "SHIFT" COLUMN'S SORT KEY (the maintainer, 18 Sept). Sorting by
+  // shift is sorting by the band's own START TIME (Shift 1 before Shift 2
+  // before a night band), never by name — "Shift 10" must not sort before
+  // "Shift 2" the way a text sort would read it. `-1` is a sentinel below
+  // every real `start_min` (which is always `>= 0`), so "No shift" is
+  // ordered first ascending, exactly as the maintainer asked; an id this
+  // payload cannot resolve (still loading, or stale) reads the same way as
+  // "no shift" rather than as a guess.
+  const shiftStartById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of shiftPatternsQuery.data?.shifts ?? []) {
+      if (s !== null) m.set(s.id, s.startMin);
+    }
+    return m;
+  }, [shiftPatternsQuery.data]);
+  const shiftSortValue = (homeShiftId: string | null): number =>
+    homeShiftId === null ? -1 : (shiftStartById.get(homeShiftId) ?? -1);
+
+  /** Ascending compare, `name` or `shift` — `dirMul` below flips the WHOLE
+   *  thing (tiebreak included), which is the plain reading of "clicking
+   *  again reverses": the reversed list, not merely the reversed groups. */
+  function compareRows(a: OperatorRow, b: OperatorRow, key: "name" | "shift"): number {
+    let cmp = 0;
+    if (key === "shift") cmp = shiftSortValue(a.homeShiftId) - shiftSortValue(b.homeShiftId);
+    if (cmp === 0) {
+      const an = a.displayName.toLowerCase();
+      const bn = b.displayName.toLowerCase();
+      cmp = an < bn ? -1 : an > bn ? 1 : 0;
+    }
+    return cmp !== 0 ? cmp : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  }
+  // ⭐ `null` IS R-444'S OWN DEFAULT (no shift first, then name) — `rows`
+  // already reads that way (`operatorRows`' own sort), so an unsorted screen
+  // is untouched by this feature. A heading click is the only thing that
+  // ever produces a `sort`.
+  const sortedRows =
+    sort === null
+      ? rows
+      : [...rows].sort((a, b) => (sort.dir === "asc" ? 1 : -1) * compareRows(a, b, sort.key));
 
   // ⚠️ THE SELECTION IS RESOLVED AGAINST THE PLANT, NOT AGAINST `rows`. `rows`
   // is also narrowed by the search box and the deactivated toggle, and typing
@@ -508,6 +618,23 @@ export function OperatorsPanel() {
   // than pointing at a node it will not save.
   const editSiteValue = scopeChoices.some((o) => o.value === editSite) ? editSite : "";
 
+  // ⭐ R-443/R-444, CORRECTED 18 Sept: the Edit form's own picker, beside
+  // "Belongs to" — the bands of the pattern the CHOSEN place resolves, same
+  // resolution `draftShiftValue` runs below. Changing the place while this
+  // form is open changes which shifts are on offer, and a band that no
+  // longer belongs to the newly-chosen site's pattern falls back to "No
+  // shift" rather than silently saving a foreign band id.
+  const editBands = bandsForNode(shiftPatternsQuery.data, editSiteValue || null);
+  const editShiftValue = editBands.some((b) => b.id === editShift) ? editShift : "";
+
+  // ⭐ R-443: "the create form offers the same dropdown" — the bands of the
+  // pattern the CHOSEN "Belongs to" node resolves, so changing that picker
+  // changes which shifts are on offer. Resolved the same way `draftSiteValue`
+  // is: a band that no longer belongs to the newly-chosen site's pattern falls
+  // back to "No shift" rather than silently submitting a foreign band id.
+  const draftBands = bandsForNode(shiftPatternsQuery.data, draftSiteValue || null);
+  const draftShiftValue = draftBands.some((b) => b.id === draftShift) ? draftShift : "";
+
   const busy =
     createOperator.isPending ||
     updateOperator.isPending ||
@@ -553,11 +680,16 @@ export function OperatorsPanel() {
         // the plant filter has taken out from under the form; what is submitted
         // has to be what the control is showing.
         siteNodeId: draftSiteValue,
+        // R-443: "" is "no shift" on this form, the column's own default.
+        // `draftShiftValue`, not `draftShift` — the resolved value, for the
+        // same reason `draftSiteValue` is used above and not `draftSite`.
+        homeShiftId: draftShiftValue === "" ? null : draftShiftValue,
       },
       {
         onSuccess: (created) => {
           setDraftName("");
           setDraftRef("");
+          setDraftShift("");
           setSelectedId(created.id);
           if (draft.duplicateNameOf !== null) {
             // A WARNING after the fact, not a refusal before it: `operators`
@@ -607,6 +739,12 @@ export function OperatorsPanel() {
         displayName: draft.displayName,
         employeeRef: draft.employeeRef,
         siteNodeId: editSiteValue,
+        // ⭐ R-443/R-444, CORRECTED 18 Sept (the maintainer's one-place rule:
+        // "why reinvent stuff… a second control for the same fact is a
+        // defect"): the shift is set HERE now, beside "Belongs to", not
+        // through a second control on the row. "" is "no shift", the same
+        // reading `draftShiftValue` gives the create form's own picker.
+        homeShiftId: editShiftValue === "" ? null : editShiftValue,
       },
       { onSuccess: () => setRenaming(false), onError: onErr },
     );
@@ -725,36 +863,115 @@ export function OperatorsPanel() {
             <span>Show deactivated people</span>
           </label>
 
+          {/* ⭐ R-444: "the tab's head says 'N people have no shift'" — said
+              here, above the list it counts, so the gap is seen before the
+              rows that carry it. Never rendered as a bare "0": a count of
+              nothing is a fact worth stating in its own right on THIS tab
+              (unlike the trims below, whose zero case is simply nothing to
+              say), because it is the one line that tells a reader the gap has
+              been closed. */}
+          <p className={styles.noShiftCount}>
+            {noShiftCount === 0
+              ? "Everybody here has a shift."
+              : noShiftCount === 1
+                ? "1 person has no shift."
+                : `${noShiftCount} people have no shift.`}
+          </p>
+
           {/* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers",
               R-372). The people list can run to a hundred rows; it scrolls
               WITHIN this bounded box so `.peopleHead` stays put rather than
               the whole page scrolling and the column head leaving with it. */}
           <div className={styles.tableScroll}>
-            <div className={styles.peopleHead} aria-hidden="true">
-              Person
+            {/* ⭐ THE MAINTAINER, 18 SEPT: "Is it possible to create a sorting
+                here for names and shifts? Like we do columns in a table?"
+                Each heading is now a real button (its own text is its own
+                accessible name) inside a `columnheader` carrying `aria-sort`,
+                and the active one shows a `Chevron` for direction — never a
+                text glyph (the icon standard, `src/components/icons.tsx`).
+                The head can no longer be `aria-hidden`: it holds the only
+                control for this feature. */}
+            <div className={styles.peopleHead}>
+              <span
+                role="columnheader"
+                aria-sort={
+                  sort?.key === "name" ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
+                }
+              >
+                <button type="button" className={styles.sortBtn} onClick={() => toggleSort("name")}>
+                  Person
+                  {sort?.key === "name" && (
+                    <Chevron
+                      direction={sort.dir === "asc" ? "up" : "down"}
+                      className={styles.sortIcon}
+                    />
+                  )}
+                </button>
+              </span>
+              <span
+                role="columnheader"
+                aria-sort={
+                  sort?.key === "shift" ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
+                }
+              >
+                <button
+                  type="button"
+                  className={styles.sortBtn}
+                  onClick={() => toggleSort("shift")}
+                >
+                  Shift
+                  {sort?.key === "shift" && (
+                    <Chevron
+                      direction={sort.dir === "asc" ? "up" : "down"}
+                      className={styles.sortIcon}
+                    />
+                  )}
+                </button>
+              </span>
             </div>
             <ul className={styles.peopleList}>
-              {rows.map((row) => (
-                <li key={row.id}>
-                  <button
-                    type="button"
-                    className={row.id === selectedId ? styles.personOn : styles.person}
-                    onClick={() => {
-                      setSelectedId(row.id);
-                      setRenaming(false);
-                      setConfirmDelete(false);
-                      setNotice(null);
-                    }}
+              {sortedRows.map((row) => {
+                // ⭐ R-444: the same inset accent AuditPanel draws for a
+                // deletion, in --crit — "the same bar in --crit with the
+                // words is the honest reuse" (R-444's own note). Colour never
+                // carries the meaning alone: "No shift" is always drawn too.
+                //
+                // ⚠️ CORRECTED 18 Sept (session 179): this row used to also
+                // carry a `<select>` here, writing `home_shift_id` on its own
+                // change — the maintainer: "why reinvent stuff?… a second
+                // control for the same fact is a defect." The row keeps only
+                // the bar and the words, a MARK the reader cannot act on; the
+                // CONTROL is the Edit form's own picker, beside "Belongs to"
+                // (see the header, `editBands`/`editShiftValue`).
+                const noShift = row.homeShiftId === null;
+                return (
+                  <li
+                    key={row.id}
+                    className={
+                      noShift ? `${styles.personRow} ${styles.noShiftRow}` : styles.personRow
+                    }
                   >
-                    <span className={styles.personName}>{row.displayName}</span>
-                    <span className={styles.personMeta}>
-                      {row.employeeRef ?? "no reference"} ·{" "}
-                      {row.ticketCount === 1 ? "1 training" : `${row.ticketCount} trainings`}
-                      {!row.active && <span className={styles.badge}>deactivated</span>}
-                    </span>
-                  </button>
-                </li>
-              ))}
+                    <button
+                      type="button"
+                      className={row.id === selectedId ? styles.personOn : styles.person}
+                      onClick={() => {
+                        setSelectedId(row.id);
+                        setRenaming(false);
+                        setConfirmDelete(false);
+                        setNotice(null);
+                      }}
+                    >
+                      <span className={styles.personName}>{row.displayName}</span>
+                      <span className={styles.personMeta}>
+                        {row.employeeRef ?? "no reference"} ·{" "}
+                        {row.ticketCount === 1 ? "1 training" : `${row.ticketCount} trainings`}
+                        {!row.active && <span className={styles.badge}>deactivated</span>}
+                      </span>
+                    </button>
+                    <span className={styles.shiftMark}>{shiftMarkLabel(row.homeShiftId)}</span>
+                  </li>
+                );
+              })}
               {rows.length === 0 && <li className={styles.status}>Nobody matches that.</li>}
             </ul>
           </div>
@@ -803,6 +1020,21 @@ export function OperatorsPanel() {
               {scopeChoices.map((o) => (
                 <option key={o.value ?? "company"} value={o.value ?? ""}>
                   {indentedLabel(o)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Shift (optional)</span>
+            <select
+              className={styles.input}
+              value={draftShiftValue}
+              onChange={(e) => setDraftShift(e.target.value)}
+            >
+              <option value="">No shift</option>
+              {draftBands.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
                 </option>
               ))}
             </select>
@@ -881,6 +1113,26 @@ export function OperatorsPanel() {
                         </option>
                       ))}
                     </select>
+                    {/* ⭐ R-443/R-444, CORRECTED 18 Sept: the shift lives HERE
+                        now, beside "Belongs to" — the maintainer's one-place
+                        rule, and the answer to "make sure there is a way to
+                        modify/edit assigned shift" (OS6 pins the gesture).
+                        Changing "Belongs to" while this is open changes which
+                        bands are on offer, exactly as the create form does
+                        (`editBands`/`editShiftValue`, above). */}
+                    <select
+                      className={styles.input}
+                      aria-label={`Shift for ${selected.displayName}`}
+                      value={editShiftValue}
+                      onChange={(e) => setEditShift(e.target.value)}
+                    >
+                      <option value="">No shift</option>
+                      {editBands.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
                       className={styles.small}
@@ -922,7 +1174,14 @@ export function OperatorsPanel() {
                       className={styles.headMeta}
                       title={scopePathLabel(selected.siteNodeId, nodesById)}
                     >
-                      Belongs to {scopeLabel(selected.siteNodeId, nodesById)}
+                      {/* ⭐ R-443/R-444, CORRECTED 18 Sept: "the shift button
+                          in the panel [moves] to the right where we have
+                          option to edit the hierarchy level" — so the shift
+                          reads as text right here, beside the place, and the
+                          same Edit button above opens the one form that
+                          changes either. */}
+                      Belongs to {scopeLabel(selected.siteNodeId, nodesById)} ·{" "}
+                      {shiftMarkLabel(selected.homeShiftId ?? null)}
                     </span>
                     <button
                       type="button"
@@ -931,6 +1190,7 @@ export function OperatorsPanel() {
                         setEditName(selected.displayName);
                         setEditRef(selected.employeeRef ?? "");
                         setEditSite(selected.siteNodeId ?? "");
+                        setEditShift(selected.homeShiftId ?? "");
                         setRenaming(true);
                       }}
                     >

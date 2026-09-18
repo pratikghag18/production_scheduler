@@ -37,6 +37,25 @@ vi.mock("@/features/admin/hooks/useSiteAccess", async (importActual) => {
   };
 });
 
+/**
+ * R-442 (S66-b): the panel now calls `useSession` (for the "Plans" picker's
+ * own gate) and `useShiftPatterns` (for its bands) directly, neither of
+ * which this file exercised before. Mocked at the boundary like every other
+ * hook here — an empty pattern payload is enough for every case in this file,
+ * none of which is about the shift plan.
+ */
+vi.mock("@/features/auth/useSession", () => ({
+  useSession: () => ({ session: { user: { id: "viewer-1" } }, profile: null, loading: false }),
+}));
+vi.mock("@/features/admin/hooks/useShifts", () => ({
+  useShiftPatterns: () => ({
+    data: { templates: [], shifts: [], breaks: [], attachments: [], nodes: [] },
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
 const NODES = [
   { nodeId: "plantA", name: "Plant A", path: "plant_a" },
   { nodeId: "lineA1", name: "Line 1", path: "plant_a.line_1" },

@@ -32,6 +32,7 @@ import {
   createSkill,
   deleteOperator,
   deleteSkill,
+  fetchHomeShiftHolders,
   fetchOperatorsAdmin,
   grantSkill,
   setSkillActive,
@@ -46,6 +47,7 @@ import {
   type CreateOperatorInput,
   type CreateSkillInput,
   type GrantSkillInput,
+  type HomeShiftHolder,
   type OperatorRecord,
   type OperatorSkillRecord,
   type OperatorsAdminData,
@@ -78,6 +80,21 @@ export function useOperatorsAdmin(enabled: boolean) {
   return useQuery<OperatorsAdminData, SchedulerError>({
     queryKey: [...operatorKeys.all, "admin"],
     queryFn: () => fetchOperatorsAdmin(),
+    enabled,
+  });
+}
+
+/**
+ * R-443 (S66-b): `ShiftsPanel`'s own read — who currently has a home band,
+ * for the retire-warning's count and reassignment list. Its own query key
+ * under the SAME `operatorKeys.all` prefix, so any operator write
+ * (`useUpdateOperator` in particular — reassigning someone's band during a
+ * retire IS one) invalidates it along with the Operators tab's own read.
+ */
+export function useHomeShiftHolders(enabled: boolean) {
+  return useQuery<HomeShiftHolder[], SchedulerError>({
+    queryKey: [...operatorKeys.all, "home-shift-holders"],
+    queryFn: fetchHomeShiftHolders,
     enabled,
   });
 }

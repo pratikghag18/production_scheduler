@@ -157,6 +157,18 @@ vi.mock("@/lib/api", () => ({
   isSchedulerError: () => false,
 }));
 
+/**
+ * R-443 (S66-b): the retire warning's own read and write, neither of which
+ * this file exercised before — an empty holder list is enough for every
+ * existing case here (none of them is about a band or pattern anybody
+ * points at); `shiftsPanelRetire.test.tsx` is where a non-empty list, and the
+ * warning it triggers, is pinned.
+ */
+vi.mock("@/features/admin/hooks/useOperators", () => ({
+  useHomeShiftHolders: () => ({ data: [], isLoading: false, isError: false, error: null }),
+  useUpdateOperator: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+}));
+
 vi.mock("@/features/auth/useSession", () => ({
   useSession: () => ({
     session: { user: { id: h.state.profile.userId } },

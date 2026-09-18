@@ -34,6 +34,20 @@ vi.mock("@/features/admin/hooks/useSiteAccess", async (importActual) => {
   };
 });
 
+/** R-442 (S66-b): see `siteAccessNodePicker.test.tsx`'s copy of this mock — this
+ *  file's cases are about the invite surface, not the shift plan. */
+vi.mock("@/features/auth/useSession", () => ({
+  useSession: () => ({ session: { user: { id: "viewer-1" } }, profile: null, loading: false }),
+}));
+vi.mock("@/features/admin/hooks/useShifts", () => ({
+  useShiftPatterns: () => ({
+    data: { templates: [], shifts: [], breaks: [], attachments: [], nodes: [] },
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }: { children: ReactNode }) => (

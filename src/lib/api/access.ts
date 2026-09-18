@@ -75,6 +75,19 @@ export interface SetSiteMemberInput {
   nodeId: string;
   profileId: string;
   role: SiteMemberRole;
+  /**
+   * R-442, migration 0083: the band this grant plans, `null` = the whole day.
+   * **Optional, and there is no "leave it alone" on the server** — 0083's own
+   * header says so: a PL/pgSQL default cannot tell "omitted" from "sent the
+   * default", so this is ALWAYS WRITTEN, defaulting server-side to `null`
+   * when omitted. A caller changing only the role (or moving/adding a grant)
+   * MUST resend the grant's current `plansShiftId`/`outsideShift` or this
+   * silently clears them — `SiteAccessPanel.tsx`'s call sites all do.
+   */
+  plansShiftId?: string | null;
+  /** R-442: may this grant place people OUTSIDE `plansShiftId`'s band? Same
+   *  "always written, no leave-alone" contract as `plansShiftId` above. */
+  outsideShift?: boolean;
 }
 
 export interface RemoveSiteMemberInput {
@@ -183,20 +196,40 @@ export async function invite(input: InviteInput): Promise<InviteResult> {
 }
 
 /**
- * `set_site_member(p_node_id, p_profile_id, p_role)`. Adds the person or
- * changes the role they already hold there — one row either way, because
- * `profile_grants` is keyed `(profile_id, node_id)`.
+ * `set_site_member(p_node_id, p_profile_id, p_role, p_plans_shift_id,
+ * p_outside_shift)`. Adds the person or changes the role (and now the
+ * shift-planning restriction, R-442) they already hold there — one row
+ * either way, because `profile_grants` is keyed `(profile_id, node_id)`.
  *
  * Raises: `invalid_argument` (no such node, carrying `node_id`; no such
  * person, carrying `profile_id`; unknown or null role, carrying
  * `field: "role"`), `not_permitted` (not your place; or your own admin access
  * here).
+ *
+ * ⚠️ `plansShiftId`/`outsideShift` OMITTED HERE MEANS "THE COLUMNS' OWN
+ * DEFAULTS" (null / true), NOT "leave alone" — see the interface comment.
+ *
+ * SR-1 (reviewer, S66-b): `p_plans_shift_id`'s generated Args type is
+ * `string | undefined` — a nullable `uuid DEFAULT NULL` argument does not
+ * generate `| null` — but `input.plansShiftId` is `string | null`. Sending
+ * `null` explicitly and omitting the key are the SAME thing on the server
+ * (0083's header: the default IS null, resolved before the function body
+ * ever runs), so `null` is folded into "omit" here rather than forwarded;
+ * this was hidden by `database.types.ts` having been hand-edited into a
+ * two-member union that kept the pre-0083 three-argument shape alive as an
+ * alternative overload tsc could match against instead (fixed separately,
+ * same review — CLAUDE.md §4/§7 "extract, never retype": the real schema
+ * has exactly one overload, `bash scripts/run-sql-test.sh` and `\df+
+ * public.set_site_member` against the container both show it, and
+ * `npm run db:types`'s own output has no union).
  */
 export async function setSiteMember(input: SetSiteMemberInput): Promise<void> {
   const { error } = await supabase.rpc("set_site_member", {
     p_node_id: input.nodeId,
     p_profile_id: input.profileId,
     p_role: input.role,
+    ...(input.plansShiftId != null ? { p_plans_shift_id: input.plansShiftId } : {}),
+    ...(input.outsideShift !== undefined ? { p_outside_shift: input.outsideShift } : {}),
   });
   if (error) throw toSchedulerError(error);
 }

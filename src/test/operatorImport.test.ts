@@ -15,7 +15,7 @@
  * UPDATE leaves the site alone — the two people-specific twists these cases pin.
  */
 import { describe, expect, it } from "vitest";
-import type { OperatorRecord } from "@/lib/api";
+import type { OperatorRecord, ShiftPatternsPayload } from "@/lib/api";
 import { parseCsvTable } from "../features/admin/lib/csv.ts";
 import {
   detectColumns,
@@ -48,10 +48,29 @@ const PLANT_A: ImportPlant = { id: "N1", name: "Plant A" };
  * The wizard's real path: parse the text, propose columns from the header, plan.
  * Column overrides are the wizard's job; the default detection is what we test.
  */
-function planFrom(csv: string, existing: OperatorRecord[] = [], plants: ImportPlant[] = []) {
+function planFrom(
+  csv: string,
+  existing: OperatorRecord[] = [],
+  plants: ImportPlant[] = [],
+  shiftPatterns?: ShiftPatternsPayload,
+) {
   const table = parseCsvTable(csv);
   const columns = detectColumns(table.headerKeys);
-  return planOperatorImport(table, existing, columns, plants);
+  return planOperatorImport(table, existing, columns, plants, shiftPatterns);
+}
+
+/** R-441/R-443 (S66-b): Plant A's pattern, with two named bands. */
+function shiftPayload(): ShiftPatternsPayload {
+  return {
+    templates: [{ id: "T1", name: "Standard", siteNodeId: "N1", active: true }],
+    shifts: [
+      { id: "S1", templateId: "T1", name: "Shift 1", startMin: 360, endMin: 840 },
+      { id: "S2", templateId: "T1", name: "Shift 2", startMin: 840, endMin: 1320 },
+    ],
+    breaks: [],
+    attachments: [{ nodeId: "N1", templateId: "T1" }],
+    nodes: [{ id: "N1", name: "Plant A", parentId: null, path: "planta" }],
+  };
 }
 
 const only = (plan: ReturnType<typeof planFrom>) => plan.rows[0].outcome;
@@ -149,6 +168,10 @@ describe("rule 2 — external_id matches nothing", () => {
       employeeRef: null,
       externalId: "EXT-NEW",
       plantNodeId: "N1",
+      // S66-b: an insert always carries a home_shift_id, null on a blank
+      // Shift column (there is no "leave alone" for a row that does not
+      // exist yet).
+      homeShiftId: null,
     });
   });
 });
@@ -169,6 +192,7 @@ describe("rule 3 — no external_id always inserts", () => {
       employeeRef: "EMP-5",
       externalId: null,
       plantNodeId: "N1",
+      homeShiftId: null,
     });
   });
 
@@ -253,6 +277,88 @@ describe("rule 5 — a plant is required for an insert", () => {
 });
 
 /* ===========================================================================
+ * Group OI — R-441/R-443 (S66-b): the fifth column, "Shift", matched by band
+ * NAME against the person's own plant pattern (case-insensitive); blank
+ * allowed; an unknown name is a row error naming the pattern's bands.
+ * ======================================================================== */
+
+describe("the Shift column (S66-b)", () => {
+  it("OI1: an insert whose Shift names a real band resolves it, case-insensitively", () => {
+    const plan = planFrom(
+      "import id,name,plant,shift\nEXT-NEW,New Person,Plant A,shift 1",
+      [],
+      [PLANT_A],
+      shiftPayload(),
+    );
+    const outcome = only(plan);
+    expect(outcome.kind).toBe("insert");
+    expect(outcome.kind === "insert" && outcome.homeShiftId).toBe("S1");
+  });
+
+  it("OI2: a blank Shift column is legal and answers no shift on an insert", () => {
+    const plan = planFrom(
+      "import id,name,plant,shift\nEXT-NEW,New Person,Plant A,",
+      [],
+      [PLANT_A],
+      shiftPayload(),
+    );
+    const outcome = only(plan);
+    expect(outcome.kind).toBe("insert");
+    expect(outcome.kind === "insert" && outcome.homeShiftId).toBeNull();
+  });
+
+  it("OI3: an unknown shift name is a row error naming the pattern's own bands", () => {
+    const plan = planFrom(
+      "import id,name,plant,shift\nEXT-NEW,New Person,Plant A,Nightshift",
+      [],
+      [PLANT_A],
+      shiftPayload(),
+    );
+    const outcome = only(plan);
+    expect(outcome.kind).toBe("error");
+    const msg = outcome.kind === "error" ? outcome.messages.join(" ") : "";
+    expect(msg).toContain("Nightshift");
+    expect(msg).toContain("Shift 1");
+    expect(msg).toContain("Shift 2");
+  });
+
+  it("a plant with no pattern attached at all names that, rather than an empty list", () => {
+    const plan = planFrom(
+      "import id,name,plant,shift\nEXT-NEW,New Person,Plant A,Shift 1",
+      [],
+      [PLANT_A],
+      { templates: [], shifts: [], breaks: [], attachments: [], nodes: [] },
+    );
+    const outcome = only(plan);
+    expect(outcome.kind).toBe("error");
+    const msg = outcome.kind === "error" ? outcome.messages.join(" ") : "";
+    expect(msg).toContain("no shift pattern is set up");
+  });
+
+  it("an update matches by NAME against the EXISTING person's own site, never the plant column", () => {
+    // O1's own site is N1 (Plant A). The plant column is ignored on an update
+    // (rule 1) — naming a different plant here must not change which pattern
+    // the shift name is matched against.
+    const plan = planFrom(
+      "import id,name,shift\nEXT-1,Jane,SHIFT 2",
+      [O1],
+      [PLANT_A],
+      shiftPayload(),
+    );
+    const outcome = only(plan);
+    expect(outcome.kind).toBe("update");
+    expect(outcome.kind === "update" && outcome.homeShiftId).toBe("S2");
+  });
+
+  it("a blank Shift column on an UPDATE is ignored, not a clearing write", () => {
+    const plan = planFrom("import id,name\nEXT-1,Jane Renamed", [O1], [], shiftPayload());
+    const outcome = only(plan);
+    expect(outcome.kind).toBe("update");
+    expect(outcome).not.toHaveProperty("homeShiftId");
+  });
+});
+
+/* ===========================================================================
  * Group E — file-level errors ride along to the plan.
  * ======================================================================== */
 
@@ -277,7 +383,7 @@ describe("operatorPlanToView", () => {
     );
     const view = operatorPlanToView(plan);
     expect(view.counts).toEqual({ insert: 1, update: 0, error: 0 });
-    expect(view.rows[0].cells).toEqual(["New Person", "EMP-7", "EXT-NEW", "Plant A"]);
+    expect(view.rows[0].cells).toEqual(["New Person", "EMP-7", "EXT-NEW", "Plant A", ""]);
     expect(view.rows[0].kind).toBe("insert");
   });
 
@@ -301,8 +407,15 @@ describe("OPERATOR_TEMPLATE", () => {
       employeeRef: keys[1],
       externalId: keys[2],
       plant: keys[3],
+      shift: keys[4],
     });
-    expect(OPERATOR_TEMPLATE.headers).toEqual(["Name", "Employee ref", "Import ID", "Plant"]);
+    expect(OPERATOR_TEMPLATE.headers).toEqual([
+      "Name",
+      "Employee ref",
+      "Import ID",
+      "Plant",
+      "Shift",
+    ]);
   });
 
   it("M2: the example row and the legend both cover every header", () => {

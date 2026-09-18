@@ -87,7 +87,18 @@
      account-scoped, and the maintainer asked for them side by side in their own
      columns rather than stacked or crammed into one. Both fixed and equal so the
      two buttons are the same width and the right edge does not zig-zag. */
-  grid-template-columns: minmax(8rem, 1.6fr) 8rem minmax(6rem, 1.3fr) 6.75rem 6.75rem;
+  /* ⭐ R-442, CORRECTED 18 Sept (session 179): "Plans" and "May place outside
+     their shift" were a full-width line under the row and the maintainer
+     said so plainly — "it should have been a new column, not a new row with
+     the same column." Two more fixed tracks, right after Access level:
+     Person | Access level | Plans | Outside | Place | Remove | Deactivate.
+     The Add-someone row leaves the two new tracks empty (a new grant still
+     takes the columns' own defaults, see `runSetMemberAt`'s header) but keeps
+     the same seven-track template, so its OWN Place and action columns still
+     land under the member rows' — one grid, still shared by both lists. */
+  grid-template-columns:
+    minmax(8rem, 1.4fr) 8rem 7.5rem minmax(9rem, 1fr) minmax(6rem, 1.1fr) 6.75rem
+    6.75rem;
   align-items: center;
   column-gap: 0.75rem;
   row-gap: 0.375rem;
@@ -161,22 +172,25 @@
 }
 
 /* R-368: the two editable columns, and the two read-only fillers that keep a
-   non-editable row's tracks from collapsing. */
+   non-editable row's tracks from collapsing.
+   ⭐ R-442, CORRECTED 18 Sept: Plans/Outside sit BETWEEN Access level and
+   Place now, so Place moved from column 3 to column 5 — see the grid
+   comment above for the whole seven-track layout. */
 .roleCol {
   grid-column: 2;
 }
 .placeCol {
-  grid-column: 3;
+  grid-column: 5;
 }
 .placeText {
-  grid-column: 3;
+  grid-column: 5;
   min-width: 0;
   font-size: 0.75rem;
   color: var(--ink-2);
   overflow-wrap: anywhere;
 }
 .descWide {
-  grid-column: 2 / 4;
+  grid-column: 2 / 6;
   min-width: 0;
   font-size: 0.75rem;
   color: var(--ink-2);
@@ -205,11 +219,11 @@
 
 .removeBtn,
 .addBtn {
-  grid-column: 4;
+  grid-column: 6;
 }
 .deactivateBtn,
 .reactivateBtn {
-  grid-column: 5;
+  grid-column: 7;
 }
 
 /* Remove and Deactivate both take away access, so both are crit ink; Reactivate
@@ -280,6 +294,30 @@
   margin: 0;
   font-size: 0.75rem;
   color: var(--crit);
+}
+
+/* ---------------------------------------------------------------------------
+   ⭐ R-442: "PLANS" AND "MAY PLACE OUTSIDE THEIR SHIFT", THEIR OWN COLUMNS.
+   CORRECTED 18 Sept (session 179), the maintainer on the S66-b build: "it
+   should have been a new column, not a new row with the same column." These
+   used to be `.shiftPlanRow`, a full-width flex line under the row; they are
+   grid cells now, columns 3 and 4 of the same seven-track grid every row and
+   the header share (see `.head, .row` above) — never a second row under the
+   person.
+   --------------------------------------------------------------------------- */
+.plansCol {
+  grid-column: 3;
+}
+
+.outsideCol {
+  grid-column: 4;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
 }
 
 /* The way IN to a place whose grant sits below this one, and the way back

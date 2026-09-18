@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { describeSchedulerError, invite, type InviteResult, type SchedulerError } from "@/lib/api";
+import { useSession } from "@/features/auth/useSession";
+import { canQueryAsUser } from "@/features/auth/session";
+// R-442, migration 0083 (S66-b): the same shift-pattern read `OperatorsPanel`
+// and `ShiftsPanel` already make, reused here for the "Plans" picker's bands
+// — `bandsForNode` is the pure resolver all three (and the CSV importer)
+// share, extracted once rather than a fourth copy of the ancestor walk.
+import { useShiftPatterns } from "../hooks/useShifts";
+import { bandsForNode } from "../lib/shiftDraft";
 import {
   accessPanelState,
   buildAccessRows,
@@ -154,6 +162,14 @@ export function SiteAccessPanel({
   const setActiveMutation = useSetProfileActive();
   const setSystemAdminMutation = useSetSystemAdmin();
 
+  // R-442: the "Plans" picker's own read. Gated on the SESSION, not on
+  // `treeLoading`/`peopleQuery` — those answer a different question (whose
+  // access is this) and this is a read of a different kind, exactly the
+  // reasoning `OperatorsPanel` gives for keeping its own copy separate.
+  const { session, loading: sessionLoading } = useSession();
+  const canQueryShifts = canQueryAsUser(session?.user.id ?? null, sessionLoading);
+  const shiftPatternsQuery = useShiftPatterns(canQueryShifts);
+
   const [query, setQuery] = useState("");
   const [confirmingProfileId, setConfirmingProfileId] = useState<string | null>(null);
   const [pendingProfileId, setPendingProfileId] = useState<string | null>(null);
@@ -220,11 +236,24 @@ export function SiteAccessPanel({
   // `set_site_member` has always taken any node the caller administers; this is
   // the Add control finally naming one. The node comes from the plant subtree
   // picker, so it is always a node the viewer can read AND inside this plant.
-  function runSetMemberAt(row: AccessRow, nodeId: string, role: GrantRole) {
+  //
+  // ⚠️ R-442: `plan` IS OMITTED FOR A GENUINE NEW GRANT (the Add flow below)
+  // and SUPPLIED for a re-role of one that already exists — `set_site_member`
+  // has no "leave alone" for `plansShiftId`/`outsideShift` (0083's own
+  // header), so a re-role that failed to resend them would silently clear a
+  // restriction the admin never touched. Omitting it here writes the columns'
+  // own defaults, which is exactly right for a grant that did not exist a
+  // moment ago.
+  function runSetMemberAt(
+    row: AccessRow,
+    nodeId: string,
+    role: GrantRole,
+    plan?: { plansShiftId: string | null; outsideShift: boolean },
+  ) {
     clearRowError(row.profileId);
     setPendingProfileId(row.profileId);
     setMemberMutation.mutate(
-      { nodeId, profileId: row.profileId, role },
+      { nodeId, profileId: row.profileId, role, ...plan },
       {
         onError: (err: SchedulerError) =>
           setRowError({ profileId: row.profileId, message: describeSchedulerError(err) }),
@@ -241,12 +270,24 @@ export function SiteAccessPanel({
   // unchanged; `moveTargets` has already excluded any node where that role
   // would be refused (an admin below a plant root), so the new grant cannot be
   // the thing that fails.
-  function runMove(row: AccessRow, fromNodeId: string, role: GrantRole, toNodeId: string) {
+  //
+  // ⭐ R-442: the shift plan is carried across too, for the same "no leave
+  // alone on the server" reason `runSetMemberAt` gives — a moved grant that
+  // silently dropped its restriction would be a supervisor quietly regaining
+  // the whole day the moment an admin relocated them, with nothing on screen
+  // saying so.
+  function runMove(
+    row: AccessRow,
+    fromNodeId: string,
+    role: GrantRole,
+    toNodeId: string,
+    plan?: { plansShiftId: string | null; outsideShift: boolean },
+  ) {
     if (toNodeId === fromNodeId) return;
     clearRowError(row.profileId);
     setPendingProfileId(row.profileId);
     setMemberMutation.mutate(
-      { nodeId: toNodeId, profileId: row.profileId, role },
+      { nodeId: toNodeId, profileId: row.profileId, role, ...plan },
       {
         onSuccess: () =>
           removeMemberMutation.mutate(
@@ -264,6 +305,37 @@ export function SiteAccessPanel({
           setRowError({ profileId: row.profileId, message: describeSchedulerError(err) });
           setPendingProfileId((cur) => (cur === row.profileId ? null : cur));
         },
+      },
+    );
+  }
+
+  /**
+   * ⭐ R-442: the "Plans" picker / "may place outside their shift" checkbox.
+   * `setSiteMember` has no "leave alone" for these two (0083's own header),
+   * so this ALWAYS resends the grant's current `role` unchanged alongside
+   * whichever of the two shift fields the control just changed — the same
+   * shape `runSetMemberAt` already keeps for the role itself.
+   */
+  function runSetShiftPlan(
+    row: AccessRow,
+    grant: RowGrant,
+    plansShiftId: string | null,
+    outsideShift: boolean,
+  ) {
+    clearRowError(row.profileId);
+    setPendingProfileId(row.profileId);
+    setMemberMutation.mutate(
+      {
+        nodeId: grant.nodeId,
+        profileId: row.profileId,
+        role: grant.role,
+        plansShiftId,
+        outsideShift,
+      },
+      {
+        onError: (err: SchedulerError) =>
+          setRowError({ profileId: row.profileId, message: describeSchedulerError(err) }),
+        onSettled: () => setPendingProfileId((cur) => (cur === row.profileId ? null : cur)),
       },
     );
   }
@@ -394,7 +466,16 @@ export function SiteAccessPanel({
     }
 
     // Already a node-role member: just change the grant's role in place.
-    runSetMemberAt(row, nodeId, level);
+    // R-442: `grant` is non-null on this branch (the row already holds a node
+    // role), so its own shift plan travels with the re-role unchanged.
+    runSetMemberAt(
+      row,
+      nodeId,
+      level,
+      grant === null
+        ? undefined
+        : { plansShiftId: grant.plansShiftId, outsideShift: grant.outsideShift },
+    );
   }
 
   if (state === "pending") {
@@ -561,9 +642,17 @@ export function SiteAccessPanel({
           standard as the Activity log, satisfied here by a sticky grid header
           rather than a <table> (this list is an interactive editor). */}
           <div className={styles.tableScroll} hidden={members.length === 0}>
+            {/* ⭐ R-442, CORRECTED 18 Sept (session 179), the maintainer on the
+                S66-b build: "it should have been a new column, not a new row
+                with the same column." "Plans" and "May place outside their
+                shift" are their own headed columns now, right after Access
+                level — never a second row under the person (see the render,
+                and `.plansCol`/`.outsideCol` in the stylesheet). */}
             <div className={styles.head} aria-hidden="true">
               <span>Person</span>
               <span>Access level</span>
+              <span>Plans</span>
+              <span>May place outside their shift</span>
               <span>Place</span>
               <span />
               <span />
@@ -666,6 +755,57 @@ export function SiteAccessPanel({
                           )}
                         </select>
 
+                        {/* ⭐ R-442, CORRECTED 18 Sept (session 179): "Plans"
+                            (whole day, or a band of the place's pattern) and
+                            "may place outside their shift" (on by default)
+                            are their OWN COLUMNS now, right after Access
+                            level — the maintainer: "it should have been a new
+                            column, not a new row with the same column." Gated
+                            by the SAME test as the role control (`showLevel`,
+                            above) and a system admin's row (no node grant,
+                            `g === null`) has neither: an org-wide flag plans
+                            nothing, so the two cells are simply empty for it —
+                            `.placeText` below still reads "everywhere" in the
+                            Place column, unaffected by the two empty cells
+                            beside it. */}
+                        {g !== null && (
+                          <select
+                            aria-label={`Plans for ${label}`}
+                            className={`${styles.select} ${styles.plansCol}`}
+                            value={g.plansShiftId ?? ""}
+                            disabled={isPending}
+                            onChange={(e) =>
+                              runSetShiftPlan(
+                                row,
+                                g,
+                                e.target.value === "" ? null : e.target.value,
+                                g.outsideShift,
+                              )
+                            }
+                          >
+                            <option value="">Whole day</option>
+                            {bandsForNode(shiftPatternsQuery.data, g.nodeId).map((b) => (
+                              <option key={b.id} value={b.id}>
+                                {b.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        {g !== null && (
+                          <label className={styles.outsideCol}>
+                            <input
+                              type="checkbox"
+                              aria-label={`${label} may place outside their shift`}
+                              checked={g.outsideShift}
+                              disabled={isPending}
+                              onChange={(e) =>
+                                runSetShiftPlan(row, g, g.plansShiftId, e.target.checked)
+                              }
+                            />
+                            <span>May place outside their shift</span>
+                          </label>
+                        )}
+
                         {/* Place — for a node grant, a picker to move it or the
                       node's name; a system admin is org-wide, so their place is
                       simply "everywhere". */}
@@ -677,7 +817,12 @@ export function SiteAccessPanel({
                             className={`${styles.select} ${styles.placeCol}`}
                             value={g.nodeId}
                             disabled={isPending}
-                            onChange={(e) => runMove(row, g.nodeId, g.role, e.target.value)}
+                            onChange={(e) =>
+                              runMove(row, g.nodeId, g.role, e.target.value, {
+                                plansShiftId: g.plansShiftId,
+                                outsideShift: g.outsideShift,
+                              })
+                            }
                           >
                             {placeOpts.map((o) => (
                               <option key={o.nodeId} value={o.nodeId}>
@@ -790,9 +935,17 @@ export function SiteAccessPanel({
               </p>
             )}
             <div className={styles.tableScroll} hidden={candidates.length === 0}>
+              {/* ⭐ R-442: a genuine new grant is still created with the
+                  columns' own defaults (Whole day, may place outside their
+                  shift) — see `runSetMemberAt`'s own header on why `plan` is
+                  omitted here. Two blank cells hold the Plans/Outside tracks'
+                  place in the shared grid so Place still lands in the same
+                  physical column as it does on the member rows below. */}
               <div className={styles.head} aria-hidden="true">
                 <span>Person</span>
                 <span>Access level</span>
+                <span />
+                <span />
                 <span>Place</span>
                 <span />
                 <span />

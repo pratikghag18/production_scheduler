@@ -28,6 +28,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addedProblems,
+  bandsForNode,
   breakProblems,
   clockToMinutes,
   dayOffset,
@@ -38,11 +39,14 @@ import {
   minutesToLabel,
   overlappingShifts,
   patternRows,
+  resolvedTemplateIdFor,
   spansOverlap,
+  templateByNodeFrom,
   validatePatternDraft,
   type BreakSpan,
   type PatternDraft,
   type ShiftDraft,
+  type ShiftNodeLike,
 } from "@/features/admin/lib/shiftDraft";
 import type { ShiftPatternsPayload } from "@/lib/api";
 
@@ -903,5 +907,90 @@ describe("shiftDraft: the problems a change is responsible for", () => {
     const stray = [{ name: "Stray", startMin: 600, endMin: 660 }];
     const moved = [{ name: "Stray", startMin: 1440, endMin: 1500 }];
     expect(addedProblems(pat(1800, stray), pat(1800, moved))).toEqual([]);
+  });
+});
+
+/* ===========================================================================
+ * X — RESOLUTION, the client mirror of `resolve_shift_template` (S66-b). The
+ * same walk R-443's dropdown, the CSV importer's name match and the Access
+ * tab's "Plans" picker all share (CLAUDE.md §4: extract once, not three times).
+ * =========================================================================== */
+
+describe("shiftDraft: resolvedTemplateIdFor / bandsForNode (S66-b)", () => {
+  const cell: ShiftNodeLike = { id: "n-cell", parentId: "n-line-a" };
+  const line: ShiftNodeLike = { id: "n-line-a", parentId: "n-plant" };
+  const root: ShiftNodeLike = { id: "n-plant", parentId: null };
+  const nodesById = new Map([
+    [cell.id, cell],
+    [line.id, line],
+    [root.id, root],
+  ]);
+
+  it("a node attached directly resolves to its own template", () => {
+    const byNode = new Map([["n-cell", "t-1"]]);
+    expect(resolvedTemplateIdFor("n-cell", nodesById, byNode)).toBe("t-1");
+  });
+
+  it("a node with nothing of its own inherits the nearest ancestor's attachment", () => {
+    const byNode = new Map([["n-plant", "t-1"]]);
+    expect(resolvedTemplateIdFor("n-cell", nodesById, byNode)).toBe("t-1");
+  });
+
+  it("the NEAREST attachment wins over one further up", () => {
+    const byNode = new Map([
+      ["n-plant", "t-old"],
+      ["n-line-a", "t-new"],
+    ]);
+    expect(resolvedTemplateIdFor("n-cell", nodesById, byNode)).toBe("t-new");
+  });
+
+  it("no attachment anywhere on the chain answers null, never a guess", () => {
+    expect(resolvedTemplateIdFor("n-cell", nodesById, new Map())).toBeNull();
+  });
+
+  it("a node not in the map answers null", () => {
+    expect(resolvedTemplateIdFor("n-gone", nodesById, new Map([["n-plant", "t-1"]]))).toBeNull();
+  });
+
+  it("a cycle answers null rather than looping forever", () => {
+    const looped = new Map([
+      ["a", { id: "a", parentId: "b" }],
+      ["b", { id: "b", parentId: "a" }],
+    ]);
+    expect(resolvedTemplateIdFor("a", looped, new Map())).toBeNull();
+  });
+
+  it("templateByNodeFrom skips a null attachment row", () => {
+    const byNode = templateByNodeFrom({
+      attachments: [null, { nodeId: "n-plant", templateId: "t-1" }],
+    });
+    expect(byNode.get("n-plant")).toBe("t-1");
+    expect(byNode.size).toBe(1);
+  });
+
+  it("bandsForNode lists exactly the resolved pattern's bands, sorted by start", () => {
+    const shifts = [
+      { id: "s2", templateId: "t-1", name: "Shift 2", startMin: 840, endMin: 1320 },
+      { id: "s1", templateId: "t-1", name: "Shift 1", startMin: 360, endMin: 840 },
+      { id: "sx", templateId: "t-other", name: "Elsewhere", startMin: 0, endMin: 60 },
+    ];
+    const bands = bandsForNode(
+      payload({
+        nodes: [PLANT, LINE, { id: "n-cell", name: "Cell 1", parentId: "n-line", path: "" }],
+        attachments: [{ nodeId: "n-plant", templateId: "t-1" }],
+        shifts,
+      }),
+      "n-cell",
+    );
+    expect(bands.map((b) => b.name)).toEqual(["Shift 1", "Shift 2"]);
+  });
+
+  it("bandsForNode answers [] for a node whose place resolves to no pattern", () => {
+    expect(bandsForNode(payload({ nodes: [PLANT] }), "n-plant")).toEqual([]);
+  });
+
+  it("bandsForNode answers [] rather than throwing for a null payload or node", () => {
+    expect(bandsForNode(undefined, "n-plant")).toEqual([]);
+    expect(bandsForNode(payload(), null)).toEqual([]);
   });
 });

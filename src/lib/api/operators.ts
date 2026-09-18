@@ -621,6 +621,62 @@ export async function deleteOperator(id: string): Promise<void> {
   requireWritten(data as unknown[] | null);
 }
 
+/* ===========================================================================
+ * R-443 (S66-b): retiring a band or its pattern. `ShiftsPanel` needs to warn
+ * with a COUNT of the people who point at the band being retired before it
+ * lets the delete through — but that screen has no reason to carry the whole
+ * operators-admin payload (skills, tickets, requirements, the tree) just to
+ * count and name a handful of rows. This is that "smallest read": the id,
+ * name, reference and home band of every person who HAS a home band, nothing
+ * else. `fetchOperatorsAdmin` above stays the one read the Operators tab
+ * itself uses; this is a second, narrower one for a screen that is not it.
+ * =========================================================================== */
+
+export interface HomeShiftHolder {
+  id: string;
+  displayName: string;
+  employeeRef: string | null;
+  homeShiftId: string;
+}
+
+function parseHomeShiftHolder(v: unknown): HomeShiftHolder | null {
+  if (!isRecord(v)) return null;
+  const id = str(v.id);
+  const displayName = str(v.display_name);
+  const employeeRef = strOrNull(v.employee_ref);
+  const homeShiftId = str(v.home_shift_id);
+  if (id === null || displayName === null || homeShiftId === null || employeeRef === undefined) {
+    return null;
+  }
+  return { id, displayName, employeeRef, homeShiftId };
+}
+
+/**
+ * Every operator who currently has a home band, org-wide (RLS-scoped to the
+ * caller, same as every other read in this file). Skip-and-count is not worth
+ * it here — a row this cannot read is a row `ShiftsPanel`'s warning would
+ * otherwise silently under-count, so an unreadable row is dropped and the
+ * caller's own UI says the count came from what could be read, exactly as
+ * every list in this app already qualifies a possibly-partial number.
+ */
+export async function fetchHomeShiftHolders(): Promise<HomeShiftHolder[]> {
+  const rows = await fetchAll((from, to) =>
+    supabase
+      .from("operators")
+      .select("id, display_name, employee_ref, home_shift_id")
+      .not("home_shift_id", "is", null)
+      .order("home_shift_id")
+      .order("id")
+      .range(from, to),
+  );
+  const out: HomeShiftHolder[] = [];
+  for (const row of rows) {
+    const parsed = parseHomeShiftHolder(row);
+    if (parsed !== null) out.push(parsed);
+  }
+  return out;
+}
+
 export interface CreateSkillInput {
   orgId: string;
   name: string;

@@ -48,10 +48,10 @@ export interface AccessGrant {
   nodeName: string;
   role: GrantRole;
   /**
-   * R-442, migration 0082: the band this grant plans for, `null` = the whole
-   * day (the column's own default). Read leniently: a payload that omits
-   * either key (every payload today -- `site_people`, migration 0076, does
-   * not emit them yet; wiring that RPC is a later lane's work) reads as
+   * R-442, migration 0082, wired into `site_people` by 0083 (S66-b): the band
+   * this grant plans for, `null` = the whole day (the column's own default).
+   * Still read LENIENTLY on purpose: a payload that omits either key (an
+   * older cached response, or a server that predates 0083) reads as
    * `null`/`true`, the same "unrestricted" default the columns themselves
    * carry, rather than rejecting the whole grant.
    */
@@ -847,6 +847,14 @@ export interface RowGrant {
   role: GrantRole;
   /** On the node being viewed (a re-role writes THIS node) vs a single grant below it. */
   direct: boolean;
+  /**
+   * R-442: this grant's own shift-planning restriction, carried through so a
+   * write that changes the ROLE (or moves the grant) can resend it unchanged
+   * — `setSiteMember` has no "leave alone" for these two (0083's own header),
+   * so the caller is the one place that contract can be kept.
+   */
+  plansShiftId: string | null;
+  outsideShift: boolean;
 }
 
 /**
@@ -858,11 +866,25 @@ export interface RowGrant {
  */
 export function rowGrant(row: AccessRow, activeNodeId: string | null): RowGrant | null {
   if (row.directRole !== null && activeNodeId !== null) {
-    return { nodeId: activeNodeId, role: row.directRole, direct: true };
+    return {
+      nodeId: activeNodeId,
+      role: row.directRole,
+      direct: true,
+      // R-442: the row's OWN direct-grant fields — the same scope `directRole`
+      // reads, never an inherited grant's.
+      plansShiftId: row.plansShiftId,
+      outsideShift: row.outsideShift,
+    };
   }
   if (row.directRole === null && row.inheritedGrants.length === 1) {
     const g = row.inheritedGrants[0];
-    return { nodeId: g.nodeId, role: g.role, direct: false };
+    return {
+      nodeId: g.nodeId,
+      role: g.role,
+      direct: false,
+      plansShiftId: g.plansShiftId,
+      outsideShift: g.outsideShift,
+    };
   }
   return null;
 }

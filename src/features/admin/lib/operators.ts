@@ -176,6 +176,13 @@ export interface OperatorLike {
    * there is no company-wide operator, and it need not be a root (D109).
    */
   siteNodeId: string;
+  /**
+   * R-441/R-443, migration 0082: the band this person normally works, by id.
+   * `null` = no home shift recorded. **Optional**, not required, so every
+   * fixture written before S66-b keeps working unchanged — `operatorRows`
+   * below reads a missing key as `null`, the column's own default.
+   */
+  homeShiftId?: string | null;
 }
 
 /**
@@ -794,6 +801,12 @@ export interface OperatorRow {
   siteNodeId: string;
   /** How many trainings this person holds. Not eligibility — just the count. */
   ticketCount: number;
+  /**
+   * R-441/R-443/R-444: the band this person normally works, by id; `null` =
+   * no home shift. Read by the panel to draw "No shift" and the red bar, and
+   * used below to sort those rows to the top.
+   */
+  homeShiftId: string | null;
 }
 
 export interface OperatorRowsOptions {
@@ -829,13 +842,20 @@ export function operatorRows(
       active: o.active,
       siteNodeId: o.siteNodeId,
       ticketCount: counts.get(o.id) ?? 0,
+      homeShiftId: o.homeShiftId ?? null,
     };
     if (matches(row, needle)) rows.push(row);
   }
-  // Name order, case-insensitive, `id` as the tiebreak so the list is stable
-  // for two people genuinely called the same thing — which the schema allows:
-  // there is no unique constraint on `display_name`.
+  // ⭐ R-444: "those rows sort to the top" — a person with no home shift is the
+  // gap this list exists to surface, so the shiftless group comes first; name
+  // order, case-insensitive, is the tiebreak WITHIN each group (and therefore
+  // the whole order when nobody in the list has a shift at all — O6 pins this
+  // is unchanged for a fixture that predates home_shift_id entirely), `id` as
+  // the final tiebreak for two people genuinely called the same thing.
   rows.sort((a, b) => {
+    const ag = a.homeShiftId === null ? 0 : 1;
+    const bg = b.homeShiftId === null ? 0 : 1;
+    if (ag !== bg) return ag - bg;
     const an = a.displayName.toLowerCase();
     const bn = b.displayName.toLowerCase();
     if (an !== bn) return an < bn ? -1 : 1;

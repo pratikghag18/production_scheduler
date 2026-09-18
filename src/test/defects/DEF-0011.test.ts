@@ -65,8 +65,13 @@ function definitionsOf(name: string): Array<{ file: string; body: string }> {
     .sort();
   for (const file of files) {
     const sql = readFileSync(path.join(MIGRATIONS, file), "utf8");
+    // Session 179 (18 Sept): the matcher used to accept ANY "function <name>("
+    // -- which in 0083 was also the DROP FUNCTION of the old overload and the
+    // GRANT/REVOKE lines after the body, so "the last definition" was a grant
+    // line with no body that raised nothing. A definition starts with
+    // CREATE [OR REPLACE] FUNCTION; nothing else is one.
     const re = new RegExp(
-      String.raw`(?:create or replace\s+)?function\s+(?:public\.)?${name}\s*\(`,
+      String.raw`create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?${name}\s*\(`,
       "gi",
     );
     let m: RegExpExecArray | null;
