@@ -41,6 +41,7 @@ function operator(
 ): BoardOperator {
   return {
     homeNodeId: null,
+    homeShiftId: null,
     employeeRef: null,
     active: true,
     siteNodeId: "n-plant",

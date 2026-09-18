@@ -41,6 +41,7 @@ function operator(id: string, displayName: string): BoardOperator {
   return {
     id,
     homeNodeId: null,
+    homeShiftId: null,
     displayName,
     employeeRef: null,
     active: true,
@@ -290,13 +291,13 @@ function renderPanel(
     operators?: BoardOperator[];
     windowStart?: Date;
     zone?: string;
-  } = {},
     /** S65-a (R-438): the board root's shift pattern, threaded straight to
      *  `OperatorPanel`'s own `rootTemplate` prop. Omitted (the default,
      *  `null`) is the common case here -- `bookingWords`' own fallback, the
      *  window itself, which is what every R-038 case below was written
      *  against before R-438 gave the panel a real pattern to read. */
     rootTemplate?: ShiftTemplate | null;
+  } = {},
 ) {
   const ops = opts.operators ?? [ELENA, RAY];
   const dragApi = {
@@ -329,8 +330,8 @@ function renderPanel(
       windowMinutes={1440}
       zone={zone}
       capacityCap={opts.capacityCap ?? 1}
-      open={true}
       rootTemplate={opts.rootTemplate ?? null}
+      open={true}
       onToggleOpen={vi.fn()}
       draggingOperatorId={null}
       dragApi={dragApi}
@@ -532,9 +533,9 @@ describe("operator panel (R-038, SUPERSEDED BY R-438 -- see the note below): ava
     // `OperatorPanel.module.css`, not merely unapplied here.
     expect(elenaChip.className).not.toMatch(/full/);
     expect(rayChip.className).not.toMatch(/full/);
-  });
     expect(within(elenaChip).getByText("booked")).not.toBeNull();
     expect(within(rayChip).getByText("free")).not.toBeNull(); // no blocks at all
+  });
 });
 
 /* ===========================================================================

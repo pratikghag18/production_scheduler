@@ -114,6 +114,7 @@ export function operatorViewFor(
   return {
     id: "",
     homeNodeId: null,
+    homeShiftId: null,
     displayName: a.operatorDisplayName,
     employeeRef: null,
     active: false,

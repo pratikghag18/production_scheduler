@@ -47,6 +47,17 @@ export interface AccessGrant {
   nodeId: string;
   nodeName: string;
   role: GrantRole;
+  /**
+   * R-442, migration 0082: the band this grant plans for, `null` = the whole
+   * day (the column's own default). Read leniently: a payload that omits
+   * either key (every payload today -- `site_people`, migration 0076, does
+   * not emit them yet; wiring that RPC is a later lane's work) reads as
+   * `null`/`true`, the same "unrestricted" default the columns themselves
+   * carry, rather than rejecting the whole grant.
+   */
+  plansShiftId: string | null;
+  /** R-442: may this grant place people OUTSIDE `plansShiftId`'s band? */
+  outsideShift: boolean;
 }
 
 /**
@@ -79,6 +90,16 @@ export interface AccessRow {
    * rather than silently locking everyone out.
    */
   active: boolean;
+  /**
+   * R-442, migration 0082: the DIRECT grant's own shift-planning restriction
+   * -- the same "this exact node's row" scope `directRole` reads, never an
+   * inherited one. `null` = unrestricted (no direct grant, or a direct grant
+   * that plans no shift).
+   */
+  plansShiftId: string | null;
+  /** R-442: the direct grant's own `outsideShift`; `true` (unrestricted) when
+   *  there is no direct grant. */
+  outsideShift: boolean;
 }
 
 export interface AccessView {
@@ -120,7 +141,14 @@ function parseGrant(v: unknown): AccessGrant | null {
   const nodeName = asString(v.nodeName);
   const role = asRole(v.role);
   if (nodeId === null || nodeName === null || role === null) return null;
-  return { nodeId, nodeName, role };
+  // R-442 / 0082: lenient, not rejected on absence -- see the interface
+  // comment. `plansShiftId` absent or not a string-or-null reads as `null`;
+  // `outsideShift` absent or not a boolean reads as `true`. Both are the
+  // columns' own defaults, so a payload that predates this key (every one
+  // today) reads as "unrestricted", changing nothing for anyone.
+  const plansShiftId = typeof v.plansShiftId === "string" ? v.plansShiftId : null;
+  const outsideShift = typeof v.outsideShift === "boolean" ? v.outsideShift : true;
+  return { nodeId, nodeName, role, plansShiftId, outsideShift };
 }
 
 /**
@@ -184,6 +212,10 @@ export function buildAccessRows(payload: unknown, viewerProfileId: string | null
       // (older server, partial read) reads as active — the safe direction: the
       // screen never invents a lock-out nobody asked for.
       active: entry.active !== false,
+      // R-442: the direct grant's own restriction, unrestricted when there
+      // is none — the same "no direct grant" default `directRole: null` uses.
+      plansShiftId: direct ? direct.plansShiftId : null,
+      outsideShift: direct ? direct.outsideShift : true,
     });
   }
   return { nodeId, nodeName, rows, skipped };

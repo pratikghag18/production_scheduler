@@ -45,6 +45,7 @@ function op(id: string, displayName: string): BoardOperator {
   return {
     id,
     homeNodeId: null,
+    homeShiftId: null,
     displayName,
     employeeRef: null,
     active: true,

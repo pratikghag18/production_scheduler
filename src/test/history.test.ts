@@ -41,6 +41,7 @@ const PRODUCTS: ReadonlyMap<string, Product> = new Map([["p1", LIVE]]);
 const MARIA: BoardOperator = {
   id: "o1",
   homeNodeId: null,
+  homeShiftId: null,
   displayName: "Maria",
   employeeRef: "EMP-001",
   active: true,

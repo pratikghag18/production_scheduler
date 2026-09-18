@@ -55,6 +55,7 @@ const operator: BoardOperator = {
   id: "op-1",
   displayName: "Ana Ortiz",
   homeNodeId: null,
+  homeShiftId: null,
   employeeRef: null,
   active: true,
   siteNodeId: "n-plant",

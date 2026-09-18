@@ -336,6 +336,7 @@ describe("useDragGesture", () => {
     index.operatorById.set("op-1", {
       id: "op-1",
       homeNodeId: null,
+      homeShiftId: null,
       displayName: "Ana Operator",
       employeeRef: null,
       active: true,
@@ -401,6 +402,7 @@ describe("useDragGesture", () => {
     index.operatorById.set("op-1", {
       id: "op-1",
       homeNodeId: null,
+      homeShiftId: null,
       displayName: "Ana Operator",
       employeeRef: null,
       active: true,
@@ -688,6 +690,7 @@ describe("useDragGesture", () => {
       return {
         id: "op-1",
         homeNodeId: "cell-1",
+        homeShiftId: null,
         displayName: "Elena",
         employeeRef: "EMP-1",
         active: true,
@@ -960,6 +963,7 @@ describe("useDragGesture", () => {
       index.operatorById.set("op-1", {
         id: "op-1",
         homeNodeId: null,
+        homeShiftId: null,
         displayName: "Elena",
         employeeRef: null,
         active: true,
@@ -1253,6 +1257,7 @@ describe("useDragGesture", () => {
       index.operatorById.set("op-1", {
         id: "op-1",
         homeNodeId: null,
+        homeShiftId: null,
         displayName: "Elena",
         employeeRef: null,
         active: true,
@@ -1461,6 +1466,7 @@ describe("useDragGesture", () => {
       return {
         id: "op-1",
         homeNodeId: null,
+        homeShiftId: null,
         displayName: "Ana Ortiz",
         employeeRef: null,
         active: true,

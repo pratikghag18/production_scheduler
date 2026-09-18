@@ -36,6 +36,7 @@ function op(id: string, displayName: string, siteNodeId: string, active = true):
     siteNodeId,
     source: "manual",
     externalId: null,
+    homeShiftId: null,
   };
 }
 function osk(operatorId: string, skillId: string, expiresAt: string | null): OperatorSkillRecord {

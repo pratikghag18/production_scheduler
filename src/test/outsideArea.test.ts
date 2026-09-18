@@ -52,6 +52,7 @@ function op(id: string, sitePath: string): BoardOperator {
   return {
     id,
     homeNodeId: null,
+    homeShiftId: null,
     displayName: id,
     employeeRef: null,
     active: true,

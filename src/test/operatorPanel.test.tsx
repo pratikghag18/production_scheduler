@@ -26,6 +26,7 @@ import { RAIL_MAX_WIDTH, RAIL_MIN_WIDTH } from "@/features/board/lib/railWidth";
 const ELENA: BoardOperator = {
   id: "op-elena",
   homeNodeId: null,
+  homeShiftId: null,
   displayName: "Elena",
   employeeRef: null,
   active: true,

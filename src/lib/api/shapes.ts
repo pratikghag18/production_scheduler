@@ -359,6 +359,15 @@ export function parseAssignment(v: Json): Assignment | null {
 export interface BoardOperator {
   id: string;
   homeNodeId: string | null;
+  /**
+   * R-441/R-443, migration 0082: the BAND this person normally works, by id
+   * -- a row in `shifts`, never its name (D137's correction: a rename or an
+   * hours change carries everyone along because the pointer is the id).
+   * `null` means no home band recorded, which `shift_fit` answers `no_shift`
+   * for. Sent straight off the payload, never resolved on the client
+   * (DEF-0016's lesson: the same reason `sitePath` beside it exists).
+   */
+  homeShiftId: string | null;
   displayName: string;
   employeeRef: string | null;
   active: boolean;
@@ -444,6 +453,7 @@ function parseOperator(v: Json): BoardOperator | null {
   const {
     id,
     home_node_id,
+    home_shift_id,
     display_name,
     employee_ref,
     active,
@@ -455,6 +465,10 @@ function parseOperator(v: Json): BoardOperator | null {
   if (
     !isStr(id) ||
     !isStrOrNull(home_node_id) ||
+    // R-441 / 0082: nullable, like home_node_id beside it -- `undefined`
+    // (the key absent) is a payload from a database that hasn't run
+    // migration 0082 and is rejected, not coerced to null.
+    !isStrOrNull(home_shift_id) ||
     !isStr(display_name) ||
     !isStrOrNull(employee_ref) ||
     !isBool(active) ||
@@ -483,6 +497,7 @@ function parseOperator(v: Json): BoardOperator | null {
   return {
     id,
     homeNodeId: home_node_id,
+    homeShiftId: home_shift_id,
     displayName: display_name,
     employeeRef: employee_ref,
     active,
@@ -831,6 +846,35 @@ function parseCommandBarMode(v: Json | undefined): CommandBarMode {
     : "off";
 }
 
+/**
+ * R-442, migration 0082: the acting caller's OWN effective planning
+ * restriction for this board's root -- the nearest-ancestor-or-self covering
+ * grant, resolved on the server the identical way `supervisor_shift_allows`
+ * resolves it (`app_planning_grant_for`), so the rail/pop-ups/bar read the
+ * SAME answer the server would enforce rather than re-deriving the covering
+ * rule (DEF-0016/DEF-0017, CLAUDE.md §7's "the server's rule, transcribed").
+ *
+ * `null` for BOTH an absent key (an older payload, predating 0082 -- read as
+ * "unrestricted", the behaviour every board had before this existed) AND a
+ * present-but-empty answer (the caller holds no covering grant at all --
+ * owner context, or a company admin with no node grant -- which
+ * `supervisor_shift_allows` also reads as unrestricted). Malformed shapes
+ * fail the same safe way rather than blanking the board: this is an
+ * ADVISORY the client uses to grey out an option before asking, never the
+ * permission itself, which the server re-checks on every write regardless.
+ */
+export interface MyShiftPlan {
+  plansShiftId: string | null;
+  outsideShift: boolean;
+}
+
+function parseMe(v: Json | undefined): MyShiftPlan | null {
+  if (v === undefined || v === null || !isJsonObject(v)) return null;
+  const { plans_shift_id, outside_shift } = v;
+  if (!isStrOrNull(plans_shift_id) || !isBool(outside_shift)) return null;
+  return { plansShiftId: plans_shift_id, outsideShift: outside_shift };
+}
+
 // ---------------------------------------------------------------------------
 // Top-level RPC results.
 // ---------------------------------------------------------------------------
@@ -884,6 +928,11 @@ export interface BoardWindow {
    *  fail-safe rule, and the one field on this interface that is lenient in
    *  BOTH directions rather than strict like `dateFormat`. */
   commandBar: CommandBarMode;
+  /** R-442, migration 0082: the caller's own effective shift-planning
+   *  restriction for this board's root, or `null` when unrestricted (no
+   *  covering grant plans a shift, or the payload predates 0082). See
+   *  `parseMe`. */
+  me: MyShiftPlan | null;
 }
 
 export function parseBoardWindow(json: Json): BoardWindow | null {
@@ -906,6 +955,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     date_format,
     timezone,
     command_bar,
+    me,
   } = json;
 
   const parsedOrg = parseOrg(org);
@@ -947,6 +997,10 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
   // Missing (an older payload) reads as 'voice'; present-but-unrecognised
   // reads as 'off', the requirement's own fail-safe rule.
   const parsedCommandBar = parseCommandBarMode(command_bar);
+  // R-442 / 0082: lenient like commandBar's own missing-key case -- an
+  // absent or malformed `me` reads as unrestricted rather than a shape
+  // mismatch (see parseMe).
+  const parsedMe = parseMe(me);
 
   if (
     parsedOrg === null ||
@@ -984,6 +1038,7 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     dateFormat: parsedDateFormat,
     timezone: parsedTimezone,
     commandBar: parsedCommandBar,
+    me: parsedMe,
   };
 }
 

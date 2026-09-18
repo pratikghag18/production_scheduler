@@ -54,6 +54,8 @@ function row(over: Partial<AccessRow> = {}): AccessRow {
     hasAccess: true,
     isSelf: false,
     active: true,
+    plansShiftId: null,
+    outsideShift: true,
     ...over,
   };
 }

@@ -82,6 +82,8 @@ function rawPayload(): Json {
       {
         id: "op-untrained",
         home_node_id: null,
+        // R-441 / migration 0082: required alongside home_node_id.
+        home_shift_id: null,
         display_name: "Elena",
         employee_ref: null,
         active: true,

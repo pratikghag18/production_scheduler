@@ -641,6 +641,7 @@ export type Database = {
           employee_ref: string | null
           external_id: string | null
           home_node_id: string | null
+          home_shift_id: string | null
           id: string
           org_id: string
           site_node_id: string
@@ -654,6 +655,7 @@ export type Database = {
           employee_ref?: string | null
           external_id?: string | null
           home_node_id?: string | null
+          home_shift_id?: string | null
           id?: string
           org_id: string
           site_node_id: string
@@ -667,6 +669,7 @@ export type Database = {
           employee_ref?: string | null
           external_id?: string | null
           home_node_id?: string | null
+          home_shift_id?: string | null
           id?: string
           org_id?: string
           site_node_id?: string
@@ -693,6 +696,13 @@ export type Database = {
             columns: ["org_id", "home_node_id"]
             isOneToOne: false
             referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
+          },
+          {
+            foreignKeyName: "operators_org_id_home_shift_id_fkey"
+            columns: ["org_id", "home_shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
             referencedColumns: ["org_id", "id"]
           },
           {
@@ -814,6 +824,8 @@ export type Database = {
           created_at: string
           node_id: string
           org_id: string
+          outside_shift: boolean
+          plans_shift_id: string | null
           profile_id: string
           role: string
           updated_at: string
@@ -822,6 +834,8 @@ export type Database = {
           created_at?: string
           node_id: string
           org_id: string
+          outside_shift?: boolean
+          plans_shift_id?: string | null
           profile_id: string
           role?: string
           updated_at?: string
@@ -830,6 +844,8 @@ export type Database = {
           created_at?: string
           node_id?: string
           org_id?: string
+          outside_shift?: boolean
+          plans_shift_id?: string | null
           profile_id?: string
           role?: string
           updated_at?: string
@@ -847,6 +863,13 @@ export type Database = {
             columns: ["org_id", "node_id"]
             isOneToOne: false
             referencedRelation: "nodes"
+            referencedColumns: ["org_id", "id"]
+          },
+          {
+            foreignKeyName: "profile_grants_org_id_plans_shift_id_fkey"
+            columns: ["org_id", "plans_shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
             referencedColumns: ["org_id", "id"]
           },
           {
@@ -1349,6 +1372,10 @@ export type Database = {
           site_path: unknown
         }[]
       }
+      app_outside_shift_message: {
+        Args: { p_node_id: string; p_timerange: unknown }
+        Returns: string
+      }
       app_owner_covers: {
         Args: { p_node: string; p_owner: string }
         Returns: boolean
@@ -1362,6 +1389,13 @@ export type Database = {
         Returns: boolean
       }
       app_pick_product_color: { Args: { p_org_id: string }; Returns: string }
+      app_planning_grant_for: {
+        Args: { p_node_id: string }
+        Returns: {
+          outside_shift: boolean
+          plans_shift_id: string
+        }[]
+      }
       app_plant_root_of: { Args: { p_node_id: string }; Returns: string }
       app_product_offered_at: {
         Args: { p_node: string; p_product: string }
@@ -1388,6 +1422,15 @@ export type Database = {
       app_resolve_node_setting: {
         Args: { p_key: string; p_node_id: string }
         Returns: string
+      }
+      app_shift_overtime_minutes: {
+        Args: {
+          p_end_min: number
+          p_start_min: number
+          p_timerange: unknown
+          p_tz: string
+        }
+        Returns: number
       }
       app_trim_ws: { Args: { input: string }; Returns: string }
       apply_copy_week: {
@@ -1648,11 +1691,19 @@ export type Database = {
         Args: { p_is_admin: boolean; p_profile_id: string }
         Returns: Json
       }
+      shift_fit: {
+        Args: { p_node_id: string; p_operator_id: string; p_timerange: unknown }
+        Returns: Json
+      }
       site_people: {
         Args: { p_limit?: number; p_node_id: string; p_search?: string }
         Returns: Json
       }
       slugify: { Args: { input: string }; Returns: string }
+      supervisor_shift_allows: {
+        Args: { p_node_id: string; p_timerange: unknown }
+        Returns: boolean
+      }
       text2ltree: { Args: { "": string }; Returns: unknown }
       visible_board_roots: {
         Args: never

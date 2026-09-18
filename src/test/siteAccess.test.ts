@@ -77,7 +77,13 @@ const P_MIX = "d0000000-0000-0000-0000-000000000005";
 const P_NONE = "d0000000-0000-0000-0000-000000000006";
 const P_GHOST = "d0000000-0000-0000-0000-000000000007";
 
-const grant = (nodeId: string, nodeName: string, role: GrantRole) => ({ nodeId, nodeName, role });
+const grant = (nodeId: string, nodeName: string, role: GrantRole) => ({
+  nodeId,
+  nodeName,
+  role,
+  plansShiftId: null,
+  outsideShift: true,
+});
 
 const PAYLOAD = {
   nodeId: PLANT,
@@ -160,6 +166,8 @@ const byId = (id: string): AccessRow =>
     hasAccess: false,
     isSelf: false,
     active: true,
+    plansShiftId: null,
+    outsideShift: true,
   };
 
 const stranger = (over: Partial<AccessRow> = {}): AccessRow => ({
@@ -171,6 +179,8 @@ const stranger = (over: Partial<AccessRow> = {}): AccessRow => ({
   hasAccess: false,
   isSelf: false,
   active: true,
+  plansShiftId: null,
+  outsideShift: true,
   ...over,
 });
 

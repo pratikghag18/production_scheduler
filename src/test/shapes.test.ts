@@ -93,6 +93,12 @@ const boardWindowJson: Json = {
     {
       id: "50000000-0000-0000-0000-000000000001",
       home_node_id: "30000000-0000-0000-0000-000000000003",
+      // R-441 / migration 0082: board_window emits this on every operator
+      // (null = no home band) and parseOperator now REQUIRES the key, the
+      // same "present but possibly null" contract home_node_id already
+      // keeps. homeShift.test.ts covers the parser itself; this fixture only
+      // needs to keep pace with the required shape.
+      home_shift_id: null,
       display_name: "Maria",
       employee_ref: "EMP-001",
       active: true,

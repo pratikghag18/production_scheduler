@@ -117,12 +117,17 @@ BEGIN
   bw := board_window('plant_1', '2030-01-01', '2030-01-08');
   IF bw->'runs' <> '[]'::jsonb THEN RAISE EXCEPTION 'FAIL: runs not empty array: %', bw->'runs'; END IF;
   IF bw->'assignments' <> '[]'::jsonb THEN RAISE EXCEPTION 'FAIL: assignments not empty array: %', bw->'assignments'; END IF;
-  -- 'org' is an object, 'can_place' (0058, R-346) is the one boolean, and
-  -- two resolved-for-the-root STRINGS: 'date_format' (0062, R-333, DEF-0017),
-  -- the calendar-date format, and 'timezone' (0063, R-353, D88a), the IANA zone
-  -- the board's axis renders in. The rest of the payload is arrays.
+  -- 'org' is an object, 'can_place' (0058, R-346) is the one boolean, three
+  -- resolved-for-the-root STRINGS -- 'date_format' (0062, R-333, DEF-0017),
+  -- 'timezone' (0063, R-353, D88a), and 'command_bar' (0081, R-403, D129;
+  -- this allowlist was not updated when 0081 added the key, so this case was
+  -- silently red from 0081 onward until this reviewer pass on S66-a caught
+  -- it while re-running the suite after an unrelated fix) -- and 'me' (0082,
+  -- R-442, this lane: NULL or {plans_shift_id, outside_shift}, the caller's
+  -- own resolved planning grant for the root). The rest of the payload is
+  -- arrays.
   FOR k IN SELECT jsonb_object_keys(bw) LOOP
-    IF k NOT IN ('org', 'can_place', 'date_format', 'timezone')
+    IF k NOT IN ('org', 'can_place', 'date_format', 'timezone', 'command_bar', 'me')
        AND jsonb_typeof(bw->k) <> 'array' THEN
       RAISE EXCEPTION 'FAIL: key % is not array-valued (%), or is null', k, jsonb_typeof(bw->k);
     END IF;

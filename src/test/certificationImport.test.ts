@@ -30,6 +30,7 @@ const op = (id: string, employeeRef: string | null, siteNodeId: string) => ({
   siteNodeId,
   source: "manual",
   externalId: null,
+  homeShiftId: null,
 });
 const skill = (id: string, name: string, siteNodeId: string, externalId: string | null = null) => ({
   id,

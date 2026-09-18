@@ -52,6 +52,7 @@ function operator(
   return {
     id,
     homeNodeId: null,
+    homeShiftId: null,
     displayName: id,
     employeeRef: null,
     active: true,
@@ -219,6 +220,9 @@ function payload(operators: Json[]): Json {
 const RAW_OPERATOR = {
   id: "op1",
   home_node_id: null,
+  // R-441 / migration 0082: parseOperator now requires this key present
+  // (null = no home band) alongside home_node_id.
+  home_shift_id: null,
   display_name: "Maria",
   employee_ref: null,
   active: true,

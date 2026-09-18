@@ -71,6 +71,13 @@ export interface OperatorRecord {
   /** `'manual'` by default; an imported person carries their source here. */
   source: string;
   externalId: string | null;
+  /**
+   * R-441/R-443, migration 0082: the BAND this person normally works, by id
+   * -- never its name (a rename or an hours change carries everyone along
+   * because the pointer survives it, D137's correction). `null` = no home
+   * band recorded, which `shift_fit` answers `no_shift` for.
+   */
+  homeShiftId: string | null;
 }
 
 export interface SkillRecord {
@@ -181,10 +188,25 @@ export function parseOperatorRecord(v: unknown): OperatorRecord | null {
   const siteNodeId = str(v.site_node_id);
   const source = str(v.source);
   const externalId = strOrNull(v.external_id);
+  // R-441 / 0082: nullable (most people have no home band yet), so
+  // `strOrNull` — `undefined` (the key absent) still rejects the row, the
+  // same contract every other column here keeps.
+  const homeShiftId = strOrNull(v.home_shift_id);
   if (id === null || displayName === null || source === null || siteNodeId === null) return null;
-  if (employeeRef === undefined || externalId === undefined) return null;
+  if (employeeRef === undefined || externalId === undefined || homeShiftId === undefined) {
+    return null;
+  }
   if (typeof v.active !== "boolean") return null;
-  return { id, displayName, employeeRef, active: v.active, siteNodeId, source, externalId };
+  return {
+    id,
+    displayName,
+    employeeRef,
+    active: v.active,
+    siteNodeId,
+    source,
+    externalId,
+    homeShiftId,
+  };
 }
 
 export function parseSkillRecord(v: unknown): SkillRecord | null {
@@ -314,7 +336,13 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
       fetchAll((from, to) =>
         supabase
           .from("operators")
-          .select("id, display_name, employee_ref, active, site_node_id, source, external_id")
+          // ⚠️ WAS A SECOND, INLINE COPY OF OPERATOR_COLUMNS (below), found
+          // while adding home_shift_id (S66-a, CLAUDE.md §4: "a column list
+          // that appears twice is a bug with a delay on it"). Unified onto
+          // the one constant so the next column cannot be added to one copy
+          // and not the other, the exact defect apiSkillShape.test.ts exists
+          // to catch on SKILL_COLUMNS/OPERATOR_SKILL_COLUMNS.
+          .select(OPERATOR_COLUMNS)
           .order("display_name")
           .order("id")
           .range(from, to),
@@ -442,8 +470,11 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
  *                                         without `requireWritten`.
  * =========================================================================== */
 
-const OPERATOR_COLUMNS =
-  "id, display_name, employee_ref, active, site_node_id, source, external_id";
+// ⭐ EXPORTED so a test can hold it against `parseOperatorRecord`, the same
+// pairing `SKILL_COLUMNS`/`parseSkillRecord` and `OPERATOR_SKILL_COLUMNS` are
+// exported for below (homeShift.test.ts, added with home_shift_id).
+export const OPERATOR_COLUMNS =
+  "id, display_name, employee_ref, active, site_node_id, source, external_id, home_shift_id";
 /**
  * ⚠⚠ EXPORTED SO A TEST CAN HOLD IT AND `parseSkillRecord` TO EACH OTHER.
  * They are two halves of one contract — what we ask the database for, and what
@@ -480,6 +511,12 @@ export interface CreateOperatorInput {
    * What survives is the org check: the node must exist in this org.
    */
   siteNodeId: string;
+  /**
+   * R-441 / 0082: the band this person normally works. Optional — most
+   * people are created with none and given one later; omit for "no home
+   * band", the column's own default (NULL).
+   */
+  homeShiftId?: string | null;
 }
 
 export async function createOperator(input: CreateOperatorInput): Promise<OperatorRecord> {
@@ -490,6 +527,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Operat
       display_name: input.displayName,
       employee_ref: input.employeeRef,
       site_node_id: input.siteNodeId,
+      home_shift_id: input.homeShiftId ?? null,
     })
     .select(OPERATOR_COLUMNS);
   if (error) throw toSchedulerError(error);
@@ -514,15 +552,34 @@ export interface UpdateOperatorInput {
    * the old owner while the screen showed the new one.
    */
   siteNodeId?: string;
+  /**
+   * R-441 / 0082: the band this person normally works. **Omit the field to
+   * leave it alone; pass `null` to clear it.** Nullable, unlike `siteNodeId`
+   * above, so `undefined` and `null` are two different answers here — the
+   * same `in`-tested contract `updateSkillRecord` keeps for its own nullable
+   * columns, not the `!== undefined` one `siteNodeId` uses for its NOT NULL
+   * column.
+   */
+  homeShiftId?: string | null;
 }
 
 export async function updateOperator(input: UpdateOperatorInput): Promise<OperatorRecord> {
-  const patch: { display_name: string; employee_ref: string | null; site_node_id?: string } = {
+  const patch: {
+    display_name: string;
+    employee_ref: string | null;
+    site_node_id?: string;
+    home_shift_id?: string | null;
+  } = {
     display_name: input.displayName,
     employee_ref: input.employeeRef,
   };
   // Only when the caller actually supplied it — see the interface comment.
   if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;
+  // `in`, not `!== undefined`: home_shift_id is NULLABLE, so `null` (clear
+  // it) and "not supplied" (leave it alone) must read as two different
+  // things — the same test updateSkillRecord uses for its own nullable
+  // columns.
+  if ("homeShiftId" in input) patch.home_shift_id = input.homeShiftId ?? null;
 
   const { data, error } = await supabase
     .from("operators")

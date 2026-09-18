@@ -64,6 +64,7 @@ const OPERATOR_ROW = {
   employee_ref: null,
   active: false,
   site_node_id: "node-1",
+  home_shift_id: null,
   source: "manual",
   external_id: null,
 };

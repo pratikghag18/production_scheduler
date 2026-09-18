@@ -35,6 +35,7 @@ function operator(over: Partial<OperatorRecord> = {}): OperatorRecord {
     siteNodeId: "N1",
     source: "import",
     externalId: "EXT-1",
+    homeShiftId: null,
     ...over,
   };
 }
