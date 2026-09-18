@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { SpeechBubble } from "@/components/icons";
 import { CommandBar, type CommandBarProps } from "./CommandBar";
 import { createConversationStore, flushTraceOnTeardown } from "../store/commandConversation";
+import { clampPanelSize, readPanelSize, writePanelSize, type PanelSize } from "../lib/panelSize";
 import styles from "./CommandLauncher.module.css";
 
 /**
@@ -14,11 +15,13 @@ import styles from "./CommandLauncher.module.css";
  * panel is open once it is rendered at all).
  *
  * This component owns nothing the bar does not already own: `open` is its
- * only state. Every prop `CommandBar` takes is passed straight through; the
- * one addition on the wire is `onEscapeIdle` (a S48-a `CommandBar` prop),
- * bound here to `close` so the bar's own Escape rule — clear the status, then
- * the input, then (nothing left) tell whoever is listening — reaches this
- * panel's close without the bar knowing a panel exists around it.
+ * only state (S63-a adds `size`, the panel's own remembered width/height --
+ * see the resize section below). Every prop `CommandBar` takes is passed
+ * straight through; the one addition on the wire is `onEscapeIdle` (a S48-a
+ * `CommandBar` prop), bound here to `close` so the bar's own Escape rule --
+ * clear the status, then the input, then (nothing left) tell whoever is
+ * listening -- reaches this panel's close without the bar knowing a panel
+ * exists around it.
  *
  * `onEscapeIdle` only ever fires for an Escape whose target IS the bar's own
  * input (that is where `CommandBar`'s `onKeyDown` is bound). The header's own
@@ -41,67 +44,86 @@ import styles from "./CommandLauncher.module.css";
  * the lot and the open trace entry were `CommandBar`'s own refs. They are now
  * a store this component creates ONCE per board mount
  * (`../store/commandConversation.ts`) and hands to whichever bar is mounted,
- * so an outside mousedown — the toolbar, the day count, the zoom slider — and
- * Escape both close a panel that reopens showing exactly what stood.
+ * so closing and reopening the panel shows exactly what stood.
  *
- * ⚠️ WHICH KEY CLOSES AND WHICH CANCELS. **Escape closes** — the header says
- * so and means it: inside the bar's input it first drops a standing question
- * (putting the sentence back in the box, F-162), then clears the input, then
- * reaches `onEscapeIdle` = `close`; from anywhere else in the panel it closes
- * outright. None of those cancels the conversation — closing is a person
- * looking at the board. **A cancel word cancels** ("no", "cancel", "stop",
- * "nope", "never mind", typed or spoken): that is the only thing that ends a
- * standing question without answering it, and the only thing besides a
- * finished readout or a new sentence that resets the store.
+ * ⭐ S63-a / R-429 — THE PANEL NOW STAYS OPEN BESIDE THE BOARD. The maintainer
+ * asked for a panel that behaves like an ordinary chat window: closing an
+ * outside mousedown used to be the ONLY way most people ever closed it, and
+ * that made it impossible to drag a block, move the zoom slider, or read a
+ * cell while a question stood, without the panel vanishing out from under
+ * you. So that effect, its exemptions and the constant that listed them
+ * (`FOCUSABLE_SELECTOR`, the `[role="dialog"]` walk) are GONE — scrolling,
+ * dragging and clicking the board or the toolbar all leave the panel open
+ * now, on purpose. What is left as a close: the launcher button itself
+ * (already toggled `open`), the panel header's own "Close" button, and
+ * Escape from inside the panel (the two rules above, unchanged). `close`
+ * always returns focus to the launcher button now — the one exception that
+ * used to exist (a mousedown about to focus something else outside) went
+ * with the effect it belonged to, since there is no more outside-mousedown
+ * close for it to except.
  *
  * This component also owns the trace entry's LAST resort (F-157): the bar
  * only flushes an entry still open at unmount when it owns its own store,
  * which it does not here — so the flush moves to this component's own
  * unmount, which is the board itself going away.
  *
- * `close` also decides where focus goes next (review fix: it used to leave
- * focus wherever the closing event found it, which for Escape and for a
- * mousedown on inert board chrome meant focus fell all the way back to
- * `<body>`). Escape and a mousedown on something NOT itself focusable both
- * move focus back to the launcher button, the nearest still-visible control
- * that was responsible for the panel in the first place. A mousedown on a
- * focusable element outside (another button, a field) is the one exception:
- * the browser is about to focus THAT element as part of the same click, so
- * `close` is told not to fight it (`refocusButton = false`) and leaves focus
- * where the click put it.
+ * ⭐ S63-a / R-429 — RESIZABLE, REMEMBERED. The panel is anchored bottom-right
+ * (`CommandLauncher.module.css`'s own `.panel`), so it can only grow from its
+ * TOP and LEFT edges without the button underneath moving — a handle sits on
+ * the top-left corner (and the top and left edges on their own, for a
+ * one-axis drag) and turns a pointer drag into a new inline width/height,
+ * clamped by `panelSize.ts`'s `clampPanelSize` to a floor and to the
+ * viewport. The size is kept in ordinary `useState`, not the conversation
+ * store — it is a property of the PANEL, not of what is being said, and a
+ * closed panel has no size to keep in sync — and persisted per person
+ * (`panelSize.ts`, keyed off `historyKey` exactly as the thread is, with its
+ * own prefix so the two never collide in storage). A `historyKey` of `null`
+ * still resizes for the session; it is simply not written to storage
+ * (`writePanelSize`'s own contract).
  *
- * "Outside" for the close-on-mousedown rule is decided by role, not by DOM
- * position: a pop-up the bar opens (`CreatePopover` and friends) is the
- * shared dialog shell (`src/components/Popover.tsx`, `role="dialog"`),
- * portaled to `document.body` and rendered by `BoardPage` as a SIBLING of
- * this component, not a descendant of the panel — an "inside the panel"
- * containment check alone would call a click inside one of those pop-ups
- * "outside" and close this panel out from under a sentence-opened create
- * pop-up mid-answer. Walking up from the click target for a `[role="dialog"]`
- * ancestor catches that pop-up wherever it is portaled, without this
- * component needing to know which pop-up is open or where `BoardPage` put it
- * — the simpler of the brief's two options, and the one chosen.
+ * ⭐ S63-a REVIEW FIX — NO DEFAULT SIZE, EITHER (the maintainer, looking at
+ * the panel on disk: "a tall remembered size, nothing in the thread ...
+ * feels out of place and unprofessional"). `size` starts (and stays, across
+ * a `historyKey` with nothing stored) at `null` -- no inline style at all,
+ * so the panel sizes to its own content (`.panel`'s CSS width, 372px, the
+ * mock's own number; the height whatever the header, the thread and the
+ * input actually need). Only a drag, or a `historyKey` that DOES have a
+ * saved size, ever puts an explicit width/height on it.
  *
+
  * This panel's own `role="dialog"` (R-396's contract: "the panel ...
  * `role="dialog"`") is a deliberate second entry in `popoverStandard.test.ts`'s
- * allowlist, not an oversight: the shared `<Popover>` shell computes its
- * position from an anchor point via `resolvePopoverPlacement` and sizes
- * itself from its own CSS module's `rem` width — exactly wrong for a panel
- * the mock pins to a fixed screen corner at a fixed px width. Composing
- * `<Popover>` here would fight both. Semantically this IS a dialog, so the
- * role is right; structurally it is not the shared shell's dialog, so it
- * does not compose it.
+ * allowlist, not an oversight, and stays one after S63-a: the shared
+ * `<Popover>` shell computes its position from an anchor point via
+ * `resolvePopoverPlacement` and sizes itself from its own CSS module's `rem`
+ * width -- exactly wrong for a panel pinned to a fixed screen corner and, now,
+ * resized in px by the person looking at it. Composing `<Popover>` here would
+ * fight both. Semantically this IS a dialog, so the role is right;
+ * structurally it is not the shared shell's dialog, so it does not compose
+ * it. It also carries no `aria-modal` and no backdrop (R-429: the board stays
+ * fully usable beside it), which an ordinary dialog would.
  */
 
 const PANEL_ID = "command-launcher-panel";
 const BAR_INPUT_ID = "command-bar-input";
 
-/** The shared shell's own list (`src/components/Popover.tsx`'s
- *  `FOCUSABLE_SELECTOR`) -- not imported from there since that constant is
- *  private to the module, but the same set: elements a mousedown is about to
- *  focus itself, so `close` must not fight it for focus (review fix 2). */
-const FOCUSABLE_SELECTOR =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+/**
+ * S63-a review fix (the maintainer, looking at the panel on disk: "a tall
+ * remembered size, nothing in the thread ... feels out of place and
+ * unprofessional"): this is no longer the panel's own default SIZE -- with
+ * nothing ever dragged and nothing stored, the panel carries no inline size
+ * at all (`size` stays `null`, below) and sizes itself to its content, the
+ * same as any ordinary box; `.panel`'s own CSS still gives it its width
+ * (372px, the mock's own number). This constant is now only the DRAG MATH's
+ * starting point -- `startResize`'s `size ?? DEFAULT_PANEL_SIZE` -- so a
+ * first drag (from a content-sized panel jsdom and a real browser both
+ * measure differently) has a sane, deterministic number to grow from.
+ */
+const DEFAULT_PANEL_SIZE: PanelSize = { width: 372, height: 480 };
+
+function currentViewport(): { width: number; height: number } {
+  return { width: window.innerWidth, height: window.innerHeight };
+}
 
 export interface CommandLauncherProps extends CommandBarProps {
   /**
@@ -110,6 +132,10 @@ export interface CommandLauncherProps extends CommandBarProps {
    * know both: the thread still works for the session, it is simply not
    * persisted. Owned here rather than in `CommandBar` because the STORE is
    * owned here; the bar only renders whatever thread its store holds.
+   *
+   * S63-a: the panel's remembered SIZE is keyed off this same value (its own
+   * prefix, `panelSize.ts`) for the same reason -- one person's board, one
+   * remembered shape.
    */
   historyKey?: string | null;
 }
@@ -123,14 +149,38 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target.isContentEditable;
 }
 
+/** S63-a: which edges a drag handle grows. A corner handle changes both; an
+ *  edge handle on its own changes only the one dimension it sits on. */
+type ResizeAxis = "both" | "width" | "height";
+
 export function CommandLauncher({ historyKey = null, ...props }: CommandLauncherProps) {
   const [open, setOpen] = useState(false);
-  const panelRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   // F-163: ONE conversation per board mount. `useState`'s initialiser form,
   // never `createConversationStore()` inline -- a fresh store per render
   // would be a fresh conversation per render.
   const [conversation] = useState(createConversationStore);
+  // S63-a review fix (the maintainer): `null` until EITHER a stored size is
+  // loaded or a drag sets one -- the panel then carries no inline size at
+  // all and sizes to its content (`.panel`'s own CSS gives it its width;
+  // the height is whatever the header + thread + input actually need). Only
+  // once a size exists here (loaded or dragged) does the panel get an
+  // explicit, persisted width/height.
+  const [size, setSize] = useState<PanelSize | null>(null);
+  // CR-2 (reviewer fix): the drag in progress, if any -- a plain ref, not
+  // state, since only `pointermove`'s own math needs it and a ref update
+  // must not itself trigger a render (`setSize` below already does that).
+  // `null` outside an active drag; `latest` is what gets persisted on
+  // release, since `size` from this closure would still read the value from
+  // BEFORE this drag's `setSize` calls.
+  const resizeRef = useRef<{
+    axis: ResizeAxis;
+    startX: number;
+    startY: number;
+    startSize: PanelSize;
+    latest: PanelSize;
+    pointerId: number;
+  } | null>(null);
 
   // F-157, moved here from `CommandBar` (see the module doc): this component
   // going away IS the board going away, so an entry still open then is the
@@ -147,24 +197,33 @@ export function CommandLauncher({ historyKey = null, ...props }: CommandLauncher
     conversation.getState().useHistoryKey(historyKey);
   }, [conversation, historyKey]);
 
-  /** Review fix 2: `refocusButton` defaults to true (Escape, and a mousedown
-   *  on something not itself focusable) -- the one caller that must NOT
-   *  fight the browser for focus (a mousedown outside on a focusable
-   *  element) passes `false` explicitly. */
-  function close(refocusButton = true): void {
+  // S63-a review fix: the panel's remembered size, same key, same trigger --
+  // but ONLY when one was actually saved. A missing or corrupt stored value
+  // (`readPanelSize`'s own contract) leaves `size` at `null` (content-sized),
+  // never a default forced on a panel nobody has resized yet.
+  useEffect(() => {
+    const stored = readPanelSize(historyKey);
+    setSize(stored !== null ? clampPanelSize(stored, currentViewport()) : null);
+  }, [historyKey]);
+
+  /** R-429: `close` always returns focus to the launcher button now -- the
+   *  one exception S48-a carried (a mousedown about to focus something else
+   *  outside) belonged to the outside-mousedown close this session removed,
+   *  and went with it. */
+  function close(): void {
     setOpen(false);
-    if (refocusButton) buttonRef.current?.focus();
+    buttonRef.current?.focus();
   }
 
-  /** Review fix 1: the panel's own Escape rule -- "Esc closes" has to hold
-   *  from anywhere focus is inside the panel, not only the bar's input.
-   *  When the event's target IS the input, this does nothing and leaves it
-   *  to `CommandBar`'s own `onKeyDown` (bound directly on that element),
-   *  which already runs first (bubbling) and calls `onEscapeIdle` only when
-   *  it found nothing left to clear -- exactly the existing multi-Escape
-   *  rule, untouched. Anything else inside the panel (the mic button, a
-   *  candidate button, the header) has no handler of its own, so this is
-   *  the only thing that would ever see that Escape. */
+  /** The panel's own Escape rule -- "Esc closes" has to hold from anywhere
+   *  focus is inside the panel, not only the bar's input. When the event's
+   *  target IS the input, this does nothing and leaves it to `CommandBar`'s
+   *  own `onKeyDown` (bound directly on that element), which already runs
+   *  first (bubbling) and calls `onEscapeIdle` only when it found nothing
+   *  left to clear -- exactly the existing multi-Escape rule, untouched.
+   *  Anything else inside the panel (the mic button, a candidate button, the
+   *  header) has no handler of its own, so this is the only thing that would
+   *  ever see that Escape. */
   function handlePanelKeyDown(e: React.KeyboardEvent<HTMLDivElement>): void {
     if (e.key !== "Escape") return;
     if (e.target instanceof HTMLElement && e.target.id === BAR_INPUT_ID) return;
@@ -195,24 +254,94 @@ export function CommandLauncher({ historyKey = null, ...props }: CommandLauncher
     document.getElementById(BAR_INPUT_ID)?.focus();
   }, [open]);
 
-  // Close on a mousedown outside the panel and the button. See the module
-  // doc above for why a `[role="dialog"]` ancestor is also exempted, and for
-  // `refocusButton`'s one exception (a focusable element outside keeps the
-  // focus the click itself is about to give it).
-  useEffect(() => {
-    if (!open) return;
-    function onMouseDown(e: MouseEvent): void {
-      const target = e.target;
-      if (!(target instanceof Node)) return;
-      if (panelRef.current?.contains(target)) return;
-      if (buttonRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest('[role="dialog"]')) return;
-      const clickWillFocusItself = target instanceof Element && target.closest(FOCUSABLE_SELECTOR);
-      close(!clickWillFocusItself);
+  /**
+   * S63-a: a pointer drag on a resize handle. `axis` picks which of
+   * width/height this handle changes (the corner handle passes "both"; the
+   * top and left edge handles pass "height"/"width" respectively). Dragging
+   * UP or LEFT grows the panel (it is anchored at its bottom-right corner),
+   * so the delta is (start - current), not (current - start).
+   *
+   * Listens on `document`, not the handle itself: a fast drag routinely
+   * outruns the handle's own bounding box, and a lost pointer capture must
+   * not leave the panel stuck mid-resize. `latest` (a plain variable, not
+   * state) is what gets written to storage on release -- `size` itself would
+   * still read the value from BEFORE this render's `setSize`, a stale read
+   * `useState` warns about for exactly this reason.
+   *
+   * `size ?? DEFAULT_PANEL_SIZE`: the FIRST drag ever, on a panel that has
+   * never been sized before, starts the math from the default rather than
+   * `null` -- there is no inline size to read a real number back from yet.
+   * Every later drag (and every reopen once one has been saved) reads the
+   * real, remembered `size`.
+   *
+   * CR-2 (reviewer fix, S63 review): this used to track the drag with plain
+   * `document.addEventListener("pointermove"/"pointerup", ...)` and no
+   * `setPointerCapture` at all -- the one thing D33
+   * (`useDragGesture.ts`'s own doc) exists to warn about. A release OUTSIDE
+   * the browser window (or over an iframe, or anywhere the OS delivers the
+   * mouse-up to something other than this document) never reaches
+   * `document` as a `pointerup` at all, so the listeners were never removed:
+   * the next hover back over the page kept resizing the panel with no
+   * button held, until some unrelated click elsewhere finally fired a
+   * `pointerup` to clean up. `setPointerCapture` on the handle at
+   * `pointerdown` is the same fix every other drag in this codebase already
+   * uses -- the browser then routes pointermove/pointerup/pointercancel for
+   * this pointer to the handle itself regardless of where the cursor ends
+   * up, so the handlers can live as ordinary `onPointerMove`/`onPointerUp`/
+   * `onPointerCancel` props on the handle rather than a manual
+   * document-level subscription, and `pointercancel` (the browser taking
+   * the gesture over, e.g. a touch scroll) ends the drag exactly like a
+   * `pointerup` would instead of leaving it stuck.
+   */
+  function handleResizePointerDown(
+    axis: ResizeAxis,
+  ): (e: React.PointerEvent<HTMLDivElement>) => void {
+    return (e) => {
+      e.preventDefault();
+      const startSize = size ?? DEFAULT_PANEL_SIZE;
+      resizeRef.current = {
+        axis,
+        startX: e.clientX,
+        startY: e.clientY,
+        startSize,
+        latest: startSize,
+        pointerId: e.pointerId,
+      };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    };
+  }
+
+  function handleResizePointerMove(e: React.PointerEvent<HTMLDivElement>): void {
+    const drag = resizeRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const dx = drag.startX - e.clientX;
+    const dy = drag.startY - e.clientY;
+    const next = clampPanelSize(
+      {
+        width: drag.axis === "height" ? drag.startSize.width : drag.startSize.width + dx,
+        height: drag.axis === "width" ? drag.startSize.height : drag.startSize.height + dy,
+      },
+      currentViewport(),
+    );
+    drag.latest = next;
+    setSize(next);
+  }
+
+  /** Ends a resize on either `pointerup` or `pointercancel` -- see the CR-2
+   *  doc above for why both matter here. */
+  function endResize(e: React.PointerEvent<HTMLDivElement>): void {
+    const drag = resizeRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    resizeRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
     }
-    document.addEventListener("mousedown", onMouseDown);
-    return () => document.removeEventListener("mousedown", onMouseDown);
-  }, [open]);
+    writePanelSize(historyKey, drag.latest);
+  }
+
+  // Close on a mousedown outside the panel and the button: REMOVED, S63-a
+  // (R-429) -- see the module doc's own section on why. The panel now closes
+  // only by the launcher button, the header's "Close" button, and Escape.
 
   return (
     <>
@@ -246,15 +375,50 @@ export function CommandLauncher({ historyKey = null, ...props }: CommandLauncher
       {open && (
         <div
           id={PANEL_ID}
-          ref={panelRef}
           role="dialog"
           aria-label="Tell the board"
           className={styles.panel}
+          // S63-a review fix: no inline size at all until one exists (loaded
+          // or dragged) -- `undefined` leaves `.panel`'s own CSS (width
+          // 372px, height auto to content) in charge.
+          style={size !== null ? { width: size.width, height: size.height } : undefined}
           onKeyDown={handlePanelKeyDown}
         >
+          {/* S63-a: the top-left corner handle resizes both dimensions at
+              once; the top and left edges on their own resize one. CR-2: the
+              drag is tracked with `setPointerCapture` on the handle itself
+              (D33, `useDragGesture.ts`'s own convention), never a raw
+              `document` subscription -- see `handleResizePointerDown`'s own
+              doc for why. */}
+          <div
+            className={styles.resizeCorner}
+            onPointerDown={handleResizePointerDown("both")}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            aria-hidden="true"
+          />
+          <div
+            className={styles.resizeTop}
+            onPointerDown={handleResizePointerDown("height")}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            aria-hidden="true"
+          />
+          <div
+            className={styles.resizeLeft}
+            onPointerDown={handleResizePointerDown("width")}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            aria-hidden="true"
+          />
           <div className={styles.header}>
             <span className={styles.headerLabel}>Tell the board</span>
-            <span>Esc closes</span>
+            <button type="button" className={styles.closeButton} onClick={() => close()}>
+              Close
+            </button>
           </div>
           <CommandBar {...props} onEscapeIdle={close} conversation={conversation} />
         </div>

@@ -606,10 +606,27 @@ export function finishTrace(store: ConversationStore): void {
   postTrace(entry);
 }
 
-/** R-427: the same entry, filed into the thread. One place, called by both
- *  `finishTrace` and `flushTraceOnTeardown`, so the file and the thread can
- *  never hold different turns. `offered` is the only field the entry itself
- *  does not carry (see `HistoryTurn`'s own doc). */
+/**
+ * R-427: the same entry, filed into the thread. One place, called by both
+ * `finishTrace` and `flushTraceOnTeardown`, so the file and the thread can
+ * never hold different turns. `offered` is the only field the entry itself
+ * does not carry (see `HistoryTurn`'s own doc).
+ *
+ * S63-a review fix (CP-5, the maintainer looking at the panel: a written
+ * single showed twice, once filed here and once still live in `sentence`/
+ * `status` underneath it). THIS is where a turn's life actually ends -- never
+ * `fileOpenTurn` below, whose whole point is that the turn is NOT over yet --
+ * so `sentence`/`status` are cleared back to idle here, the one place, rather
+ * than a second idea elsewhere of "is this turn still current" (CLAUDE.md
+ * §4). Every path that reaches this function (`finishTrace`, `settleTurn`'s
+ * own still-current branch, `flushTraceOnTeardown`) gets it once. A caller
+ * with its own last word for this instant -- a lot's "Done: N commands.", a
+ * cancel's "Left it.", the "Nothing to say yes to." floor -- sets a fresh
+ * `status` right after finishing, which simply replaces the `null` this
+ * leaves; a call site that does not (a plain written single, a refusal, an
+ * Escape) leaves the live area genuinely empty, and the thread just filed is
+ * the only place that turn reads any more.
+ */
 function fileTurn(store: ConversationStore, entry: TraceEntry): void {
   const state = store.getState();
   // F-167: this entry may ALREADY be in the thread, filed as "Waiting: the
@@ -624,7 +641,7 @@ function fileTurn(store: ConversationStore, entry: TraceEntry): void {
       outcome: entry.outcome,
       offered: state.offered,
     });
-    state.set({ filedTurnAt: null });
+    state.set({ filedTurnAt: null, sentence: null, status: null });
     return;
   }
   state.appendTurn({
@@ -638,7 +655,7 @@ function fileTurn(store: ConversationStore, entry: TraceEntry): void {
     ran: [...entry.ran],
     outcome: entry.outcome,
   });
-  state.set({ filedTurnAt: null });
+  state.set({ filedTurnAt: null, sentence: null, status: null });
 }
 
 /**

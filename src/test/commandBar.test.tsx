@@ -22,7 +22,6 @@ import { formatDayLabel } from "@/features/board/lib/time";
 import {
   formatCommand,
   parseCommand,
-  type AssignCommand,
   type UnassignCommand,
   type MoveCommand,
   type ReplaceCommand,
@@ -386,9 +385,44 @@ function makeFakeRecognizer() {
   };
 }
 
-/** The one `aria-live="polite"` status element (brief 6). */
+/** The one `aria-live="polite"` STATUS element (brief 6). CR-4 (reviewer
+ *  fix): tag-qualified as `p[...]` now that `threadBody` (a `div`) ALSO
+ *  carries `aria-live="polite"` as the thread's own `role="log"` region --
+ *  a bare `[aria-live="polite"]` would match that ancestor first. */
 function statusText(): string {
-  return document.querySelector('[aria-live="polite"]')?.textContent ?? "";
+  return document.querySelector('p[aria-live="polite"]')?.textContent ?? "";
+}
+
+/**
+ * S63-a review fix (CP-5, the maintainer looking at the panel): once a turn
+ * is filed (`commandConversation.ts`'s own `fileTurn`), its `sentence`/
+ * `status` are cleared back to `null` so the live area never repeats the
+ * words the thread already has -- so a written single's own readout (or a
+ * refusal, or a "nothing happened" floor) is read back from HERE now,
+ * never `statusText()`, which is empty for exactly that turn once it is
+ * filed. `threadBody` scopes this to the conversation record itself, never
+ * the input row or the panel chrome around it.
+ *
+ * CR-4 (reviewer fix, S63 review): this element is ALSO the announced
+ * surface now (`role="log"`, `aria-live="polite"`, `aria-relevant="additions"`)
+ * -- `fileTurn` clearing `status` the same tick `settleWrite` sets it means
+ * a screen reader's own read of `statusText()`'s element never held a
+ * finished turn's words long enough to be caught (React batches both), so
+ * the announcement moved here, to whatever gets APPENDED (a new turn) --
+ * which is exactly what this helper already reads for other reasons. `p`
+ * tag-qualifies `statusText()`'s own selector below (`p[aria-live="polite"]`)
+ * so it still finds the STATUS line's `<p>`, not this `<div>`, now that both
+ * carry `aria-live="polite"`.
+ *
+ * CP-7 (CONTRACT CHANGED, CLAUDE.md §4, session 178, found by the typed
+ * walk): a LOT's last word -- "Done: N commands." or "Did k of N; the next
+ * failed: …" -- is filed into the thread the moment the lot finishes, the
+ * same order a single's readout takes (CP-5), so the fifteen lot cases that
+ * read it from `statusText()` read it from here now, and the live line is
+ * empty once the turn is filed. It used to stay live as a second copy.
+ */
+function threadText(): string {
+  return document.querySelector('[class*="threadBody"]')?.textContent ?? "";
 }
 
 /**
@@ -456,8 +490,21 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(input.placeholder).toBe("Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
   });
 
+  // C2 (CONTRACT CHANGED, CLAUDE.md §4, S63-a review fix/CP-5): a written
+  // single's own readout used to sit on the live status line indefinitely;
+  // it is filed into the thread now and the live line goes back to empty
+  // the moment that happens (`fileTurn`), which for a synchronous writer
+  // (this file's own default `vi.fn()`) is the SAME tick as the Enter that
+  // triggered it. The day-RENDERING this test is actually about
+  // (`renderReadout`'s zone-aware label, F-153/R-426) only ever exists on
+  // that live, optimistic line -- the thread keeps the raw ISO date verbatim
+  // (`resolved.readout`, never reformatted) -- so `onOpen` is held pending
+  // here instead of left to settle synchronously, the same shape CB-day-1
+  // below now uses, to give the live line a moment to be read before it
+  // would be filed.
   it("C2: a resolvable sentence opens the popover and shows the readout with the day rendered", () => {
     const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockReturnValue(new Promise(() => {}));
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -492,7 +539,15 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it("C4: clicking a candidate rewrites the input and resolves the chosen person", () => {
+  // C4 (CONTRACT CHANGED, CLAUDE.md §4, R-437/CB-ent-4): this used to pin
+  // that picking a candidate REWROTE the input with the completed, canonical
+  // sentence (`setText(rendered)`). The maintainer's own words for R-437 are
+  // "the box is empty after every Enter and every button press" -- the
+  // completed form goes into the person's own bubble (`sentence`) instead,
+  // never back into the box; CB-ent-4 (below) pins the box side of this
+  // directly. This test keeps proving the ORIGINAL point (the chosen
+  // person's id reaches the write) and adds the box's own new contract.
+  it("C4: clicking a candidate empties the input and resolves the chosen person", () => {
     const { onOpen, input } = renderBar();
     fireEvent.change(input, {
       target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
@@ -500,19 +555,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
 
-    const expectedCommand: AssignCommand = {
-      intent: "assign",
-      operator: "Sam Patel",
-      product: "Housing A",
-      place: ["Cell 1", "Line 1"],
-      day: null,
-      start: { hour: 10, minute: 0 },
-      end: { hour: 14, minute: 0 },
-      attach: null,
-      existing: null,
-      shift: null,
-    };
-    expect(input.value).toBe(formatCommand(expectedCommand));
+    expect(input.value).toBe("");
     expect(onOpen).toHaveBeenCalledTimes(1);
     const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
     expect(resolved.operatorId).toBe("sp");
@@ -538,19 +581,23 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(statusText()).toBe(`I could not read "10:75". ${SHAPE}`);
   });
 
-  it("C7: Escape once clears the status line and keeps the input; Escape twice clears the input", () => {
+  // C7 (CONTRACT CHANGED, CLAUDE.md §4, R-437): this used to pin that Enter
+  // left "gibberish" sitting in the box and a SECOND Escape was needed to
+  // clear it. R-437 empties the box the instant Enter is pressed, whatever
+  // it does with the sentence (CB-ent-2 pins the unreadable-sentence case
+  // directly) -- there is nothing left in the input for a second Escape to
+  // clear, so this keeps only the half that is still true: the first Escape
+  // clears the status line.
+  it("C7: Enter already empties the box for an unreadable sentence; Escape then clears the status line", () => {
     const { input } = renderBar();
 
     fireEvent.change(input, { target: { value: "gibberish" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(statusText()).toBe(SHAPE);
-    expect(input.value).toBe("gibberish");
+    expect(input.value).toBe("");
 
     fireEvent.keyDown(input, { key: "Escape" });
     expect(statusText()).toBe("");
-    expect(input.value).toBe("gibberish");
-
-    fireEvent.keyDown(input, { key: "Escape" });
     expect(input.value).toBe("");
   });
 
@@ -650,7 +697,11 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     const [resolved] = onRetime.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
     expect(resolved.target).toEqual({ kind: "retime", assignmentId: "blk1" });
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
-    expect(statusText()).toContain("· changing 10:00–14:00");
+    // S63-a review fix (CP-5, CLAUDE.md §4): a synchronous write is filed
+    // (and the live line cleared) in the same tick it happens -- the readout
+    // reads from the thread now, not the live status line.
+    expect(resolved.readout).toContain("· changing 10:00–14:00");
+    expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
   it("C13: Separate block sends direct; with a run also present it asks the run question instead", () => {
@@ -718,10 +769,9 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(anchor).toBeTruthy();
     expect(onRetimeRun).not.toHaveBeenCalled();
 
-    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
-    expect(statusText()).toBe(
-      `Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · ${dayLabel} · 06:00–14:00`,
-    );
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) the same tick -- the readout reads from the thread now.
+    expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
   it("CB2: a job of the same part in the way asks to change it; Change calls onRetimeRun", () => {
@@ -834,11 +884,9 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onUnassign).toHaveBeenCalledTimes(1);
     const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
     expect(resolved.assignmentId).toBe("blk1");
-    expect(statusText()).toBe(
-      "Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · " +
-        formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC") +
-        " · 10:00–14:00",
-    );
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) the same tick -- the readout reads from the thread now.
+    expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
   it("CU3: a no-hours sentence with two blocks shows two buttons labelled with part and hours", () => {
@@ -871,7 +919,15 @@ describe("CommandBar (P1-7a, brief §9)", () => {
   // S41-c: "move" (CM1-CM3), brief s41-c-move-brief.md §5.
   // -------------------------------------------------------------------------
 
-  it("CM1: naming BLK1 with a destination cell calls onMove once (move_cell), input unchanged, readout shown; nothing else called", () => {
+  // CM1 (CONTRACT CHANGED, CLAUDE.md §4, R-437 + S63-a review fix/CP-5): this
+  // used to pin that the input kept the sentence after a written single
+  // ("input unchanged" in its own title) -- the maintainer's own words for
+  // R-437 are "Enter always empties it ... in every case", CB-ent-1's own
+  // pin. The sentence is not lost, only moved: a synchronous write like this
+  // file's own default `vi.fn()` is filed in the SAME tick (`fileTurn`), so
+  // it reads from the thread, never a live bubble that would only ever flash
+  // for an async write.
+  it("CM1: naming BLK1 with a destination cell calls onMove once (move_cell), input empties (R-437), readout shown; nothing else called", () => {
     const { onOpen, onRetime, onBook, onRetimeRun, onUnassign, onMove, input } = renderBar({
       assignments: [BLK1],
     });
@@ -879,16 +935,12 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(input.value).toBe(MOVE_SENTENCE);
+    expect(input.value).toBe("");
     expect(onMove).toHaveBeenCalledTimes(1);
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.assignmentId).toBe("blk1");
     expect(resolved.target).toEqual({ kind: "move_cell" });
-    expect(statusText()).toBe(
-      "Moving Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · " +
-        formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC") +
-        " · 10:00–14:00 → Cell 2 · 10:00–14:00",
-    );
+    expect(threadText()).toContain(`Written: ${resolved.readout}`);
     expect(onOpen).not.toHaveBeenCalled();
     expect(onRetime).not.toHaveBeenCalled();
     expect(onBook).not.toHaveBeenCalled();
@@ -1083,8 +1135,19 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     // sending "yes" to the model, which has to answer with a form and so
     // invented one (a live run read a bare "yes" as `unassign "everyone" on
     // today`). A confirm word with nothing standing is answered, not parsed.
-    expect(statusText()).toBe("Nothing to say yes to.");
-    expect(input.value).toBe("yes");
+    // S63-a review fix (CP-5, CLAUDE.md §4): this "sentence" is filed (and
+    // the live line cleared) as soon as it is answered -- the words are in
+    // the thread's own `asked` bubble now, not the live status line.
+    expect(threadText()).toContain("Nothing to say yes to.");
+    // R-437 IS UNCONDITIONAL (CONTRACT CHANGED, CLAUDE.md §4, reviewer fix):
+    // this used to keep "yes" in the box on purpose, reasoning that a bare
+    // confirm/cancel word with nothing standing was "answered in place",
+    // never a sentence of its own. The maintainer's own wording for R-437 --
+    // "whether written, refused or standing" -- settles that judgment call
+    // the other way: the word goes to the thread as the person's own bubble
+    // like any other sentence, and the box empties the same as it does for
+    // one.
+    expect(input.value).toBe("");
 
     cleanup();
     const onConfirmWordCreated = vi.fn((): ConfirmWordResult => "created");
@@ -1282,8 +1345,13 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     // sending "yes" to the model, which has to answer with a form and so
     // invented one (a live run read a bare "yes" as `unassign "everyone" on
     // today`). A confirm word with nothing standing is answered, not parsed.
-    expect(statusText()).toBe("Nothing to say yes to.");
-    expect(third.input.value).toBe("yes");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed as soon as it is answered
+    // -- reads from the thread's own `asked` bubble, not the live line.
+    expect(threadText()).toContain("Nothing to say yes to.");
+    // R-437 IS UNCONDITIONAL (CONTRACT CHANGED, CLAUDE.md §4, reviewer fix):
+    // see CB-yes-8's own identical note -- the word goes to the thread as
+    // the person's own bubble like any other sentence, box empty.
+    expect(third.input.value).toBe("");
   });
 
   // -------------------------------------------------------------------
@@ -1303,7 +1371,10 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     fireEvent.change(input, { target: { value: "yes" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe("Nothing to say yes to.");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) as soon as it is answered -- reads from the thread's own
+    // `asked` bubble now, not the live status line.
+    expect(threadText()).toContain("Nothing to say yes to.");
     expect(reader).not.toHaveBeenCalled();
     expect(onOpen).not.toHaveBeenCalled();
     // The turn is finished here -- nothing can ever answer it.
@@ -1319,14 +1390,16 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     const first = renderBar({}, reader);
     fireEvent.change(first.input, { target: { value: "no" } });
     fireEvent.keyDown(first.input, { key: "Enter" });
-    expect(statusText()).toBe("Nothing to cancel.");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) as soon as it is answered -- reads from the thread now.
+    expect(threadText()).toContain("Nothing to cancel.");
     expect(reader).not.toHaveBeenCalled();
 
     cleanup();
     const second = renderBar({}, reader);
     fireEvent.change(second.input, { target: { value: "never mind" } });
     fireEvent.keyDown(second.input, { key: "Enter" });
-    expect(statusText()).toBe("Nothing to cancel.");
+    expect(threadText()).toContain("Nothing to cancel.");
     expect(reader).not.toHaveBeenCalled();
   });
 
@@ -1336,7 +1409,9 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     const first = renderBar({}, reader, null, { onConfirmWord: () => "none" });
     fireEvent.change(first.input, { target: { value: "ok" } });
     fireEvent.keyDown(first.input, { key: "Enter" });
-    expect(statusText()).toBe("Nothing to say yes to.");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) as soon as it is answered -- reads from the thread now.
+    expect(threadText()).toContain("Nothing to say yes to.");
     expect(reader).not.toHaveBeenCalled();
 
     cleanup();
@@ -1445,7 +1520,9 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     // The held sentence went with it -- a later "yes" has nothing to act on.
     fireEvent.change(input, { target: { value: "yes" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(statusText()).toBe("Nothing to say yes to.");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) as soon as it is answered -- reads from the thread now.
+    expect(threadText()).toContain("Nothing to say yes to.");
     expect(reader).toHaveBeenCalledTimes(1);
   });
 
@@ -1481,7 +1558,9 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     // The lot went with it: a later "yes" has nothing to run.
     fireEvent.change(second.input, { target: { value: "yes" } });
     fireEvent.keyDown(second.input, { key: "Enter" });
-    expect(statusText()).toBe("Nothing to say yes to.");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) as soon as it is answered -- reads from the thread now.
+    expect(threadText()).toContain("Nothing to say yes to.");
     expect(second.onRunLot).not.toHaveBeenCalled();
 
     cleanup();
@@ -1645,7 +1724,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.change(input, { target: { value: "yes" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -1693,7 +1772,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     // through `buildSchedulerErrorToast` (which no longer bakes in "—
     // reverted." at all, that F-154 fix's own clean half) reads verbatim.
     await waitFor(() =>
-      expect(statusText()).toBe(
+      expect(threadText()).toContain(
         `Did 1 of 2; the next failed: boom. The 1 done stayed: ${renderedReadout(resolvedList[0].readout)}.`,
       ),
     );
@@ -1702,6 +1781,68 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
 
     expect(input.value).toBe("yes");
     expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  // CR-1 (reviewer fix, S63 review): `rewriteCapRefusal` (brief §5, CB-ref-1)
+  // was applied on the single-sentence write path only -- `runLotNow`'s own
+  // `result.error` (`LotResult`'s own doc: "the same wording a toast would
+  // show") is the identical capacity sentence and reached the thread/status
+  // verbatim, "try the split again" included, the exact bug brief §5 exists
+  // to fix, just through the lot door.
+  it("CR-1: a lot step's capacity refusal is rewritten the same way a single sentence's is -- no 'try the split again' through the lot door either", async () => {
+    const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: 1,
+      error:
+        "Sam Patel would reach 110% (cap 100%). Someone else changed their load — try the split again.",
+    }));
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+
+    // CP-7 (CONTRACT CHANGED, CLAUDE.md §4, session 178): a lot's last word
+    // is filed into the thread the moment the lot finishes, the same as a
+    // single's readout (CP-5), so it is read from the thread, not the live
+    // line, which is empty once the turn is filed.
+    await waitFor(() =>
+      expect(threadText()).toContain(
+        "Did 1 of 2; the next failed: Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
+      ),
+    );
+    expect(threadText()).not.toContain("try the split again");
+    expect(statusText()).toBe("");
+  });
+
+  it("CP-7: a finished lot's 'Done' is in the thread once and the live line is empty -- the sentence after a lot starts from a clean live area", async () => {
+    const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: 2,
+      error: null,
+    }));
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    // Once, in the thread; nothing left on the live line (found by the typed
+    // walk, session 178: "Done: 2 commands." used to stay live as a second
+    // copy, and every sentence after a lot inherited a stale live turn).
+    expect(threadText().split("Done: 2 commands.").length).toBe(2);
+    expect(statusText()).toBe("");
+    expect(input.value).toBe("");
   });
 
   it("CB-lot-4: the first command's ambiguous block question is numbered and its buttons continue to the next command, then the lot status", () => {
@@ -1915,7 +2056,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect(onRunLot).toHaveBeenCalledTimes(1);
 
     resolveRunLot!({ done: 2, error: null });
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
   });
 
   it("CB-lot-11: two commands naming the same block drop the lot with the collision message", () => {
@@ -1961,7 +2102,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect(statusText()).toBe("Working…");
 
     resolveRunLot!({ done: 2, error: null });
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
   });
 
   it("CB-lot-13: a typed edit during Working… is ignored -- the input stays unchanged", async () => {
@@ -1991,7 +2132,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect(statusText()).toBe("Working…");
 
     resolveRunLot!({ done: 2, error: null });
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
     expect(input.value).toBe("");
   });
 });
@@ -2202,7 +2343,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -2224,7 +2365,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     expect(statusText()).toMatch(/^2 commands ready: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -2270,7 +2411,11 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.keyDown(input, { key: "Enter" });
 
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
-    expect(statusText()).toBe(`Cell 3 has nobody on it ${dayLabel}.`);
+    // S63-a review fix (CP-5, CLAUDE.md §4): a plain readout ends the entry
+    // (`traceQuestionStatus`'s own "readout" branch) the same tick it is
+    // shown, so it is filed (and the live line cleared) immediately -- it
+    // reads from the thread's own `asked` bubble now.
+    expect(threadText()).toContain(`Cell 3 has nobody on it ${dayLabel}.`);
     // R-427: the candidate strip, not the whole bar -- the thread's "Clear
     // history" control is a button too (see `candidateButtons`).
     expect(candidateButtons()).toHaveLength(0);
@@ -2331,7 +2476,10 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     expect(onOpen).toHaveBeenCalledTimes(1);
     const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
     expect(resolved.range.startMin).toBe(3 * 1440 + 615);
-    expect(statusText()).toContain("10:15");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) the same tick -- the readout reads from the thread now.
+    expect(resolved.readout).toContain("10:15");
+    expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
   // -----------------------------------------------------------------------
@@ -2385,7 +2533,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     expect(statusText()).toMatch(/^2 commands ready: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -2492,7 +2640,12 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
 
     fireEvent.click(screen.getByRole("button", { name: "Ana" }));
 
-    expect(input.value).toBe("cover Sam with Ana on Cell 1 today");
+    // R-437 (CONTRACT CHANGED, CLAUDE.md §4): this used to pin that picking
+    // the candidate rewrote the input with the completed sentence
+    // (`setText(rendered)`); the maintainer's own words are "the box is
+    // empty after every ... button press" -- the completed form goes into
+    // the person's own bubble (`sentence`) now, never back into the box.
+    expect(input.value).toBe("");
     expect(statusText()).toMatch(/^2 commands ready: /);
   });
 
@@ -2535,7 +2688,10 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     expect(statusText()).toContain('"An" matches 2');
     fireEvent.click(screen.getByRole("button", { name: "Ana" }));
 
-    expect(input.value).toBe("swap Sam and Ana on Cell 1 today");
+    // R-437 (CONTRACT CHANGED, CLAUDE.md §4): see CB-x-10's own identical
+    // note -- the completed sentence goes into the person's bubble now,
+    // never back into the box.
+    expect(input.value).toBe("");
     expect(statusText()).toMatch(/^4 commands ready: /);
   });
 
@@ -2710,7 +2866,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     expect(statusText()).not.toContain("name the same block");
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 4" }));
-    await waitFor(() => expect(statusText()).toBe("Done: 4 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 4 commands."));
     expect(onRunLot).toHaveBeenCalledTimes(1);
   });
 
@@ -2721,8 +2877,10 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.keyDown(input, { key: "Enter" });
 
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
-    expect(statusText()).toBe(`Cell 1 has nobody on it ${dayLabel}.`);
-    expect(statusText()).not.toContain("name the same block");
+    // S63-a review fix (CP-5, CLAUDE.md §4): see CB-x-5's own identical note
+    // -- a plain readout is filed (and the live line cleared) the same tick.
+    expect(threadText()).toContain(`Cell 1 has nobody on it ${dayLabel}.`);
+    expect(threadText()).not.toContain("name the same block");
     // R-427: see CB-x-5's own note.
     expect(candidateButtons()).toHaveLength(0);
     expect(onRunLot).not.toHaveBeenCalled();
@@ -2758,7 +2916,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     expect(statusText()).toMatch(/^2 commands ready: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -2791,7 +2949,10 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.target).toEqual({ kind: "retime" });
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
-    expect(statusText()).toContain("Sam · Cell 1 · ends 15:00, was 14:00");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) the same tick -- the readout reads from the thread now.
+    expect(resolved.readout).toContain("Sam · Cell 1 · ends 15:00, was 14:00");
+    expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
   it("CB-y-4: 'make the Housing A job on Cell 1 4 people' calls onSetHeadcount with the run and the number, and shows the readout", () => {
@@ -2807,7 +2968,10 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     ];
     expect(resolved.runId).toBe("runX");
     expect(resolved.headcount).toBe(4);
-    expect(statusText()).toContain("4 people");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) the same tick -- the readout reads from the thread now.
+    expect(resolved.readout).toContain("4 people");
+    expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
   it("CB-y-5: 'make it 4 people' has no memory of \"it\" -- the grammar asks for the job's own name, nothing resolves", () => {
@@ -2915,7 +3079,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     expect(statusText()).toMatch(/^2 commands ready: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
 
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
     expect(resolvedList.map((r) => r.intent)).toEqual(["move", "assign"]);
@@ -2965,7 +3129,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     expect(statusText()).not.toMatch(/move which/i);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
     expect(resolvedList.map((r) => r.intent)).toEqual(["move", "assign"]);
     const moveStep = resolvedList[0];
@@ -3001,11 +3165,22 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.target).toEqual({ kind: "retime" });
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
-    expect(statusText()).toContain("Sam · Cell 1 · ends 15:00, was 14:00");
+    // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
+    // cleared) the same tick -- the readout reads from the thread now.
+    expect(resolved.readout).toContain("Sam · Cell 1 · ends 15:00, was 14:00");
+    expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
+  // S63-a review fix (CP-5, CLAUDE.md §4): `onSetHeadcount` is held pending
+  // here now (never settling within the test), the same shape C2/CB-day-1
+  // use -- this test's own point is the OPTIMISTIC readout showing before
+  // the write is known to have succeeded, which is only observable on the
+  // live line for a write that has not yet settled (a settled one -- this
+  // file's own default synchronous `vi.fn()` -- is filed, and the live line
+  // cleared, in the very same tick; `fileTurn`).
   it("CB-y-12: reviewer scenario 4 -- the headcount readout shows immediately on Enter regardless of the async write's own outcome (fire-and-forget, same shape as onRetime/onUnassign/onMove); a later mutation failure surfaces through the toast useDragGesture's own failWith writes, never the bar's status -- ACCEPTABLE, matches every other single-write intent", () => {
     const { onSetHeadcount, input } = renderXBar({ runs: [RUN_X] });
+    onSetHeadcount.mockReturnValue(new Promise(() => {}));
 
     fireEvent.change(input, { target: { value: "make the Housing A job on Cell 1 4 people" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -3015,10 +3190,12 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     // has no promise to await here, unlike `onRunLot`'s lot path.
     expect(onSetHeadcount).toHaveBeenCalledTimes(1);
     expect(statusText()).toContain("4 people");
-    // The input is never cleared for a single (non-lot) write -- success or
-    // failure look identical from here; only `onRunLot`'s own lot path
-    // clears the input on a clean "Done".
-    expect(input.value).toBe("make the Housing A job on Cell 1 4 people");
+    // R-437 (CONTRACT CHANGED, CLAUDE.md §4): this used to pin that the
+    // input was "never cleared for a single (non-lot) write -- success or
+    // failure look identical from here". R-437 (CB-ent-1) empties the box on
+    // Enter regardless, so success and failure keep looking identical from
+    // here -- just both empty now instead of both unchanged.
+    expect(input.value).toBe("");
   });
 
   it("CB-y-13: reviewer scenario 5 -- 'make the Housing A job on Cell 1 4 people' typed and run twice is a plain write both times, no dedupe", () => {
@@ -3250,7 +3427,14 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
       by: "model",
     }));
 
+    // S63-a review fix (CP-5, CLAUDE.md §4): the " · read by the model"
+    // suffix lives only on the live, OPTIMISTIC status line (`runCommand`'s
+    // own `suffix` argument -- never stored in `entry.ran`, so the thread's
+    // "Written: …" never carries it) -- `onOpen` is held pending so that
+    // line is still there to read once the model has answered, the same
+    // shape C2/CB-day-1 use.
     const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+    onOpen.mockReturnValue(new Promise(() => {}));
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -3271,7 +3455,11 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
       ok: false,
       reason: "unavailable",
     }));
+    // S63-a review fix (CP-5, CLAUDE.md §4): see CB-model-1's own identical
+    // note -- the "· read by the rules (…)" suffix only ever lives on the
+    // live, optimistic status line.
     const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+    onOpen.mockReturnValue(new Promise(() => {}));
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -3294,7 +3482,14 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
     );
   });
 
-  it("CB-model-4: 'Reading…' shows while pending; a second Enter aborts the first (its signal) and reads again", async () => {
+  // CB-model-4 (CONTRACT CHANGED, CLAUDE.md §4, R-437): a bare second Enter
+  // used to resubmit the SAME sentence, still sitting in the box while
+  // "Reading…" stood. R-437 (CB-ent-1) empties the box the moment the first
+  // Enter is pressed, so a second Enter with nothing retyped now submits an
+  // empty string (no reader call at all) rather than reading again -- this
+  // retypes the sentence first, the way a person actually retries a slow
+  // read once the box is empty.
+  it("CB-model-4: 'Reading…' shows while pending; a second Enter (after retyping) aborts the first (its signal) and reads again", async () => {
     const captured: { first: AbortSignal | null } = { first: null };
     let calls = 0;
     const fakeReader: Reader = vi.fn((_text: string, signal: AbortSignal) => {
@@ -3315,6 +3510,7 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
     expect(calls).toBe(1);
     expect(captured.first?.aborted ?? false).toBe(false);
 
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(calls).toBe(2);
     expect(captured.first?.aborted).toBe(true);
@@ -3456,7 +3652,11 @@ describe("CB-mic: the microphone button (S46-a)", () => {
 
     first.fire.final(P1_SENTENCE);
 
-    expect(input.value).toBe(P1_SENTENCE);
+    // R-437 (CONTRACT CHANGED, CLAUDE.md §4): "exactly as Enter does" now
+    // includes emptying the box (CB-ent-1) -- this test's own title is the
+    // reason the assertion follows Enter's contract rather than pinning its
+    // own.
+    expect(input.value).toBe("");
     expect(onOpen).toHaveBeenCalledTimes(1);
     const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
     expect(resolved.operatorId).toBe("op1");
@@ -3536,7 +3736,10 @@ describe("CB-mic: the microphone button (S46-a)", () => {
 
     fire.final(P1_SENTENCE);
     expect(onOpen).toHaveBeenCalledTimes(1);
-    expect(statusText()).not.toBe("");
+    // S63-a review fix (CP-5, CLAUDE.md §4): a synchronous write is filed
+    // (and the live line cleared) the same tick -- the readout reads from
+    // the thread now, not the live status line.
+    expect(threadText()).not.toBe("");
 
     // The real API fires `onEnd` on its own once a final result has settled
     // the session -- nothing here presses the mic button again.
@@ -3549,7 +3752,10 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     // status line was cleared.
     expect(stop).not.toHaveBeenCalled();
     expect(statusText()).toBe("");
-    expect(input.value).toBe(P1_SENTENCE);
+    // R-437 (CONTRACT CHANGED, CLAUDE.md §4): the final result already
+    // emptied the box on arrival (CB-ent-1, same as an Enter's own written
+    // single) and Escape no longer puts anything back into it (CB-ent-3).
+    expect(input.value).toBe("");
   });
 
   it("CB-mic-9: a synchronous onError from the recognizer factory itself leaves the button idle with the error status", () => {
@@ -4379,7 +4585,10 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
     fire.final(P1_SENTENCE);
-    expect(input.value).toBe(P1_SENTENCE);
+    // R-437 (CONTRACT CHANGED, CLAUDE.md §4): a final result submits exactly
+    // as Enter does (CB-mic-4's own title), which now empties the box
+    // (CB-ent-1).
+    expect(input.value).toBe("");
 
     await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -4427,7 +4636,7 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     fireEvent.change(input, { target: { value: "yes" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(statusText()).toBe("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const entry = postedEntry(fetchMock);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -4560,11 +4769,12 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
 
     fireEvent.keyDown(input, { key: "Escape" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // First Escape cleared the status; the sentence text itself is still in
-    // the box, so the SECOND Escape's own job (per C7) is to clear that --
-    // no trace entry is open any more (`finishTrace` already ran), so this
-    // must not post again.
-    expect(input.value).not.toBe("");
+    // CB-t-10 (CONTRACT CHANGED, CLAUDE.md §4, R-437/CB-ent-3): this used to
+    // say the sentence came back into the box for the second Escape (per the
+    // old C7) to clear. R-437 empties the box the moment the question was
+    // first asked (Enter, not Escape) and Escape no longer puts anything
+    // back into it -- the box is already empty here, and stays that way.
+    expect(input.value).toBe("");
 
     fireEvent.keyDown(input, { key: "Escape" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -4600,7 +4810,10 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     engine = "browser";
     fire.final(P1_SENTENCE);
 
-    expect(input.value).toBe(P1_SENTENCE);
+    // R-437 (CONTRACT CHANGED, CLAUDE.md §4): a final result submits exactly
+    // as Enter does (CB-mic-4's own title), which now empties the box
+    // (CB-ent-1).
+    expect(input.value).toBe("");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const entry = postedEntry(fetchMock);
     expect(entry.by).toBe("browser");
@@ -4818,8 +5031,13 @@ describe("CB-keep: the bar keeps its conversation through a ctx that goes null a
     expect(entry.ran).toEqual([resolved.readout]);
   });
 
+  // S63-a review fix (CP-5, CLAUDE.md §4): `onOpen` is held pending here --
+  // this file's own default synchronous `vi.fn()` would file the turn (and
+  // clear the live line, `fileTurn`) in the same tick as the Enter that
+  // wrote it, leaving nothing here for a ctx flicker to prove it kept.
   it("CB-keep-3: a pop-up opening from a sentence keeps the status through a ctx that goes null and back", () => {
     const { onOpen, input, rerenderCtx } = renderBar({ runs: [] });
+    onOpen.mockReturnValue(new Promise(() => {}));
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -4844,8 +5062,14 @@ describe("CB-keep: the bar keeps its conversation through a ctx that goes null a
 // 2026-09-16. Fixed by building the instant that reads back as midnight of
 // the ISO day IN the zone (`zonedTimeToInstant`) instead.
 describe("CB-day: the readout's ISO day renders in the plant's own zone (F-153)", () => {
+  // S63-a review fix (CP-5, CLAUDE.md §4): `onBook` is held pending -- a
+  // synchronous write would file this turn (and clear the live line,
+  // `fileTurn`) in the same tick as the Enter that wrote it, and the
+  // zone-aware day label this test is actually about (F-153/R-426) only
+  // ever lives on that live, optimistic line -- the thread keeps the raw
+  // ISO date verbatim, never reformatted.
   it("CB-day-1: a readout carrying 2026-09-16 under America/Chicago renders 'Wed Sep 16', never Tue", () => {
-    const onBook = vi.fn();
+    const onBook = vi.fn(() => new Promise<never>(() => {}));
     render(
       <CommandBar
         ctx={buildCtx({
@@ -4911,11 +5135,11 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
     const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
 
     await waitFor(() =>
-      expect(statusText()).toBe(
+      expect(threadText()).toContain(
         `Did 1 of 2; the next failed: Tom Baker is not certified for Cell 1: missing Welding. The 1 done stayed: ${renderedReadout(resolved[0].readout)}.`,
       ),
     );
-    expect(statusText()).not.toContain("reverted");
+    expect(threadText()).not.toContain("reverted");
   });
 });
 
@@ -5019,7 +5243,19 @@ describe("CB-ans: the answer box (F-162)", () => {
     expect(resolved.operatorId).toBe("op1");
   });
 
-  it("CB-ans-5: Escape drops the question and puts the sentence back in the box, ready to edit", () => {
+  // CB-ans-5 (CONTRACT CHANGED, CLAUDE.md §4, R-437 + S63-a review fix/CP-5):
+  // this pinned that Escape on a standing question put the sentence back in
+  // the box, ready to edit. The maintainer's own words for R-437 are the
+  // opposite: "Escape ... no longer puts the sentence back into the box --
+  // it stays readable in its bubble ... the box stays empty." CB-ent-3 below
+  // is this pin's direct replacement in spirit; this one is kept (updated)
+  // rather than deleted because it still exercises the F-162 answer-box
+  // question shape CB-ent-3 does not (a candidate question, not a plain
+  // unreadable sentence). CP-5 narrows "its own bubble" further still:
+  // Escape files the turn (`finishTrace`), which clears the live
+  // `sentence`/`status` the same way a written single's own filing does --
+  // the sentence reads from the THREAD's own bubble now, not a live one.
+  it("CB-ans-5: Escape drops the question, empties the box, and files the turn into the thread", () => {
     stubFetch();
     const { input } = renderBar();
     const sentence = "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
@@ -5030,9 +5266,76 @@ describe("CB-ans: the answer box (F-162)", () => {
     fireEvent.keyDown(input, { key: "Escape" });
 
     expect(statusText()).toBe("");
-    expect(input.value).toBe(sentence);
+    expect(input.value).toBe("");
     expect(input.placeholder).toBe("Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
-    expect(document.body.textContent).not.toContain("You said:");
+    expect(threadText()).toContain(sentence);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-437 (the maintainer, S63-a): "Enter always empties it: the sentence goes
+// into the store's sentence (the right bubble) in every case, and the box is
+// empty for the next sentence." Before this, `submitText` left the sentence
+// in the input on a written single, a shape hint, and a readout, and only
+// F-162's own answer-box question (CB-ans-1..5 above) emptied it.
+// ---------------------------------------------------------------------------
+describe("CB-ent: Enter always empties the box (R-437)", () => {
+  // CB-ent-1 (CONTRACT NARROWED, CLAUDE.md §4, S63-a review fix/CP-5): a
+  // written single's own turn is filed the same tick it writes (this file's
+  // default synchronous `vi.fn()`), which clears the live `sentence`/
+  // `status` right back to idle (`fileTurn`) -- so there is no live "You
+  // said" bubble left to read here; the sentence is in the THREAD's own
+  // right bubble instead, once, exactly where CP-5 says it belongs.
+  it("CB-ent-1: Enter on a written single leaves the box empty and the sentence in the thread", () => {
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input.value).toBe("");
+    expect(statusText()).toBe("");
+    expect(threadText()).toContain(P1_SENTENCE);
+    expect(threadText()).toContain("Written:");
+  });
+
+  it("CB-ent-2: Enter on an unreadable sentence leaves the box empty with the hint in the board's bubble", () => {
+    const { input } = renderBar();
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input.value).toBe("");
+    expect(statusText()).toBe(SHAPE);
+    expect(document.body.textContent).toContain("You said: gibberish");
+  });
+
+  it("CB-ent-3: Escape on a standing question leaves the box empty", () => {
+    const { input } = renderBar();
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(input.value).toBe("");
+  });
+
+  // CB-ent-4 (S63-a review fix, R-437): the maintainer's own screenshot
+  // still showed the completed sentence sitting in the box after "Which
+  // part?" was answered by a button (`pickCandidate`'s own `setText(rendered)`
+  // -- fixed to set `sentence` instead, alongside `pickPartAsPlace`'s
+  // identical call).
+  it("CB-ent-4: answering a question by button leaves the box empty", () => {
+    const { input } = renderBar();
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+
+    expect(input.value).toBe("");
   });
 });
 
@@ -5073,10 +5376,13 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
       settle({ done: 1, error: "That person belongs to a different part of the structure." });
     });
 
-    expect(statusText()).toContain("Did 1 of 2; the next failed:");
+    expect(threadText()).toContain("Did 1 of 2; the next failed:");
     const entry = postedEntry(fetchMock);
-    // The one thing the maintainer's own trace could not tell him.
-    expect(entry.outcome).toBe(
+    // The one thing the maintainer's own trace could not tell him. CP-7
+    // (session 178): the outcome is the whole sentence the thread shows, the
+    // "stayed" clause included, so this reads the failure's own words rather
+    // than the exact string.
+    expect(entry.outcome).toContain(
       "Did 1 of 2; the next failed: That person belongs to a different part of the structure.",
     );
     // And only the step that actually ran.
@@ -5372,6 +5678,15 @@ describe("CH: the conversation thread (R-427)", () => {
     vi.unstubAllGlobals();
   });
 
+  // CH-1 (CONTRACT CHANGED, CLAUDE.md §4, R-428): this pinned the past
+  // turn's own "You: "/"Board: " prefixed lines. R-428 turns each finished
+  // turn into bubbles, one colour per side (`data-side`), and drops both
+  // prefixes on purpose ("the side says who") -- the text itself (what was
+  // heard, what was asked) is unchanged, so this drops only the two literal
+  // prefixes from what it looks for. CP-1..CP-4 below (R-428's own new pins)
+  // cover the bubble STRUCTURE directly; this one keeps proving the thread's
+  // older facts (both candidates shown, the chosen one ticked, a written
+  // result, "Clear history") still hold.
   it("CH-1: a finished turn appears in the thread with the buttons that were offered, and the one chosen marked", () => {
     stubFetch();
     const { input } = renderBar({ runs: [] });
@@ -5384,8 +5699,8 @@ describe("CH: the conversation thread (R-427)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
 
     const thread = document.body.textContent ?? "";
-    expect(thread).toContain("You: assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
-    expect(thread).toContain('Board: Which person? "Sam" matches 2:');
+    expect(thread).toContain("assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2");
+    expect(thread).toContain('Which person? "Sam" matches 2:');
     // Both options are shown; the chosen one carries the tick.
     expect(thread).toContain("Sam Ortiz");
     expect(thread).toContain("Sam Patel ✓");
@@ -5407,6 +5722,29 @@ describe("CH: the conversation thread (R-427)", () => {
     expect(document.body.textContent).toContain(
       "Refused: That person does not belong to this part of the structure.",
     );
+  });
+
+  // CB-ref-1 (R-434, S63-a brief §5): a capacity refusal reaches the bar as
+  // the DRAG's own toast wording (`useSchedulerToast.ts`'s `CapacityExceeded`
+  // case) -- accurate for a drag, which really can retry the split; the bar
+  // has no split to retry, so it rewrites this one shape of message before
+  // filing it, matching the numbers but not the drag's own advice.
+  it("CB-ref-1: a capacity refusal is rewritten -- the drag's 'try the split again' becomes 'Nothing changed', same numbers", async () => {
+    stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockResolvedValue({
+      kind: "refused",
+      message:
+        "Sam Patel would reach 110% (cap 100%). Someone else changed their load — try the split again.",
+    });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+
+    expect(document.body.textContent).toContain(
+      "Refused: Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
+    );
+    expect(document.body.textContent).not.toContain("try the split again");
   });
 
   it("CH-6: nothing in a past turn runs a command -- the thread is a record, and only the CURRENT question has live buttons", () => {
@@ -5436,6 +5774,161 @@ describe("CH: the conversation thread (R-427)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// R-428 (the maintainer, S63-a): the bar as a chat panel -- a finished turn
+// is bubbles now, one colour per side (`data-side`, so a pin reads the side
+// without the CSS module's hash), not the "You: "/"Board: " prefixed lines
+// CH-1 (above) used to read. The CURRENT turn reads the same way, off the
+// live `sentence`/`status` instead of a filed `HistoryTurn`.
+// ---------------------------------------------------------------------------
+describe("CP: a finished turn is bubbles, not prefixed lines (R-428)", () => {
+  function bubbles(container: HTMLElement): { side: string | null; text: string }[] {
+    return Array.from(container.querySelectorAll("[data-side]")).map((el) => ({
+      side: el.getAttribute("data-side"),
+      text: el.textContent ?? "",
+    }));
+  }
+
+  it("CP-1: a finished turn renders one right bubble (heard) and left bubbles for the question and the result", () => {
+    stubFetch();
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+
+    const [turn] = threadTurns();
+    const bs = bubbles(turn);
+    expect(bs[0]).toEqual({
+      side: "you",
+      text: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2",
+    });
+    expect(bs[1].side).toBe("board");
+    expect(bs[1].text).toContain('Which person? "Sam" matches 2:');
+    expect(bs[2].side).toBe("board");
+    expect(bs[2].text).toContain("Written:");
+  });
+
+  it("CP-2: the offered chips sit inside the board's own bubble, the chosen one marked", () => {
+    stubFetch();
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+
+    const [turn] = threadTurns();
+    const askedBubble = turn.querySelector('[data-side="board"]') as HTMLElement;
+    const chips = Array.from(askedBubble.querySelectorAll('[class*="chip"]'));
+    expect(chips.length).toBe(2);
+    expect(askedBubble.textContent).toContain("Sam Patel ✓");
+  });
+
+  it("CP-3: the current turn reads the same way -- the sentence a right bubble, the live question a left one", () => {
+    const { input } = renderBar();
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const said = document.querySelector('[class*="saidLine"]')?.closest("[data-side]");
+    expect(said?.getAttribute("data-side")).toBe("you");
+    const status = document.querySelector('p[aria-live="polite"]')?.closest("[data-side]");
+    expect(status?.getAttribute("data-side")).toBe("board");
+  });
+
+  it("CP-4: nothing in a past turn is a button (CH-6 stays)", () => {
+    // CH-6 (above) already drives this end to end -- clicking every chip
+    // changes nothing. This confirms the structural fact the bubbles rely
+    // on: every element carrying a `data-side` in a past turn is a plain
+    // `div`, never a `button`.
+    stubFetch();
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+
+    const [turn] = threadTurns();
+    for (const el of Array.from(turn.querySelectorAll("[data-side]"))) {
+      expect(el.tagName).toBe("DIV");
+    }
+  });
+
+  // CP-5 (S63-a review fix, the maintainer looking at the panel: "assign Sam
+  // Patel to Cell 1 from 8 to 12" appeared as a written turn in the thread
+  // AND again as the live "You said" + readout underneath it). Fixed at
+  // `commandConversation.ts`'s own `fileTurn`, which clears the live
+  // `sentence`/`status` back to `null` the moment a turn is actually filed
+  // -- this pins the visible result for the commonest case, a plain
+  // synchronous written single.
+  it("CP-5: after a written single the readout is in the thread once and the live area is empty (apart from the input)", () => {
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(threadTurns()).toHaveLength(1);
+    expect(threadText()).toContain("Written:");
+    // The live area: no live bubble left standing, and the input is all
+    // that remains outside the thread.
+    expect(statusText()).toBe("");
+    expect(document.body.textContent).not.toContain("You said:");
+  });
+
+  // CP-6 (S63-a review fix, the maintainer looking at the panel: input at
+  // the top, a tall remembered size, nothing in the thread -- "feels out of
+  // place and unprofessional"). The hint is not a turn: nothing in the
+  // store, nothing traced, gone the instant a sentence is submitted or a
+  // history turn exists.
+  it("CP-6: an empty thread shows the example bubble; after a sentence it is gone", () => {
+    const { input } = renderBar();
+    expect(document.body.textContent).toContain(
+      "Tell the board what to do. For example: clear Cell 1 today, or assign Sam Patel to Cell 1 from 8 to 12.",
+    );
+
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(document.body.textContent).not.toContain("Tell the board what to do.");
+  });
+
+  // CR-4 (reviewer fix, S63 review): the announcement was lost -- `status`
+  // and `fileTurn`'s own clear of it happen in the same tick for a
+  // synchronous write, so React batches both and the status line's own
+  // `aria-live` element never actually held the finished words at a point a
+  // screen reader could catch. The thread body is the announced surface
+  // instead (`role="log"`, `aria-live="polite"`, `aria-relevant="additions"`)
+  // -- every turn APPENDED to it is announced, which both a written single
+  // and a refusal are.
+  it("CR-4: after a written single the thread body is the announced log with the readout inside it, and the status line is empty; a refusal reads the same way", async () => {
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const log = document.querySelector('[class*="threadBody"]');
+    expect(log?.getAttribute("role")).toBe("log");
+    expect(log?.getAttribute("aria-live")).toBe("polite");
+    expect(log?.getAttribute("aria-relevant")).toBe("additions");
+    expect(log?.textContent).toContain("Written:");
+    expect(statusText()).toBe("");
+
+    cleanup();
+    const { onOpen, input: input2 } = renderBar({ runs: [] });
+    onOpen.mockResolvedValue({ kind: "refused", message: "Nope." });
+    fireEvent.change(input2, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input2, { key: "Enter" });
+    await act(async () => {});
+
+    const log2 = document.querySelector('[class*="threadBody"]');
+    expect(log2?.getAttribute("role")).toBe("log");
+    expect(log2?.textContent).toContain("Refused: Nope.");
+    expect(statusText()).toBe("");
+  });
+});
+
 describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
   /** `certificateGaps` answers one gap ("Welding", never-trained) for
    *  Operator 1 (op1) on Cell 1 (c1a) -- P1_SENTENCE's own person and cell
@@ -5460,8 +5953,13 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     );
   });
 
+  // S63-a review fix (CP-5, CLAUDE.md §4): `onOpen` is held pending -- the
+  // "· override: …" suffix (`runCommand`'s own `suffix` argument) lives only
+  // on the live, optimistic status line, never in `entry.ran`/the thread; a
+  // synchronous write would file (and clear) it in the same tick.
   it("CB-nc-2: a reason runs with the override on the resolved command -- onOpen receives it, the readout is suffixed", () => {
     const { onOpen, input } = renderBar(notCertifiedCtx("warn"));
+    onOpen.mockReturnValue(new Promise(() => {}));
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onOpen).not.toHaveBeenCalled();
@@ -5577,6 +6075,8 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     expect(statusText()).not.toContain("override");
   });
 
+  // S63-a review fix (CP-5, CLAUDE.md §4): `onOpen` is held pending -- see
+  // CB-nc-2's own identical note.
   it("CB-nc-7: a person failing BOTH gates is asked twice, and the readout names BOTH overrides", () => {
     // Uncertified for the cell AND not from its area -- the two gates run
     // one after the other (certificate first), so the sentence is answered
@@ -5587,6 +6087,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
       eligibilityPolicy: () => "warn" as const,
       outsideArea: () => true,
     });
+    onOpen.mockReturnValue(new Promise(() => {}));
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });

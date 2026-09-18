@@ -9,9 +9,20 @@
    scroll container, so it is chrome by the same reasoning that file's header
    comment gives). No colour introduced; `--ink-1` is never used (F-130). */
 
+/* S63-a (R-429): inside the launcher's now-resizable panel, this is the one
+   flex child that has to grow to fill it -- `min-height: 0` is required for
+   `.thread`'s own `flex: 1 1 auto` below to ever be allowed to grow past its
+   content size inside a flex column (the classic flexbox trap: without it,
+   the child's intrinsic height wins and the parent overflows instead of
+   scrolling). Outside the panel (a plain top-of-board bar, pre-S48-a's own
+   shape, still reachable when `conversation` is un-owned) this is a no-op:
+   there is nothing above it constraining a height, so `flex: 1 1 auto` has
+   nothing to grow INTO. */
 .bar {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: calc(4px * var(--chrome-scale, 1));
   padding: calc(8px * var(--chrome-scale, 1)) calc(16px * var(--chrome-scale, 1));
   background: var(--surface);
@@ -30,22 +41,42 @@
   width: 100%;
 }
 
+/* S63-a review fix (the maintainer, looking at the panel): full-strength
+   `--ink`, not the muted `--ink-2` this was before bubbles -- the status
+   line lives inside a board bubble now (`.bubble[data-side="board"]` below),
+   and the maintainer's own words were "no quieter ... variant for the
+   replies", the status line included. */
 .statusLine {
   margin: 0;
   min-height: 1.2em;
   font-size: calc(12px * var(--chrome-scale, 1));
-  color: var(--ink-2);
+  color: var(--ink);
 }
 
-/* R-427: the conversation thread above the input -- the finished turns of
-   the last day. A record, so it is quieter than the live status line and
-   bounded in height; the newest turn sits at the bottom, next to the answer
-   box. No new colour (F-130's rule stays). */
+/* R-427: the conversation area above the input -- the finished turns of the
+   last day, PLUS (S63-a) the current turn's own bubbles while it is still
+   open, bubbled exactly the same way (see `.bubble` below); the newest thing
+   (filed or live) sits at the bottom, next to the input. No new colour
+   (F-130's rule stays). Always rendered now (S63-a review fix), not only
+   when `history.length > 0` -- an empty thread shows its own hint bubble
+   instead of a blank box (`EMPTY_THREAD_HINT`, CP-6).
+
+   S63-a (R-429): this used to bound ITS OWN height with `.threadBody`'s
+   `max-height: 220px` regardless of how much room the panel actually had --
+   now the panel resizes, so this takes whatever SPARE height `.bar` above
+   has to give it (`flex: 1 1 auto`, `min-height: 0`, the same flexbox pair
+   `.bar`'s own comment explains) and `.threadBody` scrolls inside that, so a
+   taller panel shows more turns instead of the same fixed window. `.bar`
+   itself has no fixed height until a person resizes the panel
+   (`CommandLauncher.tsx`'s own `size` doc), so with few turns this simply
+   sizes to its content -- the flex-grow only matters once there IS spare
+   height to give. */
 .thread {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 4px;
-  margin-bottom: 8px;
   min-width: 0;
 }
 
@@ -68,11 +99,19 @@
   cursor: pointer;
 }
 
+/* S63-a: `flex: 1 1 auto` + `min-height: 0` (see `.thread`'s own comment) --
+   this is the element that actually scrolls. `justify-content: flex-end`
+   is the maintainer's own fix (looking at the panel): with few turns this
+   bottom-anchors them against the input instead of the top of the panel, so
+   any blank space in a tall or lightly-used panel sits ABOVE the
+   conversation, never below it. */
 .threadBody {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 8px;
-  max-height: 220px;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -80,12 +119,58 @@
 .turn {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   font-size: calc(11px * var(--chrome-scale, 1));
-  color: var(--ink-2);
 }
 
-.turnYou,
+/*
+ * R-428: A FINISHED TURN IS TWO COLOURS OF BUBBLE, NOT TWO LINES OF PREFIXED
+ * TEXT. `data-side` (never a class, so a pin can read it without the CSS
+ * module's hash -- `commandBar.test.tsx`'s own convention for this) carries
+ * WHICH side a bubble is on. The CURRENT turn (the `sentence`/status-line
+ * bubbles further down this file) uses the exact same class and attribute,
+ * never a second definition of what a bubble looks like (CLAUDE.md §4: a
+ * copy is a bug with a delay on it) -- so the question, the live status
+ * (with its buttons), a written/refused/waiting/cancelled result, and a
+ * shape hint are ALL the one `[data-side="board"]` rule below, full
+ * strength, never a quieter or fill-less variant of it.
+ *
+ * S63-a review fix (the maintainer, looking at the panel just after this
+ * landed): "The bubbles from the board are not popping enough from the
+ * background" -- `--page` (#f9f9f7) on the panel's own `--surface`
+ * (#fcfcfb) is a three-shade difference, the exact gap `tokens.css`'s own
+ * comment on `--page`/`--surface` already names as too close to read as two
+ * things. `--grid` (#e1e0d9) is the token this file chose instead: it is a
+ * fill, not the hairline border it usually draws, so a person's bubble
+ * (`--ink`, next to black) and the board's (`--grid`, a visible warm grey)
+ * read as two distinct bubbles rather than one dark one and a shade of the
+ * page -- confirmed in `test-results/s63-chat-panel.png`. The other option
+ * the maintainer offered, `--ring` (rgba ink 0.1) over `--surface` with a
+ * `--grid` border, was tried first and read as barely-there next to the
+ * `--ink` bubble at this component's own font size; `--grid` alone did not
+ * need the fallback. No border on the board bubble any more either -- a
+ * `--grid` border around a `--grid` fill is invisible, and the fill alone is
+ * now the whole contrast.
+ */
+.bubble {
+  max-width: 92%;
+  padding: 4px 8px;
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+
+.bubble[data-side="you"] {
+  align-self: flex-end;
+  background: var(--ink);
+  color: var(--avatar-fg);
+}
+
+.bubble[data-side="board"] {
+  align-self: flex-start;
+  background: var(--grid);
+  color: var(--ink);
+}
+
 .turnBoard,
 .turnChips,
 .turnResult {
@@ -93,14 +178,11 @@
   overflow-wrap: anywhere;
 }
 
-.turnResult:empty {
-  display: none;
-}
-
 .turnChips {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  margin-top: 4px;
 }
 
 .chip {
@@ -116,13 +198,13 @@
 }
 
 /* F-162: the sentence the answer box took out of the input, kept readable
-   while the question stands. Quieter than the status line itself (the
-   question is what to read; this is only what it is about) -- same tokens,
-   no new colour (F-130's rule stays). */
+   while the question stands (and, since R-437, after it too -- the CURRENT
+   turn's own bubble, same lifecycle the status line beside it has). Quieter
+   than the status line itself (the question is what to read; this is only
+   what it is about) -- same tokens, no new colour (F-130's rule stays). */
 .saidLine {
   margin: 0;
   font-size: calc(11px * var(--chrome-scale, 1));
-  color: var(--ink-2);
   opacity: 0.8;
   overflow-wrap: anywhere;
 }

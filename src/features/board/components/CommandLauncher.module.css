@@ -39,12 +39,20 @@
   box-shadow: 0 2px 8px rgba(11, 11, 11, 0.12);
 }
 
+/* S63-a (R-429): the panel's width/height are now the INLINE `size` state
+   `CommandLauncher.tsx` sets (its own remembered, resized dimensions) --
+   this rule only supplies the size BEFORE that first inline style lands
+   (there is none: the inline style is present from the panel's first
+   render) and the floor `max-width`/`max-height` keep it from ever
+   overflowing the viewport on a screen smaller than the remembered size,
+   belt and braces alongside `panelSize.ts`'s own `clampPanelSize`. */
 .panel {
   position: fixed;
   right: 18px;
   bottom: 76px;
   width: 372px;
   max-width: calc(100% - 36px);
+  max-height: calc(100% - 94px);
   background: var(--surface);
   border: 1px solid var(--grid);
   border-radius: 8px;
@@ -52,12 +60,14 @@
   z-index: 80;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 10px 12px 0;
   font-size: 12px;
   color: var(--muted);
@@ -67,4 +77,58 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   font-size: 10.5px;
+}
+
+/* R-429: the panel's one remaining header control -- no border-radius
+   alongside a border (`fieldStandard.test.ts`'s own rule), so this is
+   plainly not the app's editable-box skin, just an underlined word the same
+   shape `CommandBar.module.css`'s `.threadClear` already uses. */
+.closeButton {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* S63-a: three invisible drag strips, anchored to the edges a bottom-right
+   panel can actually grow from. Sized generously enough to grab with a
+   mouse (10px) without stealing space from the header or the thread
+   underneath it -- `z-index` above the panel's own content so a drag that
+   starts a pixel inside the border still lands on the handle, not the
+   thread's scrollbar. `touch-action: none` stops the browser treating the
+   drag as a scroll/zoom gesture on a touch screen. */
+.resizeCorner,
+.resizeTop,
+.resizeLeft {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+}
+
+.resizeCorner {
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+.resizeTop {
+  top: 0;
+  left: 14px;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.resizeLeft {
+  top: 14px;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
 }

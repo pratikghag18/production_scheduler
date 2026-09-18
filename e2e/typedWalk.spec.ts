@@ -87,6 +87,123 @@ function statusLine(page: Page): Locator {
   return page.locator('p[aria-live="polite"]');
 }
 
+/**
+ * S63-a review fix (CP-5, the maintainer's own screenshot review, 17 Sept):
+ * once a turn is filed (`commandConversation.ts`'s own `fileTurn`), the live
+ * status line goes back to empty the SAME tick the write settles -- for a
+ * REAL write against the local stack that can be fast enough that this
+ * spec's own poll never catches the readout live at all. The answer is just
+ * as real read from the thread's own last turn instead (its own `asked`
+ * bubble for a plain readout the resolver worded itself -- `nothing_to_do`
+ * -- and its own result bubble, `Written: <readout>`, for an ordinary write,
+ * prefix stripped since no regex here was ever written to expect it), so
+ * `expectAnswered` below checks both in one poll rather than the live line
+ * alone.
+ *
+ * Reviewer fix (S63 review): a bare "last turn" read has no proof it BELONGS
+ * to the sentence just submitted -- a slow write racing a fast subsequent
+ * poll could still be reading the PREVIOUS turn's own result and pass for
+ * the wrong reason. `expectAnswered` below takes a `ThreadSnapshot` (the
+ * turn count) from BEFORE the sentence was submitted and only trusts the
+ * thread once that count has actually grown AND the new last turn's own
+ * `heard` bubble is the exact sentence just typed -- otherwise it keeps
+ * polling the live line alone.
+ */
+/**
+ * The FILED turns only. The bar draws the turn still in flight inside the
+ * same thread body with the same `.turn` class (so its two bubbles space the
+ * way a filed turn's do), and that live turn is the one with the
+ * `aria-live` status paragraph in it -- so it is excluded here, or a
+ * snapshot taken while a previous turn's live line still stood counted one
+ * too many and the thread was never trusted (session 178, the typed walk
+ * failing on the first sentence after a lot).
+ */
+function threadTurns(page: Page): Locator {
+  return page.locator('[class*="threadBody"] > [class*="turn"]:not(:has([aria-live]))');
+}
+
+interface ThreadSnapshot {
+  count: number;
+}
+
+async function snapshotThread(page: Page): Promise<ThreadSnapshot> {
+  return { count: await threadTurns(page).count() };
+}
+
+/**
+ * The text of `loc` if it is on the page NOW, else null -- never a wait.
+ *
+ * Session 178 (the developer, after the walk failed twice on the same two
+ * readouts): a filed turn does not always carry every bubble. A plain
+ * readout such as "Cell 4 has nobody on it …" has an `asked` bubble and NO
+ * result bubble (`turnResultLine` is "" for it, and the bar renders none),
+ * so `locator.textContent()` on the missing one waited with no timeout
+ * inside `expectAnswered`'s poll until the whole entry's budget was gone,
+ * and the walk reported the bar had said "" -- while the trace file showed
+ * the right answer filed within ten seconds. `count()` does not wait.
+ */
+async function textIfPresent(loc: Locator): Promise<string | null> {
+  if ((await loc.count()) === 0) return null;
+  return loc
+    .first()
+    .textContent({ timeout: ACTION_TIMEOUT_MS })
+    .catch(() => null);
+}
+
+async function heardTextOfLastTurn(page: Page): Promise<string | null> {
+  const turn = threadTurns(page).last();
+  if ((await turn.count()) === 0) return null;
+  return textIfPresent(turn.locator('[data-side="you"]'));
+}
+
+async function lastFiledTexts(page: Page): Promise<string[]> {
+  const turn = threadTurns(page).last();
+  if ((await turn.count()) === 0) return [];
+  const asked = await textIfPresent(turn.locator('[class*="turnBoard"]'));
+  const result = await textIfPresent(turn.locator('[class*="turnResult"]'));
+  const out: string[] = [];
+  if (asked) out.push(asked);
+  if (result) out.push(result.startsWith("Written: ") ? result.slice("Written: ".length) : result);
+  return out;
+}
+
+/**
+ * Replaces a bare `expect(statusLine(page)).toHaveText(pattern, ...)` for a
+ * plain readout/`nothing_to_do` regex -- the ONE shape CP-5 can file (and
+ * clear the live line for) before this spec's own poll runs again. A
+ * standing QUESTION never auto-files (nothing has answered it yet), so
+ * `entry.expect.question` above this function's own two call sites keeps
+ * using `statusLine` directly -- there is nothing for it to have moved to.
+ *
+ * `before` and `heard` are the STALE-TURN guard: the thread is only ever
+ * trusted once `threadTurns(page).count()` exceeds `before.count` (a NEW
+ * turn actually landed, not the one that already stood there) AND that new
+ * turn's own `heard` bubble equals `heard` (the sentence THIS call is
+ * waiting on, never a leftover from the entry before it).
+ */
+async function expectAnswered(
+  page: Page,
+  pattern: RegExp,
+  before: ThreadSnapshot,
+  heard: string,
+): Promise<void> {
+  await expect(async () => {
+    const live = await currentStatusText(page);
+    if (pattern.test(live)) return;
+    const afterCount = await threadTurns(page).count();
+    if (afterCount > before.count) {
+      const lastHeard = await heardTextOfLastTurn(page);
+      if (lastHeard === heard) {
+        const filed = await lastFiledTexts(page);
+        if (filed.some((text) => pattern.test(text))) return;
+      }
+    }
+    throw new Error(
+      `neither the live status ("${live}") nor a new thread turn for ${JSON.stringify(heard)} matched ${pattern}`,
+    );
+  }).toPass({ timeout: ENTRY_TIMEOUT_MS, intervals: [250] });
+}
+
 /** The bar's own candidate-button strip (`CommandBar.tsx`: a `div` whose
  *  CSS-Modules class carries "candidates", rendered right after the status
  *  line) -- scoped so a near-miss/"Which part?" button lookup by product
@@ -260,6 +377,10 @@ async function runEntry(page: Page, entry: Sentence): Promise<EntryResult> {
   // Progress, timestamped: a walk this long that stops somewhere must say
   // WHICH sentence it stopped on without waiting for the table at the end.
   console.log(`[${new Date().toISOString()}] SAY: ${entry.say}`);
+  // Reviewer fix (S63 review): taken BEFORE the sentence is even submitted,
+  // so `expectAnswered` below can tell a genuinely NEW turn (this sentence's
+  // own) apart from a stale one already sitting in the thread.
+  const before = await snapshotThread(page);
   await submit(page, entry.say);
   if (typeof entry.expect === "object" && "button" in entry.expect) {
     const button = candidateButtons(page).filter({ hasText: entry.expect.button }).first();
@@ -287,7 +408,7 @@ async function runEntry(page: Page, entry: Sentence): Promise<EntryResult> {
       await button.click({ timeout: ACTION_TIMEOUT_MS, force: true });
     });
     try {
-      await expect(statusLine(page)).toHaveText(entry.expect.then, { timeout: ENTRY_TIMEOUT_MS });
+      await expectAnswered(page, entry.expect.then, before, entry.say);
     } catch {
       const after = await recordMismatch(page, entry, `after pressing "${entry.expect.button}"`);
       return { ...after, barSaid };
@@ -299,7 +420,7 @@ async function runEntry(page: Page, entry: Sentence): Promise<EntryResult> {
     return { say: entry.say, barSaid, written, note: entry.note, listing };
   }
   try {
-    await expect(statusLine(page)).toHaveText(entry.expect, { timeout: ENTRY_TIMEOUT_MS });
+    await expectAnswered(page, entry.expect, before, entry.say);
   } catch {
     return recordMismatch(page, entry, "the bar answered this sentence with something else");
   }

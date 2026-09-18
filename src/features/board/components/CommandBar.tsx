@@ -516,6 +516,13 @@ export type ConfirmWordResult = "created" | "needs-decision" | "none";
 
 const PLACEHOLDER = "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2";
 
+/** S63-a review fix (the maintainer): the empty-thread hint (CP-6) -- one
+ *  constant so the JSX below and `commandBar.test.tsx`'s own pin never drift
+ *  apart (CLAUDE.md §4). Not a `Status`, not a `HistoryTurn`: it is never
+ *  set into the store and never reaches the trace file. */
+const EMPTY_THREAD_HINT =
+  "Tell the board what to do. For example: clear Cell 1 today, or assign Sam Patel to Cell 1 from 8 to 12.";
+
 /** The readout's day is an ISO token (`resolve.ts` cannot import the date
  *  seam); this is the one place it is rendered through it (brief §3). */
 const ISO_DAY = /\d{4}-\d{2}-\d{2}/;
@@ -669,8 +676,17 @@ function isTargetOnBoard(
  * above already says what happened.
  */
 function turnResultLine(turn: HistoryTurn): string {
-  if (turn.ran.length > 0) return `Written: ${turn.ran.join("; ")}`;
   const outcome = turn.outcome;
+  // CP-7 (session 178): a LOT's last word is its own sentence -- "Done: N
+  // commands." or "Did k of N; the next failed: … The k done stayed: …" --
+  // and it is the thread's result line, the readouts that landed after it.
+  // Before this, `ran` won and a lot that stopped at step two read
+  // "Written: <step one>" with nothing saying why it stopped (F-154's
+  // lesson, lost again on the way from the live line to the thread).
+  if (outcome !== null && (outcome.startsWith("Done: ") || outcome.startsWith("Did "))) {
+    return turn.ran.length > 0 ? `${outcome} Written: ${turn.ran.join("; ")}` : outcome;
+  }
+  if (turn.ran.length > 0) return `Written: ${turn.ran.join("; ")}`;
   if (outcome === null) return "";
   if (outcome.startsWith("popup: ")) return `Waiting: ${outcome.slice("popup: ".length)}`;
   if (outcome.startsWith("refused: ")) return `Refused: ${outcome.slice("refused: ".length)}`;
@@ -777,6 +793,29 @@ function failureToStatus(failure: ParseFailure): Status {
   return { kind: "shape", message: shape };
 }
 
+/**
+ * S63-a (R-434, brief §5): THE REFUSAL THAT BORROWS THE DRAG'S WORDS.
+ *
+ * A capacity refusal reaches the bar as `useSchedulerToast.ts`'s own
+ * `CapacityExceeded` message -- accurate for the DRAG, which really can
+ * "try the split again" (D61's proactive probe already offers one), but the
+ * bar has no split to retry: a sentence that runs into the same cap can only
+ * be re-typed. Matched on the message's SHAPE (name, peak, cap), not on the
+ * whole string, so a later wording change to the toast that keeps the same
+ * numbers is still caught, and every OTHER writer message (`NotEligible`,
+ * `RunOverlap`, an ordinary server refusal, ...) passes through untouched --
+ * this is the one shape the bar itself has an opinion about.
+ */
+const CAP_REFUSAL =
+  /^(.+) would reach (\d+)% \(cap (\d+)%\)\. Someone else changed their load — try the split again\.$/;
+
+function rewriteCapRefusal(message: string): string {
+  const m = CAP_REFUSAL.exec(message);
+  if (!m) return message;
+  const [, name, peak, cap] = m;
+  return `${name} would be over the cap today (${peak}% of ${cap}%). Nothing changed.`;
+}
+
 export function CommandBar({
   ctx,
   dateFormat,
@@ -818,15 +857,27 @@ export function CommandBar({
   const setStatus = (next: Status | null | ((prev: Status | null) => Status | null)): void =>
     store.getState().setStatus(next);
   const history = useStore(store, (s) => s.history);
+  // S63-a review fix (the maintainer, looking at the panel): A FINISHED TURN
+  // READS ONCE, NOT TWICE. `sentence`/`status` used to keep showing a
+  // completed turn's own bubbles right below the thread even after
+  // `finishTrace` had already filed the exact same turn into `history` --
+  // "assign Sam Patel to Cell 1 from 8 to 12" appeared as a written turn in
+  // the thread AND again as the live "You said" + readout underneath it.
+  // Fixed at the source now (`commandConversation.ts`'s own `fileTurn`
+  // clears `sentence`/`status` back to `null` the moment a turn is actually
+  // filed), so this component reads them exactly as before -- there is
+  // nothing "live" left to gate here once a turn is filed, because the
+  // store itself no longer holds it.
   const [listening, setListening] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  // R-427: the thread scrolls to the bottom -- the newest turn is the one
-  // being talked about, and the answer box is directly under it.
+  // R-427: the thread scrolls to the bottom -- the newest turn (or the live
+  // one still open, S63-a) is the one being talked about, and the input sits
+  // directly under it now.
   const threadRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = threadRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [history]);
+  }, [history, sentence, status]);
   // The last parsed command, kept so a candidate button can substitute one
   // field and so a run/job-question button can set `attach`/`existing`
   // without retyping the sentence (brief §6). Any edit to the input
@@ -918,7 +969,14 @@ export function CommandBar({
    *  entry holds and clears it. F-163 moved the post itself into the
    *  conversation store (`commandConversation.ts`), so an entry can outlive
    *  this component exactly as the rest of the conversation now does; this
-   *  wrapper keeps the name every call site below already reads by. */
+   *  wrapper keeps the name every call site below already reads by.
+   *
+   *  S63-a review fix (CP-5): the moment a turn is actually FILED (never
+   *  just "ended" -- `fileOpenTurn`'s own "Waiting: …" hand-off ends nothing
+   *  and must keep showing) is `commandConversation.ts`'s own `fileTurn`,
+   *  which is where `sentence`/`status` are cleared back to idle now, so
+   *  every path that reaches it (this wrapper, `settleTurn`, a popup's
+   *  reporter) gets the fix once, not re-implemented per caller. */
   function finishTrace(): void {
     finishTraceIn(store);
   }
@@ -1034,28 +1092,19 @@ export function CommandBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  /**
-   * F-162: the answer box, in ONE place rather than at every `setStatus` call
-   * site (the same reasoning the `onHighlight` effect above is built on).
-   * When a question starts standing, the sentence in the box is remembered
-   * and the box is emptied for the answer; when the question is answered,
-   * replaced by a readout, or cleared, the remembered sentence goes with it.
-   *
-   * Keyed on `status` alone: the person typing the answer changes `text`, not
-   * `status`, so this never fires mid-answer and never takes a keystroke back.
-   * A question REPLACED by another question ("Say the reason, not yes.",
-   * "Which one?") leaves the remembered sentence exactly where it was --
-   * `sentence` is only ever set when there is not one already.
-   */
-  useEffect(() => {
-    const st = store.getState();
-    if (answerTakes(status) === null) {
-      if (st.sentence !== null) st.set({ sentence: null });
-      return;
-    }
-    if (st.sentence === null) st.set({ sentence: st.text, text: "" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  // F-162's own answer-box effect (S61-a..S62-b) lived here: it emptied the
+  // box and remembered the sentence keyed on `status` alone, the moment a
+  // question that TAKES an answer started standing. R-437 (S63-a, the
+  // maintainer) replaced it -- Enter now empties the box and sets `sentence`
+  // ITSELF, at the exact points `submitText` (and its one reason-answering
+  // fall-through) treats `value` as something to run, rather than waiting
+  // for the resulting `status` to say whether an answer box is needed. See
+  // `submitText`'s own comment where it now does this: `sentence` is set
+  // ONCE per sentence and never cleared back to `null` again by anything in
+  // this file, so a written single's own bubble reads exactly like an
+  // unreadable one's (CB-ent-1/CB-ent-2) and a question's still reads like it
+  // always did (CB-ans-1..4, unchanged) -- there is no separate "answer box"
+  // moment left for an effect to catch.
 
   // S59 (R-419): re-runs a "Show that day" press's held command once the
   // window has actually moved -- `ctx` is the SAME object from one render to
@@ -1196,7 +1245,7 @@ export function CommandBar({
           entry.ran.push(result.readout ?? readout);
           entry.outcome = "written";
         } else if (result.kind === "refused") {
-          entry.outcome = `refused: ${result.message}`;
+          entry.outcome = `refused: ${rewriteCapRefusal(result.message)}`;
         } else {
           entry.outcome = "cancelled";
         }
@@ -1220,9 +1269,22 @@ export function CommandBar({
    *
    * `value` is the word as said or typed -- recorded as the entry's `answered`
    * before the entry is posted, the same field a candidate button sets.
+   *
+   * S63-a review fix (CP-5): "Left it." is set on `status` AFTER the entry
+   * is filed (below), so the live area (gated on `hasOpenTrace`) never shows
+   * it -- the same instant it would appear, the turn is already filed and
+   * the live bubbles stop rendering. Silence there would be exactly the bug
+   * F-166 fixed (a cancel indistinguishable from one never heard), so the
+   * entry's own `outcome` is set to `"cancelled"` BEFORE `finishTrace`,
+   * which `turnResultLine` already renders as "Cancelled" (the same word a
+   * pop-up's own cancel uses) -- the thread is where it reads now, not the
+   * live line.
    */
   function cancelStanding(value: string): void {
-    if (traceRef.current) traceRef.current.answered = value;
+    if (traceRef.current) {
+      traceRef.current.answered = value;
+      traceRef.current.outcome = "cancelled";
+    }
     finishTrace();
     setStatus({ kind: "shape", message: "Left it." });
     setText("");
@@ -1285,7 +1347,7 @@ export function CommandBar({
           entry.ran.push(readout);
           entry.outcome = "written";
         } else {
-          entry.outcome = `refused: ${outcome.message}`;
+          entry.outcome = `refused: ${rewriteCapRefusal(outcome.message)}`;
         }
       }
       if (entry) settleTurn(store, entry);
@@ -1667,35 +1729,49 @@ export function CommandBar({
       // four readouts and NOTHING said why the fourth stopped. `asked`
       // already holds the lot's "N commands ready" question, so the result
       // goes in `outcome` -- the same sentence the status line shows.
+      // CR-1 (reviewer fix, S63 review): `result.error` is "the same wording
+      // a toast would show" (`LotResult`'s own doc) -- the identical
+      // drag-borrowed capacity sentence `rewriteCapRefusal` exists to catch
+      // on the single-sentence path (brief §5) reaches the bar this way too,
+      // and was never rewritten here: a lot whose failing step was a
+      // capacity refusal showed "try the split again" verbatim, the same bug
+      // brief §5 named, just through the lot door instead of the single one.
+      const lotError = result.error === null ? null : rewriteCapRefusal(result.error);
+      // F-154 review fix: say what actually stood, never claim a revert
+      // that never happened -- the steps before the failure wrote for
+      // real and are still on the board, so they are named here.
+      // `result.error` no longer carries the drag's own "— reverted."
+      // wording at all (`useSchedulerToast.ts`'s own F-154 fix: that
+      // suffix is now appended only by a caller that genuinely reverted
+      // something, never baked into `buildSchedulerErrorToast`'s message
+      // itself), so this reads it verbatim -- nothing to strip here any
+      // more. CR-1: except the ONE shape `rewriteCapRefusal` rewrites
+      // (`lotError`, above) -- the bar has no split to offer here either.
+      const stayedReadouts = resolved.slice(0, result.done).map((r) => renderReadout(r.readout));
+      const stayed =
+        stayedReadouts.length > 0
+          ? ` The ${result.done} done stayed: ${stayedReadouts.join("; ")}.`
+          : "";
       const lotOutcome =
-        result.error === null
+        lotError === null
           ? `Done: ${n} commands.`
-          : `Did ${result.done} of ${n}; the next failed: ${result.error}`;
+          : `Did ${result.done} of ${n}; the next failed: ${lotError}${stayed}`;
       if (traceRef.current) traceRef.current.outcome = lotOutcome;
-      finishTrace();
+      // CP-7 (session 178, found by the typed walk): the status is set
+      // BEFORE the entry is finished, the same order `settleWrite` uses, so
+      // `fileTurn` clears it and the lot's last word is on screen ONCE, in
+      // the thread. It used to be set after, so "Done: 2 commands." stayed
+      // on the live line as a second copy of the filed turn, and the walk's
+      // count of turns was one too high for every sentence that followed a
+      // lot. The trace's `outcome` and the thread's result line are the same
+      // sentence, "stayed" clause included.
       if (result.error === null) {
-        setStatus({ kind: "readout", message: `Done: ${n} commands.` });
+        setStatus({ kind: "readout", message: lotOutcome });
         setText("");
       } else {
-        // F-154 review fix: say what actually stood, never claim a revert
-        // that never happened -- the steps before the failure wrote for
-        // real and are still on the board, so they are named here.
-        // `result.error` no longer carries the drag's own "— reverted."
-        // wording at all (`useSchedulerToast.ts`'s own F-154 fix: that
-        // suffix is now appended only by a caller that genuinely reverted
-        // something, never baked into `buildSchedulerErrorToast`'s message
-        // itself), so this reads it verbatim -- nothing to strip here any
-        // more.
-        const stayedReadouts = resolved.slice(0, result.done).map((r) => renderReadout(r.readout));
-        const stayed =
-          stayedReadouts.length > 0
-            ? ` The ${result.done} done stayed: ${stayedReadouts.join("; ")}.`
-            : "";
-        setStatus({
-          kind: "shape",
-          message: `Did ${result.done} of ${n}; the next failed: ${result.error}${stayed}`,
-        });
+        setStatus({ kind: "shape", message: lotOutcome });
       }
+      finishTrace();
     });
   }
 
@@ -1867,7 +1943,15 @@ export function CommandBar({
       return;
     }
     const rendered = formatCommand(next);
-    setText(rendered);
+    // S63-a review fix (R-437, CB-ent-4): a candidate answer is still an
+    // ANSWER, not a new sentence -- but it is also still a box that must end
+    // up empty (the maintainer's own words: "the box is empty after every
+    // Enter and every button press"). The rendered, now-complete form used
+    // to go straight into the input (`setText(rendered)`); it goes into
+    // `sentence` instead -- the person's own bubble -- so the box empties
+    // and what the person's turn now reads as is the completed sentence,
+    // never a half-typed one.
+    store.getState().set({ sentence: rendered, text: "" });
     const parsed = parseCommand(rendered);
     if (!parsed.ok) {
       heldRef.current = null;
@@ -1905,7 +1989,10 @@ export function CommandBar({
       return;
     }
     const rendered = formatCommand(next);
-    setText(rendered);
+    // R-437 (CB-ent-4): same as `pickCandidate`'s own identical fix -- the
+    // completed sentence goes into the person's bubble, never back into the
+    // box.
+    store.getState().set({ sentence: rendered, text: "" });
     const parsed = parseCommand(rendered);
     if (!parsed.ok) {
       heldRef.current = null;
@@ -2736,6 +2823,12 @@ export function CommandBar({
         if (nextOptions.areaReason !== undefined) {
           suffixParts.push(` · area override: ${nextOptions.areaReason}`);
         }
+        // R-437: this Enter answered the standing question with a reason --
+        // never a new sentence (`sentence` already names the ORIGINAL one,
+        // untouched here), but still an Enter, so the box empties for
+        // whatever `runCommand` below turns into (a write, another
+        // question, a refusal).
+        setText("");
         runCommand(command, suffixParts.join(""), nextOptions);
         return;
       }
@@ -2843,6 +2936,14 @@ export function CommandBar({
         // return before this, so R-384's spoken yes into a sentence-opened
         // create pop-up still works exactly as it did.
         startTrace(value, by);
+        // R-437 IS unconditional (reviewer fix, S63 review -- settles the
+        // judgment call an earlier comment here left open: "whether written,
+        // refused or standing" is the maintainer's own wording for what R-437
+        // covers, and a bare word with nothing standing is answered here the
+        // same as any other sentence). The word goes to the thread as the
+        // person's own bubble, same as any other sentence -- CB-yes-8 below
+        // no longer keeps it in the box.
+        store.getState().set({ sentence: value, text: "" });
         if (traceRef.current) {
           traceRef.current.model = { skipped: "no question standing" };
           traceRef.current.read = isCancel ? "cancel word" : "confirm word";
@@ -2909,6 +3010,19 @@ export function CommandBar({
     // of those is a NEW sentence, only an answer to (or a cancel of) the
     // one already open.
     startTrace(value, by);
+    // R-437 (the maintainer): ENTER ALWAYS EMPTIES THE BOX NOW, whatever this
+    // sentence turns out to do -- write, refuse, ask, fail to parse, or start
+    // a lot (CB-ent-1, CB-ent-2). `sentence` is unconditionally overwritten
+    // here, never guarded on "already set": `startTrace` above just flushed
+    // whatever turn was open before into `history` (its own doc -- "a new
+    // sentence" is one of the three life-end triggers), so any OLD bubble is
+    // already a finished, past turn and this is a fresh one starting. It is
+    // never cleared back to `null` again once set here (unlike the pre-R-437
+    // F-162 effect this replaces) -- it keeps its bubble exactly as long as
+    // the status line beside it keeps showing this sentence's own outcome,
+    // and both are only ever replaced by the NEXT sentence reaching this same
+    // line.
+    store.getState().set({ sentence: value, text: "" });
     // F-162: a new sentence ends whatever stood. `handleChange` already does
     // this for a TYPED one (it can see the text parse), but a spoken final
     // transcript arrives here without ever passing through it, so a lot left
@@ -3095,12 +3209,17 @@ export function CommandBar({
         // S51 (brief §2 item 1): drops a standing lot exactly as it drops a
         // single question.
         lotRef.current = null;
-        // F-162: the sentence the answer box emptied out of the input comes
-        // BACK, so it can be edited rather than retyped. Done before
-        // `setStatus(null)` so the answer-box effect above sees nothing left
-        // to tidy.
-        const remembered = store.getState().sentence;
-        if (remembered !== null) store.getState().set({ text: remembered, sentence: null });
+        // R-437 (S63-a, CB-ent-3) CONTRACT CHANGED (CLAUDE.md §4): CB-ans-5
+        // pinned that the sentence the answer box emptied out of the input
+        // came BACK on Escape, so it could be edited rather than retyped.
+        // The maintainer's own words for R-437 are the opposite: "Escape ...
+        // no longer puts the sentence back into the box -- it stays readable
+        // in its bubble ... the box stays empty." `finishTrace` below files
+        // this turn (CP-5: `fileTurn` clears the now-live `sentence`/`status`
+        // back to `null` the moment it does), so what was readable in the
+        // live bubble is readable in the THREAD's own copy of this turn
+        // instead -- there is nothing left to restore into the box either
+        // way; CB-ent-3 replaces CB-ans-5 below.
         // S60-b: Escape on a standing question is the third trigger this
         // fixes -- the question's own `asked` was written when it was
         // shown, but nothing ever closed the entry (a pick would have, via
@@ -3117,15 +3236,26 @@ export function CommandBar({
     }
   }
 
+  // S63-a review fix (R-437, CB-ent-3/4): true while `sentence` is still
+  // worth its own bubble -- something to show, and never when the question
+  // standing already quotes it verbatim (the pre-existing "nothing is said
+  // twice" rule, unchanged). Once a turn is filed, `sentence`/`status` are
+  // ALREADY `null` (`commandConversation.ts`'s own `fileTurn`, CP-5) -- there
+  // is no separate "is this still live" flag to check here.
+  const showSaidLine =
+    sentence !== null && sentence !== "" && !(status?.message ?? "").includes(sentence);
+
   return (
     <div className={styles.bar}>
       {/* R-427: the thread -- every finished turn of the last day for this
-          person on this plant, oldest first, scrolled to the bottom. A
-          RECORD, not a control: nothing in it is clickable (the chips are
-          spans), so the only live buttons on screen are the CURRENT
-          question's, below. */}
-      {history.length > 0 && (
-        <div className={styles.thread}>
+          person on this plant, oldest first, scrolled to the bottom, PLUS
+          (S63-a) the current turn's own live bubbles while it is still open
+          -- one scrolling column, so the newest thing (filed or not) always
+          sits directly above the input. A record, not a control: nothing
+          FILED is clickable (the chips are spans); the only live buttons on
+          screen are the CURRENT question's, below. */}
+      <div className={styles.thread}>
+        {history.length > 0 && (
           <div className={styles.threadHead}>
             <span>Earlier today</span>
             <button
@@ -3136,34 +3266,161 @@ export function CommandBar({
               Clear history
             </button>
           </div>
-          <div className={styles.threadBody} ref={threadRef}>
-            {history.map((turn, i) => (
+        )}
+        {/*
+          CR-4 (reviewer fix, S63 review): THE ANNOUNCEMENT WAS LOST. `status`
+          set the readout/refusal text and `fileTurn` cleared it back to
+          `null` in the SAME tick (`settleWrite`'s synchronous branch) -- React
+          batches both, so the `<p aria-live>` below never actually held a
+          finished turn's own words at any point a screen reader could catch,
+          and the bubble it moved to (a plain `div`) had no live semantics of
+          its own. `role="log"` + `aria-live="polite"` + `aria-relevant="additions"`
+          here is the standard chat-log pattern instead: every turn APPENDED
+          to this element (a new child of `history.map` below) is announced
+          on its own, which is every turn there is, filed or not -- no second
+          hidden live region, no deferred clear. `status`'s own `aria-live`
+          keeps its job for what is genuinely still open (a question, a
+          shape hint, "Reading…", "Working…") -- CP-5 already means it holds
+          nothing else. The empty-state hint (`EMPTY_THREAD_HINT`, CP-6) is a
+          sibling AFTER this element, not a child of it, precisely so it is
+          never announced as though it were a turn.
+        */}
+        <div
+          className={styles.threadBody}
+          ref={threadRef}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+        >
+          {history.map((turn, i) => {
+            const result = turnResultLine(turn);
+            return (
               <div className={styles.turn} key={`${turn.at}-${i}`}>
-                <p className={styles.turnYou}>You: {turn.heard}</p>
-                {turn.asked !== null && <p className={styles.turnBoard}>Board: {turn.asked}</p>}
-                {turn.offered.length > 0 && (
-                  <p className={styles.turnChips}>
-                    {turn.offered.map((label, j) => (
-                      <span
-                        key={`${label}-${j}`}
-                        className={
-                          turn.answered === label
-                            ? `${styles.chip} ${styles.chipChosen}`
-                            : styles.chip
-                        }
-                      >
-                        {label}
-                        {turn.answered === label ? " ✓" : ""}
-                      </span>
-                    ))}
-                  </p>
+                {/* R-428: two colours, one per side -- the SIDE says who,
+                    not a "You: "/"Board: " prefix any more. */}
+                <div className={styles.bubble} data-side="you">
+                  {turn.heard}
+                </div>
+                {turn.asked !== null && (
+                  <div className={styles.bubble} data-side="board">
+                    <p className={styles.turnBoard}>{turn.asked}</p>
+                    {/* R-428: the offered chips sit INSIDE the board's own
+                        bubble now, the chosen one marked -- they used to be
+                        a separate line below it. */}
+                    {turn.offered.length > 0 && (
+                      <p className={styles.turnChips}>
+                        {turn.offered.map((label, j) => (
+                          <span
+                            key={`${label}-${j}`}
+                            className={
+                              turn.answered === label
+                                ? `${styles.chip} ${styles.chipChosen}`
+                                : styles.chip
+                            }
+                          >
+                            {label}
+                            {turn.answered === label ? " ✓" : ""}
+                          </span>
+                        ))}
+                      </p>
+                    )}
+                  </div>
                 )}
-                <p className={styles.turnResult}>{turnResultLine(turn)}</p>
+                {result !== "" && (
+                  <div className={styles.bubble} data-side="board">
+                    <p className={styles.turnResult}>{result}</p>
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
+            );
+          })}
+          {/* R-428/S63-a: the CURRENT turn, reading the same way a filed one
+              does -- the sentence a right bubble, the live status a left
+              one, the live candidates inside IT -- but ONLY while it is
+              still open; the instant it is filed, `sentence`/`status` are
+              already `null` (`fileTurn`, CP-5) and this whole block stops
+              rendering on its own, no separate flag to check. F-162:
+              `sentence` is kept readable while a question stands, never
+              inside the `aria-live` status line itself (which is the
+              question, and is what every pin in `commandBar.test.tsx`
+              reads). Wrapped in the SAME `.turn` class a filed turn uses, so
+              the gap between its own two bubbles matches (never the wider
+              gap between turns). */}
+          {(showSaidLine || status !== null) && (
+            <div className={styles.turn}>
+              {showSaidLine && (
+                <div className={styles.bubble} data-side="you">
+                  <p className={styles.saidLine}>You said: {sentence}</p>
+                </div>
+              )}
+              {status !== null && (
+                <div className={styles.bubble} data-side="board">
+                  <p
+                    className={
+                      status.kind === "reading"
+                        ? `${styles.statusLine} ${styles.reading}`
+                        : styles.statusLine
+                    }
+                    aria-live="polite"
+                  >
+                    {status.message}
+                  </p>
+                  {status.kind === "question" && status.candidates.length > 0 && (
+                    <div className={styles.candidates}>
+                      {status.candidates.map((c) => (
+                        <button
+                          key={c.key}
+                          type="button"
+                          className={fieldStyles.btn}
+                          onClick={() => {
+                            // S59-e (R-421, brief §3): "the answer given (a
+                            // candidate label ...)" -- one place for EVERY
+                            // candidate button (ambiguous picks, run_exists,
+                            // block_exists, remove_which, move_which, job_gone,
+                            // "Show that day", the lot's own "Do all N", ...),
+                            // rather than threading this through every action
+                            // built in `questionToStatus` above.
+                            if (traceRef.current) traceRef.current.answered = c.label;
+                            runCandidateAction(c.action);
+                          }}
+                        >
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {/* The `aria-live="polite"` element itself is ALWAYS rendered
+              SOMEWHERE, so a pin that reads it by role/attribute never finds
+              nothing -- the bubble above carries it while `status` is set;
+              this bare, empty one is what is left once filed (`status` back
+              to `null`), or before anything has ever been said. */}
+          {status === null && <p className={styles.statusLine} aria-live="polite"></p>}
         </div>
-      )}
+        {/* S63-a review fix (the maintainer): an empty thread with nothing
+            open is not a blank box -- one board-side bubble, bottom-aligned
+            just above the input (the same `flex-end`/`flex: 1 1 auto`
+            `.threadBody` above it already uses to push its own content down
+            leaves this sitting right after it). Not a turn: no `key`,
+            nothing in the store, nothing traced -- gone the instant a
+            sentence is submitted (`status` becomes non-null the moment one
+            is) or a history turn exists, both checked here and nowhere else
+            (CP-6). CR-4 (reviewer fix): a SIBLING of the log region above,
+            never a CHILD of it, so it is never announced as though it were
+            a turn. */}
+        {history.length === 0 && status === null && (
+          <div className={styles.bubble} data-side="board">
+            <p className={styles.turnBoard}>{EMPTY_THREAD_HINT}</p>
+          </div>
+        )}
+      </div>
+      {/* S63-a review fix (the maintainer): the input row is the LAST child
+          now -- a chat reads thread, then the current turn, then the box to
+          type the next one, never the box in the middle of the
+          conversation. Id, label and aria are unchanged. */}
       <div className={styles.row}>
         <label htmlFor="command-bar-input" className={styles.srOnly}>
           Tell the board
@@ -3194,45 +3451,6 @@ export function CommandBar({
           </>
         )}
       </div>
-      {/* F-162: the sentence the answer box took out of the input, kept
-          readable while the question stands -- its OWN element, never inside
-          the `aria-live` status line (which is the question, and is what
-          every pin in `commandBar.test.tsx` reads). Omitted when the
-          question already quotes the sentence, so nothing is said twice. */}
-      {sentence !== null && sentence !== "" && !(status?.message ?? "").includes(sentence) && (
-        <p className={styles.saidLine}>You said: {sentence}</p>
-      )}
-      <p
-        className={
-          status?.kind === "reading" ? `${styles.statusLine} ${styles.reading}` : styles.statusLine
-        }
-        aria-live="polite"
-      >
-        {status?.message ?? ""}
-      </p>
-      {status?.kind === "question" && status.candidates.length > 0 && (
-        <div className={styles.candidates}>
-          {status.candidates.map((c) => (
-            <button
-              key={c.key}
-              type="button"
-              className={fieldStyles.btn}
-              onClick={() => {
-                // S59-e (R-421, brief §3): "the answer given (a candidate
-                // label ...)" -- one place for EVERY candidate button
-                // (ambiguous picks, run_exists, block_exists, remove_which,
-                // move_which, job_gone, "Show that day", the lot's own "Do
-                // all N", ...), rather than threading this through every
-                // action built in `questionToStatus` above.
-                if (traceRef.current) traceRef.current.answered = c.label;
-                runCandidateAction(c.action);
-              }}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
