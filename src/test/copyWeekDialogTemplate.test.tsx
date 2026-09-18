@@ -155,6 +155,13 @@ function dialog(): HTMLElement {
  * The toolbar: who is offered "Copy week" and "Save this week as a template".
  * ======================================================================== */
 
+/**
+ * S67 (R-445): these buttons now render inside the toolbar's "Show more"
+ * band, closed by default -- opened once, here, since every case below is
+ * about WHO is offered which button, not about the band's own open/closed
+ * state. The contract changed on purpose (R-445); nothing here was wrong
+ * when it was written.
+ */
 function renderToolbar() {
   const queryClient = new QueryClient();
   render(
@@ -175,6 +182,7 @@ function renderToolbar() {
       />
     </QueryClientProvider>,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Show more" }));
 }
 
 describe("the save control's rights (R-356)", () => {

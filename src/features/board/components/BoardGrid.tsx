@@ -107,6 +107,7 @@ export function BoardGrid({
   dragApi,
   setDropRowResolver,
   onFitScaleChange,
+  onWindowEdgeChange,
   dateFormat = DEFAULT_DATE_FORMAT,
 }: {
   index: BoardIndex;
@@ -153,6 +154,17 @@ export function BoardGrid({
    * parent is a normal post-render update, not a render-phase one.
    */
   onFitScaleChange: (scale: number) => void;
+  /**
+   * S67 (F-170): reports whether the horizontal scroll is at (or past) the
+   * loaded window's right edge, the same way `onFitScaleChange` above
+   * reports the vertical fit -- fired from an effect, not during render, for
+   * the same reason. `BoardToolbar`'s end-of-window note used to render
+   * unconditionally; this is the real signal it needed and nothing else in
+   * the tree already exposed (`scroll`/`railWidth`/`trackWidth`/`viewport`
+   * are this component's own internal state). Optional so every existing
+   * direct render of this component keeps compiling without it.
+   */
+  onWindowEdgeChange?: (atEnd: boolean) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // P1-4c D47: `--rail-w` is now `calc(232px * var(--ui-scale))` in
@@ -267,6 +279,23 @@ export function BoardGrid({
 
   const pxPerHour = ZOOMS[zoomIndex].pxPerHour;
   const trackWidth = minutesToPx(index.windowMinutes, pxPerHour);
+
+  // S67 (F-170): "at the edge" requires BOTH that there is somewhere to
+  // scroll TO (`hasOverflow` -- a window that already fits the viewport with
+  // no scrollbar is not "at the edge", it simply has no edge to reach) and
+  // that the scroll has actually reached it. `rawMaxScrollLeft` is the SAME
+  // formula the resize-observer clamp and the scroll-to-now effect below
+  // already use (`railWidth + trackWidth - viewport.width`) -- one more
+  // reader of it, not a second definition. The 1px slack on the comparison
+  // absorbs the browser's own scroll-snapping/subpixel rounding so a person
+  // who has genuinely scrolled all the way right is not read as "not quite
+  // at the edge" by a fraction of a pixel.
+  const rawMaxScrollLeft = railWidth + trackWidth - viewport.width;
+  const hasOverflow = rawMaxScrollLeft > 1;
+  const atMaxScrollLeft = hasOverflow && scroll.left >= rawMaxScrollLeft - 1;
+  useEffect(() => {
+    onWindowEdgeChange?.(atMaxScrollLeft);
+  }, [atMaxScrollLeft, onWindowEdgeChange]);
 
   // --- D58: register the drop-row resolver. `resolveDropRow` (pure,
   // harness-tested §10) does the binary search; everything geometry-

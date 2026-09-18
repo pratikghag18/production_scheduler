@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { hasRealBackend, NO_BACKEND_REASON } from "./env";
+import { openShowMoreIfNeeded } from "./toolbarShowMore";
 
 /**
  * Copy Week (R-339 / S35), driven in a real browser against the real server.
@@ -50,6 +51,8 @@ function mondayPlusWeeks(weeks: number): string {
 
 test("a plant admin opens Copy week for her plant and reads the counts", async ({ page }) => {
   await signIn(page, SITE_ADMIN, "/");
+  // S67 (R-445) review (TR-3): the button lives behind "Show more" now.
+  await openShowMoreIfNeeded(page);
   await page.getByRole("button", { name: "Copy week" }).click({ timeout: 15_000 });
   const dialog = page.getByRole("dialog", { name: "Copy week" });
   await expect(dialog).toBeVisible();
@@ -64,6 +67,8 @@ test("a plant admin opens Copy week for her plant and reads the counts", async (
 
 test("a plant admin applies the copy onto a week nothing else touches", async ({ page }) => {
   await signIn(page, SITE_ADMIN, "/");
+  // S67 (R-445) review (TR-3): the button lives behind "Show more" now.
+  await openShowMoreIfNeeded(page);
   await page.getByRole("button", { name: "Copy week" }).click({ timeout: 15_000 });
   const dialog = page.getByRole("dialog", { name: "Copy week" });
   await dialog.getByLabel("Copy the week starting").fill(mondayPlusWeeks(0));
@@ -95,5 +100,10 @@ test("a supervisor with no admin grant is not offered Copy week", async ({ page 
   await signIn(page, SUPERVISOR, "/");
   // The board has rendered once its day controls are there.
   await expect(page.getByRole("button", { name: "Today" })).toBeVisible({ timeout: 15_000 });
+  // S67 (R-445) review (TR-3): absent in the closed row is not proof of
+  // anything (the whole band is unmounted); open it so this asserts what
+  // R-445 actually claims -- the "Week plan" group itself omits the button
+  // for her, not merely that the row never showed it.
+  await openShowMoreIfNeeded(page);
   await expect(page.getByRole("button", { name: "Copy week" })).toHaveCount(0);
 });

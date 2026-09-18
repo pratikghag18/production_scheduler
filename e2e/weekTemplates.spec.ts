@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { hasRealBackend, NO_BACKEND_REASON } from "./env";
+import { openShowMoreIfNeeded } from "./toolbarShowMore";
 
 /**
  * Named week templates (R-356), driven in a real browser against the real
@@ -44,6 +45,8 @@ function mondayPlusWeeks(weeks: number): string {
 }
 
 async function saveTemplate(page: Page, name: string): Promise<void> {
+  // S67 (R-445) review (TR-3): the button lives behind "Show more" now.
+  await openShowMoreIfNeeded(page);
   await page
     .getByRole("button", { name: "Save this week as a template" })
     .click({ timeout: 15_000 });
@@ -89,6 +92,7 @@ test("an admin saves this week as a template and applies it through Copy Week", 
 
   // R-358: an admin reaches a template through its OWN button, not through the
   // "Copy from" select inside "Copy week".
+  await openShowMoreIfNeeded(page);
   await page.getByRole("button", { name: "Apply a template" }).click({ timeout: 15_000 });
   const dialog = page.getByRole("dialog", { name: "Copy week" });
   await expect(dialog).toBeVisible();
@@ -117,6 +121,9 @@ test("an admin saves this week as a template and applies it through Copy Week", 
 
 test("a supervisor is offered the controls and only the template source", async ({ page }) => {
   await signIn(page, SUPERVISOR, "/");
+  // S67 (R-445) review (TR-3): both controls checked below live in the
+  // "Show more" band now.
+  await openShowMoreIfNeeded(page);
   await expect(page.getByRole("button", { name: "Save this week as a template" })).toBeVisible({
     timeout: 15_000,
   });
@@ -139,6 +146,11 @@ test("a viewer is offered neither control", async ({ page }) => {
   await signIn(page, VIEWER, "/");
   // Give the board a moment to resolve the (negative) place answer.
   await expect(page.getByRole("heading", { name: "Board" })).toBeVisible({ timeout: 15_000 });
+  // S67 (R-445) review (TR-3): absent in the closed row is not proof of
+  // anything (the whole band is unmounted); open it so this asserts the
+  // "Week plan" group is omitted for her, not merely that the row never
+  // showed it.
+  await openShowMoreIfNeeded(page);
   await expect(page.getByRole("button", { name: "Save this week as a template" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Apply a template" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Copy week" })).toHaveCount(0);

@@ -669,6 +669,15 @@ describe("CW9: the sentences", () => {
  * The toolbar: who is offered the button, and what happens after Apply.
  * ======================================================================== */
 
+/**
+ * S67 (R-445): "Copy week" and friends now render inside the toolbar's
+ * "Show more" band, closed by default -- these cases are about WHO is
+ * offered the button, not about the band's own open/closed state (that is
+ * `boardToolbar.test.tsx`'s job), so this opens it once, here, rather than
+ * every case reaching for "Show more" itself. The contract changed on
+ * purpose (R-445); the cases below did not get this wrong, the toolbar did
+ * not have a "Show more" to open when they were written.
+ */
 function renderToolbar(rootPath: string | null = PLANT.path) {
   const queryClient = new QueryClient();
   const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -690,6 +699,7 @@ function renderToolbar(rootPath: string | null = PLANT.path) {
       />
     </QueryClientProvider>,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Show more" }));
   return { invalidate };
 }
 

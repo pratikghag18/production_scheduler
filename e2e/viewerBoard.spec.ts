@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { hasRealBackend, NO_BACKEND_REASON } from "./env";
+import { openShowMoreIfNeeded } from "./toolbarShowMore";
 
 /**
  * A viewer's board (R-346, the viewer clause; DEF-0015), driven in a real
@@ -49,6 +50,11 @@ test("a viewer sees the board and nothing to pick from: no panel, no Copy week",
   });
   // And nothing that exists to place people with.
   await expect(page.getByRole("complementary", { name: "Operators" })).toHaveCount(0);
+  // S67 (R-445) review (TR-3): absent in the closed row is not proof of
+  // anything (the whole band is unmounted); open it so this asserts the
+  // "Week plan" group is omitted for her, not merely that the row never
+  // showed it.
+  await openShowMoreIfNeeded(page);
   await expect(page.getByRole("button", { name: "Copy week" })).toHaveCount(0);
 });
 

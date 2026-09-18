@@ -22,6 +22,14 @@
   background: var(--surface);
   border-bottom: 1px solid var(--grid);
   flex-wrap: wrap;
+  /* S67 (R-445): the positioning context for `.moreBand`, which is
+     `position: absolute` so opening and closing it never changes THIS
+     element's own box height (see `.moreBand`'s own comment). `position:
+     relative` with no `z-index` here does not itself open a new stacking
+     context, so `.moreBand`'s z-index still compares against `Popover`'s at
+     the document root, the same as `CommandLauncher`'s fixed-position chrome
+     does today. */
+  position: relative;
 }
 
 .title {
@@ -97,12 +105,17 @@
   font-style: italic;
 }
 
-.legend {
-  display: flex;
-  gap: 12px;
-  margin-left: auto;
-  align-items: center;
-  flex-wrap: wrap;
+/* S67 (R-445): even columns, never a ragged wrap -- `auto-fill` keeps every
+   column the same width regardless of how many products are in the shown
+   window, and the swatch + name pair inside `.key` stays aligned across rows
+   because every cell in the grid starts at the same x. Replaces the old
+   `.legend` (a flex row with `margin-left: auto` to push it to the row's own
+   right edge) now that the key lives in its own group inside the band,
+   not the row. */
+.keyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: calc(6px * var(--chrome-scale, 1)) calc(16px * var(--chrome-scale, 1));
 }
 
 .key {
@@ -195,7 +208,11 @@
   color: var(--avatar-fg);
 }
 
-.snapNote,
+/* F-170: `.snapNote` (the row's old, unconditional "snap: 30 min (P1-4b)"
+   label) is gone with the JSX that rendered it -- removed, not reworded, per
+   the finding's own default. `.scrollNote` stays: the end-of-window text it
+   styles is now conditional on `atWindowEnd` (BoardToolbar.tsx), but the
+   look is unchanged. */
 .scrollNote {
   font-size: calc(11.5px * var(--chrome-scale, 1));
   color: var(--muted);
@@ -251,4 +268,83 @@
 
 .copyWeek button:hover {
   background: var(--page);
+}
+
+/* S67 (R-445): "Show more" / "Show less" -- same segmented-button look as
+   `.daynav`/`.copyWeek` beside it (border + radius, not the filled `.zoom`
+   look, since this toggles a layer rather than picking one of several
+   states). */
+.moreButton {
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: calc(5px * var(--chrome-scale, 1)) calc(11px * var(--chrome-scale, 1));
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+}
+
+.moreButton:hover {
+  background: var(--page);
+}
+
+/* S67 (R-445): the band is a LAYER over the board, never a row that pushes
+   it down -- `.header` above is `position: relative` for exactly this, and
+   `position: absolute` takes THIS element out of its parent's flex flow
+   entirely, so opening and closing it never changes `.header`'s own box
+   height, which is what `computeFitScale` measures the board's available
+   height against (D76, this file's header comment).
+
+   z-index 80: the same tier `CommandLauncher.module.css` uses for its own
+   corner chrome, for the same reason spelled out there -- above ordinary
+   board content (the highest board-body z-index is `AssignmentChip`/
+   `DirectBlock`/`RunBand`'s dragging state at 50) and below the shared
+   `Popover` shell's 90, since `CopyWeekDialog`/`SaveTemplateDialog` --
+   opened from a button INSIDE this band -- must still sit over it. */
+/* TR-1 (reviewer, S67-a review): unbounded before this -- `overflow-y:
+   visible` (the initial value) and no `max-height` at all, the one thing
+   `CommandLauncher.module.css`'s own `.panel` (`max-height: calc(100% -
+   94px)`) and `OperatorPanel.module.css`'s `.list` (`overflow-y: auto`)
+   both take care to set. Measured in a real browser (jsdom cannot compute
+   box layout, so this cannot be a vitest pin): at a 1280x480 viewport the
+   band already reads `overflow-y: visible; max-height: none` on
+   `getComputedStyle`, and a "Key" long enough (many products in the shown
+   window, or several long template names wrapping in "Week plan") pushes
+   the band's bottom below the viewport with NOTHING to scroll -- `.page`'s
+   height chain is `overflow: hidden` all the way up (`global.css` D50/D48),
+   so there is no ancestor scrollbar to reveal it either. Bounded to the
+   viewport, minus room for the header above it and a margin below, with its
+   own scrollbar once content exceeds that. */
+.moreBand {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: calc(12px * var(--chrome-scale, 1)) calc(16px * var(--chrome-scale, 1));
+  background: var(--surface);
+  border-bottom: 1px solid var(--grid);
+  box-shadow: 0 8px 20px rgba(11, 11, 11, 0.16);
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.moreGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.moreGroupTitle {
+  margin: 0;
+  font-size: calc(11px * var(--chrome-scale, 1));
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
 }
