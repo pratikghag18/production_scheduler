@@ -2865,7 +2865,7 @@ stages:
   track: core
   num: 64
   title: The standards' audits, fixed --- choices at every dead end, absence and capacity before the yes, a lot in one transaction, a trace line on every path
-  status: open
+  status: now
   owner: agent
   refs:
   - 'session 178 conversation (the maintainer, 17 Sept)'
@@ -2885,7 +2885,9 @@ stages:
     back and the thread says nothing changed (a migration, then runLot is one call); (d) one endTurn in the
     store that every life-ending path calls, so no turn has a blank last line, plus F-168 and F-169.
   state: >-
-    **OPEN 17 Sept (session 178).** Audits run and written; fixes after S63 lands.
+    **NOW 18 Sept (session 179).** Audits run and written 17 Sept; the first fix lane runs on F-168, F-169 and
+    four untraced paths (docs/agent-briefs/s64-c-writers-answer-brief.md); the dead ends, absence and capacity
+    before the yes, and the lot RPC follow.
 - id: S65
   track: core
   num: 65
