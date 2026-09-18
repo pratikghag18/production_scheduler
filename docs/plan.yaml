@@ -12494,6 +12494,13 @@ requirements:
     we're using in the activity tab." AuditPanel.module.css's own reasoning applies in reverse here: it chose a
     left bar over a red box because a deletion is not an error; a person with no shift IS something wanting
     attention, so the same bar in --crit with the words is the honest reuse, and one accent system is kept.
+    CORRECTED 18 Sept (session 179), the maintainer on the S66-b build: "why do reinvent stuff? The shift should
+    have been part of where we select the hierarchy level, why do we want the user to have multiple places
+    where they must update?" The shift is SET in the Edit form beside Belongs to (the one place a person's
+    place is chosen) and on the create form; the list row carries only the red bar and the words as a mark;
+    the header reads "Belongs to Plant A · Shift 2" or "· No shift". The per-row dropdown the developer's brief
+    asked for is withdrawn. CANDIDATE STANDARD put the same hour: a fact about a thing is changed in one place,
+    the place where the thing is defined; a second control for the same fact is a defect.
 - id: R-445
   title: The board toolbar is one row, with everything else behind "Show more"
   source:
