@@ -2927,6 +2927,7 @@ stages:
   - R-442
   - R-443
   - R-444
+  - R-448
   what: >-
     **The gap the maintainer found on 17 Sept.** Five pieces (D137): the model and the server (two nullable
     columns, the board payload, a shift_fit verdict the five writers and the resize guard forward); the
@@ -12611,6 +12612,29 @@ requirements:
     believe, it is causing the panel to move, this does not look professional."; "The compact/Standard/Fine
     buttons should be equally spaced as well. Make sure this is a standard, every button part of the same
     system should be equal in size."
+- id: R-448
+  title: The rail shows the people on shift now, with a way to bring in the other shifts; an overtime block carries a coloured OT tag beside the name
+  source:
+  - 'session 179 conversation (the maintainer, 18 Sept, the two placement questions answered)'
+  stated_by: maintainer
+  claim: >-
+    The operator rail lists, by default, the people whose home shift covers the plant's clock now (the
+    board's own "now", in the plant's zone, R-426); a control on the rail brings in the people from the
+    other shifts, selectable by shift, and says which are showing. No shift name is drawn on a person's
+    chip. A block placed outside the person's own shift carries a small "OT" tag inside the chip beside
+    the name, in the board's amber signal colour (the token that already means "look at this" on the
+    board), with "overtime" and the minutes in the chip's title; the block's other marks are unchanged.
+  verified_by:
+  - kind: manual
+    steps: "pinned when S66-c lands"
+  status: uncovered
+  note: >-
+    STATED 18 Sept (session 179), answering the developer's two placement questions with candidates: "1. B,
+    the tag can have a colour to make it visual. 2. The chip should not show, the list should automatically
+    show people from current shift based on time with an selectable option to assign people from other
+    shifts." Supersedes the interim rule on R-438 (the words measured against the root pattern's span) the
+    moment the person's band reaches the rail. The amber token is the developer's pick within the palette;
+    the maintainer may name another.
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today

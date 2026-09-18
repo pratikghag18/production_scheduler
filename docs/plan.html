@@ -121,7 +121,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">893</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">82</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
-  <div class="stat "><span class="n">333 / 390</span><span class="l">requirements covered by a test</span></div>
+  <div class="stat "><span class="n">333 / 391</span><span class="l">requirements covered by a test</span></div>
 </div>
   <p class="fine">Measured at commit <code>ab410c5</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -195,7 +195,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <h3>A person belongs to a shift --- a home shift per operator, overtime named everywhere, a supervisor's shift or the whole day</h3>
   <div class="what"><p><b>The gap the maintainer found on 17 Sept.</b> Five pieces (D137): the model and the server (two nullable columns, the board payload, a shift_fit verdict the five writers and the resize guard forward); the admin screens (the Operators tab, a CSV column, the Access tab); the board (the rail measuring free and booked against the person's band with overtime in hours, the pop-ups' chips, the mark on an overtime block); the bar (the grammar, the question before the yes, the sixth run's data); the demo and the walks. About three and a half days of lanes.</p></div>
   <div class="state"><p><b>OPEN 17 Sept (session 178).</b> Scoped and decided the day it was stated: the person points at the band by id, retiring warns with the count and asks where people go (R-443, the maintainer's correction of the developer's name-on-the-person idea); and the supervisor question answered the same turn (R-442: no restriction by default, a setting on the grant in the Access tab). Piece (1) SHIPPED 17 Sept (session 178, 68badab): the columns, shift_fit and supervisor_shift_allows, the five writers and the resize guard, the payload, the shapes, HS0-HS15; two review fixes (F-176). Nothing on screen yet --- the maintainer asked on 18 Sept what had been marked complete; the answer is the database and the server. Piece (2), the admin screens, is S66-b (docs/agent-briefs/s66-b-shift-screens-brief.md), lane running 18 Sept; the board, the bar and the demo follow.</p></div>
-  <p class="fine">session 178 conversation (the maintainer, 17 Sept) · §19.108 (D137)</p><p class="fine">Delivers <a href="#R-441">R-441</a>, <a href="#R-442">R-442</a>, <a href="#R-443">R-443</a>, <a href="#R-444">R-444</a></p>
+  <p class="fine">session 178 conversation (the maintainer, 17 Sept) · §19.108 (D137)</p><p class="fine">Delivers <a href="#R-441">R-441</a>, <a href="#R-442">R-442</a>, <a href="#R-443">R-443</a>, <a href="#R-444">R-444</a>, <a href="#R-448">R-448</a></p>
   <span class="tags"><span class="chip now">In progress</span><span class="chip mine">Mine</span></span>
 </div>
 <div class="stage now" id="S67">
@@ -3930,7 +3930,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>390 requirements · 333 covered · 33 uncovered · 0 contradicted · 24 superseded</caption>
+<caption>391 requirements · 333 covered · 34 uncovered · 0 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -6659,6 +6659,13 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="reqmain"><b>Every button in one group is the same size --- a segmented control, a stack, a changing toggle, a dialog footer share one width, so nothing shifts</b><br><span class="fine">The buttons that belong to one system share one width: a segmented control's segments (one grid track size), a stacked group (a stretched column), a toggle whose label changes (one min-width in em), a dialog's footer. Nothing moves when a label changes or a state flips. The one exception is a strip whose labels are data --- the bar's candidate answers, which are as long as the names and hours they carry --- and that exception is written here. Standard: the audit is the walk through every button group in the app; the toolbar's zoom, day navigation, week-plan stack and toggle are the first four.</span>
       <br><span class="fine">session 179 conversation (the maintainer, 18 Sept), CLAUDE.md §7 · maintainer · STATED 18 Sept (session 179) over three messages on the band: &quot;align the week plan buttons vertically ... equal size buttons like they fit in a column&quot;; &quot;The show more and show less buttons have different sizes I believe, it is causing the panel to move, this does not look professional.&quot;; &quot;The compact/Standard/Fine buttons should be equally spaced as well. Make sure this is a standard, every button part of the same system should be equal in size.&quot;</span></td>
   <td class="fine">manual: TB-13 when the audit lane lands; measured in the browser 18 Sept: the toggle 102px at the same x in both states; the zoom and day-navigation segments one width each (session 179)</td>
+  <td class="chipcol"><span class="chip q">uncovered</span></td>
+</tr>
+<tr class="r-uncovered" id="R-448">
+  <td class="g-n">R-448</td>
+  <td class="reqmain"><b>The rail shows the people on shift now, with a way to bring in the other shifts; an overtime block carries a coloured OT tag beside the name</b><br><span class="fine">The operator rail lists, by default, the people whose home shift covers the plant's clock now (the board's own &quot;now&quot;, in the plant's zone, R-426); a control on the rail brings in the people from the other shifts, selectable by shift, and says which are showing. No shift name is drawn on a person's chip. A block placed outside the person's own shift carries a small &quot;OT&quot; tag inside the chip beside the name, in the board's amber signal colour (the token that already means &quot;look at this&quot; on the board), with &quot;overtime&quot; and the minutes in the chip's title; the block's other marks are unchanged.</span>
+      <br><span class="fine">session 179 conversation (the maintainer, 18 Sept, the two placement questions answered) · maintainer · STATED 18 Sept (session 179), answering the developer's two placement questions with candidates: &quot;1. B, the tag can have a colour to make it visual. 2. The chip should not show, the list should automatically show people from current shift based on time with an selectable option to assign people from other shifts.&quot; Supersedes the interim rule on R-438 (the words measured against the root pattern's span) the moment the person's band reaches the rail. The amber token is the developer's pick within the palette; the maintainer may name another.</span></td>
+  <td class="fine">manual: pinned when S66-c lands</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr></tbody></table></div>
 </section>
