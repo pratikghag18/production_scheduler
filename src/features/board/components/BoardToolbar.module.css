@@ -359,6 +359,15 @@
   font: inherit;
   font-size: calc(12px * var(--chrome-scale, 1));
   color: var(--ink-2);
+  /* The maintainer, 18 Sept: "The show more and show less buttons have
+     different sizes I believe, it is causing the panel to move." One width
+     for both words, in the button's own em so it scales with the row, with
+     the label centred -- the row never shifts when the band opens. */
+  min-width: 8.5em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3em;
 }
 
 .moreButton:hover {
