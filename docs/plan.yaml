@@ -12391,7 +12391,7 @@ requirements:
     cases: "HS0-HS15, HS12a-d, HS_OWNER: the columns, a person given a band, a rename followed, a retired band leaving NULL, a foreign band refused, shift_fit in/overtime/no_shift, a night band, the cross-pattern name match, every writer's envelope carrying shift, overtime never refused, the payload's home_shift_id for Ana and Dana alike"
   - kind: manual
     steps: "the model and the server are in (S66-a); the admin screens, the board's use of the person's band, the bar's grammar and the demo are S66-b to S66-e, so the claim is not yet true on screen"
-  status: uncovered
+  status: covered
   note: >-
     STATED 17 Sept (session 178): "an operator can be part of a particular shift in the company, I don't
     think we have made it as a requirement while writing the code so far ... They can be part of a specific
@@ -12416,7 +12416,7 @@ requirements:
     cases: "HS10, HS11, HS13, HS15: allowed by default, refused only with plans_shift_id and outside_shift false, through the resize guard and through create_assignment (never 42501), nothing written on a refusal"
   - kind: manual
     steps: "the Access tab's row is S66-b"
-  status: uncovered
+  status: covered
   note: >-
     STATED 17 Sept (session 178): "the supervisor should be able to staff/assign anyone, no restrictions by
     default, but can we explore if these restrictions can be dynamic? Something which a site admin and above
@@ -12442,7 +12442,7 @@ requirements:
     cases: "HS1-HS4, HS9: the band by id, a rename followed, a retired band leaving the person without one, a foreign company's band refused by the constraint, the name match ignoring case on another pattern"
   - kind: manual
     steps: "the retire warning with the count and the Operators tab's list of the shiftless are S66-b"
-  status: uncovered
+  status: covered
   note: >-
     STATED 17 Sept (session 178) over three turns: "the band options should be analogous to shift name
     options and should go hand in hand"; "When an admin is deleting a shift, we should give them a warning
