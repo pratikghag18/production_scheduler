@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 import { test, expect, type Page, type CDPSession } from "@playwright/test";
 import { hasRealBackend, NO_BACKEND_REASON } from "./env";
+import { fillWindowStart } from "./boardWindow";
 
 /**
  * THE TOUCH ACCEPTANCE PASS ON BOTH DRAGS (wave 2, lane C).
@@ -335,7 +336,7 @@ async function firstTrack(page: Page) {
 async function openBoardAt(page: Page, email: string): Promise<void> {
   await signIn(page, email, "/");
   await firstTrack(page); // board's first window has drawn
-  await page.locator("#board-window-start").fill(mondayOfThisWeek());
+  await fillWindowStart(page, mondayOfThisWeek());
   await firstTrack(page); // the refetch has settled
 }
 

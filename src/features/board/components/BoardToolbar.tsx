@@ -25,6 +25,10 @@ const MAX_WINDOW_DAYS = 92;
  *  collide with. */
 const MORE_BAND_ID = "board-toolbar-more";
 
+/** S67-b (R-445 CORRECTED 18 Sept): the date range's own pop-over, same
+ *  one-toolbar-per-board reasoning as `MORE_BAND_ID` above. */
+const RANGE_POPOVER_ID = "board-toolbar-range";
+
 /**
  * S67 (R-445): whether the "Show more" band is open, remembered per person
  * per board -- the same `historyKey` shape `panelSize.ts` and
@@ -53,12 +57,6 @@ function writeShowMore(key: string | null, value: boolean): void {
   }
 }
 
-/** No product id reaches here from anywhere but `BoardPage`'s per-render
- *  computation; a stable empty constant means an omitted prop (every direct
- *  `<BoardToolbar>` render in the test files) does not invalidate the key's
- *  `useMemo` on every render the way a fresh `new Set()` default would. */
-const NO_PRODUCT_IDS: ReadonlySet<string> = new Set();
-
 /**
  * The one key for "does the caller administer this plant", keyed by plant id
  * the way `boardKeys.window` is keyed by what it loads, so nothing hand-builds
@@ -72,19 +70,31 @@ export const copyWeekKeys = {
 };
 
 /**
- * S67 (R-445): ONE ROW -- the plant, the day navigation, the date range and
- * the three zoom levels, what a person touches while reading the board --
- * plus "Show more", a LAYER over the board (never a row that pushes it
- * down, so `.header`'s own box height, and the `computeFitScale` input
- * measured from it, are identical open and closed) holding the rest as
- * labelled groups: "Week plan" (Copy week / Apply a template / Save this
- * week as a template, each still gated on its own existing rights check,
- * moved here unchanged) and "Key" (brief §7/§10, P1-4c §5 for the density
- * control this toolbar no longer offers). T5: the loaded window is exactly
- * what the range control requests — scrolling never extends it, so the
- * end-of-window note names that limit instead of letting it read as a bug,
- * but only while the person is actually scrolled to that edge (F-170: it
- * used to render on every board, unconditionally).
+ * S67-b (R-445 CORRECTED 18 Sept): the maintainer's mock, not the 17 Sept
+ * build's own reading of the row's words. ONE ROW -- "Board", the plant, a
+ * prev/Today/next segmented control, the date range as ONE dropdown control
+ * (a button naming the range, opening a small pop-over with the From/Days
+ * fields that used to sit directly in the row), the three zoom levels, and
+ * "Show more"/"Show less" last, a LAYER over the board (never a row
+ * that pushes it down, so `.header`'s own box height, and the
+ * `computeFitScale` input measured from it, are identical open and closed)
+ * holding the rest as TWO COLUMNS: "Week plan" (Copy week / Apply a
+ * template / Save this week as a template, each still gated on its own
+ * existing rights check, moved here unchanged, as a plain row of buttons
+ * with no bordered strip around them) and "Key" (the WHOLE readable
+ * catalogue with its count in the heading -- the 17 Sept filter to products
+ * with a run in the shown window is withdrawn, since it left the key empty
+ * on a week with no runs). TR-4 (reviewer, 18 Sept): the mock's plain "More" word,
+ * with the state carried only in `aria-label`, is WITHDRAWN -- the
+ * maintainer, seeing this lane's own build, called it meaningless; the
+ * toggle's VISIBLE text and its ACCESSIBLE name are one string again
+ * ("Show more" closed, "Show less" open), with a `Chevron` (never a glyph
+ * in text) pointing down closed and up open beside it.
+ * T5: the loaded window is exactly what the range control requests --
+ * scrolling never extends it, so the end-of-window note names that limit
+ * instead of letting it read as a bug, but only while the person is
+ * actually scrolled to that edge (F-170: it used to render on every board,
+ * unconditionally).
  */
 export function BoardToolbar({
   roots,
@@ -98,7 +108,6 @@ export function BoardToolbar({
   onShiftWindowByDays,
   onGoToToday,
   products,
-  productIdsInWindow = NO_PRODUCT_IDS,
   atWindowEnd = false,
   isFetching,
   dateFormat = DEFAULT_DATE_FORMAT,
@@ -115,14 +124,12 @@ export function BoardToolbar({
   onWindowChange: (startDate: Date, dayCount: number) => void;
   onShiftWindowByDays: (delta: number) => void;
   onGoToToday: () => void;
-  /** The readable catalogue (pop-ups need every product, not only the ones
-   *  currently on the board) -- the Key's own filter is `productIdsInWindow`
-   *  below, never a second, narrower fetch of this same list (R-445 DECIDED). */
+  /** S67-b (R-445 CORRECTED 18 Sept): the Key lists this WHOLE readable
+   *  catalogue, sorted by name, with its count in the heading -- the 17
+   *  Sept build's `productIdsInWindow` filter is withdrawn (the maintainer:
+   *  "the product keys are missing from show more"), so there is only ever
+   *  one list of products handed to this component now. */
   products: Product[];
-  /** S67 (R-445) DECIDED: the product ids with a run inside the shown
-   *  window, from the runs `BoardPage`'s own board index already holds --
-   *  the Key lists only these, sorted by name, never the whole catalogue. */
-  productIdsInWindow?: ReadonlySet<string>;
   /** F-170: whether the person is actually scrolled to the loaded window's
    *  right edge -- the end-of-window note renders only then. */
   atWindowEnd?: boolean;
@@ -257,16 +264,46 @@ export function BoardToolbar({
     moreButtonRef.current?.focus();
   };
 
-  // R-445 DECIDED: filtered from the runs BoardPage already holds (never a
-  // second, narrower fetch), sorted the way a person reads a list --
-  // locale-aware, not code-point order (`sort()`'s default), so an accented
-  // name still lands where a person scanning the key expects it.
+  // S67-b (R-445 CORRECTED 18 Sept): the date range folded into ONE
+  // dropdown control -- a button naming the range, opening a small
+  // pop-over with the From/Days fields that used to sit directly in the
+  // row. No persistence (unlike "Show more" above): the mock does not ask
+  // for this to remember how it was left, and closed-by-default is the
+  // safer read of "a dropdown", the same as a native `<select>`.
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const rangeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const closeRange = () => {
+    setRangeOpen(false);
+    rangeButtonRef.current?.focus();
+  };
+  // A dropdown, unlike the "Show more" band above, closes on an outside
+  // click as well as Escape -- the band is deliberately a LAYER that only
+  // its own button or Escape dismiss (R-445), but nothing in the brief asks
+  // the range control to share that behaviour, and a control that reads
+  // "Thu Sep 17 – Sat Sep 19 ▾" is a dropdown in every other sense.
+  useEffect(() => {
+    if (!rangeOpen) return;
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target as Node;
+      if (rangeButtonRef.current?.contains(target)) return;
+      const pop = document.getElementById(RANGE_POPOVER_ID);
+      if (pop?.contains(target)) return;
+      setRangeOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [rangeOpen]);
+
+  // S67-b (R-445 CORRECTED 18 Sept): the WHOLE readable catalogue, sorted
+  // the way a person reads a list -- locale-aware, not code-point order
+  // (`sort()`'s default), so an accented name still lands where a person
+  // scanning the key expects it. The 17 Sept build filtered this to
+  // products with a run in the shown window; withdrawn per the maintainer's
+  // 18 Sept correction ("the product keys are missing from show more" --
+  // the filter left the key empty on a week with no runs).
   const keyProducts = useMemo(
-    () =>
-      products
-        .filter((p) => productIdsInWindow.has(p.id))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [products, productIdsInWindow],
+    () => [...products].sort((a, b) => a.name.localeCompare(b.name)),
+    [products],
   );
 
   return (
@@ -300,11 +337,6 @@ export function BoardToolbar({
       ) : (
         roots.length === 1 && <span className={styles.rootName}>{roots[0].name}</span>
       )}
-      <span className={styles.date}>
-        {formatDayLabel(localStart, dateFormat, zone)} –{" "}
-        {formatDayLabel(localLastDay, dateFormat, zone)}
-      </span>
-
       {/* Day navigation, ported from the mockup's `.daynav`. Without it the
           only way to move the window is to retype the date, which is exactly
           the friction the mockup's buttons existed to remove. "Today" also
@@ -321,66 +353,92 @@ export function BoardToolbar({
         </button>
       </div>
 
-      {/* S67 (R-445): the buttons themselves, and the dialogs they anchor,
+      {/* S67 (R-445): the Week plan buttons, and the dialogs they anchor,
           moved into the "Show more" band's "Week plan" group below --
           `getBoundingClientRect()` on the button still anchors the dialog
           correctly from inside the band, so the two stayed together rather
           than splitting the button from its own dialog across the file. */}
 
-      <div className={styles.range}>
-        <label htmlFor="board-window-start" className={styles.rangeLabel}>
-          From:
-        </label>
-        <input
-          id="board-window-start"
-          type="date"
-          className={styles.rangeInput}
-          value={startInputValue}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (!v) return;
-            const next = dayMarker(v);
-            if (!Number.isNaN(next.getTime())) onWindowChange(next, windowDayCount);
-          }}
-        />
-        <label htmlFor="board-window-days" className={styles.rangeLabel}>
-          Days:
-        </label>
-        <input
-          id="board-window-days"
-          type="number"
-          min={1}
-          max={MAX_WINDOW_DAYS}
-          className={styles.rangeInputNarrow}
-          value={windowDayCount}
-          onChange={(e) => {
-            const raw = Number(e.target.value);
-            if (!Number.isFinite(raw)) return;
-            const clamped = Math.min(MAX_WINDOW_DAYS, Math.max(1, Math.round(raw)));
-            onWindowChange(windowStartDate, clamped);
-          }}
-        />
-        {windowDayCount >= MAX_WINDOW_DAYS && (
-          <span
-            className={styles.endMarker}
-            title="board_window raises invalid_argument past 92 days"
+      {/* S67-b (R-445 CORRECTED 18 Sept): the date range as ONE dropdown
+          control, the way the mock draws it -- a button naming the range
+          (never a raw glyph for its own chevron, per the icon standard),
+          opening a small pop-over that holds the From/Days fields that used
+          to sit directly in the row. Closed by default; no persistence, the
+          same as a native `<select>`. `.rangeGroup` is the positioning
+          context for `.rangePopover` below, the same `position: relative` /
+          `position: absolute` pairing `.header`/`.moreBand` already use. */}
+      <div className={styles.rangeGroup}>
+        <button
+          ref={rangeButtonRef}
+          type="button"
+          className={styles.rangeButton}
+          aria-expanded={rangeOpen}
+          aria-controls={RANGE_POPOVER_ID}
+          onClick={() => setRangeOpen((v) => !v)}
+        >
+          {formatDayLabel(localStart, dateFormat, zone)} –{" "}
+          {formatDayLabel(localLastDay, dateFormat, zone)}
+          <Chevron direction={rangeOpen ? "up" : "down"} />
+        </button>
+        {rangeOpen && (
+          <div
+            id={RANGE_POPOVER_ID}
+            className={styles.rangePopover}
+            // TB-10: Escape closes the pop-over and returns focus to the
+            // button that opened it, the same rule `closeBand` already
+            // gives the "Show more" band (TR-2) -- scoped to this pop-over,
+            // not a document-wide listener, so it never fights another
+            // layer's own Escape handling.
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                closeRange();
+              }
+            }}
           >
-            max window
-          </span>
+            <label htmlFor="board-window-start" className={styles.rangeLabel}>
+              From:
+            </label>
+            <input
+              id="board-window-start"
+              type="date"
+              className={styles.rangeInput}
+              value={startInputValue}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) return;
+                const next = dayMarker(v);
+                if (!Number.isNaN(next.getTime())) onWindowChange(next, windowDayCount);
+              }}
+            />
+            <label htmlFor="board-window-days" className={styles.rangeLabel}>
+              Days:
+            </label>
+            <input
+              id="board-window-days"
+              type="number"
+              min={1}
+              max={MAX_WINDOW_DAYS}
+              className={styles.rangeInputNarrow}
+              value={windowDayCount}
+              onChange={(e) => {
+                const raw = Number(e.target.value);
+                if (!Number.isFinite(raw)) return;
+                const clamped = Math.min(MAX_WINDOW_DAYS, Math.max(1, Math.round(raw)));
+                onWindowChange(windowStartDate, clamped);
+              }}
+            />
+            {windowDayCount >= MAX_WINDOW_DAYS && (
+              <span
+                className={styles.endMarker}
+                title="board_window raises invalid_argument past 92 days"
+              >
+                max window
+              </span>
+            )}
+          </div>
         )}
       </div>
-
-      {isFetching && (
-        <span className={styles.refreshing} title="Refreshing in the background">
-          refreshing…
-        </span>
-      )}
-
-      {/* S67 (R-445): the key moved into the "Show more" band's "Key"
-          group below, filtered to `productIdsInWindow` and drawn as even
-          columns -- see `keyProducts` above and the group in the band. The
-          colour rule itself is untouched (D100/D102, still `productColorCss`
-          off the product's own `color_token`, never a position in a list). */}
 
       <div className={styles.zoom}>
         {ZOOMS.map((z, i) => (
@@ -413,6 +471,19 @@ export function BoardToolbar({
           floor can act on -- removed rather than reworded, the default the
           finding itself calls for. */}
 
+      {/* S67-b (R-445 CORRECTED 18 Sept): "Nothing else is in the row"
+          beyond the mock's six controls; the two quiet, non-interactive
+          notes below are the mock's own named exception ("'refreshing…' may
+          stay as a quiet text at the row's end") and F-170's edge note,
+          which is the same shape -- neither is a control a person acts on,
+          so both stay at the row's end rather than moving behind "Show
+          more". */}
+      {isFetching && (
+        <span className={styles.refreshing} title="Refreshing in the background">
+          refreshing…
+        </span>
+      )}
+
       {/* F-170: this used to render on every board, always, with a title
           naming a brief id ("Scrolling never extends the loaded window in
           P1-4a"). It names a real limit -- scrolling truly does not load
@@ -429,11 +500,25 @@ export function BoardToolbar({
         </span>
       )}
 
-      {/* S67 (R-445): the one toggle for everything the row no longer
-          shows. `aria-controls` points at the band below regardless of
+      {/* TR-4 (reviewer, S67-b review, 18 Sept): the mock's plain "More" word is
+          WITHDRAWN. The maintainer, reviewing this lane's own build same day:
+          "The unexpanded view should show the Show More button and expanded
+          view should show the Show Less button. Just more button is
+          meaningless." So the VISIBLE text goes back to naming the state
+          ("Show more" closed, "Show less" open) and the ACCESSIBLE name is
+          the same string again -- no `aria-label` split. The lane's own
+          TB-12 (a constant visible word, state carried only in `aria-label`)
+          is the thing withdrawn here, not a bug in how it was built: it
+          matched the brief as written, and the maintainer's live look at the
+          shipped band overruled the brief. `e2e/toolbarShowMore.ts` already
+          reads `aria-expanded` rather than the text, so it needs no change.
+          `aria-controls` still points at the band below regardless of
           whether it is currently mounted -- a stable id, not a ref, since
           the id must exist in the attribute before React has necessarily
-          committed the band's own DOM node on the same render that opens it. */}
+          committed the band's own DOM node on the same render that opens
+          it. The chevron stays (down closed, up open), same convention as
+          the range control above (never a raw glyph in text -- `icons.tsx`),
+          since the maintainer's objection was to the word alone. */}
       <button
         ref={moreButtonRef}
         type="button"
@@ -443,6 +528,7 @@ export function BoardToolbar({
         onClick={toggleExpanded}
       >
         {expanded ? "Show less" : "Show more"}
+        <Chevron direction={expanded ? "up" : "down"} />
       </button>
 
       {expanded && (
@@ -462,10 +548,18 @@ export function BoardToolbar({
             }
           }}
         >
+          {/* S67-b (R-445 CORRECTED 18 Sept): TWO COLUMNS, per the mock --
+              "Week plan" left (its own intrinsic width, a plain row of
+              buttons with no bordered strip around them) and "Key" right,
+              taking the remaining width (`.weekPlanColumn`/`.keyColumn`
+              below, a flex row with the Key column `flex: 1 1 auto` so it
+              alone fills the band's width when "Week plan" is absent --
+              TB-11: a viewer, who has no Week plan, gets the key alone
+              across the full width, with nothing else to change here.) */}
           {offerWeekPlanGroup && (
-            <div className={styles.moreGroup}>
+            <div className={styles.weekPlanColumn}>
               <h2 className={styles.moreGroupTitle}>Week plan</h2>
-              <div className={styles.copyWeek}>
+              <div className={styles.weekPlanButtons}>
                 {offerCopyWeek && (
                   <button
                     type="button"
@@ -508,9 +602,18 @@ export function BoardToolbar({
 
           {/* R-445: "Key" always renders -- the two status swatches
               (understaffed, break) are not gated on any rights check, so
-              this group is never empty the way "Week plan" can be. */}
-          <div className={styles.moreGroup}>
-            <h2 className={styles.moreGroupTitle}>Key</h2>
+              this group is never empty the way "Week plan" can be.
+              S67-b (R-445 CORRECTED 18 Sept): the heading now carries the
+              WHOLE catalogue's count ("KEY — N PRODUCTS" in the mock; the
+              uppercase look comes from `.moreGroupTitle`'s own
+              `text-transform`, same as "Week plan" beside it, so the text
+              here stays sentence case and the two headings keep sharing one
+              rule). A thin divider, then the status marks, separate the
+              per-product swatches from the two fixed ones below. */}
+          <div className={styles.keyColumn}>
+            <h2 className={styles.moreGroupTitle}>
+              Key — {keyProducts.length} {keyProducts.length === 1 ? "product" : "products"}
+            </h2>
             <div className={styles.keyGrid}>
               {/* ⭐ THE PRODUCT'S OWN COLOUR, NOT ITS POSITION IN THIS LIST (D102).
                   This read `var(--product-${(i % 4) + 1})`, so the legend agreed with
@@ -524,9 +627,10 @@ export function BoardToolbar({
                   0025 §2 then added a hex arm to it. That is D100's defect, and the
                   fix is the same one: move the rule somewhere every feature may
                   import from, rather than matching three copies.
-                  R-445 DECIDED: `keyProducts` (above) is `products` filtered to
-                  `productIdsInWindow` and sorted by name -- only what is actually
-                  on the board in the shown window, never the whole catalogue. */}
+                  R-445 CORRECTED 18 Sept: `keyProducts` (above) is the WHOLE
+                  `products` catalogue, sorted by name -- the 17 Sept build's
+                  filter to what is actually on the board in the shown window
+                  is withdrawn (it left the key empty on a week with no runs). */}
               {keyProducts.map((p) => (
                 <span key={p.id} className={styles.key}>
                   <span
@@ -536,6 +640,9 @@ export function BoardToolbar({
                   {p.name}
                 </span>
               ))}
+            </div>
+            <div className={styles.keyDivider} />
+            <div className={styles.keyGrid}>
               <span className={styles.key}>
                 <span
                   className={styles.swatchStatus}

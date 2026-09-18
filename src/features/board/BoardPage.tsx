@@ -493,21 +493,6 @@ export default function BoardPage() {
     [index, from, to, windowDayCount, density],
   );
 
-  // S67 (R-445) DECIDED: the toolbar's Key lists only products with a run
-  // inside the shown window -- `index.runById` IS that window's runs
-  // (`boardIndex.ts` builds it from exactly the fetched `[from, to)` range,
-  // clipped to it), so this reads the ids off runs already held here rather
-  // than a second, narrower fetch of the readable catalogue `products`
-  // (below) stays. Empty (not null) before the board has data, same
-  // convention `emptyIndex` above uses.
-  const productIdsInWindow = useMemo(() => {
-    const ids = new Set<string>();
-    for (const run of emptyIndex.runById.values()) {
-      if (run.productId !== null) ids.add(run.productId);
-    }
-    return ids;
-  }, [emptyIndex]);
-
   const dragApi = useDragGesture({
     // Only ever used to build cache keys, and unreachable while null: with no
     // place to open there is no board and nothing to drag.
@@ -1099,11 +1084,13 @@ export default function BoardPage() {
         }}
         onShiftWindowByDays={shiftWindowByDays}
         onGoToToday={() => goToToday(zone)}
+        // S67-b (R-445 CORRECTED 18 Sept): the whole readable catalogue --
+        // the toolbar's Key lists every one of these now (sorted by name,
+        // with the count in its heading), not only the ones with a run in
+        // the shown window. The 17 Sept build's `productIdsInWindow` prop
+        // (this same list, filtered against `emptyIndex.runById`) is
+        // withdrawn along with the filter it fed.
         products={boardQuery.data?.products ?? []}
-        // S67 (R-445) DECIDED: filters the Key to what is actually on the
-        // board in the shown window; `products` above stays the readable
-        // catalogue the create/copy pop-ups need.
-        productIdsInWindow={productIdsInWindow}
         // F-170: the end-of-window note renders only while this is true.
         atWindowEnd={atWindowEnd}
         isFetching={boardQuery.isFetching && hasData}

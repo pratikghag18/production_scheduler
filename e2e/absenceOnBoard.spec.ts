@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { hasRealBackend, NO_BACKEND_REASON } from "./env";
+import { fillWindowStart } from "./boardWindow";
 
 /**
  * Absence on the board, driven as the real person (R-357), the follow-up to
@@ -75,7 +76,7 @@ test("Ana records an absence and the board marks the person on leave", async ({ 
   await page.goto("/");
   const firstTrack = page.getByLabel(/press Enter to create/).first();
   await expect(firstTrack).toBeVisible({ timeout: 20_000 });
-  await page.locator("#board-window-start").fill(monday);
+  await fillWindowStart(page, monday);
   await expect(firstTrack).toBeVisible({ timeout: 20_000 });
 
   // 3. The operator panel marks whoever is away this week.

@@ -38,11 +38,6 @@
   font-weight: 650;
 }
 
-.date {
-  color: var(--ink-2);
-  font-size: calc(13px * var(--chrome-scale, 1));
-}
-
 /* Which place the board is showing. Sits beside the title because it is part
    of the answer to "what am I looking at", not a filter. Both forms use the
    same size and weight so switching between one plant and several does not
@@ -65,10 +60,54 @@
   max-width: calc(200px * var(--chrome-scale, 1));
 }
 
-.range {
+/* S67-b (R-445 CORRECTED 18 Sept): the date range as ONE dropdown control.
+   `.rangeGroup` is the positioning context for `.rangePopover` (`position:
+   relative`/`position: absolute`, the same pairing `.header`/`.moreBand`
+   already use), so the pop-over opens directly under the button rather
+   than under the whole row. */
+.rangeGroup {
+  position: relative;
+  display: flex;
+}
+
+.rangeButton {
   display: flex;
   align-items: center;
   gap: 6px;
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: calc(5px * var(--chrome-scale, 1)) calc(11px * var(--chrome-scale, 1));
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+}
+
+.rangeButton:hover {
+  background: var(--page);
+}
+
+/* Same layer tier as `.moreBand` (z-index 80) so it always reads above
+   ordinary board content; one step higher (85) so the range pop-over
+   still sits above the "Show more" band on the rare chance both are open
+   at once, and still below the shared `Popover` shell's 90 (`Popover.tsx`'s
+   own comment), since `CopyWeekDialog`/`SaveTemplateDialog` open from
+   inside that band and must stay on top of everything else in the header. */
+.rangePopover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 85;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: calc(10px * var(--chrome-scale, 1)) calc(12px * var(--chrome-scale, 1));
+  background: var(--surface);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(11, 11, 11, 0.16);
+  white-space: nowrap;
 }
 
 .rangeLabel {
@@ -245,19 +284,25 @@
   border-left: 1px solid var(--grid);
 }
 
-/* R-339: the Copy week button. Same segmented shape as `.daynav` beside it,
-   one button wide, so it reads as a sibling of the day controls rather than a
-   stray control -- and on `--chrome-scale` for the reason at the top of this
-   file. */
-.copyWeek {
+/* S67-b (R-445 CORRECTED 18 Sept): "the three buttons in a plain row
+   beneath it (no bordered strip around them)" -- the mock's own words for
+   "Week plan". Replaces the 17 Sept build's `.copyWeek`, which drew the
+   three as one segmented strip (R-339's original shape, borrowed from
+   `.daynav` beside it in the row); that shape belonged to the row, not to
+   a labelled group inside the band, and the maintainer's correction named
+   the button positions as wrong. Each button keeps its own border/radius
+   (the app's ordinary button look, `.moreButton`'s own skin) rather than
+   losing all affordance, wrapping if the column is ever narrower than the
+   three labels. */
+.weekPlanButtons {
   display: flex;
-  border: 1px solid var(--axis);
-  border-radius: 7px;
-  overflow: hidden;
+  flex-wrap: wrap;
+  gap: calc(8px * var(--chrome-scale, 1));
 }
 
-.copyWeek button {
-  border: 0;
+.weekPlanButtons button {
+  border: 1px solid var(--axis);
+  border-radius: 7px;
   background: var(--surface);
   padding: calc(5px * var(--chrome-scale, 1)) calc(10px * var(--chrome-scale, 1));
   cursor: pointer;
@@ -266,14 +311,17 @@
   color: var(--ink-2);
 }
 
-.copyWeek button:hover {
+.weekPlanButtons button:hover {
   background: var(--page);
 }
 
-/* S67 (R-445): "Show more" / "Show less" -- same segmented-button look as
-   `.daynav`/`.copyWeek` beside it (border + radius, not the filled `.zoom`
-   look, since this toggles a layer rather than picking one of several
-   states). */
+/* S67-b (R-445 CORRECTED 18 Sept): "Show more"/"Show less" -- same
+   individual-button look as `.rangeButton`/`.weekPlanButtons button`
+   (border + radius, not the filled `.zoom` look, since this toggles a layer
+   rather than picking one of several states). TR-4 (reviewer, 18 Sept): the
+   lane's plain "More" word (with the state carried only in `aria-label`) is
+   withdrawn -- the maintainer called it meaningless on the shipped band;
+   the visible text names the state again and IS the accessible name. */
 .moreButton {
   border: 1px solid var(--axis);
   border-radius: 7px;
@@ -316,6 +364,11 @@
    so there is no ancestor scrollbar to reveal it either. Bounded to the
    viewport, minus room for the header above it and a margin below, with its
    own scrollbar once content exceeds that. */
+/* S67-b (R-445 CORRECTED 18 Sept): TWO COLUMNS, not a stack -- "Week plan"
+   left, "Key" right taking the remaining width. `flex-wrap: wrap` still
+   guards a very narrow viewport (the columns stack rather than clip), and
+   `align-items: flex-start` keeps the two headings on one baseline instead
+   of the taller column stretching the shorter one's own children. */
 .moreBand {
   position: absolute;
   top: 100%;
@@ -323,8 +376,10 @@
   right: 0;
   z-index: 80;
   display: flex;
-  flex-direction: column;
-  gap: 14px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: calc(28px * var(--chrome-scale, 1));
   padding: calc(12px * var(--chrome-scale, 1)) calc(16px * var(--chrome-scale, 1));
   background: var(--surface);
   border-bottom: 1px solid var(--grid);
@@ -334,10 +389,24 @@
   overflow-x: hidden;
 }
 
-.moreGroup {
+/* Its own intrinsic width -- the mock's left column is only as wide as the
+   longest button label, never stretched to share the row evenly with Key. */
+.weekPlanColumn {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* Takes the remaining width -- TB-11: with no "Week plan" column beside it
+   (a viewer), this is the band's only child and so reads as the full width
+   on its own, with nothing here needing to know that. */
+.keyColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .moreGroupTitle {
@@ -347,4 +416,11 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ink-2);
+}
+
+/* S67-b (R-445 CORRECTED 18 Sept): "a thin divider, then the understaffed
+   and break marks" -- separates the per-product swatches (however many
+   the catalogue holds) from the two fixed status marks below them. */
+.keyDivider {
+  border-top: 1px solid var(--grid);
 }

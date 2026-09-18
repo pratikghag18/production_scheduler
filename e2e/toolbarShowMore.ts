@@ -9,14 +9,22 @@ import type { Page } from "@playwright/test";
  * renders. One helper, not a copy pasted into each spec (CLAUDE.md §4: a
  * list, or here a gesture, that appears twice is a bug with a delay on it).
  *
- * A no-op when the band is already open (`textContent` reads "Show less"),
- * so a spec that opens it once and then reaches for a second Week-plan
- * button later in the same test does not toggle it shut again.
+ * A no-op when the band is already open, so a spec that opens it once and
+ * then reaches for a second Week-plan button later in the same test does
+ * not toggle it shut again.
+ *
+ * S67-b (R-445 CORRECTED 18 Sept) briefly made the button's VISIBLE text a
+ * constant "More" in both states, carrying open/closed only in
+ * `aria-label` -- the maintainer withdrew that the same day ("Just more
+ * button is meaningless"), so the visible text is `BoardToolbar.tsx`'s
+ * "Show more"/"Show less" again. The read below still uses `aria-expanded`
+ * rather than the text, which was already the more direct fact and needed
+ * no change either way.
  */
 export async function openShowMoreIfNeeded(page: Page): Promise<void> {
   const toggle = page.getByRole("button", { name: /^Show (more|less)$/ });
   await toggle.waitFor({ state: "visible", timeout: 15_000 });
-  if ((await toggle.textContent()) === "Show more") {
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
     await toggle.click();
   }
 }

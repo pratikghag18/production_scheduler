@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { hasRealBackend, NO_BACKEND_REASON } from "./env";
+import { fillWindowStart } from "./boardWindow";
 
 /**
  * R-346, ON THE SCREEN, AS THE PERSON IT BROKE FOR.
@@ -102,7 +103,7 @@ test("a line supervisor sees the whole plant's people: the default list plus the
   page,
 }) => {
   await signIn(page, SUPERVISOR, "/");
-  await page.locator("#board-window-start").fill(mondayPlusWeeks(0));
+  await fillWindowStart(page, mondayPlusWeeks(0));
 
   const panel = page.getByRole("complementary", { name: "Operators" });
   await expect(panel).toBeVisible({ timeout: 15_000 });
@@ -125,7 +126,7 @@ test("the cell pop-up splits the same six the same way, marking only the ones be
   page,
 }) => {
   await signIn(page, SUPERVISOR, "/");
-  await page.locator("#board-window-start").fill(mondayPlusWeeks(0));
+  await fillWindowStart(page, mondayPlusWeeks(0));
 
   // Any cell track on her board, not a named one: her grant is Line 1 and the
   // demo may move cells; a track is a focusable div with an aria-label and no

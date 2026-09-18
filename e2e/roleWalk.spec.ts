@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Browser, type Locator } from "@playwright/test";
 import { hasRealBackend, NO_BACKEND_REASON, e2eBaseUrl } from "./env";
+import { fillWindowStart } from "./boardWindow";
 
 /**
  * THE NET FOR THE "RESOLVED THROUGH THE CALLER'S OWN VIEW" CLASS OF DEFECT.
@@ -223,7 +224,7 @@ async function observeBoard(page: Page, person: Person): Promise<BoardFacts> {
   const firstTrack = page.getByLabel(/press Enter to create/).first();
   await expect(firstTrack).toBeVisible({ timeout: 20_000 });
 
-  await page.locator("#board-window-start").fill(mondayOfThisWeek());
+  await fillWindowStart(page, mondayOfThisWeek());
   // The date change refetches; wait for the board to settle on a track again.
   await expect(firstTrack).toBeVisible({ timeout: 20_000 });
 
