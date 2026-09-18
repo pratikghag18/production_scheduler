@@ -369,7 +369,7 @@ function TemplateRow({
       </div>
 
       {mayAdminister && (
-        <div className={styles.actions}>
+        <div className={styles.rowActions}>
           {editing ? (
             <>
               <button

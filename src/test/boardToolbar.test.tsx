@@ -63,6 +63,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Product } from "@/lib/api";
 import { BoardToolbar } from "@/features/board/components/BoardToolbar";
+import styles from "@/features/board/components/BoardToolbar.module.css";
 
 const h = vi.hoisted(() => ({
   isAdminFor: vi.fn(),
@@ -438,5 +439,32 @@ describe("TB-12: the toggle's visible text names the state, and is its own acces
     expect(stillTheSameButton).toBe(toggle);
     expect(stillTheSameButton.textContent).toBe("Show less");
     expect(stillTheSameButton.getAttribute("aria-label")).toBeNull();
+  });
+});
+
+/**
+ * TB-13 (R-447, the audit lane, 18 Sept): every button in one group is the
+ * same size. jsdom does not compute layout, so this cannot measure pixels
+ * (the maintainer's own browser measurement is what `verified_by` in
+ * docs/plan.yaml records instead) -- what IS honestly testable here is that
+ * the zoom levels and the day-navigation buttons are still wrapped in the
+ * grid container that gives every segment one shared track size
+ * (`BoardToolbar.module.css`'s `.zoom`/`.daynav`, `grid-auto-columns: 1fr`),
+ * so a future edit cannot quietly drop the class back to a plain `flex` row
+ * without a test noticing.
+ */
+describe("TB-13: R-447 -- the zoom and day-navigation segments share the grid class that gives them one width", () => {
+  it("Compact/Standard/Fine sit inside the .zoom grid", async () => {
+    mockRole("admin");
+    renderToolbar();
+    const compact = screen.getByRole("button", { name: "Compact" });
+    expect(compact.parentElement?.className).toContain(styles.zoom);
+  });
+
+  it("Prev day/Today/Next day sit inside the .daynav grid", async () => {
+    mockRole("admin");
+    renderToolbar();
+    const prevDay = screen.getByRole("button", { name: "Prev day" });
+    expect(prevDay.parentElement?.className).toContain(styles.daynav);
   });
 });

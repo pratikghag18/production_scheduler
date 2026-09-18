@@ -230,6 +230,14 @@
   white-space: nowrap;
 }
 
+/* R-447: THE ONE WRITTEN EXCEPTION the standard itself names. Every other
+   button group in the app shares one width (a segmented control, a stacked
+   group, a toggle whose label changes, a dialog footer); this strip does
+   not, because each candidate's label IS the answer -- an operator's name,
+   a shift's hours, a place's path -- as long as whatever the trace actually
+   holds, never a fixed word a width could be sized to. Forcing one width
+   here would either clip a long answer or pad every short one out to match
+   the longest, both worse than a strip that wraps to fit what it carries. */
 .candidates {
   display: flex;
   flex-wrap: wrap;

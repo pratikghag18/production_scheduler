@@ -95,6 +95,26 @@
   align-items: center;
 }
 
+/* R-447: this is the same button MORPHING BETWEEN STATES the standard names
+   for the toolbar's own "Show more"/"Show less" -- Save/Cancel while
+   renaming, Yes-delete/Keep while confirming, Rename/Delete otherwise. One
+   width sized to the longest of the six ("Yes, delete") so the row never
+   shifts as the state flips, the same `min-width` fix as
+   `BoardToolbar.module.css`'s `.moreButton`. A separate class from
+   `.actions` above (whose only button, "Show contents"/"Hide contents", is
+   already two equal-length words and does not need one) so the fix does not
+   force an unrelated group to share this row's width by coincidence. */
+.rowActions {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.rowActions button {
+  min-width: 5.5em;
+  text-align: center;
+}
+
 .confirmText {
   font-size: 0.75rem;
   color: var(--crit);

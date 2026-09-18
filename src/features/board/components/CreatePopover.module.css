@@ -115,6 +115,13 @@
   flex: 1;
 }
 
+/* R-447 data exception, written down rather than forced: the second of the
+   two the standard names (the first is `CommandBar.module.css`'s
+   `.candidates`). Each chip's label is a shift's name and its clock hours
+   (`CreatePopover.tsx`: `{c.name} {formatClock(...)}–...`) -- "as long as
+   the names and hours they carry", the standard's own words -- so the row
+   wraps to fit whatever the plant's shifts are named, rather than every
+   chip sharing one width sized to the longest one a plant happens to have. */
 .shiftChipRow {
   display: flex;
   flex-wrap: wrap;
