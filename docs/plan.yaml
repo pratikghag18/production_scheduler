@@ -12526,6 +12526,26 @@ findings:
     the thread while the block is still on the board. CLAUDE.md §4's own warning, in the bar's words. Fix:
     every writer prop returns the outcome (written, refused with the server's reason) the way onOpen and
     onBook already do, and a void return is a type error, not a success.
+- id: F-171
+  title: The settings panel's date-sample test read the machine's day, so the suite went red the first time it ran after 7 pm Chicago
+  tag: A clock-dependent expectation with no frozen clock
+  status: fixed
+  found_by: agent
+  stage: S62
+  refs:
+  - R-426
+  - R-320
+  story: >-
+    Found 17 Sept (session 178) by the full suite at 19:33 Chicago: three cases in settingsPanel.test.tsx
+    expected "17 Sep 2026" and got "18 Sep 2026". The S62 audit had moved the panel's sample day onto the
+    plant's zone (the fixture's company zone is UTC), but the test's own helper still built today from the
+    machine's getters, with a comment that said so ("LOCAL, not the UTC day"). Right by luck for every run
+    before seven in the evening --- the same shape as F-159, in a test, and exactly what R-426's last
+    sentence asks for: a clock-dependent rule needs a frozen-clock pin in both directions.
+  fix: >-
+    Session 178. The helper reads today in the zone the panel resolves (todayIsoInZone, the plant's own
+    else the company's), and a pin freezes the clock at 2026-09-18T00:30Z and asserts 18 Sep under UTC and
+    17 Sep under America/Chicago in the same run.
 - id: F-170
   title: The board toolbar shows an internal brief id and an unconditional end-of-window apology
   tag: A build note shipped as a label

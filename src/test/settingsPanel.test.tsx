@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
 import { DATE_FORMATS, formatCalendarDay } from "@/lib/format/dates";
+import { todayIsoInZone } from "@/lib/format/timezones";
 import rowStyles from "@/components/SettingRow.module.css";
 
 /**
@@ -266,12 +267,20 @@ function commandBarPicker(): HTMLSelectElement {
   return screen.getByRole("combobox", { name: "The command bar" }) as HTMLSelectElement;
 }
 
-/** Today the way the panel builds it: LOCAL, not the UTC day. */
+/**
+ * Today the way the panel builds it (R-426): in the zone the panel resolves --
+ * the plant's own when set, else the company's -- never the machine's day.
+ *
+ * F-171 (17 Sept, session 178, found by the full suite at 19:33 Chicago): this
+ * helper used to read the MACHINE's getters ("LOCAL, not the UTC day"), which
+ * was right by luck for as long as the suite ran before 19:00 Chicago; the S62
+ * audit moved the panel onto the plant's zone (fixture company zone UTC) and
+ * left this expectation on the machine's, so the three sample cases failed the
+ * first time the suite ran after seven in the evening -- the same shape as
+ * F-159, in a test. The frozen-clock pin below holds both sides of midnight.
+ */
 function todayIso(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-    now.getDate(),
-  ).padStart(2, "0")}`;
+  return todayIsoInZone(h.state.own.timezone ?? h.state.companyTimezone);
 }
 
 /** The option value that means "no row -- follow the company". Never sent. */
@@ -474,6 +483,33 @@ describe("R-320: the settings tab is one row per setting", () => {
       expect(option.getAttribute("value")).toBe(fmt);
       expect(option.textContent).toContain(formatCalendarDay(today, fmt));
     });
+  });
+
+  it("F-171: the sample is the plant's day at 19:30 Chicago (17 Sep there, 18 Sep in UTC), both sides of midnight", () => {
+    // 2026-09-18T00:30Z is 17 Sept 19:30 in Chicago and 18 Sept 00:30 in UTC:
+    // the instant at which the machine's day and the plant's disagree, which
+    // is the case R-426 exists for and the case the old helper hid.
+    vi.useFakeTimers({ now: new Date("2026-09-18T00:30:00Z"), toFake: ["Date"] });
+    try {
+      render(<SettingsPanel />);
+      const optionText = () =>
+        within(picker())
+          .getAllByRole("option")
+          .map((o) => o.textContent)
+          .join(" | ");
+      expect(optionText()).toContain("2026-09-18");
+      expect(optionText()).not.toContain("2026-09-17");
+      cleanup();
+      h.state.own.timezone = "America/Chicago";
+      choosePlant("a");
+      render(<SettingsPanel />);
+      // On a plant the first option is "Use the company setting (…)", so the
+      // samples are read across every option rather than by index.
+      expect(optionText()).toContain("2026-09-17");
+      expect(optionText()).not.toContain("2026-09-18");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the company's current format, so the closed control is its own sample", () => {

@@ -2378,7 +2378,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>170 things that weren't in the plan</h2>
+  <h2>171 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3844,6 +3844,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   
   <p class="fine">R-445</p>
+</div>
+<div class="find fix" id="F-171">
+  <span class="tag">A clock-dependent expectation with no frozen clock · fixed · found while building · <a href="#S62">S62</a></span>
+  <h3>The settings panel's date-sample test read the machine's day, so the suite went red the first time it ran after 7 pm Chicago</h3>
+  <p>Found 17 Sept (session 178) by the full suite at 19:33 Chicago: three cases in settingsPanel.test.tsx expected &quot;17 Sep 2026&quot; and got &quot;18 Sep 2026&quot;. The S62 audit had moved the panel's sample day onto the plant's zone (the fixture's company zone is UTC), but the test's own helper still built today from the machine's getters, with a comment that said so (&quot;LOCAL, not the UTC day&quot;). Right by luck for every run before seven in the evening --- the same shape as F-159, in a test, and exactly what R-426's last sentence asks for: a clock-dependent rule needs a frozen-clock pin in both directions.</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 178. The helper reads today in the zone the panel resolves (todayIsoInZone, the plant's own else the company's), and a pin freezes the clock at 2026-09-18T00:30Z and asserts 18 Sep under UTC and 17 Sep under America/Chicago in the same run.</p></div>
+  <p class="fine">R-426 · R-320</p>
 </div>
 <div class="find " id="F-168">
   <span class="tag">A write that reports success can have changed nothing · open · found while building · <a href="#S64">S64</a></span>
