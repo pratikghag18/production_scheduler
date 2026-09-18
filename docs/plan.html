@@ -2384,7 +2384,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>180 things that weren't in the plan</h2>
+  <h2>181 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -3922,6 +3922,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   
   <p class="fine">R-421 · R-427 · R-434</p>
+</div>
+<div class="find fix" id="F-181">
+  <span class="tag">A walk premise that lived in the database, not in the seed · fixed · found while building · <a href="#S61">S61</a></span>
+  <h3>The typed walk relied on a training the seed never gave --- Sam Patel held Welding by a lane's hand, and the re-seed took it away</h3>
+  <p>Found 18 Sept (session 179) when the typed walk failed twice on its second sentence after the morning's re-seed: &quot;Sam Patel is not certified for Cell 1: missing Welding.&quot; The seed gives Welding to the second, third and fourth person of each plant and only the Line 1 Cert to the first; the stack that had passed the walk every day since the 16th carried a Welding row for Sam that a lane or a hand had added and no file recorded. R-433 says a walk is a spec first; a spec whose premise is not in the seed passes only on the machine that happens to hold it --- the same shape as the drifted week (F-177).</p>
+  
+  <div class="aside"><span class="k">Fix</span><p>Session 179. The seed gives the first person of each plant Welding as well as the Line 1 Cert (Tom Baker stays the uncertified case); the same rows added to the live demo through the place tree; the demo build green; the walk re-run.</p></div>
+  <p class="fine">R-433 · R-423</p>
 </div>
 <div class="find " id="F-178">
   <span class="tag">A floating panel that dodges the pop-over audit by never writing the role it is · open · found while building · <a href="#S67">S67</a></span>

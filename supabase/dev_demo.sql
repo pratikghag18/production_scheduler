@@ -346,7 +346,13 @@ BEGIN
            CASE WHEN o.display_name LIKE '%3' THEN (now() + interval '20 days')::date END
       FROM operators o, skills s
      WHERE o.org_id = v_org AND s.org_id = v_org
-       AND o.display_name IN ('Operator ' || v_letter || '2',
+       -- F-181 (18 Sept, session 179): the first person (Sam Patel on Plant A)
+       -- holds Welding as well as the Line 1 Cert below, because the typed walk
+       -- and the maintainer's own list put Sam on Cell 1, which requires it; the
+       -- stack that passed the walk had that row from a lane's hand, not the
+       -- seed, and a re-seed lost it. Tom Baker (5) stays the uncertified case.
+       AND o.display_name IN ('Operator ' || v_letter || '1',
+                              'Operator ' || v_letter || '2',
                               'Operator ' || v_letter || '3',
                               'Operator ' || v_letter || '4')
        -- ⚠⚠ THE OWNER IS PART OF THE LOOKUP NOW, AND HAS TO BE. All three

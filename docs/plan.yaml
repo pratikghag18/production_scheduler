@@ -12744,6 +12744,26 @@ findings:
     passes popoverStandard.test.ts only because that audit's signal is the literal role="dialog", which the
     code never writes. Every other anchored floating panel composes the shared Popover shell or is
     allowlisted with a reason. Decide: compose the shell, or allowlist with the reason written beside it.
+- id: F-181
+  title: The typed walk relied on a training the seed never gave --- Sam Patel held Welding by a lane's hand, and the re-seed took it away
+  tag: A walk premise that lived in the database, not in the seed
+  status: fixed
+  found_by: agent
+  stage: S61
+  refs:
+  - R-433
+  - R-423
+  story: >-
+    Found 18 Sept (session 179) when the typed walk failed twice on its second sentence after the morning's
+    re-seed: "Sam Patel is not certified for Cell 1: missing Welding." The seed gives Welding to the second,
+    third and fourth person of each plant and only the Line 1 Cert to the first; the stack that had passed the
+    walk every day since the 16th carried a Welding row for Sam that a lane or a hand had added and no file
+    recorded. R-433 says a walk is a spec first; a spec whose premise is not in the seed passes only on the
+    machine that happens to hold it --- the same shape as the drifted week (F-177).
+  fix: >-
+    Session 179. The seed gives the first person of each plant Welding as well as the Line 1 Cert (Tom Baker
+    stays the uncertified case); the same rows added to the live demo through the place tree; the demo build
+    green; the walk re-run.
 - id: F-180
   title: A retime from the bar that needs a confirm pop-up reports Waiting and nothing ever settles it
   tag: A pop-up with no reporter back to the bar
