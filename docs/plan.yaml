@@ -12547,7 +12547,8 @@ requirements:
     window is withdrawn --- on a week with no runs it showed nothing); the band is two columns, Week plan left
     and Key right; the From and Days fields fold into the range control as a dropdown; the button reads
     "More" with a chevron. The 17 Sept build followed the row's words, not the image, which was never in the
-    repo; S67-b builds the image (docs/agent-briefs/s67-b-band-as-the-mock-brief.md).- id: R-446
+    repo; S67-b builds the image (docs/agent-briefs/s67-b-band-as-the-mock-brief.md).
+- id: R-446
   title: Every side panel resizes by its edge and remembers its width per person, through the one size module
   source:
   - 'session 179 conversation (the maintainer, 18 Sept)'
