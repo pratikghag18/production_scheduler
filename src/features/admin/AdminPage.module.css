@@ -8,7 +8,11 @@
   min-height: 100%;
 }
 
+/* R-446: `position: relative` anchors `.railHandle` and `.railProbe` below to
+   THIS box, not the page -- the same reason `OperatorPanel.module.css`'s
+   `.panel` carries it (S65-a/R-439's own doc). */
 .rail {
+  position: relative;
   flex: none;
   width: var(--rail-w);
   display: flex;
@@ -17,6 +21,44 @@
   padding: 0.75rem 0.5rem;
   border-right: 1px solid var(--grid);
   background: var(--surface);
+}
+
+/* R-446: zero-size, unrendered -- its CSS `width` IS `var(--rail-w)`, so
+   reading its RESOLVED `getBoundingClientRect().width` in `AdminPage.tsx`
+   turns the token's `calc(232px * var(--ui-scale, 1))` into a real px number
+   (`getComputedStyle` on the custom property itself would hand back the
+   unresolved calc() text instead). `BoardGrid.module.css`'s own `.railProbe`
+   is the same trick for the same token, for the board's row-label column --
+   a different rail, same measurement problem (P1-4c D47). */
+.railProbe {
+  position: absolute;
+  width: var(--rail-w);
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* R-446: the drag handle, a thin strip on the rail's right edge -- same shape
+   as `OperatorPanel.module.css`'s `.resizeHandle` (8px there, `touch-action:
+   none` so a touch drag isn't read as a scroll). `0.5rem` here, NOT the
+   board file's raw `8px`: this stylesheet is one of D84's rem surfaces,
+   scaled through the root font-size rather than through `--ui-scale`, so a
+   bare px width here is exactly `scaleAudit.ts`'s R1 (it is not a hairline
+   border, the one px exemption that rule carries). `.rail` sets no
+   `overflow`, so `right: 0` (rather than straddling with a negative offset)
+   is not load-bearing here the way OR-3 made it for the operator rail, but
+   the same value keeps the two handles' CSS the same shape. Never rendered
+   while collapsed (`AdminPage.tsx` doesn't render it then), so no
+   `.railCollapsed` override is needed. */
+.railHandle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 0.5rem;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 3;
 }
 
 /* Collapsed: the rail shrinks to a strip of icons, and `.content` (flex: 1)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 // `fetchHierarchyTree` moved to src/lib/api/hierarchy.ts by the design session:
 // `src/lib/api/` is the only place allowed to touch supabase, snake_case or
@@ -12,6 +12,12 @@ import { buildShapeSummaries, filterEditableShapes, resolveSelectedShape } from 
 import { nodesInPlant } from "./lib/plantFilter";
 import { usePlantFilter } from "./hooks/usePlantFilter";
 import { useAdminViewStore } from "./store/adminView";
+import {
+  readRailWidth,
+  writeRailWidth,
+  railKey,
+  clampWidthToFloor,
+} from "@/features/board/lib/railWidth";
 import { LevelEditor } from "./components/LevelEditor";
 import { NodeTreeEditor } from "./components/NodeTreeEditor";
 import { ShapePicker } from "./components/ShapePicker";
@@ -347,6 +353,32 @@ function readRailCollapsed(): boolean {
   }
 }
 
+/**
+ * R-446: the standard's first hit outside the board -- this rail resizes by
+ * its edge and remembers its width per person through `panelSize.ts`, the
+ * same shape `railWidth.ts` already gives the operator rail (`readRailWidth`/
+ * `writeRailWidth` are reused as-is: a width-only pair over `panelSize.ts`'s
+ * localStorage round trip). Only the KEY differs -- `railKey` in
+ * `railWidth.ts` prefixes the operator rail's own key (user + board root)
+ * with `rail:`; this page has no root, so the key is the signed-in user's id
+ * alone, prefixed with `admin-rail:` (passed as `railKey`'s own second
+ * argument, RR-1 below) so the two stores never collide under the one shared
+ * `commandLauncher.panelSize.*` namespace. `userId === null` (session not
+ * yet known): the same `null`-means-session-only contract every function
+ * down this chain already carries.
+ *
+ * RR-1 (reviewer, S68-a review): this used to carry its own `adminRailKey`
+ * and `clampAdminRailWidth`, retyping `railWidth.ts`'s `railKey` and clamp
+ * under new names instead of generalising them -- exactly the "own storage"
+ * shape R-446 exists to rule out, even though the actual localStorage
+ * round trip (`readRailWidth`/`writeRailWidth`) was already shared. Fixed by
+ * giving `railKey` a `prefix` argument and `railWidth.ts` a floor-only
+ * `clampWidthToFloor` that both this file and `clampRailWidth` itself now
+ * call; `OP-1..OP-4` (`operatorPanel.test.tsx`) stay green because
+ * `clampRailWidth`'s own signature and behaviour are unchanged.
+ */
+const ADMIN_RAIL_PREFIX = "admin-rail:";
+
 export default function AdminPage() {
   const [section, setSection] = useState<SectionId>("hierarchy");
   const [railCollapsed, setRailCollapsed] = useState<boolean>(readRailCollapsed);
@@ -362,6 +394,97 @@ export default function AdminPage() {
       return next;
     });
   const { session, profile, loading: sessionLoading } = useSession();
+
+  /* -------------------------------------------------------------------
+   * R-446: THE RAIL'S OWN REMEMBERED WIDTH.
+   *
+   * `null` until either a stored value is loaded or a drag sets one — the
+   * same convention `OperatorPanel.tsx`'s `width` state uses, and for the
+   * same reason: the rail sizes to its CSS default (`.rail`'s
+   * `width: var(--rail-w)`) until there is a real number to override it
+   * with, rather than forcing one on a rail nobody has ever dragged.
+   * ------------------------------------------------------------------- */
+  const [railWidth, setRailWidth] = useState<number | null>(null);
+
+  // The board keys the operator rail by user + board root
+  // (`historyStorageKey`); this page has no root, so `session.user.id` alone
+  // is the whole key — the raw session id, not `profile.userId`, so the key
+  // is available the moment auth resolves rather than waiting on the
+  // separate `user_profiles` read (the same value `BoardPage` reads for its
+  // own `historyKey`).
+  const railStorageKey = railKey(session?.user.id ?? null, ADMIN_RAIL_PREFIX);
+
+  // R-446: a zero-size probe whose CSS `width` IS `var(--rail-w)` — see
+  // `AdminPage.module.css`'s `.railProbe` for why this is a measurement, not
+  // a retyped constant.
+  const railProbeRef = useRef<HTMLSpanElement | null>(null);
+  function currentRailFloor(): number {
+    return railProbeRef.current?.getBoundingClientRect().width ?? 0;
+  }
+
+  // Restore on mount and whenever the person changes (a fresh
+  // `railStorageKey`) — mirrors `OperatorPanel.tsx`'s own restore effect over
+  // `railWidth.ts` exactly. Never re-runs on `railCollapsed` toggling, so
+  // collapsing and reopening leaves this alone and a reopen finds the same
+  // width still in state.
+  useEffect(() => {
+    const stored = readRailWidth(railStorageKey);
+    setRailWidth(stored !== null ? clampWidthToFloor(stored, currentRailFloor()) : null);
+  }, [railStorageKey]);
+
+  /**
+   * R-446: a pointer drag on the rail's right-edge handle, tracked with
+   * `setPointerCapture` on the handle itself (CR-2's own fix, carried by
+   * every resize handle in the app) — a raw `document.addEventListener`
+   * misses a release outside the browser window entirely, leaving the drag
+   * stuck open. `railDragRef` (a ref, not state) holds `latest`; `railWidth`
+   * itself would still read the value from BEFORE this render's
+   * `setRailWidth`, a stale read for exactly the reason `OperatorPanel.tsx`'s
+   * own `railDragRef` doc gives. The rail grows to the RIGHT, so the delta is
+   * (current - start), not (start - current).
+   */
+  const railDragRef = useRef<{
+    startX: number;
+    startWidth: number;
+    floor: number;
+    latest: number;
+    pointerId: number;
+  } | null>(null);
+
+  function handleRailPointerDown(e: React.PointerEvent<HTMLDivElement>): void {
+    e.preventDefault();
+    const floor = currentRailFloor();
+    const startWidth = railWidth ?? floor;
+    railDragRef.current = {
+      startX: e.clientX,
+      startWidth,
+      floor,
+      latest: startWidth,
+      pointerId: e.pointerId,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function handleRailPointerMove(e: React.PointerEvent<HTMLDivElement>): void {
+    const drag = railDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const next = clampWidthToFloor(drag.startWidth + (e.clientX - drag.startX), drag.floor);
+    drag.latest = next;
+    setRailWidth(next);
+  }
+
+  /** Ends a resize on either `pointerup` or `pointercancel` -- see
+   *  `OperatorPanel.tsx`'s own `endRailResize` doc for why both matter. */
+  function endRailResize(e: React.PointerEvent<HTMLDivElement>): void {
+    const drag = railDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    railDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    writeRailWidth(railStorageKey, drag.latest);
+  }
+
   // ⭐⭐ D114: THE RAIL IS FILTERED, NOT THE PANELS. A supervisor gets the same
   // Operators and Trainings screens everybody else does — they simply show what
   // that person's grants reach, which those screens already know how to do.
@@ -689,7 +812,14 @@ export default function AdminPage() {
       <nav
         className={railCollapsed ? `${styles.rail} ${styles.railCollapsed}` : styles.rail}
         aria-label="Admin sections"
+        // R-446: only an OPEN rail takes the dragged width — collapsed always
+        // falls back to `.railCollapsed`'s own `width: auto`, same as
+        // `OperatorPanel.tsx`'s `open && width !== null` inline-style gate.
+        style={!railCollapsed && railWidth !== null ? { width: railWidth } : undefined}
       >
+        {/* See `currentRailFloor`'s own comment above: a zero-size probe whose
+            resolved `width` IS the current `--rail-w`, as a real px number. */}
+        <span ref={railProbeRef} className={styles.railProbe} aria-hidden="true" />
         {/* ⭐ THE ONE CONTROL THAT SURVIVES A COLLAPSE. When the rail is shut it
             is the only thing in it, so it must always be reachable — the section
             buttons are the thing being hidden, never this. `aria-expanded` names
@@ -728,6 +858,21 @@ export default function AdminPage() {
             {!s.enabled && <span className={styles.soon}>soon</span>}
           </button>
         ))}
+        {/* R-446: the rail's own drag handle, right edge only — collapsed has
+            nothing to widen into, same rule `OperatorPanel.tsx`'s own handle
+            follows. */}
+        {!railCollapsed && (
+          <div
+            className={styles.railHandle}
+            onPointerDown={handleRailPointerDown}
+            onPointerMove={handleRailPointerMove}
+            onPointerUp={endRailResize}
+            onPointerCancel={endRailResize}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize admin sections"
+          />
+        )}
       </nav>
 
       <div className={styles.content}>

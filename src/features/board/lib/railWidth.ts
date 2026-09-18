@@ -34,9 +34,36 @@ export const RAIL_MAX_WIDTH = 480;
 
 /** `historyKey === null` (session/board not yet known): no key to store
  *  under, same contract `panelSize.ts`'s own functions already carry for a
- *  `null` key. */
-export function railKey(historyKey: string | null): string | null {
-  return historyKey === null ? null : `rail:${historyKey}`;
+ *  `null` key. `prefix` defaults to the operator rail's own `"rail:"` so
+ *  every existing caller is unaffected; a later panel (S68-a's admin rail
+ *  review, RR-1) passes its own prefix instead of re-deriving this function
+ *  bare in its own file -- the point of generalising it here rather than
+ *  leaving a second copy to drift from this one. */
+export function railKey(historyKey: string | null, prefix: string = "rail:"): string | null {
+  return historyKey === null ? null : `${prefix}${historyKey}`;
+}
+
+/**
+ * RR-1 (reviewer, S68-a review): the shared clamp math, taking the FLOOR
+ * directly rather than deriving it from `RAIL_MIN_WIDTH * uiScale`. The
+ * operator rail's floor is that constant times the current scale;
+ * the admin rail's floor (R-446) is a measured `--rail-w`, not a scale
+ * multiple of a constant -- but both are "clamp this width into
+ * `[floor, max(floor, ceiling)]`", the same two-sided clamp
+ * `clampPanelSize` also runs. Before this, `AdminPage.tsx` re-typed this
+ * exact clamp under its own name (`clampAdminRailWidth`) instead of asking
+ * this file for a floor-only version of its own -- copied math, not shared,
+ * the shape R-446 exists to rule out. `clampRailWidth` below is this with
+ * the operator rail's own floor plugged in, so OP-1..OP-4 (a fixed
+ * `[190px * ui-scale, 480px]`) see no change.
+ */
+export function clampWidthToFloor(
+  width: number,
+  floor: number,
+  ceiling: number = RAIL_MAX_WIDTH,
+): number {
+  const max = Math.max(floor, ceiling);
+  return Math.min(max, Math.max(floor, width));
 }
 
 /**
@@ -47,9 +74,7 @@ export function railKey(historyKey: string | null): string | null {
  * `clampPanelSize` uses when the viewport is smaller than its own floor.
  */
 export function clampRailWidth(width: number, uiScale: number): number {
-  const min = RAIL_MIN_WIDTH * uiScale;
-  const max = Math.max(min, RAIL_MAX_WIDTH);
-  return Math.min(max, Math.max(min, width));
+  return clampWidthToFloor(width, RAIL_MIN_WIDTH * uiScale);
 }
 
 /** `key` is already `railKey(historyKey)`'s output (or `null`). Returns
