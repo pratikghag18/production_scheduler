@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-18'
-  tip: 'd9a60e6'
+  tip: '9f61c3f'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -2885,9 +2885,9 @@ stages:
     back and the thread says nothing changed (a migration, then runLot is one call); (d) one endTurn in the
     store that every life-ending path calls, so no turn has a blank last line, plus F-168 and F-169.
   state: >-
-    **NOW 18 Sept (session 179).** Audits run and written 17 Sept; the first fix lane runs on F-168, F-169 and
-    four untraced paths (docs/agent-briefs/s64-c-writers-answer-brief.md); the dead ends, absence and capacity
-    before the yes, and the lot RPC follow.
+    **NOW 18 Sept (session 180).** S64-c shipped (6b8a84e): F-168, F-169 and four untraced paths, four review
+    fixes. Still owed: the twenty dead ends, absence and capacity before the yes, the lot RPC, the rest of the
+    untraced paths, F-180.
 - id: S65
   track: core
   num: 65
@@ -2950,8 +2950,9 @@ stages:
     panel's header and edited with the place, the red mark and the words, Person and Shift as sort columns), the
     importer's Shift column, the Shifts panel's retire warning with the count and the destinations, the Access
     tab's two columns; migration 0083 extends set_site_member and site_people; every demo person has a band.
-    Piece (3), the board, is next (R-448): the rail on shift now with the other shifts selectable, the OT tag,
-    the words against the person's own band. Then the bar and the walks.
+    Piece (3) SHIPPED 18 Sept (session 180, 9f61c3f): the rail on shift now, a chip per shift, the OT tag, the
+    words against the person's own band; six placements the lane decided are named on R-448 for the maintainer.
+    Piece (4), the bar's grammar and question, and piece (5), the demo across the bands and the walks, remain.
 - id: S67
   track: core
   num: 67
@@ -12657,9 +12658,19 @@ requirements:
     the name, in the board's amber signal colour (the token that already means "look at this" on the
     board), with "overtime" and the minutes in the chip's title; the block's other marks are unchanged.
   verified_by:
-  - kind: manual
-    steps: "pinned when S66-c lands"
-  status: uncovered
+  - kind: vitest
+    file: src/test/operatorPanel.test.tsx
+    cases: "SC-1 to SC-10 (the chips, the on-now fill, toggling, the default list, the grid columns), RC-1 (a toggled chip reads as on), RC-3 (the rail's minute clock flips the band and clears on unmount)"
+  - kind: vitest
+    file: src/test/shiftNow.test.ts
+    cases: "SN-1 to SN-10 (the band covering now, a night band both sides of midnight, the same instant east and west of UTC)"
+  - kind: vitest
+    file: src/test/railWords.test.ts
+    cases: "RW-8, HB-1 to HB-7, OT-1 to OT-6, RC-2 (overtime minutes agree with the server on the clock-change night)"
+  - kind: vitest
+    file: src/test/directBlockAndChip.test.tsx
+    cases: "DC-ot-1 to DC-ot-3 (in, overtime with the title, no band means no tag)"
+  status: covered
   note: >-
     STATED 18 Sept (session 179), answering the developer's two placement questions with candidates: "1. B,
     the tag can have a colour to make it visual. 2. The chip should not show, the list should automatically
@@ -12672,6 +12683,10 @@ requirements:
     of 4 shifts. I want the transitions to be smooth." So: a row of shift chips under the rail's heading, the shift
     on now filled, the others toggled in; the chips share one width in a grid of two or three columns, and a 2x2
     matrix for four; toggling animates the chip and the list (no layout jump).
+    DECIDED BY THE LANE 18 Sept (session 180), named for the maintainer to confirm or correct: the rail keeps
+    its own minute clock (no shared one existed); people with no shift keep their words and get a "No shift"
+    tag; the "other people in this plant" button ignores the chips; a cross-pattern person's block shows no OT
+    tag; rows are animated in, not out; between bands the heading reads "No one on shift now".
 - id: R-449
   title: A fact is changed in one place --- the screen where the thing is defined; a second control for the same fact is a defect
   source:
@@ -12713,7 +12728,7 @@ findings:
 - id: F-168
   title: A refused unassign or retime from the bar is recorded as Written, because four writers answer nothing and nothing is read as written
   tag: A write that reports success can have changed nothing
-  status: open
+  status: fixed
   found_by: agent
   stage: S64
   refs:
@@ -12729,6 +12744,10 @@ findings:
     the thread while the block is still on the board. CLAUDE.md §4's own warning, in the bar's words. Fix:
     every writer prop returns the outcome (written, refused with the server's reason) the way onOpen and
     onBook already do, and a void return is a type error, not a success.
+  fix: >-
+    Session 180 (6b8a84e). The four writers await their mutation and answer written, refused or popup; the
+    prop type forbids a void writer; silence is filed as refused with those words (CB-w-1 to CB-w-5). The
+    popup half is F-180.
 - id: F-178
   title: The toolbar's range dropdown is a hand-rolled floating panel, not the shared pop-over shell
   tag: A floating panel that dodges the pop-over audit by never writing the role it is
@@ -12744,7 +12763,21 @@ findings:
     passes popoverStandard.test.ts only because that audit's signal is the literal role="dialog", which the
     code never writes. Every other anchored floating panel composes the shared Popover shell or is
     allowlisted with a reason. Decide: compose the shell, or allowlist with the reason written beside it.
-- id: F-181
+- id: F-182
+  title: The typed walk clears Plant A's today at its end, the maintainer's own blocks included
+  tag: A spec that runs on the day a person is using
+  status: open
+  found_by: agent
+  stage: S61
+  refs:
+  - R-433
+  story: >-
+    Noticed 18 Sept (session 180) by the S66-c reviewer, who saw the board's live assignments vanish
+    mid-review: the typed walk's last sentences are "clear Area 1 today" and "clear Area 2 today" on Plant A,
+    so every run empties the maintainer's own day --- including the overtime block they had made that morning
+    to look for the OT tag. R-433 wants the walk run before every hand-over, which means it runs while the
+    maintainer works. Fix: the walk runs on a day of its own (a far date the demo never seeds, re-dated the
+    way the list already re-dates), or on its own plant, and never on the day the board opens on.
   title: The typed walk relied on a training the seed never gave --- Sam Patel held Welding by a lane's hand, and the re-seed took it away
   tag: A walk premise that lived in the database, not in the seed
   status: fixed
@@ -12942,7 +12975,7 @@ findings:
 - id: F-169
   title: A spoken sentence keeps a stale "Show that day" rerun alive, which then writes under the new sentence's name
   tag: A pending rerun cleared on typing but not on a new sentence
-  status: open
+  status: fixed
   found_by: agent
   stage: S64
   refs:
@@ -12955,6 +12988,9 @@ findings:
     sentence before the window lands: the effect that waits for the window runs the OLD command and
     overwrites the NEW sentence's read, ran and outcome in the trace and the thread. Fix: submitText
     clears the rerun as it clears the lot; a pin that speaks a sentence while a rerun is pending.
+  fix: >-
+    Session 180 (6b8a84e). submitText clears the pending rerun with the lot; CB-rr-1 speaks a sentence while a
+    rerun is pending and the old command never fires.
 - id: F-167
   title: A single that hands off to the create pop-up left the trace and the thread saying Waiting for ever
   tag: The pop-up's own result never came back to the bar
@@ -17244,6 +17280,44 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 180
+  date: 2026-09-18
+  title: "The afternoon: the rail on shift now with a chip per shift and the OT tag, the writers that answer, the sort headings and the row widths, and the seed that forgot Sam's training (S66-c, S64-c; F-168, F-169, F-180 to F-182)"
+  shipped: []
+  commits: ['ce631e7', '407ec4e', 'd5c7355', '6b8a84e', '9f61c3f']
+  numbers:
+    app_tests: 4144
+    app_test_files: 161
+    tsc: 0
+    eslint: 0
+    db_checks: 888
+    migrations: 83
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    npm run test, 18 Sept afternoon, after the S66-c commit: 4144 tests in 161 files, all passing;
+    tsc and eslint clean; the SQL suite unchanged since session 179's 888 (no migration this session); the
+    role walk 5 passed; the typed walk 1 passed after F-181, in six minutes with the model answering slowly.
+  summary: >-
+    Three lanes and three reviewers after the morning's corrections. The Operators headings show a sort mark at
+    rest and cycle back to the default; every per-row action cluster in the admin tables is one width
+    ("equal width always"). The writers that answered nothing answer now (F-168), a spoken sentence clears a
+    stale rerun (F-169), and four paths that ended a sentence without a trace line file a turn; the reviewer
+    found the box not emptied on the lot-busy drop, a nothing-to-do readout drawn twice with the second
+    labelled Refused (a green pin that could not see a duplicate), an empty right bubble on a recogniser error,
+    and pinned the no-answer branch; the confirm pop-ups a bar-driven retime can open have no reporter back
+    (F-180, open). The board piece landed to the maintainer's own placements: the rail lists the people on
+    shift now, a chip per shift under the heading in a grid of two, three or a two-by-two, the on-now one
+    filled, the words against the person's own band, and an amber OT tag on a block outside it; the reviewer
+    fixed a toggled chip that looked off and a night-band overtime figure that disagreed with the server on the
+    clock-change night. Two seed lessons: a re-seed took away the Welding row that let the walk's second
+    sentence pass since the 16th, because it had never been in a file (F-181, the seed fixed); and the walk's
+    last two sentences clear Plant A's today, the maintainer's blocks included (F-182, open). The one-place
+    rule is a standard (R-449) with its audit queued. Both Sonnet lanes died once more on the usage limit and
+    resumed at two.
+    Next: F-182 before the next walk; S66-d the bar's grammar and question; S66-e the demo across the bands
+    and the walks; S64's dead ends, absence and capacity before the yes, the lot RPC; F-180; the voice walk;
+    the R-449 audit; the floor-wording candidate.
 - id: 179
   date: 2026-09-18
   title: "The maintainer's morning: the band as the mock, the shift on screen where the place is set, the admin rail, two standards and the rule to ask where before building (S66-b, S67-b, S68; R-446 to R-448; F-177 to F-179)"
@@ -24987,6 +25061,10 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
+- kind: task
+  text: "F-182: the typed walk runs on a day of its own, never on the day the board opens on --- before the next walk or hand-over"
+  why: >-
+    Found 18 Sept (session 180): the walk's last sentences clear Plant A's today, the maintainer's blocks included.
 - kind: task
   stage: S64
   text: "The audits the five new standards trigger, run and written down (R-430 to R-434): docs/agent-briefs/s64-a-dead-ends-and-pre-yes-audit.md and s64-b-lots-and-trace-audit.md hold every hit; now the fixes, and F-168 and F-169 found on the way"
