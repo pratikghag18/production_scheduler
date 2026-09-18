@@ -18,7 +18,7 @@ import { HighlightProvider } from "@/features/board/lib/highlight";
 import type { IndexedAssignment } from "@/features/board/lib/boardIndex";
 import { DENSITIES } from "@/features/board/lib/geometry";
 import { buildDayAxis } from "@/features/board/lib/time";
-import type { Product, BoardOperator } from "@/lib/api";
+import type { Product, BoardOperator, ShiftTemplate } from "@/lib/api";
 
 const WINDOW_START = new Date("2026-08-24T00:00:00.000Z");
 
@@ -244,5 +244,115 @@ describe("S47 / R-395: the highlight a remove/move/retime question draws", () =>
     );
     expect(buttons[0].className).not.toBe(plainBlock.querySelector('[role="button"]')!.className);
     expect(buttons[0].className).not.toBe(buttons[1].className);
+  });
+});
+
+/**
+ * S66-c (R-441/R-448): THE OT TAG — DC-ot-1..3, exactly the three cases the
+ * brief names (in, overtime, no band -> no tag), pinned on both block shapes
+ * since they share one implementation (`railWords.ts`'s `resolveHomeBand`/
+ * `overtimeMinutes`) but are two separate components. The assignment's own
+ * range is fixed (06:00-10:00, `startMin`/`endMin` 360/600 off the shared
+ * fixture above); only the operator's `homeShiftId` and `template` vary.
+ */
+describe("the OT tag (S66-c, R-441, R-448)", () => {
+  const DAY_SHIFT: ShiftTemplate = {
+    id: "pat-1",
+    name: "Pattern",
+    shifts: [{ id: "s1", name: "Day", startMin: 360, endMin: 840, breaks: [] }], // 06:00-14:00
+  };
+
+  function withHomeShift(homeShiftId: string | null): BoardOperator {
+    return { ...operator, homeShiftId };
+  }
+
+  it("DC-ot-1: the block lies entirely INSIDE the person's own band -> no tag", () => {
+    // 06:00-10:00 sits inside the 06:00-14:00 Day band -- zero overtime.
+    render(
+      <DirectBlock
+        assignment={assignment}
+        {...sharedProps}
+        operator={withHomeShift("s1")}
+        template={DAY_SHIFT}
+      />,
+    );
+    expect(screen.queryByText("OT")).toBeNull();
+  });
+
+  it("DC-ot-2: the block runs OUTSIDE the person's own band -> the tag, with the minute count in its title", () => {
+    // The Day band now starts at 08:00 (480), so the fixture's 06:00-10:00
+    // block runs two hours (120 minutes) before it starts.
+    const lateDayShift: ShiftTemplate = {
+      id: "pat-2",
+      name: "Pattern",
+      shifts: [{ id: "s1", name: "Day", startMin: 480, endMin: 840, breaks: [] }], // 08:00-14:00
+    };
+    render(
+      <AssignmentChip
+        assignment={assignment}
+        homeRun={null}
+        {...sharedProps}
+        operator={withHomeShift("s1")}
+        template={lateDayShift}
+      />,
+    );
+    const tag = screen.getByText("OT");
+    expect(tag.title).toBe("overtime, 120 min");
+
+    // The same fixture on the other block shape draws the identical tag —
+    // one arithmetic, two components (CLAUDE.md §4).
+    render(
+      <DirectBlock
+        assignment={assignment}
+        {...sharedProps}
+        operator={withHomeShift("s1")}
+        template={lateDayShift}
+      />,
+    );
+    const tags = screen.getAllByText("OT");
+    expect(tags[tags.length - 1].title).toBe("overtime, 120 min");
+  });
+
+  it("DC-ot-3: no resolvable band at all -> no tag, in each of its three shapes", () => {
+    // (a) the operator has no home shift recorded.
+    const { unmount: u1 } = render(
+      <AssignmentChip
+        assignment={assignment}
+        homeRun={null}
+        {...sharedProps}
+        operator={withHomeShift(null)}
+        template={DAY_SHIFT}
+      />,
+    );
+    expect(screen.queryByText("OT")).toBeNull();
+    u1();
+
+    // (b) the operator has a home shift, but this cell's own template is
+    // null (no pattern resolves here at all).
+    const { unmount: u2 } = render(
+      <AssignmentChip
+        assignment={assignment}
+        homeRun={null}
+        {...sharedProps}
+        operator={withHomeShift("s1")}
+        template={null}
+      />,
+    );
+    expect(screen.queryByText("OT")).toBeNull();
+    u2();
+
+    // (c) the operator is unknown to this block at all (`operator` is
+    // `undefined`, e.g. a departed person) -- "where the client cannot
+    // know, show nothing".
+    render(
+      <AssignmentChip
+        assignment={assignment}
+        homeRun={null}
+        {...sharedProps}
+        operator={undefined}
+        template={DAY_SHIFT}
+      />,
+    );
+    expect(screen.queryByText("OT")).toBeNull();
   });
 });

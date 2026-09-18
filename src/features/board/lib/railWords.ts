@@ -32,8 +32,9 @@
  * `Intl.DateTimeFormat`/`getHours()` of this file's own, per CLAUDE.md
  * §7's one-clock standard.
  */
-import type { ShiftTemplate } from "@/lib/api";
+import type { Shift, ShiftTemplate } from "@/lib/api";
 import { addMinutes, formatClock } from "./time";
+import type { DayAxis } from "./time";
 
 /** Anything with a start/end in the shared minute space -- `IndexedAssignment`
  *  duck-typed the same way `geometry.ts`'s `isFullyAllocated` takes it. */
@@ -147,4 +148,122 @@ export function bookingWords<T extends RailBlock>(
   // the person becomes free partway through.
   if (covered === b.startMin) return "free";
   return `free ${formatClock(addMinutes(window.start, covered), zone)}`;
+}
+
+/**
+ * S66-c (R-441/R-443/R-448): THE ONE PLACE A PERSON'S OWN BAND IS MATCHED
+ * AGAINST A TEMPLATE — "by id, else by name ignoring case", the identical
+ * two-step `shift_fit` runs on the server (migration 0082, extract never
+ * retype, CLAUDE.md §4): try `operator.homeShiftId` as a row id inside
+ * `targetTemplate.shifts` first (the ordinary case — the person's home node
+ * carries the SAME pattern as `targetTemplate`); only when that misses does a
+ * cross-pattern match matter at all, and only a NAME survives a pattern
+ * boundary (an id is a row in a specific pattern's `shifts` table slice, so a
+ * different pattern never happens to share one). The name to match against
+ * has to come from somewhere the id DOES resolve — `operator.homeNodeId`'s
+ * own template, in `templateForNode` — because `board_window` sends only the
+ * id, never the shift's name, on the operator row itself (DEF-0016's lesson:
+ * never resolved on the client from a guess, only from a payload that names
+ * it).
+ *
+ * `templateForNode` defaults to an empty map so a caller with no such map at
+ * all (`AssignmentChip`/`DirectBlock`, S66-c's own OT tag, which know only the
+ * block's OWN node template) still gets the id-match half for free and simply
+ * never finds the cross-pattern name half — which is exactly right per the
+ * brief's own rule for the OT tag: "where the client cannot know, show
+ * nothing". A `homeNodeId` outside the caller's own node map (a supervisor's
+ * board that does not carry the person's home node at all) degrades the same
+ * way, for the same reason.
+ *
+ * Returns the matched `Shift` itself (never a copy) so callers that compare
+ * two resolutions by identity — `id.id === id.id` — get the exact row
+ * `bandCoveringNow` (`shiftNow.ts`) also hands back from the SAME
+ * `targetTemplate.shifts` array, with no risk of two structurally-equal but
+ * distinct objects failing a reference check drift into becoming one. `null`
+ * means no home band answerable at all: no `homeShiftId` recorded, no
+ * `targetTemplate` to check it against, or neither match found.
+ */
+export function resolveHomeBand(
+  operator: { homeShiftId: string | null; homeNodeId: string | null },
+  targetTemplate: ShiftTemplate | null,
+  templateForNode: ReadonlyMap<string, ShiftTemplate | null> = new Map(),
+): Shift | null {
+  if (!operator.homeShiftId || !targetTemplate) return null;
+  const byId = targetTemplate.shifts.find((s) => s.id === operator.homeShiftId);
+  if (byId) return byId;
+  const homeTemplate = operator.homeNodeId
+    ? (templateForNode.get(operator.homeNodeId) ?? null)
+    : null;
+  const homeShift = homeTemplate?.shifts.find((s) => s.id === operator.homeShiftId) ?? null;
+  if (!homeShift) return null;
+  const byName = targetTemplate.shifts.find(
+    (s) => s.name.toLowerCase() === homeShift.name.toLowerCase(),
+  );
+  return byName ?? null;
+}
+
+/**
+ * S66-c (R-441/R-448): THE OT TAG'S ARITHMETIC, TRANSCRIBED FROM THE SERVER'S
+ * OWN `app_shift_overtime_minutes` (migration 0082) — never invented. The SQL
+ * walks every LOCAL CALENDAR DAY an absolute timerange touches, builds that
+ * day's instance of the daily band `[start_min, end_min)` by resolving its
+ * wall-clock start in the plant's zone, and sums how much of the timerange
+ * each day's instance covers; whatever is left over is outside every
+ * instance — overtime.
+ *
+ * This is the SAME walk, done in the board's own window-relative REAL-minute
+ * space instead of raw instants, so it needs no zone/Date handling of its
+ * own: `dayAxis.wallToOffset(dayIndex, minuteOfDay)` (`lib/time.ts`, D88a) is
+ * already the zone-aware "wall-clock on this day -> real minute" conversion
+ * every other board geometry call goes through, DST changeover days
+ * (1380/1500-real-minute) included — a second, file-local zone conversion
+ * here would be exactly the kind of copy CLAUDE.md §4 warns against.
+ *
+ * `range`/`band` are both in the shared minute space `RailBlock`/`Band`
+ * already describe above. Returns whole overtime minutes, floor-safe at 0
+ * (`GREATEST(round(...), 0)` in the SQL, mirrored here) — never negative,
+ * even if `range` is malformed.
+ */
+export function overtimeMinutes(range: RailBlock, band: Band, dayAxis: DayAxis): number {
+  const total = range.endMin - range.startMin;
+  if (total <= 0) return 0;
+
+  const dayIndexOf = (min: number): number => {
+    for (let i = 0; i < dayAxis.dayCount; i++) {
+      if (min < dayAxis.dayOffsets[i + 1]) return i;
+    }
+    return dayAxis.dayCount - 1;
+  };
+  const firstDay = dayIndexOf(range.startMin);
+  const lastDay = dayIndexOf(range.endMin);
+
+  // Exactly the SQL's own walk window: the day BEFORE the range's own first
+  // day (to catch a night band begun the day before still running into the
+  // range's start) through the range's own last day.
+  //
+  // RC-2 (reviewer fix): the band's END is `bandStart + (band.endMin -
+  // band.startMin)` -- a literal REAL-MINUTE duration added to the resolved
+  // start, exactly `v_band_start + make_interval(mins => (p_end_min -
+  // p_start_min))` in `app_shift_overtime_minutes` (migration
+  // 20260918000082_home_shift.sql) -- never a second `wallToOffset` call for
+  // `band.endMin`. The two are NOT the same arithmetic: `wallToOffset` on the
+  // end minute independently re-resolves that wall clock as its own instant,
+  // which on a DST fallback night (the clock repeating an hour) lands ONE
+  // HOUR LATER than the server's fixed-duration band end, because the SQL
+  // never re-touches the zone for the end at all -- it just adds elapsed
+  // minutes to whatever instant the start resolved to. Caught by hand: for
+  // the night band 22:00-06:00 (1320-1800) on the 2026-11-01 Chicago
+  // fallback night, a block 05:30-06:30 local scored 30 minutes of overtime
+  // here against 60 from `app_shift_overtime_minutes` itself (verified via
+  // psql) before this fix -- a block the server would treat as entirely
+  // outside the band read as half inside it on the client.
+  let inBand = 0;
+  for (let day = firstDay - 1; day <= lastDay; day++) {
+    const bandStart = dayAxis.wallToOffset(day, band.startMin);
+    const bandEnd = bandStart + (band.endMin - band.startMin);
+    const overlapStart = Math.max(range.startMin, bandStart);
+    const overlapEnd = Math.min(range.endMin, bandEnd);
+    if (overlapEnd > overlapStart) inBand += overlapEnd - overlapStart;
+  }
+  return Math.max(0, Math.round(total - inBand));
 }

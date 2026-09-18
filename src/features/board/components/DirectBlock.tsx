@@ -4,6 +4,7 @@ import { minutesToPx, type Density } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
 import type { DayAxis } from "../lib/time";
 import { targetDisplay } from "../lib/standardTarget";
+import { resolveHomeBand, overtimeMinutes } from "../lib/railWords";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import { useHighlightKind } from "../lib/highlight";
 import styles from "./DirectBlock.module.css";
@@ -88,6 +89,13 @@ export function DirectBlock({
   // cell's standard, else NA. See `targetDisplay` for why this is not inlined.
   const { suffix: tgtSfx, tip: tgtTip } = targetDisplay(assignment);
 
+  // S66-c (R-441/R-448): THE OT TAG. See `AssignmentChip.tsx`'s identical
+  // block for the full reasoning (extract, never retype -- the arithmetic
+  // lives once, in `railWords.ts`; this is the same call against this
+  // block's own node template, `template`).
+  const homeBand = operator ? resolveHomeBand(operator, template) : null;
+  const otMinutes = homeBand ? overtimeMinutes(range, homeBand, dayAxis) : 0;
+
   const title =
     `${name} · ${productName} · ${formatFull(addMinutes(windowStart, range.startMin), undefined, zone)}` +
     `–${formatClock(addMinutes(windowStart, range.endMin), zone)}${effSfx}${tgtTip}` +
@@ -143,6 +151,13 @@ export function DirectBlock({
       <span className={styles.who}>
         {name}
         {tgtSfx}
+        {/* S66-c (R-441/R-448): the OT tag, beside the name, drawn only when
+            this block places the person outside their own band. */}
+        {otMinutes > 0 && (
+          <span className={styles.otTag} title={`overtime, ${otMinutes} min`}>
+            OT
+          </span>
+        )}
       </span>
       <span className={styles.what}>
         {productName} · {formatClock(addMinutes(windowStart, range.startMin), zone)}–

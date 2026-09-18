@@ -4,6 +4,7 @@ import { minutesToPx, type Density } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
 import type { DayAxis } from "../lib/time";
 import { targetDisplay } from "../lib/standardTarget";
+import { resolveHomeBand, overtimeMinutes } from "../lib/railWords";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import { useHighlightKind } from "../lib/highlight";
 import styles from "./AssignmentChip.module.css";
@@ -89,6 +90,21 @@ export function AssignmentChip({
   // cell's standard, else NA. See `targetDisplay` for why this is not inlined.
   const { suffix: tgtSfx, tip: tgtTip } = targetDisplay(assignment);
 
+  // S66-c (R-441/R-448): THE OT TAG. `template` here is this BLOCK'S OWN
+  // node's resolved pattern (`resolve_shift_template(p_node_id)`'s own
+  // client-side twin, `templateForNode.get(nodeId)` in `TrackRow`) — exactly
+  // the template `shift_fit` matches `operator.homeShiftId` against on the
+  // server, so `resolveHomeBand` run against IT (not the board root) is the
+  // same lookup. Its cross-pattern name-match half never fires here: that
+  // needs the person's OWN home template, which this component was never
+  // given (only `OperatorPanel`, via a `templateForNode` prop this lane's
+  // file fence keeps out of `TrackRow`'s call site, has that) — so a home
+  // band from a DIFFERENT pattern than this cell's reads as "no band" and
+  // draws no tag, which is this feature's own "where the client cannot know,
+  // show nothing" rule, not a bug.
+  const homeBand = operator ? resolveHomeBand(operator, template) : null;
+  const otMinutes = homeBand ? overtimeMinutes(range, homeBand, dayAxis) : 0;
+
   const title =
     `${name} · ${productName} · ${formatFull(addMinutes(windowStart, range.startMin), undefined, zone)}` +
     `–${formatClock(addMinutes(windowStart, range.endMin), zone)}${effSfx}${tgtTip}` +
@@ -144,6 +160,13 @@ export function AssignmentChip({
       <span className={styles.who}>
         {name}
         {tgtSfx}
+        {/* S66-c (R-441/R-448): the OT tag, beside the name, drawn only when
+            this block places the person outside their own band. */}
+        {otMinutes > 0 && (
+          <span className={styles.otTag} title={`overtime, ${otMinutes} min`}>
+            OT
+          </span>
+        )}
       </span>
       <span className={styles.tm}>
         {formatClock(addMinutes(windowStart, range.startMin), zone)}–

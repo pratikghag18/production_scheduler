@@ -45,6 +45,20 @@
   font-weight: 600;
 }
 
+/* S66-c (R-441/R-448): see `AssignmentChip.module.css`'s identical rule and
+   comment -- same tokens, same reasoning, this block is the other shape a
+   staffing OT tag can sit on. */
+.otTag {
+  flex: none;
+  font-size: calc(8.5px * var(--ui-scale, 1));
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--signal-warn);
+  border-radius: 3px;
+  padding: 0 3px;
+  margin-left: 3px;
+}
+
 .what {
   color: var(--ink-2);
   font-size: calc(10.5px * var(--ui-scale, 1));

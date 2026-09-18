@@ -42,6 +42,23 @@
   font-weight: 600;
 }
 
+/* S66-c (R-441/R-448): the OT tag, beside the name -- the board's amber
+   "look at this" signal (`--signal-warn`, the SAME token OperatorsPanel's
+   own restricted-shift amber row uses), never the red `--crit` this block
+   already carries for `.override`/`.outlineRemove`. A small pill, not a
+   copy of `.override`'s dashed outline -- this marks a fact about the hours,
+   not a warning about the whole block. */
+.otTag {
+  flex: none;
+  font-size: calc(8.5px * var(--ui-scale, 1));
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--signal-warn);
+  border-radius: 3px;
+  padding: 0 3px;
+  margin-left: 3px;
+}
+
 .tm {
   color: var(--ink-2);
   font-size: calc(10.5px * var(--ui-scale, 1));
