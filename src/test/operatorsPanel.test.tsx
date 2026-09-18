@@ -1312,6 +1312,17 @@ describe("OperatorsPanel — the Shift mark and the Edit form's picker (R-441, R
  * nothing clicked yet — stays R-444's own (no shift first, then name), and
  * the chosen sort lives in plain component state: it does not survive past
  * this mount.
+ *
+ * ⭐ CORRECTED 18 SEPT, SAME DAY, TWO MORE THINGS THE MAINTAINER SAW:
+ * "The column names are not telling me naturally that I can sort them, also,
+ * I see no way to go to default, it is only going asc or desc once I click
+ * on it." So a heading now cycles ascending → descending → DEFAULT (a third
+ * click on the active heading clears `sort` back to `null`, `aria-sort`
+ * "none", the list back to R-444's own order) — OS7/OS8 below drive that
+ * third click too, and OS9 is the click on its own. Every heading also
+ * carries a `SortMark` AT REST, before anything is clicked — neutral on
+ * both, direction on whichever is active — which the last test in this
+ * block checks for.
  * =========================================================================== */
 
 function personHeaderBtn(): HTMLButtonElement {
@@ -1355,7 +1366,7 @@ describe("OperatorsPanel — sortable Person/Shift columns (the maintainer, 18 S
     expect(rowOrder()).toEqual(["Zoe Zhang", "Ann Adams", "Ora Orphan"]);
   });
 
-  it("OS7 ⭐⭐ sorting by Shift, ascending, puts No shift first then the bands in start-time order; clicking again reverses", () => {
+  it("OS7 ⭐⭐ sorting by Shift cycles ascending, descending, then back to default on the third click", () => {
     threeSortableOperators();
     render(<OperatorsPanel />);
     fireEvent.click(shiftHeaderBtn());
@@ -1367,6 +1378,11 @@ describe("OperatorsPanel — sortable Person/Shift columns (the maintainer, 18 S
     fireEvent.click(shiftHeaderBtn());
     expect(ariaSortOf(shiftHeaderBtn())).toBe("descending");
     expect(rowOrder()).toEqual(["Ann Adams", "Ora Orphan", "Zoe Zhang"]);
+    // The third click on the SAME heading is the maintainer's fix: back to
+    // the default order, not a third pass at descending-then-ascending.
+    fireEvent.click(shiftHeaderBtn());
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("none");
+    expect(rowOrder()).toEqual(["Zoe Zhang", "Ann Adams", "Ora Orphan"]);
   });
 
   it("OS8 ⭐⭐ sorting by Person, both directions, and the heading carries aria-sort", () => {
@@ -1386,11 +1402,35 @@ describe("OperatorsPanel — sortable Person/Shift columns (the maintainer, 18 S
     expect(ariaSortOf(personHeaderBtn())).toBe("none");
   });
 
-  it("a text glyph never carries the direction — the active heading's mark is the shared Chevron icon", () => {
+  it("OS9 ⭐⭐ the third click restores the default order and aria-sort none; both headings show a mark at rest", () => {
     threeSortableOperators();
     render(<OperatorsPanel />);
+    // Before anything is clicked, BOTH headings already carry a mark — the
+    // maintainer's other complaint, "the column names are not telling me
+    // naturally that I can sort them" — and both read `aria-sort` "none".
+    expect(personHeaderBtn().querySelector("svg")).not.toBeNull();
+    expect(shiftHeaderBtn().querySelector("svg")).not.toBeNull();
+    expect(ariaSortOf(personHeaderBtn())).toBe("none");
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("none");
+
+    fireEvent.click(personHeaderBtn()); // ascending
+    fireEvent.click(personHeaderBtn()); // descending
+    fireEvent.click(personHeaderBtn()); // back to default
+    expect(ariaSortOf(personHeaderBtn())).toBe("none");
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("none");
+    expect(rowOrder()).toEqual(["Zoe Zhang", "Ann Adams", "Ora Orphan"]);
+    // The mark is still there, at rest, on the heading that was just active —
+    // going to default does not leave a bare, unmarked word behind.
+    expect(personHeaderBtn().querySelector("svg")).not.toBeNull();
+  });
+
+  it("a text glyph never carries the direction — the active heading's mark is the shared SortMark icon, titled for the gesture", () => {
+    threeSortableOperators();
+    render(<OperatorsPanel />);
+    expect(personHeaderBtn().title).toBe("Sort by person");
+    expect(shiftHeaderBtn().title).toBe("Sort by shift");
     fireEvent.click(personHeaderBtn());
-    // `Chevron` renders an `<svg>`; the heading's own visible text stays the
+    // `SortMark` renders an `<svg>`; the heading's own visible text stays the
     // bare word, exactly as it read before any heading was ever clicked.
     expect(personHeaderBtn().querySelector("svg")).not.toBeNull();
     expect(personHeaderBtn().textContent).toBe("Person");

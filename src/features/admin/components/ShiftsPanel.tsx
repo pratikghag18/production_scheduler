@@ -744,61 +744,65 @@ export function ShiftsPanel() {
           <span className={styles.meta}>{shift.duration}</span>
           {shift.crossesMidnight && <span className={styles.nextDayTag}>overnight</span>}
           <span className={styles.spacer} />
-          <button
-            type="button"
-            className={styles.btn}
-            onClick={() =>
-              setShiftEdit(
-                editing
-                  ? null
-                  : {
-                      id: shift.id,
-                      form: {
-                        name: shift.name,
-                        start: timeOf(shift.startMin),
-                        end: timeOf(shift.endMin),
+          {/* R-447: Edit|Cancel, Add break|Cancel break and Delete share one
+              track width -- never one sized to its own word. */}
+          <span className={styles.shiftActions}>
+            <button
+              type="button"
+              className={styles.btn}
+              onClick={() =>
+                setShiftEdit(
+                  editing
+                    ? null
+                    : {
+                        id: shift.id,
+                        form: {
+                          name: shift.name,
+                          start: timeOf(shift.startMin),
+                          end: timeOf(shift.endMin),
+                        },
                       },
-                    },
-              )
-            }
-          >
-            {editing ? "Cancel" : "Edit"}
-          </button>
-          <button
-            type="button"
-            className={styles.btn}
-            onClick={() => setBreakFor(adding ? null : { shiftId: shift.id, form: BLANK_BREAK })}
-          >
-            {adding ? "Cancel break" : "Add break"}
-          </button>
-          <button
-            type="button"
-            className={styles.dangerBtn}
-            disabled={deleteShift.isPending}
-            onClick={() => {
-              clear(`shift-${shift.id}`);
-              // R-443: retiring a band that people point at warns first,
-              // with the count, and asks where they go — never a silent
-              // delete for a band somebody is actually on.
-              const holders = shiftHoldersFor(shift.id);
-              if (holders.length === 0) {
-                deleteShift.mutate(
-                  { shiftId: shift.id },
-                  { onError: (e) => fail(`shift-${shift.id}`, e) },
-                );
-              } else {
-                setRetireDestination("");
-                setRetireWarning({
-                  kind: "shift",
-                  shiftId: shift.id,
-                  shiftName: shift.name,
-                  patternId: pattern.id,
-                });
+                )
               }
-            }}
-          >
-            Delete
-          </button>
+            >
+              {editing ? "Cancel" : "Edit"}
+            </button>
+            <button
+              type="button"
+              className={styles.btn}
+              onClick={() => setBreakFor(adding ? null : { shiftId: shift.id, form: BLANK_BREAK })}
+            >
+              {adding ? "Cancel break" : "Add break"}
+            </button>
+            <button
+              type="button"
+              className={styles.dangerBtn}
+              disabled={deleteShift.isPending}
+              onClick={() => {
+                clear(`shift-${shift.id}`);
+                // R-443: retiring a band that people point at warns first,
+                // with the count, and asks where they go — never a silent
+                // delete for a band somebody is actually on.
+                const holders = shiftHoldersFor(shift.id);
+                if (holders.length === 0) {
+                  deleteShift.mutate(
+                    { shiftId: shift.id },
+                    { onError: (e) => fail(`shift-${shift.id}`, e) },
+                  );
+                } else {
+                  setRetireDestination("");
+                  setRetireWarning({
+                    kind: "shift",
+                    shiftId: shift.id,
+                    shiftName: shift.name,
+                    patternId: pattern.id,
+                  });
+                }
+              }}
+            >
+              Delete
+            </button>
+          </span>
         </div>
 
         {retireWarning !== null &&
@@ -827,17 +831,20 @@ export function ShiftsPanel() {
                   </option>
                 ))}
               </select>
-              <button
-                type="button"
-                className={styles.dangerBtn}
-                disabled={updateOperator.isPending || deleteShift.isPending}
-                onClick={() => void confirmRetire()}
-              >
-                Retire {shift.name}
-              </button>
-              <button type="button" className={styles.btn} onClick={() => setRetireWarning(null)}>
-                Cancel
-              </button>
+              {/* R-447: "Retire X"/Cancel share one track width. */}
+              <span className={styles.confirmActions}>
+                <button
+                  type="button"
+                  className={styles.dangerBtn}
+                  disabled={updateOperator.isPending || deleteShift.isPending}
+                  onClick={() => void confirmRetire()}
+                >
+                  Retire {shift.name}
+                </button>
+                <button type="button" className={styles.btn} onClick={() => setRetireWarning(null)}>
+                  Cancel
+                </button>
+              </span>
             </div>
           )}
 
@@ -1302,17 +1309,20 @@ export function ShiftsPanel() {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              className={styles.dangerBtn}
-              disabled={updateOperator.isPending}
-              onClick={() => void confirmRetire()}
-            >
-              Continue to delete
-            </button>
-            <button type="button" className={styles.btn} onClick={() => setRetireWarning(null)}>
-              Cancel
-            </button>
+            {/* R-447: "Continue to delete"/Cancel share one track width. */}
+            <span className={styles.confirmActions}>
+              <button
+                type="button"
+                className={styles.dangerBtn}
+                disabled={updateOperator.isPending}
+                onClick={() => void confirmRetire()}
+              >
+                Continue to delete
+              </button>
+              <button type="button" className={styles.btn} onClick={() => setRetireWarning(null)}>
+                Cancel
+              </button>
+            </span>
           </div>
         ) : confirming ? (
           <DeleteDialog

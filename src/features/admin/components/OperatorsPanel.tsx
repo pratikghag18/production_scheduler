@@ -38,7 +38,7 @@ import { buildColumns, trainingApplies, type CellState } from "../lib/matrix";
 import { MatrixChip, RecordPopover, type RecordFields } from "./matrixCells";
 import cellStyles from "./matrixCells.module.css";
 import { Popover } from "@/components/Popover";
-import { Chevron } from "@/components/icons";
+import { SortMark } from "@/components/icons";
 // R-360: this person's own absences, on their record — its own file, its own
 // query (see OperatorAbsences.tsx's header for why the query lives there).
 import { OperatorAbsences } from "./OperatorAbsences";
@@ -265,13 +265,22 @@ export function OperatorsPanel() {
   // until a heading is actually clicked, and it lives in plain state, never
   // storage, so it does not survive past this mount (the maintainer's own
   // words: "kept for the session only").
+  //
+  // ⭐ CORRECTED 18 Sept, same day: a heading only ever went ascending ⇄
+  // descending once clicked, with no way back to the default order short of
+  // reloading the screen. The maintainer: "I see no way to go to default, it
+  // is only going asc or desc once I click on it." So a third click on the
+  // ACTIVE heading returns `sort` to `null` — the cycle is
+  // ascending → descending → default, never a two-state toggle — and clicking
+  // the OTHER heading always starts that heading fresh at ascending, exactly
+  // as it did before.
   const [sort, setSort] = useState<{ key: "name" | "shift"; dir: "asc" | "desc" } | null>(null);
   function toggleSort(key: "name" | "shift") {
-    setSort((cur) =>
-      cur === null || cur.key !== key
-        ? { key, dir: "asc" }
-        : { key, dir: cur.dir === "asc" ? "desc" : "asc" },
-    );
+    setSort((cur) => {
+      if (cur === null || cur.key !== key) return { key, dir: "asc" };
+      if (cur.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
   }
   const [query, setQuery] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
@@ -885,12 +894,22 @@ export function OperatorsPanel() {
           <div className={styles.tableScroll}>
             {/* ⭐ THE MAINTAINER, 18 SEPT: "Is it possible to create a sorting
                 here for names and shifts? Like we do columns in a table?"
-                Each heading is now a real button (its own text is its own
-                accessible name) inside a `columnheader` carrying `aria-sort`,
-                and the active one shows a `Chevron` for direction — never a
-                text glyph (the icon standard, `src/components/icons.tsx`).
+                Each heading is a real button (its own text is its own
+                accessible name) inside a `columnheader` carrying `aria-sort`.
                 The head can no longer be `aria-hidden`: it holds the only
-                control for this feature. */}
+                control for this feature.
+
+                ⭐ CORRECTED 18 Sept, same day: "The column names are not
+                telling me naturally that I can sort them, also, I see no way
+                to go to default." Two fixes, together — (1) `SortMark` draws
+                a neutral up-and-down chevron pair on BOTH headings at rest,
+                so a reader sees "this sorts" before ever clicking, and
+                collapses to one directional chevron on whichever heading is
+                the active sort (never a text glyph — the icon standard,
+                `src/components/icons.tsx`); (2) `toggleSort` now cycles
+                ascending → descending → default (`sort === null`) instead of
+                only ever flipping between the two directions, and a `title`
+                names the gesture for a reader hovering before they click. */}
             <div className={styles.peopleHead}>
               <span
                 role="columnheader"
@@ -898,14 +917,23 @@ export function OperatorsPanel() {
                   sort?.key === "name" ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
                 }
               >
-                <button type="button" className={styles.sortBtn} onClick={() => toggleSort("name")}>
+                <button
+                  type="button"
+                  className={styles.sortBtn}
+                  onClick={() => toggleSort("name")}
+                  title="Sort by person"
+                >
                   Person
-                  {sort?.key === "name" && (
-                    <Chevron
-                      direction={sort.dir === "asc" ? "up" : "down"}
-                      className={styles.sortIcon}
-                    />
-                  )}
+                  <SortMark
+                    direction={
+                      sort?.key === "name"
+                        ? sort.dir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : "none"
+                    }
+                    className={styles.sortIcon}
+                  />
                 </button>
               </span>
               <span
@@ -918,14 +946,19 @@ export function OperatorsPanel() {
                   type="button"
                   className={styles.sortBtn}
                   onClick={() => toggleSort("shift")}
+                  title="Sort by shift"
                 >
                   Shift
-                  {sort?.key === "shift" && (
-                    <Chevron
-                      direction={sort.dir === "asc" ? "up" : "down"}
-                      className={styles.sortIcon}
-                    />
-                  )}
+                  <SortMark
+                    direction={
+                      sort?.key === "shift"
+                        ? sort.dir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : "none"
+                    }
+                    className={styles.sortIcon}
+                  />
                 </button>
               </span>
             </div>

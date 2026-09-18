@@ -53,10 +53,19 @@
   font-weight: normal;
 }
 
+/* R-447 (the maintainer, 18 Sept, "equal width always"): Rename / Delete /
+   "+ new structure" used to size each button to its own word. One grid track
+   size makes every button in the cluster as wide as its widest sibling, the
+   same fix `BoardToolbar.module.css`'s `.zoom`/`.daynav` use for a segmented
+   control. `inline-grid` keeps the cluster shrunk to its own content rather
+   than stretching across the card, and `flex-wrap` had nothing to do here in
+   practice (the card is wide enough for three short buttons) so an equal-
+   width grid does not cost the narrow-screen case anything it was using. */
 .actions {
-  display: flex;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
 .smallBtn {
@@ -66,6 +75,7 @@
   border: 1px solid var(--axis);
   background: var(--page);
   color: var(--ink-2);
+  text-align: center;
   cursor: pointer;
 }
 
@@ -100,6 +110,13 @@
   flex-basis: 100%;
 }
 
+/* R-447: the rename popover's own Cancel/Rename footer. `.popActions` is a
+   plain block box inside the popover's `<form>`, not a grid/flex item
+   another container stretches or shrink-wraps for us, so the fix here is
+   `LevelEditor.module.css`'s `.cancelBtn`/`.saveBtn` shape (a shared
+   min-width in em) rather than the `.zoom`-style grid `.actions` above uses
+   as a grid item of `.row` — sized to "Cancel", the longer of the two words
+   this footer ever shows. */
 .popActions {
   display: flex;
   justify-content: flex-end;
@@ -132,6 +149,8 @@
   border-radius: 0.375rem;
   border: 1px solid var(--axis);
   background: var(--surface);
+  min-width: 4.5em;
+  text-align: center;
   cursor: pointer;
 }
 

@@ -175,8 +175,13 @@
 
 /* One button per heading, styled to still read as a plain column label —
    the click affordance is the cursor and the focus ring, not a button chrome
-   nobody asked for. `Chevron` (never a text glyph, the icon standard) rides
-   beside the word only on the active column. */
+   nobody asked for. `SortMark` (never a text glyph, the icon standard) rides
+   beside the word on BOTH headings now, neutral at rest and pointing the
+   active column's direction, so a reader sees "this sorts" before clicking
+   (the maintainer, 18 Sept: "the column names are not telling me naturally
+   that I can sort them"). Hover/focus underlines the word, the same quiet-
+   button look the other admin panels give a plain-looking control that is
+   actually clickable (`ShiftsPanel.module.css`'s `.linkBtn`). */
 .sortBtn {
   display: inline-flex;
   align-items: center;
@@ -194,10 +199,12 @@
 .sortBtn:hover,
 .sortBtn:focus-visible {
   color: var(--ink);
+  text-decoration: underline;
 }
 
 .sortIcon {
   font-size: 0.75em;
+  flex: none;
 }
 
 /* ---------------------------------------------------------------------------

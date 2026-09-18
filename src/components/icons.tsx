@@ -78,6 +78,79 @@ export function Chevron({
 }
 
 /**
+ * S66-b / R-444 — the small sort mark a sortable column heading carries AT
+ * REST as well as active. The maintainer, 18 Sept: "The column names are not
+ * telling me naturally that I can sort them." A neutral up-and-down chevron
+ * pair says "this heading sorts" before anything is clicked; once a heading
+ * becomes the active sort, the pair collapses to a single chevron pointing
+ * the way the rows are ordered, and the OTHER heading falls back to the
+ * neutral pair (`OperatorsPanel` passes `"none"` for it).
+ *
+ * Same shape as `Chevron` above: inline SVG, sized in `em`, `currentColor` —
+ * never a text glyph. This is deliberately its own component rather than two
+ * stacked `Chevron`s: the neutral mark is a single compact glyph (both
+ * arrowheads read at once, dimmed), not two full-size chevrons that would
+ * crowd a table heading.
+ */
+export function SortMark({
+  direction = "none",
+  className,
+}: {
+  direction?: "ascending" | "descending" | "none";
+  className?: string;
+}) {
+  const style: CSSProperties = { display: "inline-block", width: "1em", height: "1em" };
+  if (direction === "none") {
+    return (
+      <svg
+        viewBox="0 0 16 16"
+        style={style}
+        className={className}
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path
+          d="M4.5 6.5 8 3.5 11.5 6.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.55}
+        />
+        <path
+          d="M4.5 9.5 8 12.5 11.5 9.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.55}
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      style={style}
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d={direction === "ascending" ? "M4 10 8 5.5 12 10" : "M4 6 8 10.5 12 6"}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.75}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
  * S48 / R-396 — the corner launcher's own glyph, and the microphone the
  * command bar folds in beside it. Same shape as `Chevron` above: inline SVG,
  * `currentColor`, decorative by default (`aria-hidden`) since the button

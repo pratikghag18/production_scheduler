@@ -406,9 +406,20 @@
   color: var(--ink-2);
 }
 
+/* R-447 (the maintainer, 18 Sept, "equal width always"): the per-row action
+   cluster — Save/Cancel while editing, Deactivate|Reactivate/Edit/Delete
+   otherwise — used to size each button to its own word, so "Edit" sat
+   narrower than "Deactivate" beside it. A grid whose columns share one track
+   size makes every button in the cluster as wide as its widest sibling, the
+   same fix `BoardToolbar.module.css`'s `.zoom`/`.daynav` already use for a
+   segmented control; `inline-grid` + `justify-self: end` keeps the cluster
+   shrunk to its own content and pinned to the fixed `.row` action column's
+   right edge, exactly where `justify-content: flex-end` put it before. */
 .actions {
-  display: flex;
-  justify-content: flex-end;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  justify-self: end;
   gap: 0.375rem;
 }
 
@@ -421,6 +432,10 @@
   font-size: 0.75rem;
   background: var(--surface);
   color: var(--ink);
+  /* R-447: the grid track above can be wider than any one button's own
+     word (it is sized to the widest sibling), so the label is centred in
+     whatever width the cluster settled on rather than hugging one edge. */
+  text-align: center;
 }
 
 .primary {

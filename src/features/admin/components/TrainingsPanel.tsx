@@ -706,22 +706,26 @@ export function TrainingsPanel() {
                 aria-label={`Document number for ${handle}`}
                 onChange={(e) => setDocDraft(e.target.value)}
               />
-              <button
-                type="button"
-                className={styles.primary}
-                aria-label={`Save the document number for ${handle}`}
-                onClick={() => saveDocNumber(row)}
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                className={styles.quiet}
-                aria-label={`Stop editing the document number for ${handle}`}
-                onClick={() => setEditingDocId(null)}
-              >
-                Cancel
-              </button>
+              {/* R-447: Save/Cancel share one track width (`.docActions`),
+                  never one sized to its own word. */}
+              <span className={styles.docActions}>
+                <button
+                  type="button"
+                  className={styles.primary}
+                  aria-label={`Save the document number for ${handle}`}
+                  onClick={() => saveDocNumber(row)}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  className={styles.quiet}
+                  aria-label={`Stop editing the document number for ${handle}`}
+                  onClick={() => setEditingDocId(null)}
+                >
+                  Cancel
+                </button>
+              </span>
             </>
           ) : (
             <>
