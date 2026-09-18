@@ -12445,6 +12445,9 @@ requirements:
     default, but can we explore if these restrictions can be dynamic? Something which a site admin and above
     can decide through the access tab?" Answered yes the same turn: two nullable fields on the grant, the
     Access tab row, the server's check in the same writers.
+    CORRECTED 18 Sept (session 179), the maintainer on the S66-b build: "it should have been a new column, not
+    a new row with the same column." The two controls are two columns on the grant's existing row, after Role,
+    with headings; never a second row under the person.
 - id: R-443
   title: A person's shift is the band itself --- editing the band carries them along, retiring it warns with the count and asks where they go, and nobody is left without a shift silently
   source:
