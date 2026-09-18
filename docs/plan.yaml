@@ -12778,6 +12778,7 @@ findings:
     to look for the OT tag. R-433 wants the walk run before every hand-over, which means it runs while the
     maintainer works. Fix: the walk runs on a day of its own (a far date the demo never seeds, re-dated the
     way the list already re-dates), or on its own plant, and never on the day the board opens on.
+- id: F-181
   title: The typed walk relied on a training the seed never gave --- Sam Patel held Welding by a lane's hand, and the re-seed took it away
   tag: A walk premise that lived in the database, not in the seed
   status: fixed
