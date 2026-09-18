@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { HierarchyLevel } from "@/lib/api";
+import type { HierarchyLevel, ShiftTemplate } from "@/lib/api";
 import { describeSchedulerError, isSchedulerError } from "@/lib/api";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
@@ -161,6 +161,23 @@ const SHOW_DAY_WEEK_WORD_OFFSETS: Record<string, number> = {
   "next week": 7,
   "last week": -7,
 };
+
+/**
+ * S65-a (R-438): the board ROOT's own shift pattern, threaded into
+ * `OperatorPanel` for its `bookingWords` band. `templateForNode` resolves
+ * nearest-ancestor-or-self for a NODE id; the root is the one node whose own
+ * `path` equals `rootPath` (`useRootPath`'s own selection). A plain function,
+ * not a memo — this adds no new hook to a component several other lanes are
+ * editing at the same time, and `index.nodeById` is small enough (one
+ * board's worth of nodes) that the scan costs nothing worth memoizing.
+ */
+function rootTemplateFor(index: BoardIndex | null, rootPath: string | null): ShiftTemplate | null {
+  if (!index || !rootPath) return null;
+  for (const n of index.nodeById.values()) {
+    if (n.path === rootPath) return index.templateForNode.get(n.id) ?? null;
+  }
+  return null;
+}
 
 /**
  * The board (brief P1-4a read-only + P1-4b interactions + P1-4c responsive
@@ -1335,11 +1352,28 @@ export default function BoardPage() {
                   windowMinutes={index.windowMinutes}
                   zone={zone}
                   capacityCap={index.capacityCap}
+                  /* S65-a (R-438): the root's own shift pattern, the band
+                     `bookingWords` measures every chip against. */
+                  rootTemplate={rootTemplateFor(index, rootPath)}
                   open={operatorPanelOpen}
                   onToggleOpen={() => setOperatorPanelOpen(!operatorPanelOpen)}
                   draggingOperatorId={
                     dragApi.activeDrag?.subject.kind === "panel"
                       ? dragApi.activeDrag.subject.operator.id
+                      : null
+                  }
+                  /* S65-a (R-439): the SAME per-person, per-board value
+                     `CommandLauncher`'s `historyKey` above is given --
+                     computed again here, not lifted to a shared variable,
+                     for the same reason `BoardToolbar`'s own copy gives
+                     (S67): this edit touches nothing another lane owns.
+                     `railWidth.ts`'s `railKey` (inside `OperatorPanel`)
+                     prefixes it before it reaches storage, so the rail's
+                     remembered width never collides with the command
+                     panel's remembered size under this same value. */
+                  widthStorageKey={
+                    session?.user.id && rootPath
+                      ? historyStorageKey(session.user.id, rootPath)
                       : null
                   }
                   dragApi={{

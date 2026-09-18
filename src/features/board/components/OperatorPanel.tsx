@@ -1,9 +1,16 @@
-import { useMemo, useState } from "react";
-import type { BoardOperator, Skill, BoardNode } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { BoardOperator, Skill, BoardNode, ShiftTemplate } from "@/lib/api";
 import { absenceGaps, type AbsenceRow } from "@/lib/absence";
 import type { IndexedAssignment } from "../lib/boardIndex";
-import { isFullyAllocated } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
+import { bookingWords, rootBand } from "../lib/railWords";
+import {
+  clampRailWidth,
+  railKey,
+  readRailWidth,
+  writeRailWidth,
+  RAIL_MIN_WIDTH,
+} from "../lib/railWidth";
 import { PanelToggle } from "@/components/PanelToggle";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./OperatorPanel.module.css";
@@ -14,9 +21,7 @@ function initials(name: string): string {
 
 /**
  * Left operator panel, read-only half (brief §8). Ported from the mockup's
- * `renderPanel`, with real-data substitutions: `isFullyAllocated` now
- * compares against the *loaded* window and `capacityCap` (a fraction)
- * instead of the mockup's hardcoded Tue 06:00-22:00 test window and `100`.
+ * `renderPanel`, with real-data substitutions.
  *
  * P1-4e D65: each chip is now also a drag SOURCE — `onPointerDown` starts a
  * "panel" drag via `dragApi.beginPanelDrag`, exactly like every other
@@ -26,6 +31,27 @@ function initials(name: string): string {
  * wired on the chip itself (D33: capture always routes back to the
  * originating element regardless of what's visually under the pointer).
  *
+ * ---------------------------------------------------------------------------
+ * ⭐⭐ S65-a (R-438) SUPERSEDES THE OLD SINGLE-LINE CHIP. The maintainer, 17
+ * Sept, shown a capacity bar next to the plain count pill: "the bar is not
+ * very useful, we don't know what a full bar would mean" -- `isFullyAllocated`
+ * (`geometry.ts`) is a BOOLEAN over the whole loaded window (a week on a week
+ * board), against which nobody is ever a full bar. Each chip is now two
+ * lines: the avatar and the name alone (never truncated -- the rail's width
+ * is the person's, R-439), then up to two skill badges (+n for the rest) and,
+ * on the right, `railWords.ts`'s `bookingWords` in words -- "free", "free
+ * 11:30", "booked" -- measured against `rootBand`'s reading of the board
+ * ROOT's shift pattern. The count pill and the dimmed "full" chip are gone;
+ * `src/test/absenceOnBoard.test.tsx`'s R-038b/R-038d, which pinned them, are
+ * rewritten to the new contract there. "not from this area" and "on leave"
+ * are unchanged, just moved onto the second line.
+ *
+ * ⭐ S65-a (R-439) ALSO GIVES THE RAIL A DRAG HANDLE ON ITS RIGHT EDGE, width
+ * clamped and remembered per person through `railWidth.ts` (a thin wrapper
+ * over S63's `panelSize.ts` -- see that file's own doc for why it doesn't
+ * just call `clampPanelSize`). The panel restores its own width on mount and
+ * keeps it in state across the once-only auto-collapse in `BoardPage`
+ * (collapsing never touches this file's `width` state, only `open`).
  * ---------------------------------------------------------------------------
  * ⭐⭐ R-346: TWO LISTS, NOT ONE. The maintainer, 6 Sept: *"If a operator is
  * assigned to higher hierarchy they should automatically become available to
@@ -56,11 +82,12 @@ export function OperatorPanel({
   windowStart,
   windowMinutes,
   zone,
-  capacityCap,
+  rootTemplate = null,
   open,
   onToggleOpen,
   draggingOperatorId,
   dragApi,
+  widthStorageKey = null,
 }: {
   /**
    * ⭐ THE PLANT'S PEOPLE, AS THE SERVER SENT THEM (`operatorPool` in
@@ -90,7 +117,22 @@ export function OperatorPanel({
   windowStart: Date;
   windowMinutes: number;
   zone?: string;
+  /**
+   * ⚠️ NO LONGER READ HERE. Kept in the prop shape (rather than trimming
+   * `BoardPage`'s call site, out of scope for this lane) because
+   * `isFullyAllocated` — the one thing that ever consumed it — went with the
+   * count pill and the dimmed "full" chip, S65-a (R-438); it is not
+   * destructured above, so nothing in this file references it.
+   */
   capacityCap: number;
+  /**
+   * R-438: the board ROOT's own shift pattern (`index.templateForNode.get`
+   * of the node whose path is `rootPath`, resolved in `BoardPage` — this file
+   * never walks node ids to find it). `rootBand` (`railWords.ts`) reads its
+   * first band; `null` (no pattern on the root, or the board not yet loaded)
+   * falls back to measuring `bookingWords` against the window itself.
+   */
+  rootTemplate?: ShiftTemplate | null;
   open: boolean;
   onToggleOpen: () => void;
   /** P1-4e D65: the operator id of the in-flight panel drag, if any — its
@@ -104,8 +146,115 @@ export function OperatorPanel({
     endPanelDrag: (e: React.PointerEvent) => void;
     cancelDrag: (e?: React.PointerEvent) => void;
   };
+  /**
+   * R-439: where the rail's dragged width is remembered — the SAME value
+   * `BoardPage` gives `CommandLauncher` as `historyKey` (user id + board
+   * root), never derived twice. `railWidth.ts`'s `railKey` prefixes it before
+   * it reaches `panelSize.ts`'s storage, so the two remembered sizes never
+   * collide. `null` (session/board not yet known, or a test that doesn't
+   * care) means the width still resizes for the render but is never
+   * persisted — `railWidth.ts`'s own contract.
+   */
+  widthStorageKey?: string | null;
 }) {
   const [showOthers, setShowOthers] = useState(false);
+
+  // R-438: the ONE band `bookingWords` measures every chip against —
+  // `rootTemplate`'s first shift, or `null` (rootBand's own fallback,
+  // `bookingWords` then reads the window itself). Recomputed only when the
+  // template identity changes, not per chip.
+  const band = useMemo(() => rootBand(rootTemplate), [rootTemplate]);
+
+  // ---------------------------------------------------------------------
+  // R-439: the rail's own remembered width. `null` until either a stored
+  // value is loaded or a drag sets one — same convention S63's `size` in
+  // `CommandLauncher` uses, and for the same reason: the panel sizes to its
+  // CSS default (`.panel`'s `calc(190px * var(--ui-scale))`) until there is
+  // a real number to override it with, rather than forcing one on a rail
+  // nobody has ever dragged.
+  const [width, setWidth] = useState<number | null>(null);
+
+  // `railWidth.ts`'s own key, derived from the SAME `historyKey` value
+  // `BoardPage` gives `CommandLauncher` — never a second derivation, and
+  // never passed to `panelSize.ts` bare (that would collide with the command
+  // panel's own stored size under the same key; `railKey`'s own doc says why).
+  const storageKey = railKey(widthStorageKey ?? null);
+
+  // `--ui-scale` is a CSS custom property this file cannot read as a number
+  // directly — outside Fit mode it comes from a viewport-driven `clamp()` in
+  // global.css, invisible to `getComputedStyle().getPropertyValue`, which
+  // hands back the unresolved token stream, not a px number (P1-4c D47's own
+  // finding, `BoardGrid.tsx`'s `railProbeRef`). This is that same trick: a
+  // hidden probe whose CSS `width` IS `var(--ui-scale)` px, so ITS measured
+  // (resolved) width is the scale as a plain number.
+  const scaleProbeRef = useRef<HTMLSpanElement | null>(null);
+  function currentUiScale(): number {
+    return scaleProbeRef.current?.getBoundingClientRect().width || 1;
+  }
+
+  // Restore on mount and whenever the person/board changes (a fresh
+  // `widthStorageKey`) — mirrors `CommandLauncher`'s own restore effect over
+  // `panelSize.ts` exactly. Never re-runs on `open` toggling, so the once-only
+  // auto-collapse in `BoardPage` (which only flips `open`) leaves this alone
+  // and a reopen finds the same width still in state.
+  useEffect(() => {
+    const stored = readRailWidth(storageKey);
+    setWidth(stored !== null ? clampRailWidth(stored, currentUiScale()) : null);
+  }, [storageKey]);
+
+  /**
+   * R-439: a pointer drag on the rail's right-edge handle, tracked with
+   * `setPointerCapture` on the handle itself (D33, `useDragGesture.ts`'s own
+   * convention -- the SAME fix `CommandLauncher`'s own resize handles carry,
+   * CR-2: a raw `document.addEventListener("pointermove"/"pointerup", ...)`
+   * misses a release outside the browser window entirely, leaving the drag
+   * stuck open). `railDragRef` (a ref, not state) holds `latest` -- `width`
+   * itself would still read the value from BEFORE this render's `setWidth`,
+   * a stale read `useState` warns about for exactly this reason. The rail
+   * grows to the RIGHT (unlike the command panel's bottom-right anchor), so
+   * the delta is (current - start), not (start - current).
+   */
+  const railDragRef = useRef<{
+    startX: number;
+    startWidth: number;
+    uiScale: number;
+    latest: number;
+    pointerId: number;
+  } | null>(null);
+
+  function handleRailPointerDown(e: React.PointerEvent<HTMLDivElement>): void {
+    e.preventDefault();
+    const uiScale = currentUiScale();
+    const startWidth = width ?? RAIL_MIN_WIDTH * uiScale;
+    railDragRef.current = {
+      startX: e.clientX,
+      startWidth,
+      uiScale,
+      latest: startWidth,
+      pointerId: e.pointerId,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function handleRailPointerMove(e: React.PointerEvent<HTMLDivElement>): void {
+    const drag = railDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const next = clampRailWidth(drag.startWidth + (e.clientX - drag.startX), drag.uiScale);
+    drag.latest = next;
+    setWidth(next);
+  }
+
+  /** Ends a resize on either `pointerup` or `pointercancel` -- see this
+   *  section's own doc above for why both matter. */
+  function endRailResize(e: React.PointerEvent<HTMLDivElement>): void {
+    const drag = railDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    railDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    writeRailWidth(storageKey, drag.latest);
+  }
 
   // R-357: who is on leave for ANY part of the shown window. The window is the
   // board's whole span — [windowStart, windowStart + windowMinutes) — and
@@ -166,12 +315,25 @@ export function OperatorPanel({
 
   function chip(o: BoardOperator, outside: boolean) {
     const mine = assignmentsByOperator.get(o.id) ?? [];
-    const full = isFullyAllocated(mine, windowMinutes, capacityCap);
     const title = titles.get(o.id);
+    const words = bookingWords(mine, { start: windowStart, minutes: windowMinutes }, band, zone);
+
+    // R-438: "ordered by the skills the cell requires first" — this panel has
+    // no notion of a cell being dragged over (that context lives in the
+    // create/reassign pop-ups' own `requiredSkills`, not here), so there is
+    // no required-skill order available to read. Falls back to the name, the
+    // brief's own escape hatch — said here rather than silently guessed.
+    const skills = o.skillIds
+      .map((sid) => skillById.get(sid))
+      .filter((s): s is Skill => s !== undefined)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const shownSkills = skills.slice(0, 2);
+    const restSkills = skills.slice(2);
+
     return (
       <div
         key={o.id}
-        className={`${styles.chip} ${full ? styles.full : ""} ${draggingOperatorId === o.id ? styles.dragSrc : ""}`}
+        className={`${styles.chip} ${draggingOperatorId === o.id ? styles.dragSrc : ""}`}
         title={title}
         style={{ touchAction: "none", cursor: "grab" }}
         onPointerDown={(e) => dragApi.beginPanelDrag(o, e)}
@@ -179,32 +341,54 @@ export function OperatorPanel({
         onPointerUp={dragApi.endPanelDrag}
         onPointerCancel={dragApi.cancelDrag}
       >
+        {/* Line one (R-438): avatar and the name ALONE, never truncated — the
+            rail's width is the person's (R-439), so there is no reason to
+            ellipsise it. */}
         <span className={styles.avatar}>{initials(o.displayName)}</span>
         <span className={styles.nm}>{o.displayName}</span>
-        {/* R-346: said on the chip itself, so the mark travels with the person
-            rather than depending on where the list happens to be scrolled. The
-            wording is the panel's plain half of the pop-ups' "not from this
-            area (override)" — the panel asks for nothing, the drop does. */}
-        {outside && <span className={styles.outsideTag}>not from this area</span>}
-        {/* R-357: the plain half of the pop-ups' "On leave" line — the panel
-            says who is away over the shown window; placing them is where the
-            warning or the refusal actually fires. */}
-        {absentIds.has(o.id) && <span className={styles.leaveTag}>on leave</span>}
-        {o.skillIds.map((sid) => {
-          const skill = skillById.get(sid);
-          return skill ? (
-            <span key={sid} className={styles.sk}>
-              {skill.name}
+        {/* Line two: the area/leave marks (unchanged from before, just moved
+            down here), up to two skill badges + "+n", and the booking words
+            pushed to the right. */}
+        <div className={styles.line2}>
+          {/* R-346: said on the chip itself, so the mark travels with the
+              person rather than depending on where the list happens to be
+              scrolled. The wording is the panel's plain half of the pop-ups'
+              "not from this area (override)" — the panel asks for nothing,
+              the drop does. */}
+          {outside && <span className={styles.outsideTag}>not from this area</span>}
+          {/* R-357: the plain half of the pop-ups' "On leave" line — the
+              panel says who is away over the shown window; placing them is
+              where the warning or the refusal actually fires. */}
+          {absentIds.has(o.id) && <span className={styles.leaveTag}>on leave</span>}
+          {shownSkills.map((s) => (
+            <span key={s.id} className={styles.sk}>
+              {s.name}
             </span>
-          ) : null;
-        })}
-        {mine.length > 0 && <span className={styles.pill}>{mine.length}</span>}
+          ))}
+          {restSkills.length > 0 && (
+            <span
+              className={styles.more}
+              title={restSkills.map((s) => s.name).join(", ")}
+            >{`+${restSkills.length}`}</span>
+          )}
+          <span className={styles.words}>{words}</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <aside className={`${styles.panel} ${open ? "" : styles.collapsed}`} aria-label="Operators">
+    <aside
+      className={`${styles.panel} ${open ? "" : styles.collapsed}`}
+      aria-label="Operators"
+      // R-439: only an OPEN panel takes the dragged width — collapsed always
+      // falls back to `.collapsed`'s own fixed CSS width, same as
+      // `CommandLauncher`'s `size !== null` inline-style gate.
+      style={open && width !== null ? { width } : undefined}
+    >
+      {/* See `currentUiScale`'s own comment above: a zero-size probe whose
+          resolved `width` IS the current `--ui-scale`, as a real px number. */}
+      <span ref={scaleProbeRef} className={styles.scaleProbe} aria-hidden="true" />
       <div className={styles.panelHd}>
         <span className={styles.lbl}>OPERATORS</span>
         <PanelToggle
@@ -233,6 +417,22 @@ export function OperatorPanel({
           </>
         )}
       </div>
+      {/* R-439: the rail's own drag handle, right edge only — the rail grows
+          rightward (unlike the command panel's bottom-right anchor), and
+          only makes sense to grab while open (a collapsed rail has nothing
+          to widen into). */}
+      {open && (
+        <div
+          className={styles.resizeHandle}
+          onPointerDown={handleRailPointerDown}
+          onPointerMove={handleRailPointerMove}
+          onPointerUp={endRailResize}
+          onPointerCancel={endRailResize}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize operators panel"
+        />
+      )}
     </aside>
   );
 }

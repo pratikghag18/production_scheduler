@@ -20,7 +20,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import type { BoardOperator, Skill } from "@/lib/api";
+import type { BoardOperator, Skill, ShiftTemplate } from "@/lib/api";
 import {
   describeSchedulerError,
   toSchedulerError,
@@ -291,6 +291,12 @@ function renderPanel(
     windowStart?: Date;
     zone?: string;
   } = {},
+    /** S65-a (R-438): the board root's shift pattern, threaded straight to
+     *  `OperatorPanel`'s own `rootTemplate` prop. Omitted (the default,
+     *  `null`) is the common case here -- `bookingWords`' own fallback, the
+     *  window itself, which is what every R-038 case below was written
+     *  against before R-438 gave the panel a real pattern to read. */
+    rootTemplate?: ShiftTemplate | null;
 ) {
   const ops = opts.operators ?? [ELENA, RAY];
   const dragApi = {
@@ -324,6 +330,7 @@ function renderPanel(
       zone={zone}
       capacityCap={opts.capacityCap ?? 1}
       open={true}
+      rootTemplate={opts.rootTemplate ?? null}
       onToggleOpen={vi.fn()}
       draggingOperatorId={null}
       dragApi={dragApi}
@@ -342,9 +349,12 @@ function renderPanel(
 }
 
 /** A minimal IndexedAssignment carrying only the fields OperatorPanel's
- *  chip() and isFullyAllocated actually read: nodeId/startMin/endMin/
- *  efficiencyPercent (the tooltip), and efficiency (the fraction
- *  isFullyAllocated sums against capacityCap). */
+ *  chip() actually reads: nodeId/startMin/endMin/efficiencyPercent (the
+ *  tooltip), and startMin/endMin again for `bookingWords` (R-438). `efficiency`
+ *  is kept on the fixture even though nothing in the CURRENT chip sums it --
+ *  `isFullyAllocated` (`geometry.ts`) read it before S65-a retired the count
+ *  pill/dimmed "full" look that consumed it here; `boardGeometry.test.ts`
+ *  still pins `isFullyAllocated` itself directly. */
 function assignmentFor(nodeId: string, startMin: number, endMin: number, efficiencyPercent = 100) {
   return {
     nodeId,
@@ -371,7 +381,22 @@ describe("operator panel: the on-leave mark", () => {
   });
 });
 
-describe("operator panel (R-038): avatar, name, skill badges, count pill, dimmed when full", () => {
+describe("operator panel (R-038, SUPERSEDED BY R-438 -- see the note below): avatar, name, skill badges, booking words", () => {
+  /*
+   * ⚠️ S65-a, R-438 SUPERSEDES R-038 WHEN IT SHIPS (`docs/plan.yaml`'s own
+   * note on R-438 said so in advance). R-038's claim was "avatar, name, skill
+   * badges and a count pill ... dimmed when full"; the maintainer replaced
+   * the pill and the dimming with `railWords.ts`'s booking words (17 Sept,
+   * "the bar is not very useful, we don't know what a full bar would mean").
+   * R-038a and R-038c (the avatar/name/skill-badge presence and the tooltip)
+   * are UNCHANGED by that -- nothing about them was the pill or the dimming,
+   * so they stay as they were. R-038b (the count pill) and R-038d (the
+   * dimmed "full" chip) are REWRITTEN below to pin the new contract in their
+   * place: the pill and the dimming are gone, replaced by the words. This is
+   * a CONTRACT CHANGE, not a case that was wrong (CLAUDE.md §4's "a green
+   * case can be pinning the bug" -- these two were pinning exactly what they
+   * were written to pin; the maintainer changed what the chip shows).
+   */
   it("R-038a: each chip shows an avatar (initials), the name, and one badge per skill", () => {
     const welding: Skill = { id: "sk-1", name: "Welding" } as never;
     const skilled: BoardOperator = { ...operator("op-nia", "Nia"), skillIds: ["sk-1"] };
@@ -383,15 +408,42 @@ describe("operator panel (R-038): avatar, name, skill badges, count pill, dimmed
     expect(within(chip).getByText("Welding")).not.toBeNull();
   });
 
-  it("R-038b: the count pill shows the number of assignments in the loaded window, and is absent with none", () => {
+  it("R-038b (REWRITTEN, R-438): the count pill is gone -- the booking words say how booked the person is instead", () => {
+    // Same fixture R-038b always used (Elena: two blocks inside the day,
+    // 00:00-08:00 and 10:00-15:00; Ray: none). With no root template, the
+    // band `bookingWords` measures against is `bookingWords`' own fallback,
+    // the window itself (R-438 DECIDED) -- Elena's first uncovered minute is
+    // 08:00 (the end of her first block; her second starts at 10:00, so it
+    // does not touch minute 480), and Ray has no blocks in the window at all.
     const assignments = new Map<string, IndexedAssignment[]>([
       [ELENA.id, [assignmentFor(NODE, 0, 480), assignmentFor(NODE, 600, 900)]],
     ]);
     renderPanel([], { assignmentsByOperator: assignments });
     const elenaChip = screen.getByText("Elena").closest("div") as HTMLElement;
-    expect(within(elenaChip).getByText("2")).not.toBeNull();
+    expect(within(elenaChip).queryByText("2")).toBeNull(); // the count pill is gone
+    expect(within(elenaChip).getByText("free 08:00")).not.toBeNull();
     const rayChip = screen.getByText("Ray").closest("div") as HTMLElement;
-    expect(within(rayChip).queryByText("0")).toBeNull(); // no pill at all, not a "0" pill
+    expect(within(rayChip).queryByText("0")).toBeNull(); // never a "0" pill, before or after
+    expect(within(rayChip).getByText("free")).not.toBeNull(); // bare -- no blocks in the window at all
+  });
+
+  it("R-438: a root shift pattern narrows the band -- 'free'/'booked' follow the shift, not the whole loaded window", () => {
+    // A single-band pattern, 06:00-14:00 (`rootBand` reads a template's
+    // FIRST shift) -- Elena's one assignment covers the WHOLE band exactly,
+    // so she reads "booked" even though the same block leaves most of the
+    // 1440-minute window itself uncovered (the R-038b case above, with no
+    // pattern, would have called this "free 14:00").
+    const pattern: ShiftTemplate = {
+      id: "t1",
+      name: "Day",
+      shifts: [{ id: "s1", name: "Day", startMin: 360, endMin: 840, breaks: [] }],
+    };
+    const assignments = new Map<string, IndexedAssignment[]>([
+      [ELENA.id, [assignmentFor(NODE, 360, 840)]],
+    ]);
+    renderPanel([], { assignmentsByOperator: assignments, rootTemplate: pattern });
+    const elenaChip = screen.getByText("Elena").closest("div") as HTMLElement;
+    expect(within(elenaChip).getByText("booked")).not.toBeNull();
   });
 
   it("R-038c: the chip's title attribute lists the operator's assignments in the window (node, times, efficiency)", () => {
@@ -465,18 +517,24 @@ describe("operator panel (R-038): avatar, name, skill badges, count pill, dimmed
     expect(titleIn("America/Chicago")).not.toBe(titleIn("UTC"));
   });
 
-  it("R-038d: a chip renders dimmed (the `full` class) when its operator is fully allocated over the window, and not otherwise", () => {
-    // windowMinutes=1440, capacityCap=1 (default): one assignment covering the
-    // whole day at 100% efficiency is exactly full.
+  it("R-038d (REWRITTEN, R-438): the dimmed 'full' chip is gone -- a fully-covered person reads 'booked' in plain text, with no dimming at all", () => {
+    // Same fixture R-038d always used: one assignment covering the whole
+    // window (windowMinutes=1440) at 100% efficiency -- with no root
+    // template, `bookingWords`' fallback band IS that window, so this is
+    // covered end to end.
     const full = new Map<string, IndexedAssignment[]>([
       [ELENA.id, [assignmentFor(NODE, 0, 1440, 100)]],
     ]);
     renderPanel([], { assignmentsByOperator: full });
     const elenaChip = screen.getByText("Elena").closest("div") as HTMLElement;
     const rayChip = screen.getByText("Ray").closest("div") as HTMLElement;
-    expect(elenaChip.className).toMatch(/full/);
+    // No chip is ever dimmed any more -- the class itself is gone from
+    // `OperatorPanel.module.css`, not merely unapplied here.
+    expect(elenaChip.className).not.toMatch(/full/);
     expect(rayChip.className).not.toMatch(/full/);
   });
+    expect(within(elenaChip).getByText("booked")).not.toBeNull();
+    expect(within(rayChip).getByText("free")).not.toBeNull(); // no blocks at all
 });
 
 /* ===========================================================================

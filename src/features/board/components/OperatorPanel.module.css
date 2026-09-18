@@ -1,9 +1,29 @@
 .panel {
+  /* S65-a (R-439): this is now only the DEFAULT — a never-dragged rail, or
+     one whose stored width came back `null` (nothing saved, a private
+     window, a corrupt value). `OperatorPanel.tsx` overrides it with an
+     inline `width` the moment there is a real remembered/dragged number,
+     same arrangement `CommandLauncher.module.css`'s `.panel` has with its
+     own `size` state. `position: relative` anchors `.resizeHandle` and
+     `.scaleProbe` below to THIS box, not the page. */
+  position: relative;
   width: calc(190px * var(--ui-scale, 1));
   flex: none;
   height: 100%;
   overflow-y: auto;
-  overflow-x: hidden;
+  /* OR-2 (reviewer, S65-a review): was `hidden`. `.nm` below is deliberately
+     `white-space: nowrap; overflow: visible` so R-438's "nothing can shorten
+     [the name]" holds -- but with no `min-width: 0` anywhere in `.chip`'s
+     grid, a name wider than the rail forces the CHIP itself wider than the
+     panel (a flex item's default `min-width: auto` is its content's
+     min-content size, and `.chip`'s `1fr` column claims the same). With
+     `overflow-x: hidden` that overflow was silently CLIPPED at the panel's
+     own edge -- no ellipsis, no scrollbar, just a name cut off mid-letter,
+     which is worse than the old ellipsis behaviour it replaced and directly
+     contradicts "nothing can shorten it". `auto` lets a rail narrower than
+     the longest name scroll horizontally to reveal the rest instead of
+     losing it; a rail wide enough for every name shows no scrollbar at all. */
+  overflow-x: auto;
   background: var(--surface);
   border-right: 1px solid var(--grid);
   display: flex;
@@ -13,7 +33,56 @@
 
 .panel.collapsed,
 .collapsed {
+  /* A dragged width is never applied while collapsed (`OperatorPanel.tsx`
+     gates the inline style on `open`), so this fixed value always wins here
+     regardless of what the person last dragged the open rail to. */
   width: calc(28px * var(--ui-scale, 1));
+}
+
+/* S65-a (R-439): zero-size, unrendered — `OperatorPanel.tsx`'s
+   `currentUiScale` reads its resolved `getBoundingClientRect().width` to
+   learn `--ui-scale` as a plain number (outside Fit mode it is a
+   viewport-driven `clamp()` in global.css, which `getComputedStyle`'s
+   `getPropertyValue` on the custom property itself would hand back as the
+   unresolved calc() text, not a number — `BoardGrid.module.css`'s
+   `.railProbe` is the same trick for `--rail-w`, a DIFFERENT rail: the
+   grid's own row-label column, not this panel). */
+.scaleProbe {
+  position: absolute;
+  width: calc(1px * var(--ui-scale, 1));
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* S65-a (R-439): the drag handle, a thin strip straddling the panel's right
+   edge — sized generously enough to grab (8px) without eating into the chip
+   list underneath it, `touch-action: none` so a touch drag isn't read as a
+   scroll. Hidden while collapsed (`OperatorPanel.tsx` doesn't render it
+   then), so no `.collapsed` override is needed here the way `.othersBtn`
+   etc. need one below. */
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  /* OR-3 (reviewer, S65-a review): was `right: -4px` (straddling the
+     panel's own right edge, half in and half out). `.panel` is a scroll
+     container on both axes (`overflow-y: auto` always was, `overflow-x`
+     above is now `auto` too) -- once ANY axis is non-`visible`, the box
+     clips its own descendants at its border edge on BOTH axes, so the outer
+     half of an 8px handle placed at `right: -4px` never paints and never
+     receives pointer events in a real browser (jsdom has no layout, so the
+     unit tests here never caught it). `CommandLauncher.module.css`'s own
+     resize strips (`.resizeCorner`/`.resizeTop`/`.resizeLeft`) already avoid
+     this by sitting fully INSIDE the panel's box (`top: 0; left: 0`, no
+     negative offsets); `right: 0` matches that convention and keeps the
+     whole 8px strip inside the clipped region, so it stays fully grabbable
+     regardless of the rail's own overflow. */
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 3;
 }
 
 .panelHd {
@@ -63,10 +132,24 @@
   padding: 0 calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
 }
 
+/* S65-a (R-438): TWO LINES, NOT ONE. `.chip` is now a two-column, two-row
+   grid rather than a single flex row — `.avatar` spans both rows in column
+   1, `.nm` (the name, alone) sits in row 1 of column 2, and `.line2` (the
+   area/leave marks, the skill badges, the booking words) fills row 2 of that
+   same column. Grid, not two nested flex rows, is what lets `.avatar`,
+   `.nm` and `.line2` all stay DIRECT children of `.chip` — which matters
+   because `absenceOnBoard.test.tsx` finds a chip with
+   `screen.getByText(name).closest("div")`, and that only still finds the
+   whole chip (not a one-line wrapper around just the name) if nothing
+   wraps `.nm` on its own. The count pill and the dimmed "full" look
+   (`.pill`, `.full`) are gone with them — R-438 supersedes R-038, which
+   pinned both; see `absenceOnBoard.test.tsx`'s own note. */
 .chip {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: calc(6px * var(--ui-scale, 1));
+  row-gap: calc(2px * var(--ui-scale, 1));
   align-items: center;
-  gap: 6px;
   padding: calc(5px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
   border-radius: 7px;
   user-select: none;
@@ -78,6 +161,8 @@
 }
 
 .avatar {
+  grid-row: 1 / span 2;
+  grid-column: 1;
   width: calc(20px * var(--ui-scale, 1));
   height: calc(20px * var(--ui-scale, 1));
   border-radius: 50%;
@@ -91,14 +176,34 @@
   flex: none;
 }
 
+/* R-438: line one is the avatar and the name ALONE — never truncated, since
+   the rail's own width is now the person's (R-439) rather than a fixed
+   190px squeezing it. `overflow: visible` is deliberate, not merely the
+   absence of `hidden`: `min-width: 0` above ellipsis-truncation used to be
+   needed only because `.nm` shared its row with tags/badges/a pill; now
+   nothing else is on this row, so the name is free to be exactly as wide as
+   it needs and the CHIP (not the name) is what the grid sizes around it. */
 .nm {
+  grid-row: 1;
+  grid-column: 2;
   font-weight: 600;
   font-size: calc(12px * var(--ui-scale, 1));
-  flex: 1;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+/* Line two: the area/leave marks, up to two skill badges + "+n", and the
+   booking words — `.words`'s own `margin-left: auto` (below) is what pushes
+   it to the right edge; a shrinking `.outsideTag`/`.leaveTag`/`.sk` fills
+   whatever space is left on the LEFT of that margin. */
+.line2 {
+  grid-row: 2;
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--ui-scale, 1));
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .sk {
@@ -111,19 +216,28 @@
   flex: none;
 }
 
-.pill {
-  font-size: calc(10px * var(--ui-scale, 1));
+/* R-438: "+n" for the skills a two-badge line can't show — `title` (set in
+   the markup, not here) names them on hover. Same shape as `.sk` rather than
+   `.pill`'s pebble look: it reads as "more of the same row", not a count. */
+.more {
+  font-size: calc(9px * var(--ui-scale, 1));
   font-weight: 700;
-  color: var(--ink-2);
-  background: var(--page);
-  border: 1px solid var(--axis);
-  border-radius: 999px;
-  padding: 1px 6px;
+  color: var(--muted);
   flex: none;
 }
 
-.full {
-  opacity: 0.55;
+/* R-438: the booking words -- "free" / "free 11:30" / "booked"
+   (`railWords.ts`'s `bookingWords`) -- pushed to line two's right edge and
+   never wrapped, so a long skill list truncates the SKILLS first via
+   `.line2`'s own `overflow: hidden` below, never the words themselves. */
+.words {
+  margin-left: auto;
+  flex: none;
+  font-size: calc(9px * var(--ui-scale, 1));
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+  padding-left: calc(4px * var(--ui-scale, 1));
 }
 
 /* P1-4e D65: ported from the mockup's `.chip.drag-src` — the source chip
@@ -146,14 +260,20 @@
   border: 1px solid var(--axis);
 }
 
+/* Collapsed, only `.avatar` shows -- everything else on the chip is
+   `display: none` below. A GRID's column tracks stay reserved even when
+   the cell in them is empty (unlike flex, which drops a hidden item
+   entirely), so centering `.avatar` alone needs `.chip` to fall back to a
+   plain flex row here rather than trying to center within its two grid
+   columns. */
 .collapsed .chip {
+  display: flex;
   justify-content: center;
   padding: calc(5px * var(--ui-scale, 1)) calc(2px * var(--ui-scale, 1));
 }
 
 .collapsed .nm,
-.collapsed .sk,
-.collapsed .pill {
+.collapsed .line2 {
   display: none;
 }
 
@@ -174,8 +294,10 @@
   width: 100%;
 }
 
-/* The mark travels with the person, so it must not squeeze the name out of a
-   190px rail: the name keeps `flex: 1` and this shrinks and ellipsises first. */
+/* S65-a (R-438): moved onto line two (`.line2`) alongside the skill badges
+   and the booking words -- the name itself (line one) never shares a row
+   with this any more, so nothing here can squeeze it. This tag shrinks and
+   ellipsises first among line two's own contents, same as `.leaveTag`. */
 .outsideTag {
   font-size: calc(9px * var(--ui-scale, 1));
   font-style: italic;
