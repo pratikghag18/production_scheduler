@@ -166,3 +166,7 @@ Each is also a `requirements` row in `docs/plan.yaml`. Three duties come with th
   trace entry and a turn in the thread; a pin for a bar feature asserts its trace entry.
 - **When in doubt, ask (R-435).** Two honest readings of a sentence become a question with both as
   buttons, never a quiet pick. "From 1 to 5" with no am/pm asks which half of the day.
+- **Every side panel resizes and remembers (R-446).** A panel beside the board or the admin content
+  (the command panel, the operator rail, the admin section rail, and any later one) resizes by its
+  edge within a clamp, with pointer capture, and remembers its size per person through the one size
+  module (`src/features/board/lib/panelSize.ts`); no panel gets its own storage or its own drag.

@@ -2964,6 +2964,22 @@ stages:
     **REOPENED 18 Sept (session 179).** The 17 Sept build (b48b54a) matched the row's words and not the
     maintainer's mock: the key was empty on a week with no runs, the band stacked, From and Days still in the
     row. S67-b builds the mock; lane running.
+- id: S68
+  track: core
+  num: 68
+  title: The admin rail resizes and remembers --- the side-panel standard's first hit
+  status: now
+  owner: agent
+  refs:
+  - 'session 179 conversation (the maintainer, 18 Sept)'
+  delivers:
+  - R-446
+  what: >-
+    **The standard applied where it was missing.** The admin page's section rail (AdminPage.tsx's nav, width
+    from --rail-w) gets the drag edge, the clamp, pointer capture and the remembered width per person through
+    panelSize.ts, the same shape as the operator rail's railWidth.ts; the collapse toggle keeps working.
+  state: >-
+    **NOW 18 Sept (session 179).** Brief: s68-a-admin-rail-resize-brief.md; lane running beside S66-b and S67-b.
 - id: M1
   track: matrix
   num: 1
@@ -12531,7 +12547,33 @@ requirements:
     window is withdrawn --- on a week with no runs it showed nothing); the band is two columns, Week plan left
     and Key right; the From and Days fields fold into the range control as a dropdown; the button reads
     "More" with a chevron. The 17 Sept build followed the row's words, not the image, which was never in the
-    repo; S67-b builds the image (docs/agent-briefs/s67-b-band-as-the-mock-brief.md).
+    repo; S67-b builds the image (docs/agent-briefs/s67-b-band-as-the-mock-brief.md).- id: R-446
+  title: Every side panel resizes by its edge and remembers its width per person, through the one size module
+  source:
+  - 'session 179 conversation (the maintainer, 18 Sept)'
+  - CLAUDE.md §7
+  stated_by: maintainer
+  claim: >-
+    A panel beside the board or the admin content --- the command panel, the operator rail, the admin
+    page's section rail, and any later one --- resizes by its edge within a clamp, with pointer capture,
+    and remembers its size per person through src/features/board/lib/panelSize.ts under its own storage
+    prefix. No panel gets its own storage or its own drag. Standard: the audit is the grep for a fixed-width
+    side panel; the admin rail is the first hit.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandLauncher.test.tsx
+    cases: "CL-10, CL-11, CR-2 (the command panel)"
+  - kind: vitest
+    file: src/test/operatorPanel.test.tsx
+    cases: "OP-1 to OP-4 (the operator rail)"
+  - kind: manual
+    steps: "the admin rail's pins when S68 lands (AR-1 to AR-4)"
+  status: covered
+  note: >-
+    STATED 18 Sept (session 179): "I was under the impression that we created a standard for the left panel, I
+    can resize on board page but not on admin page, if the standard exists was this not updated as per
+    standard?" then "Yes to both". The developer had made the choice twice (S63, S65) without asking; the
+    third time is the standard, under R-426's third duty.
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today
@@ -12565,6 +12607,23 @@ findings:
     the thread while the block is still on the board. CLAUDE.md §4's own warning, in the bar's words. Fix:
     every writer prop returns the outcome (written, refused with the server's reason) the way onOpen and
     onBook already do, and a void return is a type error, not a success.
+- id: F-177
+  title: The demo seed could not be re-applied on a used stack --- its teardown did not know week templates or absences
+  tag: A teardown older than two of the tables that point at its rows
+  status: fixed
+  found_by: agent
+  stage: S67
+  refs:
+  - R-423
+  story: >-
+    Found 18 Sept (session 179) re-anchoring the demo on the maintainer's word: dev_demo.sql's teardown
+    deletes the demo's rows table by table and then the nodes level by level, and stopped with "still
+    referenced from table week_templates" --- a template the weekTemplates spec had saved at Plant A. The
+    teardown was written before 0066 (absences) and 0067 (week templates), and nobody re-seeded a stack that
+    had been used since. The tester saw the drift in session 159 and re-applied on a fresh stack.
+  fix: >-
+    Session 179. The teardown deletes week_templates and absences before the nodes; the seed re-applied and
+    the real-names script after it; 84 runs in the current week.
 - id: F-175
   title: The API shape test sat red since the command-bar setting shipped, because its board-shape allowlist did not know the new key
   tag: A test nobody ran after the migration that changed its answer
@@ -24719,8 +24778,16 @@ next:
     weekTemplates fail before any toolbar assertion (the tester saw the same drift in session 159). Re-applying
     dev_demo.sql deletes and recreates the demo rows, so it waits for the maintainer.
 - kind: task
+  stage: S68
+  text: "The admin rail resizes and remembers (R-446), the side-panel standard's first hit --- lane running 18 Sept"
+  why: >-
+    The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
+- kind: task
   text: "The voice half of the walk through Whisper, read from the trace and the thread"
   why: >-
+    The maintainer, 18 Sept: "We still have to do testing on the whisper model for voice testing." Same list,
+    spoken, on a re-anchored demo, with the thread on screen; the developer prepares the list and reads the
+    trace after.
     The typed half passes as a spec (e2e/typedWalk.spec.ts); the maintainer's 17 Sept typed walk of ten sentences
     ran clean end to end. Next is the same list spoken, in a fresh session (the maintainer's call, 17 Sept).
 - kind: task

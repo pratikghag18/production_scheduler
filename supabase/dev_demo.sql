@@ -100,6 +100,13 @@ BEGIN
   DELETE FROM operators               WHERE org_id = v_org;
   DELETE FROM skills                  WHERE org_id = v_org;
   DELETE FROM profile_grants          WHERE org_id = v_org;
+  -- F-177 (18 Sept, session 179): two tables younger than this teardown point at
+  -- the demo's rows -- a week template (0067) at a plant, an absence (0066) at a
+  -- person -- and a re-seed after either had been written stopped at the node
+  -- loop with "still referenced from table week_templates". Deleted here so the
+  -- demo can be re-anchored on a stack that has been used.
+  DELETE FROM week_templates          WHERE org_id = v_org;
+  DELETE FROM absences                WHERE org_id = v_org;
 
   -- A structure that belongs to a site points AT a node, so break that link
   -- before the nodes go. The ORIGINAL 'Standard Plant' structure has no site
