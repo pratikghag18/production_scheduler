@@ -153,8 +153,20 @@
    not the row. */
 .keyGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  /* The maintainer, 18 Sept, on a 1900px screen where `auto-fill` had laid
+     thirteen products in ONE row: "The product placement should be in the
+     form of even column matrix as I shown". The mock is a four-column
+     matrix; the count of columns is fixed, not derived from the width, so
+     the key reads the same at every size. Two columns under 900px so a name
+     never wraps inside a cell. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: calc(6px * var(--chrome-scale, 1)) calc(16px * var(--chrome-scale, 1));
+}
+
+@media (max-width: 900px) {
+  .keyGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .key {
@@ -191,6 +203,12 @@
   border: 1px solid var(--axis);
   border-radius: 7px;
   overflow: hidden;
+  /* The maintainer, 18 Sept: "The chevron button along with the
+     compact/std/fine button should be right aligned as shown". The zoom
+     group takes the row's spare width on its left, so it and everything
+     after it (the quiet notes, the Show more toggle) sit at the right edge
+     at any screen width, as in the mock. */
+  margin-left: auto;
 }
 
 .zoom button {
