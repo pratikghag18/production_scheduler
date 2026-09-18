@@ -12744,6 +12744,24 @@ findings:
     passes popoverStandard.test.ts only because that audit's signal is the literal role="dialog", which the
     code never writes. Every other anchored floating panel composes the shared Popover shell or is
     allowlisted with a reason. Decide: compose the shell, or allowlist with the reason written beside it.
+- id: F-180
+  title: A retime from the bar that needs a confirm pop-up reports Waiting and nothing ever settles it
+  tag: A pop-up with no reporter back to the bar
+  status: open
+  found_by: agent
+  stage: S64
+  refs:
+  - R-421
+  - R-427
+  - R-434
+  story: >-
+    Found 18 Sept (session 179) by the S64-c lane while making the silent writers answer (F-168): a bar-driven
+    retime whose plan needs a decision --- the attachment ask (R-365), keep-or-scale on a run resize (R-031),
+    the crew-outside-window ask --- opens the existing confirm pop-up and the writer now answers popup, so the
+    thread says Waiting; but unlike the create pop-up (F-167) those pop-ups have no reporter wired back, so
+    the entry stays open and the thread says Waiting until the page tears down, whether the person confirmed
+    or cancelled. Before F-168 the same case was recorded as Written, which was worse. Fix: the same reporter
+    shape CreatePopover carries, on the three confirm pop-ups.
 - id: F-179
   title: The generated database types were retyped by hand and the retyping hid a real type error in the Access tab's write
   tag: A generated file edited instead of regenerated
