@@ -409,6 +409,23 @@ BEGIN
     INSERT INTO node_shift_templates (org_id, node_id, template_id)
     VALUES (v_org, v_plant, v_tpl);
   END LOOP;
+
+  -- R-441 (18 Sept, session 179; the maintainer: "assign shifts to all operators
+  -- randomly"): every demo person gets a band of the pattern their plant runs,
+  -- picked by a hash of the employee ref so the spread is random-looking but
+  -- the same on every seed -- the walks and the tester can name who is on
+  -- which shift.
+  UPDATE operators o SET home_shift_id = pick.shift_id
+    FROM (
+      SELECT o2.id AS operator_id,
+             (array_agg(s.id ORDER BY s.start_min))[1 + (abs(hashtext(o2.employee_ref)) % count(*))::int] AS shift_id
+        FROM operators o2
+        JOIN shift_templates st ON st.org_id = o2.org_id AND st.site_node_id = o2.site_node_id
+        JOIN shifts s ON s.template_id = st.id
+       WHERE o2.org_id = v_org
+       GROUP BY o2.id
+    ) AS pick
+   WHERE o.id = pick.operator_id;
 END $$;
 
 -- ---------------------------------------------------------------------------
