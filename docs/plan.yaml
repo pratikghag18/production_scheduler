@@ -12548,6 +12548,9 @@ requirements:
     and Key right; the From and Days fields fold into the range control as a dropdown; the button reads
     "More" with a chevron. The 17 Sept build followed the row's words, not the image, which was never in the
     repo; S67-b builds the image (docs/agent-briefs/s67-b-band-as-the-mock-brief.md).
+    CORRECTED AGAIN 18 Sept, on the S67-b build: "The unexpanded view should show the Show More button and
+    expanded view should show the Show Less button. Just more button is meaningless." The visible text is
+    "Show more" closed and "Show less" open, with the chevron; the accessible name is the visible text.
 - id: R-446
   title: Every side panel resizes by its edge and remembers its width per person, through the one size module
   source:
