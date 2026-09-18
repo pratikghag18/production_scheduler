@@ -233,6 +233,15 @@ export default function BoardPage() {
   const [fitScale, setFitScale] = useState(1);
   const handleFitScaleChange = useCallback((scale: number) => setFitScale(scale), []);
 
+  // S67 (F-170): whether the person has scrolled the grid to the loaded
+  // window's right edge -- `BoardGrid`'s own scroll position compared
+  // against its own max scroll left (its `onWindowEdgeChange` prop doc),
+  // bubbled up the same way `fitScale` is above. `BoardToolbar`'s
+  // end-of-window note renders only while this is true, replacing the
+  // unconditional render F-170 found.
+  const [atWindowEnd, setAtWindowEnd] = useState(false);
+  const handleWindowEdgeChange = useCallback((atEnd: boolean) => setAtWindowEnd(atEnd), []);
+
   // D43/D46/D53: DENSITIES[densityMode] is referentially stable across
   // renders (DENSITIES is a module-level const array) whenever densityMode
   // is a manual override and unchanged. Under Fit, `scaleDensity` returns a
@@ -250,15 +259,6 @@ export default function BoardPage() {
   // markers the index and axis have always been built from — that half did not
   // move. The QUERY's own bounds are `fetchFrom`/`fetchTo` below.
   const from = windowStartDate;
-  // S67 (F-170): whether the person has scrolled the grid to the loaded
-  // window's right edge -- `BoardGrid`'s own scroll position compared
-  // against its own max scroll left (its `onWindowEdgeChange` prop doc),
-  // bubbled up the same way `fitScale` is above. `BoardToolbar`'s
-  // end-of-window note renders only while this is true, replacing the
-  // unconditional render F-170 found.
-  const [atWindowEnd, setAtWindowEnd] = useState(false);
-  const handleWindowEdgeChange = useCallback((atEnd: boolean) => setAtWindowEnd(atEnd), []);
-
   const to = useMemo(
     () => addMinutes(windowStartDate, windowDayCount * MINUTES_PER_DAY),
     [windowStartDate, windowDayCount],
@@ -493,6 +493,21 @@ export default function BoardPage() {
     [index, from, to, windowDayCount, density],
   );
 
+  // S67 (R-445) DECIDED: the toolbar's Key lists only products with a run
+  // inside the shown window -- `index.runById` IS that window's runs
+  // (`boardIndex.ts` builds it from exactly the fetched `[from, to)` range,
+  // clipped to it), so this reads the ids off runs already held here rather
+  // than a second, narrower fetch of the readable catalogue `products`
+  // (below) stays. Empty (not null) before the board has data, same
+  // convention `emptyIndex` above uses.
+  const productIdsInWindow = useMemo(() => {
+    const ids = new Set<string>();
+    for (const run of emptyIndex.runById.values()) {
+      if (run.productId !== null) ids.add(run.productId);
+    }
+    return ids;
+  }, [emptyIndex]);
+
   const dragApi = useDragGesture({
     // Only ever used to build cache keys, and unreachable while null: with no
     // place to open there is no board and nothing to drag.
@@ -510,21 +525,6 @@ export default function BoardPage() {
     dateFormat,
     sessionUserId: session?.user.id ?? null,
     // DEF-0015: the server's `can_place` for this person, so the gesture layer
-  // S67 (R-445) DECIDED: the toolbar's Key lists only products with a run
-  // inside the shown window -- `index.runById` IS that window's runs
-  // (`boardIndex.ts` builds it from exactly the fetched `[from, to)` range,
-  // clipped to it), so this reads the ids off runs already held here rather
-  // than a second, narrower fetch of the readable catalogue `products`
-  // (below) stays. Empty (not null) before the board has data, same
-  // convention `emptyIndex` above uses.
-  const productIdsInWindow = useMemo(() => {
-    const ids = new Set<string>();
-    for (const run of emptyIndex.runById.values()) {
-      if (run.productId !== null) ids.add(run.productId);
-    }
-    return ids;
-  }, [emptyIndex]);
-
     // refuses to open a create pop-up, start a block move/resize, or begin a
     // panel drag when it is false. Read-only pop-ups still open on a click.
     canPlace,
@@ -1100,9 +1100,24 @@ export default function BoardPage() {
         onShiftWindowByDays={shiftWindowByDays}
         onGoToToday={() => goToToday(zone)}
         products={boardQuery.data?.products ?? []}
+        // S67 (R-445) DECIDED: filters the Key to what is actually on the
+        // board in the shown window; `products` above stays the readable
+        // catalogue the create/copy pop-ups need.
+        productIdsInWindow={productIdsInWindow}
+        // F-170: the end-of-window note renders only while this is true.
+        atWindowEnd={atWindowEnd}
         isFetching={boardQuery.isFetching && hasData}
         dateFormat={dateFormat}
         zone={zone}
+        // S67 (R-445): the same per-person, per-board key `CommandLauncher`
+        // below is given (`historyStorageKey`), computed again here rather
+        // than lifted to a shared variable so this edit touches nothing the
+        // launcher's own lane owns. "Show more" remembers itself under its
+        // own storage prefix (`BoardToolbar.tsx`'s `readShowMore`), so the
+        // two never collide even though both key off the same value.
+        historyKey={
+          session?.user.id && rootPath ? historyStorageKey(session.user.id, rootPath) : null
+        }
       />
 
       {boardQuery.status === "pending" && !hasData && (
@@ -1117,24 +1132,9 @@ export default function BoardPage() {
         </p>
       )}
 
-        // S67 (R-445) DECIDED: filters the Key to what is actually on the
-        // board in the shown window; `products` above stays the readable
-        // catalogue the create/copy pop-ups need.
-        productIdsInWindow={productIdsInWindow}
-        // F-170: the end-of-window note renders only while this is true.
-        atWindowEnd={atWindowEnd}
       {hasData && index && boardQuery.data && (
         <>
           {import.meta.env.DEV && index.droppedRanges > 0 && (
-        // S67 (R-445): the same per-person, per-board key `CommandLauncher`
-        // below is given (`historyStorageKey`), computed again here rather
-        // than lifted to a shared variable so this edit touches nothing the
-        // launcher's own lane owns. "Show more" remembers itself under its
-        // own storage prefix (`BoardToolbar.tsx`'s `readShowMore`), so the
-        // two never collide even though both key off the same value.
-        historyKey={
-          session?.user.id && rootPath ? historyStorageKey(session.user.id, rootPath) : null
-        }
             <p className={styles.devWarning}>
               dev warning: {index.droppedRanges} row(s) had an unparseable time range and were
               dropped from the board.
@@ -1401,6 +1401,7 @@ export default function BoardPage() {
                   dragApi={dragApi}
                   setDropRowResolver={dragApi.setDropRowResolver}
                   onFitScaleChange={handleFitScaleChange}
+                  onWindowEdgeChange={handleWindowEdgeChange}
                   dateFormat={dateFormat}
                 />
               </HighlightProvider>
@@ -1435,7 +1436,6 @@ export default function BoardPage() {
           nodeId={popover.nodeId}
           anchor={popover.anchor}
           initialRange={popover.range}
-                  onWindowEdgeChange={handleWindowEdgeChange}
           shiftChips={popover.shiftChips}
           defaultCreateMode={defaultCreateMode}
           products={offeredProducts}
