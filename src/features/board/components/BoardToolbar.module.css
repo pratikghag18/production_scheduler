@@ -199,7 +199,12 @@
 }
 
 .zoom {
-  display: flex;
+  /* R-447 (the maintainer, 18 Sept): every button in one group is the same
+     size. A grid whose columns share one track size makes each segment as
+     wide as the widest label; `flex` sized each to its own word. */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   border: 1px solid var(--axis);
   border-radius: 7px;
   overflow: hidden;
@@ -278,7 +283,10 @@
 /* Ported from the mockup's `.daynav` rules (model-hybrid.html). Same shape as
    `.zoom` — a segmented button group — but without a selected state. */
 .daynav {
-  display: flex;
+  /* R-447: one track size for the three segments (see `.zoom`). */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   border: 1px solid var(--axis);
   border-radius: 7px;
   overflow: hidden;

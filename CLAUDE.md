@@ -170,3 +170,8 @@ Each is also a `requirements` row in `docs/plan.yaml`. Three duties come with th
   (the command panel, the operator rail, the admin section rail, and any later one) resizes by its
   edge within a clamp, with pointer capture, and remembers its size per person through the one size
   module (`src/features/board/lib/panelSize.ts`); no panel gets its own storage or its own drag.
+- **Every button in one group is the same size (R-447).** A segmented control, a stack, a
+  toggle whose label changes, a dialog's footer: the buttons that belong to one system share one
+  width (a grid track, a stretched column, or a fixed min-width in em), so nothing shifts when a
+  label changes or a state flips. A strip whose labels are data (the bar's candidate answers) is
+  the one exception, and it is written down as one on R-447.
