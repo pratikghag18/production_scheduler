@@ -41,6 +41,7 @@ import {
   finishTrace as finishTraceIn,
   settleTurn,
   flushTraceOnTeardown,
+  postTrace,
   storeRef,
   type CandidateAction,
   type ConversationStore,
@@ -299,8 +300,13 @@ function normalizeWord(value: string): string {
  *                 something (a reason, an override, a decision) — nothing is
  *                 written until a person answers it.
  *
- * Returning nothing (`undefined`) is read as `written`, which is byte for
- * byte the pre-F-164 behaviour for any caller that has not been widened.
+ * F-168 (R-421/R-427/R-434): `onRetime`, `onRetimeRun`, `onUnassign` and the
+ * retime half of `onMove` were the callers "not yet widened" this doc used to
+ * excuse — a refused unassign or retime read as `written` in the trace and
+ * the thread while the block stayed on the board, CLAUDE.md §4's own warning
+ * in the bar's words. They answer for real now (see `WriteResult` below), so
+ * `settleWrite` no longer has a caller left that returns nothing at all —
+ * `undefined` is a defect to fix, never a success to assume.
  */
 export type WriteOutcome =
   | { kind: "written" }
@@ -308,8 +314,22 @@ export type WriteOutcome =
   | { kind: "popup"; waitingFor: string };
 
 /** What a writer prop may answer with — nothing, an outcome, or a promise of
- *  one. */
+ *  one. Still carries `void` for `onOpen`/`onBook`/`onSetHeadcount` (F-164's
+ *  own three, plus `onMove`'s move-cell half) — none of those has ever
+ *  actually returned it, so the type is wider than the truth on purpose:
+ *  narrowing it is a follow-up, not F-168's. */
 export type WriteAnswer = void | WriteOutcome | Promise<WriteOutcome | void>;
+
+/**
+ * F-168: what `onRetime`, `onRetimeRun`, `onUnassign` and `onMove` must
+ * answer with now — `WriteAnswer` minus its `void` member, so a writer that
+ * never learned what became of the write (F-168's own four silent ones, a
+ * fire-and-forget `.mutate` with a toast on error and nothing returned) no
+ * longer type-checks against the prop. A guard that needs no await (DEF-0015's
+ * `canPlace` check, an unknown id) still answers synchronously — only
+ * answering with NOTHING is closed off.
+ */
+export type WriteResult = WriteOutcome | Promise<WriteOutcome>;
 
 export interface CommandBarProps {
   /**
@@ -337,14 +357,17 @@ export interface CommandBarProps {
     report: PopupReporter,
   ) => WriteAnswer;
   /** R-385: the resolved target is `retime` — the caller re-times the block
-   *  through the drag's own path; nothing is created. */
+   *  through the drag's own path; nothing is created.
+   *  F-168: answers `WriteResult` — never `void` — so a refused re-time (an
+   *  RLS-filtered PATCH, a race) is a `refused` outcome, never a `Written`
+   *  line for a block that never moved. */
   onRetime: (
     resolved: ResolvedCommand,
     anchor: { x: number; y: number },
     /** F-167: the pop-up's own way back. A caller that opens no
      *  pop-up ignores it. */
     report: PopupReporter,
-  ) => WriteAnswer;
+  ) => WriteResult;
   /** S41-a: a "book a job" sentence resolved to a brand-new job — the caller
    *  opens `CreatePopover` in run mode, preset, through `submitCreateRun`. */
   onBook: (
@@ -356,36 +379,44 @@ export interface CommandBarProps {
   ) => WriteAnswer;
   /** S41-a / R-387: the resolved target is `retime_run` — the caller
    *  re-times the job through the drag's own re-time path; nothing is
-   *  created. */
+   *  created.
+   *  F-168: answers `WriteResult` — see `onRetime`'s own note. */
   onRetimeRun: (
     resolved: ResolvedBook,
     anchor: { x: number; y: number },
     /** F-167: the pop-up's own way back. A caller that opens no
      *  pop-up ignores it. */
     report: PopupReporter,
-  ) => WriteAnswer;
+  ) => WriteResult;
   /** S41-b / R-388: an "unassign" sentence resolved to the one block it
    *  names — the caller removes it through the SAME `dragApi.removeAssignment`
-   *  the block's own Delete button calls. Nothing is created or re-timed. */
+   *  the block's own Delete button calls. Nothing is created or re-timed.
+   *  F-168: answers `WriteResult` — see `onRetime`'s own note; an
+   *  RLS-filtered delete removes zero rows and must read as `refused`, never
+   *  `written`, the exact CLAUDE.md §4 shape F-168 is named for. */
   onUnassign: (
     resolved: ResolvedUnassign,
     anchor: { x: number; y: number },
     /** F-167: the pop-up's own way back. A caller that opens no
      *  pop-up ignores it. */
     report: PopupReporter,
-  ) => WriteAnswer;
+  ) => WriteResult;
   /** S41-c / R-389: a "move" sentence resolved to the one block it names --
    *  called for BOTH targets (`retime` and `move_cell`); the caller
    *  dispatches on `resolved.target.kind`. Nothing is created here either:
    *  a `retime` re-times through the drag's own path, a `move_cell` opens
-   *  the create pop-up preset under `presetMove`. */
+   *  the create pop-up preset under `presetMove`.
+   *  F-168: answers `WriteResult` on BOTH branches now — the `move_cell`
+   *  half already reported through `openMoveFromCommand` (F-167); the
+   *  `retime` half was F-168's own silent one and now reports through
+   *  `retimeAssignmentFromCommand` the same way `onRetime` does. */
   onMove: (
     resolved: ResolvedMove,
     anchor: { x: number; y: number },
     /** F-167: the pop-up's own way back. A caller that opens no
      *  pop-up ignores it. */
     report: PopupReporter,
-  ) => WriteAnswer;
+  ) => WriteResult;
   /**
    * S58 / R-415 (D132 item 4): a "job's headcount" sentence resolved to one
    * existing run and one existing write -- the caller commits it through the
@@ -689,7 +720,26 @@ function turnResultLine(turn: HistoryTurn): string {
   if (turn.ran.length > 0) return `Written: ${turn.ran.join("; ")}`;
   if (outcome === null) return "";
   if (outcome.startsWith("popup: ")) return `Waiting: ${outcome.slice("popup: ".length)}`;
-  if (outcome.startsWith("refused: ")) return `Refused: ${outcome.slice("refused: ".length)}`;
+  if (outcome.startsWith("refused: ")) {
+    const message = outcome.slice("refused: ".length);
+    // WR-2 (reviewer, S64-c review): `nothing_to_do`'s own outcome
+    // (`questionToStatus`) is the readout's RENDERED text verbatim, which
+    // `traceQuestionStatus`'s "readout" branch has ALREADY put in `asked`
+    // -- the bubble drawn just above this one. Rendering it again here,
+    // now mislabelled "Refused:" for a sentence nothing ever refused (an
+    // informational readout, not a write attempt), said the exact same
+    // sentence twice in one turn -- the "turn drawn once" screenshot
+    // finding (docs/plan.yaml session 177 summary) in a new shape.
+    // Suppressed only when the two are the identical string: a genuine
+    // refusal's message (CB-w-1..4, an RLS reason or a resize guard) is
+    // never equal to the question that stood before it, so this never
+    // hides a real one. The FILED entry still carries the full
+    // `refused: <message>` outcome (R-434's own "never null" requirement,
+    // and `bar.jsonl`'s record of what happened) -- only the rendered
+    // SECOND bubble is what disappears.
+    if (turn.asked !== null && message === turn.asked) return "";
+    return `Refused: ${message}`;
+  }
   // F-167: the pop-up was closed without writing -- neither done nor refused.
   if (outcome === "cancelled") return "Cancelled";
   return `Refused: ${outcome}`;
@@ -1004,6 +1054,48 @@ export function CommandBar({
     store.getState().set({ offered: [] });
   }
 
+  /**
+   * R-434 item 3 (F-168/F-169's own audit, list A item 2): files a turn for a
+   * sentence that never got an open trace entry of its own AND must NOT touch
+   * whatever the bar is showing right now -- unlike `startTrace`/`finishTrace`
+   * (which flush and then replace `traceRef.current`/`sentence`/`status`, the
+   * ordinary "a new sentence ends the old one's life" rule), this never reads
+   * or writes any of those three. The one caller today is `submitText`'s own
+   * no-op while a lot is writing: "Working…" must keep standing (the
+   * maintainer's own word for it) exactly as it is, so the dropped sentence
+   * still gets a bubble and a result line in the thread, filed independently,
+   * rather than fighting the live lot for the same `status`.
+   */
+  function fileStandaloneTurn(
+    heard: string,
+    by: "typed" | "browser" | "local",
+    outcome: string,
+  ): void {
+    const entry: TraceEntry = {
+      at: new Date().toISOString(),
+      heard,
+      by,
+      model: { skipped: "no reader" },
+      read: "",
+      asked: null,
+      answered: null,
+      ran: [],
+      outcome,
+    };
+    store.getState().appendTurn({
+      at: entry.at,
+      heard: entry.heard,
+      by: entry.by,
+      read: entry.read,
+      asked: entry.asked,
+      offered: [],
+      answered: entry.answered,
+      ran: entry.ran,
+      outcome: entry.outcome,
+    });
+    postTrace(entry);
+  }
+
   // S46-a: stop a listening session on unmount rather than leak it, and
   // retire its generation so a callback that fires after teardown is a
   // no-op.
@@ -1313,9 +1405,16 @@ export function CommandBar({
    * says `written` -- a `refused` or a `popup` records what happened under
    * `outcome` and leaves `ran` empty, which is the truth.
    *
-   * A writer that answers nothing (`undefined` -- every caller not yet
-   * widened, and every test double) is read as `written`: byte for byte the
-   * pre-F-164 behaviour, so no existing pin changes meaning.
+   * F-168 (R-421/R-427/R-434): a writer that answers NOTHING is no longer
+   * read as `written` -- that shim was the bug itself, in `onRetime`'s,
+   * `onRetimeRun`'s, `onUnassign`'s and `onMove`'s retime half's own words: a
+   * refused unassign or retime recorded as Written while the block sat right
+   * there on the board (CLAUDE.md §4). Those four now always answer for real
+   * (`WriteResult`, never `void`), and `onOpen`/`onBook`/`onSetHeadcount`
+   * always have since F-164 -- so an `undefined` reaching here is a defect in
+   * a caller this file does not yet know about, never a success to assume.
+   * It is filed as a refusal, loud rather than silent, so the trace and the
+   * thread say something is wrong instead of lying that the write landed.
    *
    * `entry` is captured BEFORE any await: a promise that settles after the
    * person has already said something else must fill in the entry it belongs
@@ -1332,7 +1431,13 @@ export function CommandBar({
         // a button.
         if (entry.asked === null) entry.asked = readoutStatus.message;
         if (entry.answered === null) entry.answered = "auto";
-        if (outcome !== undefined && outcome.kind === "popup") {
+        if (outcome === undefined) {
+          // F-168: NOT a success -- see this function's own doc above. Every
+          // writer this file calls answers for real now; a caller reaching
+          // this branch is a regression, and the trace/thread say so rather
+          // than a silent Written.
+          entry.outcome = "refused: no answer from the writer";
+        } else if (outcome.kind === "popup") {
           // F-167: NOT an ending. The write is with a pop-up now, and the
           // entry stays open until that pop-up reports back through the
           // reporter this sentence was given (`completePopup` below) -- or,
@@ -1342,8 +1447,7 @@ export function CommandBar({
           entry.outcome = `popup: ${outcome.waitingFor}`;
           fileOpenTurn(store);
           return;
-        }
-        if (outcome === undefined || outcome.kind === "written") {
+        } else if (outcome.kind === "written") {
           entry.ran.push(readout);
           entry.outcome = "written";
         } else {
@@ -2075,8 +2179,24 @@ export function CommandBar({
     // fresh typing clears them exactly as any other question does.
     // `nothing_to_do` is a plain READOUT, not a question at all -- the text
     // as the resolver wrote it (brief §3, D130 item 1).
+    //
+    // R-434 item 3: a "readout" status ends the entry's life the instant
+    // `traceQuestionStatus` sees it (below), and nothing else this function
+    // returns for `nothing_to_do` ever set `outcome` -- so the thread's last
+    // line for "Housing A has nobody on it …"/"nobody on Cell 3 …" read
+    // blank (`turnResultLine`'s own `outcome === null` case), the exact
+    // "never a blank last line" rule R-434 states. Nothing was refused by a
+    // server here, but `refused: ` is the one prefix the thread already
+    // renders as a plain sentence (`turnResultLine`), so the readout's own
+    // words become the outcome verbatim rather than inventing a fourth
+    // category this lane was not asked to add.
     if (question.kind === "nothing_to_do") {
-      return { kind: "readout", message: renderReadout(question.text) };
+      const rendered = renderReadout(question.text);
+      // The RENDERED text (the plant's own day, not the raw ISO token) --
+      // the same string the "asked" bubble above already shows, so the
+      // thread's result line never disagrees with its own question line.
+      if (traceRef.current) traceRef.current.outcome = `refused: ${rendered}`;
+      return { kind: "readout", message: rendered };
     }
     if (question.kind === "lot_too_big") {
       return {
@@ -2711,7 +2831,43 @@ export function CommandBar({
     // word, a stray "yes", an ordinary sentence) is a no-op while
     // `runningLotRef` is true, so "Working…" stands until `runLotNow`'s own
     // `.then()` replaces it with the result.
-    if (runningLotRef.current) return;
+    //
+    // R-434 item 3 (F-168/F-169's own audit, list A item 2): this used to be
+    // a silent no-op -- the heard text (typed or the final transcript of a
+    // spoken clip) discarded untraced, with nothing in the thread or the file
+    // saying a sentence arrived at all. DECISION (documented here per the
+    // brief, since either shape is a legitimate answer): the sentence is
+    // reported DROPPED, in its own standalone turn (`fileStandaloneTurn`,
+    // which never touches `status`/`sentence` -- "Working…" keeps standing,
+    // exactly as the comment above promises), rather than QUEUED to re-run
+    // once the lot finishes. Queuing would need its own state surviving this
+    // call, its own re-resolution against whatever `ctx` is current by the
+    // time the lot ends (the same staleness `pendingRerunRef`'s own
+    // `isTargetOnBoard` guard exists to catch), and its own answer for a
+    // SECOND sentence arriving before the first queued one ever runs --
+    // three open product questions, not "the entry closes" this item asks
+    // for. Saying plainly that it was dropped is small, honest (R-434's own
+    // rule: never a blank last line) and reversible: the person can simply
+    // say it again once the lot's own "Done: …"/"Did k of N…" turn lands.
+    //
+    // WR-1 (reviewer, S64-c review): a TYPED sentence can sit in the box
+    // through this whole branch -- `handleChange` only blocks an edit once
+    // `runningLotRef.current` is already true, so text typed while the
+    // lot's own "Do all N" confirm question still stood (before the click
+    // that starts it) survives into the run untouched, and `runLotNow`
+    // itself does not clear it either (only its OWN `.then()` does, on a
+    // clean sweep). Pressing Enter on that leftover sentence used to file
+    // it -- exactly what this block now does -- while leaving the sentence
+    // sitting in the input, which is R-437 verbatim ("a sent sentence
+    // lives in the thread, never in the input") for a sentence that, as of
+    // this fix, is now genuinely sent (a filed turn, not silent). `setText`
+    // here is the one line missing next to `fileStandaloneTurn` to make
+    // this branch behave like every other exit `submitText` has.
+    if (runningLotRef.current) {
+      fileStandaloneTurn(value, by, "refused: a lot was still writing; the sentence was dropped");
+      setText("");
+      return;
+    }
     // S47 / R-395 (brief §2 item 3): a confirm/cancel word is read BEFORE
     // parsing -- ahead of even the model reader below, since "yes" is never
     // a sentence to send there. Two contexts, checked in order:
@@ -3028,6 +3184,16 @@ export function CommandBar({
     // transcript arrives here without ever passing through it, so a lot left
     // standing behind a new sentence would sit in the store unreachable.
     lotRef.current = null;
+    // F-169 (R-419/R-421): a "Show that day" press's pending rerun is the
+    // SAME shape of leftover -- `handleChange` already clears it on every
+    // typed edit (line ~2677), but a spoken final sentence never passes
+    // through `handleChange` either, so it survived here exactly as a
+    // standing lot used to. Without this, "show Friday" (which sets
+    // `pendingRerunRef`) followed by an unrelated sentence spoken before the
+    // window landed would let the effect that waits for the window run the
+    // OLD command once it did, overwriting THIS sentence's `read`/`ran`/
+    // `outcome` in the trace and the thread with the stale rerun's.
+    pendingRerunRef.current = null;
     heldOptionsRef.current = {};
     // Review finding 2: empty/whitespace-only text takes exactly the
     // null-reader path -- no network round trip (and no 20s wait) for a
@@ -3120,17 +3286,27 @@ export function CommandBar({
       onError(kind, detail): void {
         if (!isCurrent()) return;
         endSession();
-        if (kind === "not-allowed") {
-          setStatus({
-            kind: "shape",
-            message:
-              "The microphone was refused. Allow it in the browser's address bar and try again.",
-          });
-        } else if (kind === "no-speech") {
-          setStatus({ kind: "shape", message: "Nothing was heard." });
-        } else {
-          setStatus({ kind: "shape", message: `The recogniser stopped: ${detail}.` });
-        }
+        const message =
+          kind === "not-allowed"
+            ? "The microphone was refused. Allow it in the browser's address bar and try again."
+            : kind === "no-speech"
+              ? "Nothing was heard."
+              : `The recogniser stopped: ${detail}.`;
+        // R-434 item 3: one of the four life-ending paths the audit named
+        // with no trace entry at all -- nothing was ever heard (a refused
+        // mic, silence, or the session itself stopping), so `heard` is
+        // empty, but the person still SAW an answer and the thread's own
+        // turn must say so, in the SAME "Refused: …" words a write's own
+        // refusal uses (`turnResultLine`'s `refused: ` prefix). `finishTrace`
+        // files the turn and clears the store's own `status`/`sentence`
+        // (CP-5) BEFORE the live line is set, the same order `cancelStanding`
+        // already uses for its own "Left it." -- so the message still shows
+        // live (CB-mic-7's own pin) as well as in the thread, rather than the
+        // two racing to set `status` last.
+        startTrace("", recognizerName?.() ?? "browser");
+        if (traceRef.current) traceRef.current.outcome = `refused: ${message}`;
+        finishTrace();
+        setStatus({ kind: "shape", message });
       },
       onEnd(): void {
         if (!isCurrent()) return;
@@ -3297,10 +3473,20 @@ export function CommandBar({
             return (
               <div className={styles.turn} key={`${turn.at}-${i}`}>
                 {/* R-428: two colours, one per side -- the SIDE says who,
-                    not a "You: "/"Board: " prefix any more. */}
-                <div className={styles.bubble} data-side="you">
-                  {turn.heard}
-                </div>
+                    not a "You: "/"Board: " prefix any more.
+                    WR-3 (reviewer, S64-c review): `turn.heard` is EMPTY for
+                    the one caller R-434 item 3 added that has nothing to
+                    show here -- a recogniser error (mic refused, nothing
+                    heard, stopped): nobody said a word, so there is nothing
+                    for a "you" bubble to hold, and an empty rounded box with
+                    no text read as a rendering glitch, not a turn. The
+                    board's own bubble below (`turn.asked`/the result line)
+                    still carries the whole story alone. */}
+                {turn.heard !== "" && (
+                  <div className={styles.bubble} data-side="you">
+                    {turn.heard}
+                  </div>
+                )}
                 {turn.asked !== null && (
                   <div className={styles.bubble} data-side="board">
                     <p className={styles.turnBoard}>{turn.asked}</p>

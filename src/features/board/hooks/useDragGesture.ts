@@ -1837,19 +1837,82 @@ export function useDragGesture(args: UseDragGestureArgs) {
    * drag commits through (`retimeAssignment`), so attachment, the R-365 prompt, the
    * R-031 keep-or-scale prompt, the R-361 warn mirrors and the one PATCH are all the
    * drag's own.
+   *
+   * F-168 (R-421/R-427/R-434): answers the bar with `WriteOutcome` instead of
+   * `void` — `settleWrite` no longer has an `undefined` case to read as
+   * "written". The DIRECT plan (no attachment change, no keep-or-scale ask)
+   * is computed with the SAME pure `planAssignmentRetime` `retimeAssignmentForLot`
+   * already calls for its own lot-aware caller, and commits through the SAME
+   * `updateAssignmentFields` mutation, via `mutateAsync` so a refusal (an
+   * RLS-filtered PATCH, a race) is a `refused` outcome, never a readout the
+   * database never wrote (CLAUDE.md §4). A plan that NEEDS a decision (R-365's
+   * attachment ask, R-031's keep-or-scale ask) still opens through
+   * `retimeAssignment` below, UNCHANGED — that confirm/choice pop-up has no
+   * way back to the bar today (unlike `CreatePopover`'s own F-167 reporter),
+   * so this answers `popup` and the trace entry is left open exactly as every
+   * other popup case is; wiring that pop-up's own eventual answer back into
+   * the trace is a follow-up this lane does not attempt (F-168's brief scopes
+   * it to the four writers answering, not to every pop-up gaining a reporter).
    */
   const retimeAssignmentFromCommand = useCallback(
-    (r: { assignmentId: string; range: Range; anchor: { x: number; y: number } }) => {
-      if (!canPlaceRef.current) return; // DEF-0015, as commitBlockDrag
+    (r: {
+      assignmentId: string;
+      range: Range;
+      anchor: { x: number; y: number };
+    }): Promise<WriteOutcome> => {
+      if (!canPlaceRef.current) {
+        // DEF-0015, as commitBlockDrag.
+        return Promise.resolve({
+          kind: "refused",
+          message: "You cannot place anyone on this board.",
+        });
+      }
       const a = index.assignmentById.get(r.assignmentId);
       if (!a) {
-        toast.reverted("That block is no longer on the board.");
-        return;
+        const message = "That block is no longer on the board.";
+        toast.reverted(message);
+        return Promise.resolve({ kind: "refused", message });
       }
       const homeRun = a.runId !== null ? (index.runById.get(a.runId) ?? null) : null;
-      retimeAssignment(a, a.nodeId, homeRun, r.range, r.anchor, assignmentLabelById(a.id));
+      const plan = planAssignmentRetime(
+        a,
+        a.nodeId,
+        homeRun,
+        r.range,
+        index,
+        ctx,
+        toast,
+        dateFormat,
+        resizeAbsences,
+      );
+      if (plan.attachmentMessage !== null || plan.keepOrScale !== null) {
+        retimeAssignment(a, a.nodeId, homeRun, r.range, r.anchor, assignmentLabelById(a.id));
+        return Promise.resolve({
+          kind: "popup",
+          waitingFor: "a decision about the re-time (attachment or keep/scale)",
+        });
+      }
+      plan.runWarnMirrors();
+      return updateAssignmentFields
+        .mutateAsync({ assignmentId: a.id, edit: plan.edit })
+        .then((): WriteOutcome => ({ kind: "written" }))
+        .catch((err: unknown): WriteOutcome => {
+          failWith(err, assignmentLabelById(a.id));
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          return { kind: "refused", message: buildSchedulerErrorToast(se, ctx).message };
+        });
     },
-    [index, toast, retimeAssignment, assignmentLabelById],
+    [
+      index,
+      ctx,
+      toast,
+      dateFormat,
+      resizeAbsences,
+      retimeAssignment,
+      assignmentLabelById,
+      updateAssignmentFields,
+      failWith,
+    ],
   );
 
   /**
@@ -2095,18 +2158,52 @@ export function useDragGesture(args: UseDragGestureArgs) {
    * edge-resize drag commits through (`retimeRun`), so the overlap refusal,
    * the "N crew assignments fall outside..." prompt and the one
    * `updateRunFields` PATCH are all the drag's own.
+   *
+   * F-168 (R-421/R-427/R-434): answers the bar with `WriteOutcome` instead of
+   * `void`, the same shape `retimeAssignmentFromCommand` above now answers
+   * with. The overlap refusal (`planRunRetime`'s `overlapMessage`) is an
+   * outright refusal, never a decision — `refused` straight away, same toast
+   * as before. The crew-outside-window ask still opens through `retimeRun`
+   * below, UNCHANGED, and answers `popup` for the same reason
+   * `retimeAssignmentFromCommand`'s own note gives (no reporter wired to that
+   * pop-up yet). This function never checked `canPlaceRef` before F-168 and
+   * still does not — unlike the assignment path, nothing here added a new
+   * guard that was not already there.
    */
   const retimeRunFromCommand = useCallback(
-    (r: { runId: string; range: Range; anchor: { x: number; y: number } }) => {
-      if (!canPlaceRef.current) return; // DEF-0015, as commitBlockDrag
+    (r: {
+      runId: string;
+      range: Range;
+      anchor: { x: number; y: number };
+    }): Promise<WriteOutcome> => {
       const run = index.runById.get(r.runId);
       if (!run) {
-        toast.reverted("That job is no longer on the board.");
-        return;
+        const message = "That job is no longer on the board.";
+        toast.reverted(message);
+        return Promise.resolve({ kind: "refused", message });
       }
-      retimeRun(run, run.nodeId, r.range, r.anchor, runLabelById(run.id));
+      const plan = planRunRetime(run, run.nodeId, r.range, index, ctx);
+      if (plan.overlapMessage !== null) {
+        toast.reverted(plan.overlapMessage);
+        return Promise.resolve({ kind: "refused", message: plan.overlapMessage });
+      }
+      if (plan.crewMessage !== null) {
+        retimeRun(run, run.nodeId, r.range, r.anchor, runLabelById(run.id));
+        return Promise.resolve({
+          kind: "popup",
+          waitingFor: "a decision about the crew outside the new window",
+        });
+      }
+      return updateRunFields
+        .mutateAsync({ runId: run.id, edit: plan.edit })
+        .then((): WriteOutcome => ({ kind: "written" }))
+        .catch((err: unknown): WriteOutcome => {
+          failWith(err, runLabelById(run.id));
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          return { kind: "refused", message: buildSchedulerErrorToast(se, ctx).message };
+        });
     },
-    [index, toast, retimeRun, runLabelById],
+    [index, ctx, toast, retimeRun, runLabelById, updateRunFields, failWith],
   );
 
   const submitCreateRun = useCallback(
@@ -2682,14 +2779,29 @@ export function useDragGesture(args: UseDragGestureArgs) {
    *  outright whenever a RUN was deleted. So the soft delete is gone, the
    *  column with it, and this is a real delete under the `assignments_delete`
    *  policy that was there all along. */
+  /**
+   * F-168 (R-421/R-427/R-434): the command bar's `onUnassign` answers with
+   * `WriteOutcome` now, the same `mutateAsync`/`failWith` shape
+   * `setHeadcountFromCommand` already uses -- so an RLS-filtered delete (a
+   * refused unassign) is a `refused` outcome the bar's trace and thread show,
+   * never a `Written` line for a row that stayed on the board (F-168's own
+   * story). The block's own Delete button (`BoardPage.tsx`'s `onDelete`)
+   * still calls this directly and simply ignores the returned promise, byte
+   * for byte its pre-F-168 behaviour.
+   */
   const removeAssignment = useCallback(
-    (assignmentId: string) => {
-      deleteAssignment.mutate(assignmentId, {
-        onError: (err) => failWith(err, assignmentLabelById(assignmentId)),
-      });
+    (assignmentId: string): Promise<WriteOutcome> => {
       setPopover(null);
+      return deleteAssignment
+        .mutateAsync(assignmentId)
+        .then((): WriteOutcome => ({ kind: "written" }))
+        .catch((err: unknown): WriteOutcome => {
+          failWith(err, assignmentLabelById(assignmentId));
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          return { kind: "refused", message: buildSchedulerErrorToast(se, ctx).message };
+        });
     },
-    [deleteAssignment, failWith, assignmentLabelById],
+    [deleteAssignment, failWith, assignmentLabelById, ctx],
   );
 
   /**

@@ -1193,8 +1193,20 @@ export default function BoardPage() {
                 });
               }}
               onRetime={(resolved, anchor) => {
-                if (resolved.target.kind !== "retime") return;
-                dragApi.retimeAssignmentFromCommand({
+                // F-168: this prop now always answers a `WriteResult` -- the
+                // `target.kind !== "retime"` branch is unreachable in
+                // practice (`CommandBar`'s own `runCommand` only calls
+                // `onRetime` when the resolved target IS `retime`), but the
+                // prop type no longer allows a bare `return;` to compile, so
+                // it answers `refused` rather than pretend a write it never
+                // attempted landed.
+                if (resolved.target.kind !== "retime") {
+                  return Promise.resolve({
+                    kind: "refused",
+                    message: "Not a re-time.",
+                  } as const);
+                }
+                return dragApi.retimeAssignmentFromCommand({
                   assignmentId: resolved.target.assignmentId,
                   range: resolved.range,
                   anchor,
@@ -1212,8 +1224,16 @@ export default function BoardPage() {
                 });
               }}
               onRetimeRun={(resolved, anchor) => {
-                if (resolved.target.kind !== "retime_run") return;
-                dragApi.retimeRunFromCommand({
+                // F-168: see `onRetime`'s own note above -- the mismatched
+                // branch is unreachable in practice, but the prop no longer
+                // compiles a bare `return;`.
+                if (resolved.target.kind !== "retime_run") {
+                  return Promise.resolve({
+                    kind: "refused",
+                    message: "Not a re-time.",
+                  } as const);
+                }
+                return dragApi.retimeRunFromCommand({
                   runId: resolved.target.runId,
                   range: resolved.range,
                   anchor,
@@ -1229,12 +1249,16 @@ export default function BoardPage() {
               // preset under `presetMove` (no second door).
               onMove={(resolved, anchor, report) => {
                 if (resolved.target.kind === "retime") {
-                  dragApi.retimeAssignmentFromCommand({
+                  // F-168: this branch used to write and return `void` --
+                  // `retimeAssignmentFromCommand` now answers a
+                  // `WriteResult`, returned here the same way the
+                  // `move_cell` branch below already returns
+                  // `openMoveFromCommand`'s own answer (F-167).
+                  return dragApi.retimeAssignmentFromCommand({
                     assignmentId: resolved.assignmentId,
                     range: resolved.range,
                     anchor,
                   });
-                  return;
                 } else {
                   return dragApi.openMoveFromCommand({
                     assignmentId: resolved.assignmentId,
@@ -1339,9 +1363,17 @@ export default function BoardPage() {
                   windowMinutes={index.windowMinutes}
                   zone={zone}
                   capacityCap={index.capacityCap}
-                  /* S65-a (R-438): the root's own shift pattern, the band
-                     `bookingWords` measures every chip against. */
+                  /* S65-a (R-438): the root's own shift pattern -- since
+                     S66-c (R-448) the FALLBACK `bookingWords` measures a
+                     chip against when the person has no band of their own. */
                   rootTemplate={rootTemplateFor(index, rootPath)}
+                  /* S66-c (R-441/R-443/R-448): the SAME map `BoardIndex`
+                     already built -- every node in the window resolved to
+                     its own nearest-ancestor pattern -- handed through so
+                     `OperatorPanel`'s `resolveHomeBand` can read a person's
+                     HOME node's template for the cross-pattern name match
+                     (R-443), never a second walk of node ids here. */
+                  templateForNode={index.templateForNode}
                   open={operatorPanelOpen}
                   onToggleOpen={() => setOperatorPanelOpen(!operatorPanelOpen)}
                   draggingOperatorId={

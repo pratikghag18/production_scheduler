@@ -54,10 +54,26 @@ import {
   type ConfirmWordResult,
   type ResolvedAny,
   type LotResult,
+  type WriteOutcome,
 } from "@/features/board/components/CommandBar";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
 import type { Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 import type { TraceEntry } from "@/lib/voice/trace";
+
+/**
+ * F-168 (R-421/R-427/R-434): `settleWrite` no longer reads an `undefined`
+ * answer as `written` (that was the exact bug F-168 fixes -- a refused
+ * unassign/retime recorded as Written because nothing else was returned).
+ * Every default writer mock below answers with this instead of a bare
+ * `vi.fn()`, so every existing "Written: …" assertion still describes a
+ * writer that actually said so, the same as the real `onOpen`/`onBook`/
+ * `onSetHeadcount` implementations (which always answered for real; only
+ * their TEST DOUBLE relied on the removed shim) and the real
+ * `onRetime`/`onRetimeRun`/`onUnassign`/`onMove` implementations now do
+ * too (F-168's own fix). A test that means to exercise a refusal or a
+ * popup overrides the mock per-case, as every such test already does.
+ */
+const WRITTEN: WriteOutcome = { kind: "written" };
 
 /** S41-a: `findRunOverlap`, the same stub shape `interaction.ts`'s own
  *  function has (half-open, `excludeRunId` skipped). */
@@ -287,13 +303,13 @@ function renderBar(
   // mutates whatever the getter closes over, never re-renders.
   s59trace: { recognizerName?: () => "browser" | "local" } = {},
 ) {
-  const onOpen = vi.fn();
-  const onRetime = vi.fn();
-  const onBook = vi.fn();
-  const onRetimeRun = vi.fn();
-  const onUnassign = vi.fn();
-  const onMove = vi.fn();
-  const onSetHeadcount = vi.fn();
+  const onOpen = vi.fn().mockReturnValue(WRITTEN);
+  const onRetime = vi.fn().mockReturnValue(WRITTEN);
+  const onBook = vi.fn().mockReturnValue(WRITTEN);
+  const onRetimeRun = vi.fn().mockReturnValue(WRITTEN);
+  const onUnassign = vi.fn().mockReturnValue(WRITTEN);
+  const onMove = vi.fn().mockReturnValue(WRITTEN);
+  const onSetHeadcount = vi.fn().mockReturnValue(WRITTEN);
   const onHighlight = vi.fn();
   // S59 (R-419): always a fresh `vi.fn()`, same reason `onHighlight` is --
   // no case here needs a caller-supplied one, every test reads it off the
@@ -2188,13 +2204,13 @@ function renderXBar(
   reader: Reader | null = null,
   s51: { onRunLot?: (resolved: ResolvedAny[]) => Promise<LotResult> } = {},
 ) {
-  const onOpen = vi.fn();
-  const onRetime = vi.fn();
-  const onBook = vi.fn();
-  const onRetimeRun = vi.fn();
-  const onUnassign = vi.fn();
-  const onMove = vi.fn();
-  const onSetHeadcount = vi.fn();
+  const onOpen = vi.fn().mockReturnValue(WRITTEN);
+  const onRetime = vi.fn().mockReturnValue(WRITTEN);
+  const onBook = vi.fn().mockReturnValue(WRITTEN);
+  const onRetimeRun = vi.fn().mockReturnValue(WRITTEN);
+  const onUnassign = vi.fn().mockReturnValue(WRITTEN);
+  const onMove = vi.fn().mockReturnValue(WRITTEN);
+  const onSetHeadcount = vi.fn().mockReturnValue(WRITTEN);
   const onHighlight = vi.fn();
   const onRunLot = vi.fn(s51.onRunLot ?? (() => new Promise<LotResult>(() => {})));
   render(
@@ -5663,6 +5679,372 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     expect(entry.ran).toEqual([]);
     expect(document.body.textContent).toContain("Cancelled");
     expect(document.body.textContent).not.toContain("Waiting:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-168 (R-421/R-427/R-434): the four writers that used to answer `void` --
+// `settleWrite` read that as `written`, so a refused unassign or retime was
+// recorded as Written while the block stayed on the board (CLAUDE.md §4's own
+// warning). Each prop now answers `WriteResult`; these pins are each writer's
+// own REFUSED half -- the WRITTEN half is already proven by C12 (onRetime),
+// CB2 (onRetimeRun), CU2 (onUnassign) and CM1/CM2 (onMove, both branches),
+// all of which read `Written: <readout>` from the default mock now that it
+// answers for real (see `WRITTEN`'s own doc above `findRunOverlap`).
+// ---------------------------------------------------------------------------
+describe("CB-w: the four silent writers answer for real (F-168)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-w-1: a refused onUnassign shows Refused with the server's own reason, ran stays empty", async () => {
+    const fetchMock = stubFetch();
+    const { onUnassign, input } = renderBar({ assignments: [BLK1] });
+    onUnassign.mockResolvedValue({
+      kind: "refused",
+      message: "You don't have permission to change that.",
+    });
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    await act(async () => {});
+
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    expect(threadText()).toContain("Refused: You don't have permission to change that.");
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("refused: You don't have permission to change that.");
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-w-2: a refused onRetime shows Refused with the server's own reason, ran stays empty", async () => {
+    const fetchMock = stubFetch();
+    const { onRetime, input } = renderBar({ assignments: [BLK1] });
+    onRetime.mockResolvedValue({
+      kind: "refused",
+      message: "That block is no longer on the board.",
+    });
+
+    fireEvent.change(input, { target: { value: P1_RETIME_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Change 10:00–14:00" }));
+    await act(async () => {});
+
+    expect(onRetime).toHaveBeenCalledTimes(1);
+    expect(threadText()).toContain("Refused: That block is no longer on the board.");
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("refused: That block is no longer on the board.");
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-w-3: a refused onRetimeRun shows Refused with the server's own reason, ran stays empty", async () => {
+    const fetchMock = stubFetch();
+    const { onRetimeRun, input } = renderBar({ runs: [JOB1] });
+    onRetimeRun.mockResolvedValue({
+      kind: "refused",
+      message: "That job is no longer on the board.",
+    });
+
+    fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Change 08:00–16:00" }));
+    await act(async () => {});
+
+    expect(onRetimeRun).toHaveBeenCalledTimes(1);
+    expect(threadText()).toContain("Refused: That job is no longer on the board.");
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("refused: That job is no longer on the board.");
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-w-4: a refused onMove (the retime half -- a move-in-time-only sentence) shows Refused, ran stays empty", async () => {
+    const fetchMock = stubFetch();
+    const { onMove, input } = renderBar({ assignments: [BLK1] });
+    onMove.mockResolvedValue({
+      kind: "refused",
+      message: "You cannot place anyone on this board.",
+    });
+
+    fireEvent.change(input, { target: { value: MOVE_RETIME_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
+    expect(resolved.target).toEqual({ kind: "retime" });
+    expect(threadText()).toContain("Refused: You cannot place anyone on this board.");
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("refused: You cannot place anyone on this board.");
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-w-5 (WR-4, reviewer fix): a writer that answers `undefined` anyway (a regression this file does not yet know about) is filed as a loud refusal, never a silent Written", async () => {
+    // `WriteResult` no longer allows `void` at compile time (F-168's own
+    // fix), so this reaches through the type system the same way a real
+    // regression would -- a caller that stops answering. `settleWrite`'s
+    // own defensive branch (`outcome === undefined`) exists precisely for
+    // this, and had no pin: CLAUDE.md 4's own warning ("a write that
+    // reports success can have changed nothing") applies to the DEFENCE
+    // too if nothing ever exercises it.
+    const fetchMock = stubFetch();
+    const { onUnassign, input } = renderBar({ assignments: [BLK1] });
+    onUnassign.mockResolvedValue(undefined as unknown as WriteOutcome);
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    await act(async () => {});
+
+    expect(threadText()).toContain("Refused: no answer from the writer");
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("refused: no answer from the writer");
+    expect(entry.ran).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-169 (R-419/R-421): the pending rerun a "Show that day" press sets was
+// cleared on a typed edit, a cancel word and Escape, but not in `submitText`
+// -- and a SPOKEN final transcript never passes through the typed-edit
+// handler at all, so it could not clear it either. A spoken sentence arriving
+// while the rerun still waits for the window to move used to survive it, and
+// once the window landed the effect ran the STALE command, overwriting the
+// new sentence's own trace.
+// ---------------------------------------------------------------------------
+describe("CB-rr: a spoken sentence clears a stale rerun (F-169)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const YESTERDAY_SENTENCE =
+    "assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2 yesterday";
+  const SHIFTED_BACK_ONE_DAY = [
+    { index: 0, iso: "2026-08-30", weekday: 0 as const },
+    { index: 1, iso: "2026-08-31", weekday: 1 as const },
+    { index: 2, iso: "2026-09-01", weekday: 2 as const },
+    { index: 3, iso: "2026-09-02", weekday: 3 as const },
+    { index: 4, iso: "2026-09-03", weekday: 4 as const },
+    { index: 5, iso: "2026-09-04", weekday: 5 as const },
+    { index: 6, iso: "2026-09-05", weekday: 6 as const },
+    { index: 7, iso: "2026-09-06", weekday: 0 as const },
+  ];
+
+  it("CB-rr-1: 'Show that day' pending, then a SPOKEN final sentence arrives before the window lands -- the old command never runs, and the new sentence keeps its own trace", () => {
+    const fetchMock = stubFetch();
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input, onOpen, rerenderCtx } = renderBar({ todayIndex: 0 }, null, recognizer);
+    // Registers the fake recognizer's callbacks -- `fire.final` below is a
+    // no-op until the recognizer function itself has been invoked once
+    // (`makeFakeRecognizer`'s own `captured`, set only by `startListening`).
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
+
+    // A SPOKEN final sentence -- never through `handleChange`, the one path
+    // that already cleared the pending rerun before this fix.
+    fire.final(P1_SENTENCE);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    // The window lands NOW -- "yesterday"'s own target is on the board.
+    // Pre-fix, the effect watching `ctx` would find `pendingRerunRef` still
+    // set and run the STALE "yesterday" command here, a second `onOpen` call
+    // that would overwrite the spoken sentence's own trace entry.
+    rerenderCtx({ days: SHIFTED_BACK_ONE_DAY, todayIndex: 1 });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    // The spoken sentence's own entry is intact -- its own `read`/`ran`/
+    // `outcome`, never overwritten by the stale "yesterday" command's.
+    const entries = fetchMock.mock.calls.map((call: unknown[]) => {
+      const [, init] = call as [string, RequestInit];
+      return JSON.parse(init.body as string) as TraceEntry;
+    });
+    const spokenEntry = entries.find((e) => e.heard === P1_SENTENCE);
+    expect(spokenEntry).toBeTruthy();
+    expect(spokenEntry?.outcome).toBe("written");
+    expect(spokenEntry?.ran).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-434 (the audit item 3, docs/agent-briefs/s64-c-writers-answer-brief.md):
+// exactly the four paths that brief names, nothing more in this lane -- every
+// other path list A/B of s64-b's own audit found is queued elsewhere.
+// ---------------------------------------------------------------------------
+describe("CB-tr: the entry closes on R-434's four named paths", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-tr-1: a recogniser error (mic refused, no speech, or stopped) files a turn -- heard empty, outcome refused", () => {
+    const fetchMock = stubFetch();
+    const { recognizer, fire } = makeFakeRecognizer();
+    renderBar({}, null, recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    fire.error("no-speech", undefined);
+
+    // The live line still shows the message (the same order `cancelStanding`
+    // already uses: file the turn, THEN set the live status -- CB-mic-7's
+    // own pin, unchanged by this fix).
+    expect(statusText()).toBe("Nothing was heard.");
+    expect(threadText()).toContain("Refused: Nothing was heard.");
+    const entry = postedEntry(fetchMock);
+    expect(entry.heard).toBe("");
+    expect(entry.outcome).toBe("refused: Nothing was heard.");
+  });
+
+  it("CB-tr-2: a sentence arriving while a lot writes is reported dropped, not silently swallowed -- 'Working…' still stands (DECISION: dropped, not queued -- see submitText's own comment)", async () => {
+    const fetchMock = stubFetch();
+    const { recognizer, fire } = makeFakeRecognizer();
+    let settle: (r: LotResult) => void = () => {};
+    const { input } = renderBar(
+      { assignments: [BLK1, BLK_SP] },
+      null,
+      recognizer,
+      {},
+      { onRunLot: () => new Promise<LotResult>((res) => (settle = res)) },
+    );
+    // Registers the fake recognizer's callbacks (`captured` inside
+    // `makeFakeRecognizer`) BEFORE the lot starts -- `fire.final` below is a
+    // no-op otherwise. Speaking, not typing: `handleChange`'s own no-op
+    // while a lot runs already blocks a TYPED keystroke from ever reaching
+    // the input's `text` state (the controlled input "redraws the keystroke
+    // away", this file's own comment above `handleChange`'s guard) -- a
+    // final transcript is delivered as a plain argument to `onFinal`/
+    // `submitText` instead, which is exactly how a real spoken sentence
+    // reaches this no-op branch per the audit's own words ("Enter or a
+    // spoken final during runningLot").
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    expect(statusText()).toBe("Working…");
+
+    fire.final("gibberish");
+
+    // "Working…" is untouched -- the dropped sentence never fights the lot
+    // for the live status line.
+    expect(statusText()).toBe("Working…");
+    expect(threadText()).toContain("Refused: a lot was still writing; the sentence was dropped");
+    const entry = postedEntry(fetchMock);
+    expect(entry.heard).toBe("gibberish");
+    expect(entry.outcome).toBe("refused: a lot was still writing; the sentence was dropped");
+
+    // Let the lot resolve so nothing leaks into a later test.
+    await act(async () => settle({ done: 2, error: null }));
+  });
+
+  it("CB-tr-2b (WR-1, reviewer fix): a TYPED sentence left in the box from before the lot started is emptied too, once Enter files it as dropped", async () => {
+    const fetchMock = stubFetch();
+    let settle: (r: LotResult) => void = () => {};
+    const { input } = renderBar(
+      { assignments: [BLK1, BLK_SP] },
+      null,
+      null,
+      {},
+      { onRunLot: () => new Promise<LotResult>((res) => (settle = res)) },
+    );
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    // The lot's own final "say yes to do them all" question stands here --
+    // `runningLotRef.current` is still false (the lot has not been told to
+    // RUN yet, only assembled), so `handleChange` still accepts a keystroke:
+    // a person can type a brand-new sentence into the box while deciding
+    // whether to run the lot. It does not parse as a command (`answerTakes`
+    // treats a lot question as yes/no, so a non-parsing edit "keeps the
+    // answer" per `handleChange`'s own F-162 exception) -- ordinary text
+    // left sitting in the box, exactly as it would be left by a person who
+    // typed ahead before clicking "Do all N".
+    fireEvent.change(input, { target: { value: "a sentence typed ahead of the click" } });
+    expect((input as HTMLInputElement).value).toBe("a sentence typed ahead of the click");
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    expect(statusText()).toBe("Working…");
+    // `runLotNow` does not clear `text` when it STARTS (only its own
+    // `.then()` does, on a clean sweep) -- pre-WR-1, the typed sentence
+    // above sat here untouched through the whole run.
+    expect((input as HTMLInputElement).value).toBe("a sentence typed ahead of the click");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // R-437 ("Enter empties the box... whether written, refused, or
+    // standing") is unconditional -- this sentence is now genuinely SENT
+    // (F-169/R-434's own fix files it as a dropped turn, not a silent
+    // no-op), so it belongs in the thread, never in the input, the same as
+    // every other exit `submitText` has.
+    expect((input as HTMLInputElement).value).toBe("");
+    expect(threadText()).toContain("a sentence typed ahead of the click");
+    expect(threadText()).toContain("Refused: a lot was still writing; the sentence was dropped");
+    const entry = postedEntry(fetchMock);
+    expect(entry.heard).toBe("a sentence typed ahead of the click");
+
+    // Let the lot resolve so nothing leaks into a later test.
+    await act(async () => settle({ done: 2, error: null }));
+  });
+
+  it("CB-tr-1b (WR-3, reviewer fix): a recogniser error with nothing heard draws no empty 'you' bubble", () => {
+    const fetchMock = stubFetch();
+    const { recognizer, fire } = makeFakeRecognizer();
+    renderBar({}, null, recognizer);
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    fire.error("no-speech", undefined);
+
+    // `heard` is "" for this turn -- nobody said a word, so there is
+    // nothing for the person's own bubble to hold. Pre-WR-3 this rendered
+    // an empty rounded box on the "you" side; now that bubble is skipped
+    // entirely and the board's own bubble (the result line) carries the
+    // whole turn alone.
+    const empty = Array.from(document.querySelectorAll('[data-side="you"]')).filter(
+      (el) => (el.textContent ?? "") === "",
+    );
+    expect(empty).toHaveLength(0);
+    expect(threadText()).toContain("Refused: Nothing was heard.");
+    const entry = postedEntry(fetchMock);
+    expect(entry.heard).toBe("");
+  });
+
+  it("CB-tr-3: 'nothing to do' sets the outcome so the thread's last line is never blank, and the sentence is drawn ONCE (WR-2, reviewer fix)", () => {
+    const fetchMock = stubFetch();
+    const { input } = renderXBar();
+    fireEvent.change(input, { target: { value: "clear Cell 3 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
+    const readout = `Cell 3 has nobody on it ${dayLabel}.`;
+    // The FILED entry still carries a non-null outcome -- R-434's own
+    // "never blank" requirement is about the RECORD, and it holds.
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe(`refused: ${readout}`);
+    // WR-2 (reviewer, S64-c review): the rendered thread said this sentence
+    // TWICE before this fix -- once plain (the board's own bubble, `asked`)
+    // and once again mislabelled "Refused:" (the result line, since
+    // `questionToStatus` sets `outcome` to the identical rendered text).
+    // Nothing was ever refused here -- it is a plain readout -- so the
+    // "Refused:" bubble is gone and the sentence is drawn once.
+    expect(threadText()).toContain(readout);
+    expect(threadText()).not.toContain(`Refused: ${readout}`);
+  });
+
+  it("CB-tr-4: cancelStanding sets outcome to 'cancelled' so the thread's last line is never blank (already correct pre-F-168; pinned so it stays that way)", () => {
+    const fetchMock = stubFetch();
+    const { input } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(threadText()).toContain("Cancelled");
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("cancelled");
   });
 });
 
