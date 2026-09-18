@@ -313,9 +313,19 @@
    losing all affordance, wrapping if the column is ever narrower than the
    three labels. */
 .weekPlanButtons {
+  /* The maintainer, 18 Sept: "align the week plan buttons vertically as
+     well? Make sure they're equal size buttons like they fit in a column."
+     A column that stretches every button to the widest one, so the three
+     read as one control stack beside the key's matrix. */
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  width: max-content;
   gap: calc(8px * var(--chrome-scale, 1));
+}
+
+.weekPlanButtons button {
+  text-align: center;
 }
 
 .weekPlanButtons button {
