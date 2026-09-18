@@ -12667,6 +12667,35 @@ requirements:
     shifts." Supersedes the interim rule on R-438 (the words measured against the root pattern's span) the
     moment the person's band reaches the rail. The amber token is the developer's pick within the palette;
     the maintainer may name another.
+    DECIDED 18 Sept (session 179), on two drawn candidates for the other-shifts control: "Option B, but make sure
+    the buttons are equally distributed when the line has 2, 3 or 4 shifts. You could create a 2x2 matrix in case
+    of 4 shifts. I want the transitions to be smooth." So: a row of shift chips under the rail's heading, the shift
+    on now filled, the others toggled in; the chips share one width in a grid of two or three columns, and a 2x2
+    matrix for four; toggling animates the chip and the list (no layout jump).
+- id: R-449
+  title: A fact is changed in one place --- the screen where the thing is defined; a second control for the same fact is a defect
+  source:
+  - 'session 179 conversation (the maintainer, 18 Sept)'
+  - CLAUDE.md §7
+  stated_by: maintainer
+  claim: >-
+    Any fact about a thing --- a person's shift, a grant's role, a product's places, a pattern's bands --- is
+    changed on the one screen where that thing is defined and nowhere else. A second control for the same
+    fact anywhere is a defect; a new capability folds into the existing control rather than adding a
+    parallel one. Standard: the audit is the walk through every admin screen and pop-up for a fact that can
+    be changed in two places.
+  verified_by:
+  - kind: vitest
+    file: src/test/operatorsPanel.test.tsx
+    cases: "OS-2 and OS-6: the list row carries no shift control; the shift is changed in the Edit form with the place"
+  - kind: manual
+    steps: "the audit this standard owes (queued 18 Sept); each hit fixed or written down"
+  status: covered
+  note: >-
+    STATED 18 Sept (session 179): "why do reinvent stuff? The shift should have been part of where we select
+    the hierarchy level, why do we want the user to have multiple places where they must update?" and, on the
+    developer's written rule, "#1 Yes". The 9 Sept guidance to fold a capability into an existing control was
+    the same rule unstated.
 findings:
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today
@@ -24959,6 +24988,10 @@ next:
   why: >-
     Stated 18 Sept (session 179). R-426's second duty. The toolbar's four groups are done the same hour; the
     rest is a grep of every stylesheet for a row or column of buttons.
+- kind: task
+  text: "The audit R-449 owes: every admin screen and pop-up walked for a fact that can be changed in two places, each hit fixed or written down"
+  why: >-
+    Stated 18 Sept (session 179). R-426's second duty. The shift on the Operators tab was the first hit and is fixed.
 - kind: task
   text: "The voice half of the walk through Whisper, read from the trace and the thread"
   why: >-

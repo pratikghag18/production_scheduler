@@ -182,3 +182,7 @@ Each is also a `requirements` row in `docs/plan.yaml`. Three duties come with th
   width (a grid track, a stretched column, or a fixed min-width in em), so nothing shifts when a
   label changes or a state flips. A strip whose labels are data (the bar's candidate answers) is
   the one exception, and it is written down as one on R-447.
+- **A fact is changed in one place (R-449).** Any fact about a thing --- a person's shift, a
+  grant's role, a product's places --- is changed on the one screen where that thing is defined,
+  and nowhere else; a second control for the same fact is a defect, and a new capability folds
+  into the existing control rather than adding a parallel one.
