@@ -12503,7 +12503,12 @@ requirements:
     where they must update?" The shift is SET in the Edit form beside Belongs to (the one place a person's
     place is chosen) and on the create form; the list row carries only the red bar and the words as a mark;
     the header reads "Belongs to Plant A · Shift 2" or "· No shift". The per-row dropdown the developer's brief
-    asked for is withdrawn. CANDIDATE STANDARD put the same hour: a fact about a thing is changed in one place,
+    asked for is withdrawn. ADDED 18 Sept, the same hour: "Move the shift button in the panel to the right where we
+    have option to edit the hierarchy level" --- the shift reads in the right panel's header line after the place
+    and is edited by the same Edit control; and "Is it possible to create a sorting here for names and shifts?
+    Like we do columns in a table?" --- "separately": the Person and Shift headings are each a sort button, one
+    column at a time, ascending then descending with a chevron, aria-sort on the column; the default order stays
+    no-shift first then name. CANDIDATE STANDARD put the same hour: a fact about a thing is changed in one place,
     the place where the thing is defined; a second control for the same fact is a defect.
 - id: R-445
   title: The board toolbar is one row, with everything else behind "Show more"
