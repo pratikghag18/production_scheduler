@@ -12526,7 +12526,9 @@ requirements:
     and is edited by the same Edit control; and "Is it possible to create a sorting here for names and shifts?
     Like we do columns in a table?" --- "separately": the Person and Shift headings are each a sort button, one
     column at a time, ascending then descending with a chevron, aria-sort on the column; the default order stays
-    no-shift first then name. CANDIDATE STANDARD put the same hour: a fact about a thing is changed in one place,
+    no-shift first then name. CORRECTED the same hour: "The column names are not telling me naturally that I
+    can sort them, also, I see no way to go to default" --- each heading shows a sort mark at rest and reads as a
+    button, and a click cycles ascending, descending, then the default order (aria-sort none). CANDIDATE STANDARD put the same hour: a fact about a thing is changed in one place,
     the place where the thing is defined; a second control for the same fact is a defect.
 - id: R-445
   title: The board toolbar is one row, with everything else behind "Show more"
@@ -12640,8 +12642,8 @@ requirements:
     system should be equal in size."
     AUDITED 18 Sept (session 179, 2d2ed3e): every pop-up footer already stretched; the import tabs, the level
     editor footer and the template row actions fixed; four data exceptions written (the bar's candidates, the
-    shift chips, the delete dialog's sentence, the counted Apply). OPEN QUESTION to the maintainer: per-row
-    Edit/Deactivate/Delete clusters in admin tables.
+    shift chips, the delete dialog's sentence, the counted Apply). ANSWERED 18 Sept: "equal width always" --- the
+    per-row Edit/Deactivate/Delete clusters in admin tables share one width too; a lane applies it.
 - id: R-448
   title: The rail shows the people on shift now, with a way to bring in the other shifts; an overtime block carries a coloured OT tag beside the name
   source:
