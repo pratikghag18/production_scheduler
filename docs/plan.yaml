@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-18'
-  tip: '9f61c3f'
+  updated: '2026-09-21'
+  tip: '9656982'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -3658,7 +3658,13 @@ requirements:
   verified_by:
   - kind: vitest
     file: src/test/scaleAudit.test.ts
+    cases: "A1-A10 the chrome files; R1-R14 the rem surfaces; D89 the admin walk; B1-B9 (session 182) the board walk --- every board stylesheet is chrome or scaled, neither or both fails, a scaled file off the legacy list is clean, a legacy file still has offenders (the list may only shrink), the matcher exempts px multiplied by --ui-scale and flags a bare one"
+  - kind: vitest
+    file: src/test/defects/DEF-0036.test.ts
+    cases: "scaleAudit.ts names OperatorPanel.module.css and ShiftLayer.module.css"
   status: contradicted
+  note: >-
+    CONTRADICTED until the tester verifies DEF-0036 (fix-claimed in session 182). Filed 21 Sept (DEF-0036, session 181t): the D89 completeness walk covered the admin tree only, so the operator rail and the shift band were audited by nothing. FIXED session 182: the board has its own classification and walk; sixteen older board files carry bare px on a dated legacy list (BOARD_PX_LEGACY, about two hundred lengths) that may only shrink.
 - id: R-D85
   title: nodes_select keeps an admin short-circuit that reads no table
   source:
@@ -9489,7 +9495,16 @@ requirements:
     cases: >-
       Ana records an absence over the shown week, the board marks the person on leave on the
       operator panel and names it in the create pop-up's line, then the absence is removed
+      (and the spec clears its own leftovers first, session 182)
+  - kind: vitest
+    file: src/test/defects/DEF-0035.test.tsx
+    cases: "the Person list offers the person whose home a writable grant covers and withholds the one it does not, while the table lists both; rights pending or failed offer everyone (fail-open); a null home is decided on the site"
+  - kind: vitest
+    file: src/test/errors.test.ts
+    cases: "absence_overlap parses the person and the requested days and is worded with them, never as Something went wrong (F-185)"
   status: contradicted
+  note: >-
+    CONTRADICTED until the tester verifies DEF-0035 (fix-claimed in session 182). Filed 21 Sept (DEF-0035, session 181t): the Person dropdown offered a supervisor everyone she could see while set_absence accepts only people whose home (falling back to site) she manages. FIXED session 182: the list is decided by canEditNode on the same coalesce, fail-open; the refusal is still worded. Found on the way: the overlap refusal was not parsed (F-185); the rail's on-leave mark could shrink to nothing (F-186).
 - id: R-351
   title: An admin invites a person by email and they land with their grants
   source:
@@ -11977,25 +11992,35 @@ requirements:
   note: >-
     STATED 15 Sept (session 174): "It can also ask what product if I don't give it one to choose from the list of available products for the hierarchy level." Brief docs/agent-briefs/s60-b-which-part-brief.md.
 - id: R-423
-  title: Plant A's demo people carry real names, kept in one script the database is updated by
+  title: Plant A's demo people carry real names, named by the demo seed itself
   source:
   - 'session 174 conversation (the maintainer, 15 Sept, after the first spoken walk)'
+  - 'session 182 conversation (the maintainer, 21 Sept: "put the real names in the seed")'
   - §19.104 (D133)
+  - DEF-0034
   stated_by: maintainer
   claim: >-
-    The six demo operators homed on Plant A's cells (employee refs EMP-1001 to EMP-1006) are Sam Patel, Maria Lopez, John Kim, Priya Shah, Tom Baker and Lena Novak, renamed by scripts/demo/rename-plant-a-operators.sql (idempotent, applied by psql through the database container, no seed file creates them); the two e2e specs that name them name the new ones; the role walk is unchanged. The training pools keep their own names.
+    The six demo operators homed on Plant A's cells (employee refs EMP-1001 to EMP-1006) are Sam Patel, Maria Lopez, John Kim, Priya Shah, Tom Baker and Lena Novak on every fresh stack: supabase/dev_demo.sql renames them itself, after the week of schedule and before the credentials, keyed on the employee refs, and refuses to finish unless each ref-and-name pair is there. No separate script; nothing a person has to remember to run. The two e2e specs that name them name the real ones; the role walk is unchanged. The training pools keep their own names.
   verified_by:
+  - kind: sql
+    file: supabase/tests/dev_demo_test.sql
+    cases: "D11: the six real names on the six refs, pairwise, and no Operator A# placeholder left in the org"
+  - kind: vitest
+    file: src/test/defects/DEF-0034.test.ts
+    cases: "the seed writes each ref-and-name pair; the demo SQL case names the six; the old script is gone and nothing under scripts/, e2e/, supabase/ or the configs still mentions it"
   - kind: e2e
     file: e2e/linePeople.spec.ts
     cases: "Plant A's six real names on the line people list"
   - kind: e2e
+    file: e2e/viewerBoard.spec.ts
+    cases: "a viewer's board shows a chip carrying one of the six real names"
+  - kind: e2e
     file: e2e/voiceBar.spec.ts
     cases: "the bar's own spec names Sam Patel"
-  - kind: manual
-    steps: "scripts/demo/rename-plant-a-operators.sql applied through the database container, the six rows read back, a second run changes nothing (session 174)"
   status: contradicted
   note: >-
-    STATED 15 Sept (session 174): "the operator names being A1, A2, etc is a bit more challenging to understand vs actual people names, should we try modifying plant A with actual people names?" Brief docs/agent-briefs/s60-a-real-names-brief.md.
+    CONTRADICTED until the tester verifies DEF-0034 (fix-claimed in session 182; the validator keeps the status until then).
+    STATED 15 Sept (session 174): "the operator names being A1, A2, etc is a bit more challenging to understand vs actual people names, should we try modifying plant A with actual people names?" Brief docs/agent-briefs/s60-a-real-names-brief.md. RESTATED 21 Sept (session 182) after DEF-0034: the rename was a script no automated path ran, so every fresh stack showed Operator A1..A6; the maintainer moved it into the seed (docs/agent-briefs/def-0034-names-in-the-seed-brief.md). The e2e cases were not rerun in session 182 (the live database still carried the placeholders); the tester's fresh stack is where they are proved.
 - id: R-424
   title: The bar keeps its conversation for the session --- a board move, a reload of the window or a pop-up never empties it
   source:
@@ -12420,6 +12445,9 @@ requirements:
   - kind: sql
     file: supabase/tests/98_home_shift_test.sql
     cases: "HS0-HS15, HS12a-d, HS_OWNER: the columns, a person given a band, a rename followed, a retired band leaving NULL, a foreign band refused, shift_fit in/overtime/no_shift, a night band, the cross-pattern name match, every writer's envelope carrying shift, overtime never refused, the payload's home_shift_id for Ana and Dana alike"
+  - kind: sql
+    file: supabase/tests/dev_demo_test.sql
+    cases: "D12 (F-187): every demo person has a home shift, the three line-owned people included"
   - kind: manual
     steps: "the model and the server are in (S66-a); the admin screens, the board's use of the person's band, the bar's grammar and the demo are S66-b to S66-e, so the claim is not yet true on screen"
   status: covered
@@ -12712,6 +12740,107 @@ requirements:
     developer's written rule, "#1 Yes". The 9 Sept guidance to fold a capability into an existing control was
     the same rule unstated.
 findings:
+- id: F-183
+  title: Plant A's people were Operator A1..A6 on every fresh stack, because the rename was a script no reset or e2e path ran
+  tag: A fact the demo depends on lived outside the seed
+  status: fixed
+  found_by: tester
+  stage: S60
+  refs:
+  - R-423
+  - DEF-0034
+  story: >-
+    Filed 21 Sept (session 181t, DEF-0034). R-423 kept the six real names in scripts/demo/rename-plant-a-operators.sql,
+    applied by hand; CI, the tester's harness and every reset loaded seed.sql and dev_demo.sql only, so the four
+    e2e specs naming the real people failed on every automated run and nothing in the confirmed count noticed.
+  fix: >-
+    Session 182 (ce26188), the maintainer's call: the seed itself renames the six after the week of schedule, keyed
+    on the employee refs, and refuses to finish unless each ref-and-name pair is there; the script is deleted; D11
+    and the rewritten pin assert the pairs.
+- id: F-184
+  title: The Absences tab offered a supervisor everyone she could see, and the server refused four of the six
+  tag: A screen that shows what the server will refuse
+  status: fixed
+  found_by: tester
+  stage: S65
+  refs:
+  - R-357
+  - R-431
+  - DEF-0035
+  story: >-
+    Filed 21 Sept (session 181t, DEF-0035). The Person dropdown listed every visible person; set_absence gates on
+    app_can_edit_node(coalesce(home_node_id, site_node_id)), so Ana (Line 1) was refused not_permitted on four of
+    Plant A's six people after the yes. The panel's own header defended offering everyone.
+  fix: >-
+    Session 182 (9624295), the maintainer's call: the list is filtered by canEditNode on homeNodeId ?? siteNodeId,
+    the same coalesce, fail-open, refusal still worded; home_node_id joins the operator read. Pinned in
+    src/test/defects/DEF-0035.test.tsx.
+- id: F-185
+  title: Recording an absence over existing leave said "Something went wrong", because absence_overlap was not a code the client knew
+  tag: A refusal the server had worded, shown as a shrug
+  status: fixed
+  found_by: agent
+  stage: S65
+  refs:
+  - R-357
+  story: >-
+    Found 21 Sept (session 182) while the absence spec ran into its own leftover row: set_absence raises
+    absence_overlap with the person and the requested days, and errors.ts's closed set of codes did not include it,
+    so the Absences tab printed the fallback sentence.
+  fix: >-
+    Session 182 (9624295). The code is parsed to an AbsenceOverlap variant and worded "This person already has an
+    absence over some of those days (from – to)."; errors.test.ts pins the parse, the sentence, the bare raise and
+    the malformed one.
+- id: F-186
+  title: The rail's on-leave mark could shrink to 0px on a crowded second line
+  tag: A mark in the DOM that nobody can see
+  status: fixed
+  found_by: agent
+  stage: S66
+  refs:
+  - R-357
+  - R-438
+  - R-448
+  story: >-
+    Found 21 Sept (session 182) by e2e/absenceOnBoard.spec.ts step 3 after the seed gave a person the No-shift tag
+    and a Line 1 outside tag at once: line two holds the outside tag, the leave tag, the No-shift tag, two skill
+    badges and the booking words; the badges and words do not shrink, so the three tags did, and "on leave" was
+    resolved thirty-two times at zero width.
+  fix: >-
+    Session 182 (9656982). The leave tag keeps its width (flex none) and the skills truncate first, the order
+    line two's own comment promised; the absence spec is the pin.
+- id: F-187
+  title: The seed gave no home shift to the one line-owned person per plant, so Sam Patel read "No shift"
+  tag: A resolver that looked at the node instead of walking up
+  status: fixed
+  found_by: agent
+  stage: S66
+  refs:
+  - R-441
+  - R-444
+  story: >-
+    Found 21 Sept (session 182) reading the live rows: the R-441 shift pick joined the pattern on the person's own
+    site, which only ever matched people owned at the plant root; EMP-x001 (owned at Line 1) joined nothing and
+    kept home_shift_id NULL, while R-441 promises every operator a band. The seed's own checks did not ask.
+  fix: >-
+    Session 182 (ce26188). The pick walks up to the plant root; the seed refuses to finish with a shiftless person;
+    D12 pins it on the demo world.
+- id: F-188
+  title: The scale audit's completeness walk covered the admin tree only, so two board stylesheets were audited by nothing
+  tag: A guard that cannot fail for a file it never reads
+  status: fixed
+  found_by: tester
+  stage: S66
+  refs:
+  - R-D84
+  - DEF-0036
+  story: >-
+    Filed 21 Sept (session 181t, DEF-0036). D89's walk read src/features/admin; OperatorPanel.module.css and
+    ShiftLayer.module.css were in neither hand-kept list and the suite was green.
+  fix: >-
+    Session 182 (9656982). Every board stylesheet is chrome or scaled, neither or both fails, a scaled file is judged
+    by a matcher that exempts px multiplied by --ui-scale; the two new files are enrolled clean and sixteen older
+    ones sit on a dated legacy list that may only shrink.
 - id: F-166
   title: A bare yes with nothing standing went to the model, which read it as clear everyone today
   tag: A confirm word with no question falls through to the readers
@@ -17281,6 +17410,51 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 182
+  date: 2026-09-21
+  title: "The tester's three defects fixed --- the real names in the seed, the Absences list decided by the server's own gate, the scale audit walking the board --- and three more found on the way (DEF-0034 to DEF-0036; F-183 to F-188)"
+  shipped: []
+  commits: ['ce26188', '9624295', '9656982']
+  numbers:
+    app_tests: 4168
+    app_test_files: 164
+    tsc: 0
+    eslint: 0
+    db_checks: 890
+    migrations: 83
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    npm run test, 21 Sept, after the three fix commits: `Tests 4168 passed (4168)` in 164 files, copied
+    verbatim (the first full run had auditPanel's footer case fail under load and pass alone; the rerun
+    was clean). tsc and eslint clean; prettier clean apart from package.json and the maintainer's untracked
+    folder, both untouched today. The demo-world SQL file reads `13 passed, 0 failed` (D11 and D12 new),
+    so the suite's count is the tester's 888 plus two; the numbered files were not rerun (no migration).
+    e2e on the running app: absences 3/3, absenceOnBoard 1/1, roleWalk 5/5. linePeople and viewerBoard were
+    NOT run: they need the real names in the live database, which is still on Operator A1..A6 after the
+    F-181 re-seed, and a write to it was refused by the session's permission gate --- the maintainer
+    resets or applies the seed's section 6a by hand (see the summary), then runs those two.
+  summary: >-
+    Merged the tester (fast-forward), read the three defects to the maintainer, and took the two calls:
+    the real names go into the demo seed, and the Absences dropdown is filtered by the server's own
+    predicate. Three Sonnet lanes, one reviewer. DEF-0034: dev_demo.sql renames the six after the week of
+    schedule (everything before keys on the placeholder names) and refuses to finish unless each
+    ref-and-name pair is there; the script is deleted, the pin rewritten to the new contract, D11 pins the
+    pairs. DEF-0035: the Person list is `canEditNode` on `homeNodeId ?? siteNodeId`, the same coalesce
+    `set_absence` runs, fail-open, refusal still worded; `home_node_id` joins the operator read, and the
+    reviewer caught the one hand-built fixture that broke at runtime. DEF-0036: the board's stylesheets
+    are classified chrome or scaled, a file in neither or both fails, a scaled file is judged by a matcher
+    that exempts px multiplied by --ui-scale, sixteen older files sit on a dated legacy list that may only
+    shrink, the two new files are enrolled clean. Three found on the way while the absence spec ran:
+    `absence_overlap` was not in the client's closed set of codes so an overlap read "Something went wrong"
+    (F-185); the rail's on-leave tag could shrink to 0px on a crowded second line (F-186); the seed's
+    home-shift pick skipped the one line-owned person per plant, so Sam Patel had no shift while R-441
+    promises everyone one (F-187). The absence spec now clears its own leftovers before recording. The
+    reviewer's other notes: the rail's resize handle now scales with --ui-scale where the launcher's
+    strips do not (the launcher's are on the legacy list); the DEF-0034 pin checks pairs now.
+    Next: the maintainer puts the real names on the live database (reset, or section 6a of the seed by
+    hand) and runs linePeople and viewerBoard; F-182; the queue as it stood; the board's legacy px list
+    (sixteen files, about two hundred lengths) when a board piece is next touched.
 - id: 181t
   date: 2026-09-21
   title: "Tester run: sessions 160-180 verified cold; three defects filed --- Plant A's real names are never seeded on any automated stack, the Absences dropdown offers a supervisor people the server refuses, and the scale audit's completeness guard misses the board (DEF-0034 to DEF-0036)"
@@ -25112,6 +25286,12 @@ next:
   text: "F-182: the typed walk runs on a day of its own, never on the day the board opens on --- before the next walk or hand-over"
   why: >-
     Found 18 Sept (session 180): the walk's last sentences clear Plant A's today, the maintainer's blocks included.
+- kind: task
+  text: "The board's bare pixels: BOARD_PX_LEGACY in src/test/scaleAudit.ts names sixteen board stylesheets with about two hundred px lengths outside calc(px * --ui-scale); shrink the list a file at a time, whenever a board piece is next touched"
+  why: >-
+    Debt, not a finding: DEF-0036 (session 182) brought the board under the scale audit and the older files did
+    not pass it. The list may only shrink (B5 fails on a clean file left on it), so each board lane that opens one
+    of these files takes it off.
 - kind: task
   stage: S64
   text: "The audits the five new standards trigger, run and written down (R-430 to R-434): docs/agent-briefs/s64-a-dead-ends-and-pre-yes-audit.md and s64-b-lots-and-trace-audit.md hold every hit; now the fixes, and F-168 and F-169 found on the way"
