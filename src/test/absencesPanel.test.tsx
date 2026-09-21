@@ -5,14 +5,14 @@
  * the admin screen at all (adminSectionsFor / adminAccess, run for real); the
  * PANEL records and removes through the api and shows a refusal as a sentence
  * rather than swallowing it (CLAUDE.md section 4 — the screen surfaces what the
- * server refuses); and, since DEF-0035, the Person LIST it offers is decided by
- * the same `canEditNode` preview `set_absence` mirrors (R-431) — its own suite
- * is `src/test/defects/DEF-0035.test.tsx`, so every case here runs with rights
- * that cover everyone (`role: "admin"`, arm (1)) and never has to think about it.
- * The mocks stop at the network boundary and at the two hooks that would
- * otherwise pull the whole api behind them — `useEditRights` is NOT one of
- * them: it is exercised for real, off the mocked `fetchGrantPaths` below, the
- * same way `useOperatorsAdmin` is exercised for real off `fetchOperatorsAdmin`.
+ * server refuses); and, since DEF-0035 (reopened and re-fixed 21 Sept), the
+ * Person LIST it offers is the SERVER'S answer — migration 0084's
+ * `absence_recordable_people()`, read through `fetchRecordableAbsencePeople` —
+ * never a client preview (R-431). Its own suite is
+ * `src/test/defects/DEF-0035.test.tsx`; every case here mocks that read to name
+ * both fixture people, so nothing here has to think about it. The mocks stop at
+ * the network boundary and at the two hooks that would otherwise pull the whole
+ * api behind them.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
@@ -83,6 +83,8 @@ vi.mock("@/lib/api", () => ({
   removeAbsence: (id: string) => h.removeAbsence(id),
   fetchNodeSetting: (nodeId: string, key: string) => h.fetchNodeSetting(nodeId, key),
   fetchGrantPaths: () => h.fetchGrantPaths(),
+  // DEF-0035 (0084): the server names both fixture people as recordable.
+  fetchRecordableAbsencePeople: () => Promise.resolve(["O1", "O2"]),
   describeSchedulerError: (e: unknown) =>
     (e as { message?: string })?.message ?? "Something went wrong.",
 }));

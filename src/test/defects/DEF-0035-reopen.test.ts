@@ -1,68 +1,75 @@
 import { describe, expect, it } from "vitest";
-import { canEditNode, type EditRights } from "@/features/admin/lib/editRights";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
- * DEF-0035 — REOPENED (tester, 21 Sept, session 183t). RED until the Absences create form offers a
- * line supervisor only the people set_absence would accept.
+ * DEF-0035 — REOPENED by the tester (21 Sept, session 183t), and the contract of the
+ * fix changed with it, so this pin is REWRITTEN rather than patched (CLAUDE.md
+ * section 4: say in writing whether the case was wrong or the contract changed).
  *
- * The session-182 fix filters the Person list with
- *   `visiblePeople.filter((p) => canEdit(nodesById.get(p.homeNodeId ?? p.siteNodeId)?.path ?? null))`
- * (AbsencesPanel.tsx). `canEditNode` FAILS OPEN — a null path answers TRUE (by design, so controls are
- * never silently stripped). The developer's own pin, `DEF-0035.test.tsx`, MOCKS `useEditRights` with a
- * known result and so never exercises the fail-open path; it passes while the app is broken.
+ * What the tester measured: as Ana (a Line 1 supervisor) on a fresh seed, the form
+ * offered all six of Plant A's people while `set_absence` accepted two. The first fix
+ * filtered the list with `canEditNode` over the person's home node; the four off-line
+ * people's owning cells are nodes Ana cannot read, so the client held no path for them
+ * and the preview failed open, by its own rule. The tester's pin ran that filter over
+ * the measured data and was red.
  *
- * Measured live as Ana (a Line 1 supervisor) on a fresh `supabase db reset`:
- *   adminPaths    = []
- *   writablePaths = ["plant_a.area_1.line_1"]
- *   operators + the nodes she can READ (reads scope up/at her grant, never sideways):
- *     Sam Patel    home cell_1  -> path plant_a.area_1.line_1.cell_1   app_can_edit_node = true
- *     Maria Lopez  home cell_2  -> path plant_a.area_1.line_1.cell_2   app_can_edit_node = true
- *     John Kim     home <other line>  -> NOT in nodesById -> path null  app_can_edit_node = false
- *     Lena Novak   home <other line>  -> NOT in nodesById -> path null  app_can_edit_node = false
- *     Priya Shah   home <other line>  -> NOT in nodesById -> path null  app_can_edit_node = false
- *     Tom Baker    home <other line>  -> NOT in nodesById -> path null  app_can_edit_node = false
+ * What changed: the client no longer guesses. Migration 0084's
+ * `absence_recordable_people()` (SECURITY DEFINER) runs the same expression
+ * `set_absence` gates on and returns the ids the writer accepts; the form offers the
+ * visible people intersected with that answer. So the property the tester's pin asked
+ * for — "the form offers exactly the people the server accepts" — is now held in two
+ * places, and this pin asserts both halves exist and are wired:
  *
- * So the four off-line people resolve to a null path (their owning node is not one Ana may read), and
- * `canEditNode(null)` fails open, so the create form offers all six — exactly the four the server then
- * refuses PT403 ("you cannot record an absence for someone at that place"). This pin reproduces that
- * with the REAL `canEditNode`, no mock: it runs the same filter over the same data shape and asserts
- * the form offers only the people the server accepts. It stays RED while the client offers people it
- * cannot resolve a path for; it is not asking the developer to break fail-open, but to offer only the
- * people set_absence accepts (resolve the owning path for these people, or filter by the server's own
- * answer). See docs/defects/DEF-0035.md.
+ *   1. the SERVER half: `88_absences_test.sql` AB35 holds the function to
+ *      `set_absence` person by person, for a supervisor, another supervisor, a viewer
+ *      and the company admin, and for a caller with no profile;
+ *   2. the CLIENT half: `AbsencesPanel.tsx` builds its Person list from
+ *      `fetchRecordableAbsencePeople` and no longer applies `canEdit` to it;
+ *      `DEF-0035.test.tsx` renders the tester's six-people scenario against the server's
+ *      answer and asserts the two are offered and the four are not.
+ *
+ * A reintroduced client preview (a `canEdit(` on the Person list) or a dropped server
+ * read turns this red again.
  */
 
-const ANA_RIGHTS: EditRights = {
-  role: "supervisor",
-  adminPaths: [],
-  writablePaths: ["plant_a.area_1.line_1"],
-  known: true, // her grant DID land — the bug is not a pending read
-};
-
-// The operators Ana is shown, and the path her client can resolve for each from the nodes she may
-// read. The four off-line people's owning node is absent (null), exactly as measured live.
-const OFFERED_OPERATORS: ReadonlyArray<{
-  name: string;
-  resolvedPath: string | null;
-  serverAccepts: boolean;
-}> = [
-  { name: "Sam Patel", resolvedPath: "plant_a.area_1.line_1.cell_1", serverAccepts: true },
-  { name: "Maria Lopez", resolvedPath: "plant_a.area_1.line_1.cell_2", serverAccepts: true },
-  { name: "John Kim", resolvedPath: null, serverAccepts: false },
-  { name: "Lena Novak", resolvedPath: null, serverAccepts: false },
-  { name: "Priya Shah", resolvedPath: null, serverAccepts: false },
-  { name: "Tom Baker", resolvedPath: null, serverAccepts: false },
-];
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
 describe("DEF-0035 (reopened): the Absences form offers a supervisor only people set_absence accepts", () => {
-  it("offers exactly the server-editable people — not the ones whose node the client cannot resolve", () => {
-    // The SAME predicate AbsencesPanel's create form applies.
-    const offered = OFFERED_OPERATORS.filter((p) => canEditNode(p.resolvedPath, ANA_RIGHTS)).map(
-      (p) => p.name,
+  it("the migration defines the definer function on the same gate set_absence runs", () => {
+    const sql = read("supabase/migrations/20260921000084_absence_recordable_people.sql");
+    expect(sql).toMatch(
+      /create or replace function absence_recordable_people\(\) returns setof uuid/,
     );
-    const serverAccepts = OFFERED_OPERATORS.filter((p) => p.serverAccepts).map((p) => p.name);
-    // RED today: `offered` is all six (the four null-path people slip through fail-open), while the
-    // server accepts only Sam Patel and Maria Lopez.
-    expect(offered).toEqual(serverAccepts);
+    expect(sql).toMatch(/security definer/);
+    expect(sql).toMatch(/app_can_edit_node\(coalesce\(o\.home_node_id, o\.site_node_id\)\)/);
+    expect(sql).toMatch(/o\.org_id = app_current_org\(\)/);
+  });
+
+  it("the SQL suite holds the function to set_absence person by person (AB35)", () => {
+    const sql = read("supabase/tests/88_absences_test.sql");
+    expect(sql).toContain("PASS AB35");
+    expect(sql).toContain("absence_recordable_people()");
+    // parity: membership in the set equals whether set_absence accepts
+    expect(sql).toMatch(/IF v_in <> v_accepts THEN/);
+  });
+
+  it("the panel's Person list is the server's answer, not a client preview", () => {
+    const panel = read("src/features/admin/components/AbsencesPanel.tsx").replace(
+      /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
+      "",
+    );
+    expect(panel).toContain("fetchRecordableAbsencePeople");
+    expect(panel).toMatch(/recordableIds\.has\(p\.id\)/);
+    expect(panel).not.toMatch(/canEdit\(/);
+    expect(panel).not.toMatch(/useEditRights/);
+  });
+
+  it("the api read exists and refuses a malformed answer rather than reading it as nobody", () => {
+    const api = read("src/lib/api/absences.ts");
+    expect(api).toMatch(/supabase\.rpc\("absence_recordable_people"\)/);
+    expect(api).toMatch(/shapeMismatch\("absence_recordable_people"/);
   });
 });

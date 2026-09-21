@@ -1,27 +1,28 @@
 /**
  * Pin for DEF-0035 — the Absences "Person" dropdown offered every visible
  * operator, but `set_absence` (migration 0069, `app_can_edit_node(coalesce(
- * home_node_id, site_node_id))`, line ~285) refuses whoever is off the
- * reader's grant. A Line 1 supervisor was offered five of Plant A's six
- * people and refused `not_permitted` on four — the screen offered what the
- * server refuses (CLAUDE.md section 4, R-431).
+ * home_node_id, site_node_id))`) refuses whoever is off the reader's grant. A
+ * Line 1 supervisor was offered five of Plant A's six people and refused
+ * `not_permitted` on four — the screen offered what the server refuses
+ * (CLAUDE.md section 4, R-431).
  *
- * The maintainer, 21 Sept, sided with the tester: filter the dropdown by the
- * server's own predicate rather than let every refusal arrive after the
- * click. The fix reads `useEditRights(canQuery, profile?.role ?? null)` and
- * narrows the create form's Person list to
- * `canEdit(nodesById.get(person.homeNodeId ?? person.siteNodeId)?.path ??
- * null)` — the SAME coalesce order the server uses — while the absences
- * TABLE keeps listing every visible person's rows (reading is wider than
- * writing, by design; only the create form narrows).
+ * ⚠️ REWRITTEN 21 SEPT AFTER THE TESTER REOPENED THE DEFECT (session 183t).
+ * The first fix filtered the list with `canEditNode` over the person's home
+ * node, and this pin passed while the app was broken: a line supervisor
+ * cannot READ the cells on other lines the plant's people are homed at, so
+ * the client held no path for them and the preview failed open (its own
+ * rule). A gate on a node the caller cannot see is not one a client can
+ * transcribe, so the form now ASKS: `fetchRecordableAbsencePeople()` is
+ * migration 0084's `absence_recordable_people()`, SECURITY DEFINER, running
+ * the same expression `set_absence` gates on, and the Person list is the
+ * visible people intersected with that answer. The server side of the
+ * contract — that the function names exactly the people `set_absence`
+ * accepts — is `88_absences_test.sql` AB35, person by person; this pin holds
+ * the client side: the form offers the answer, all of it and nothing else,
+ * and says Loading or an error rather than guessing while it has none.
  *
- * ⚠️ THE MOCKS STOP AT THE NETWORK BOUNDARY, NOT AT `useEditRights`. The
- * whole point under test is the real `canEditNode` preview running inside
- * the real hook, so only `@/lib/api`'s RPCs are replaced (`fetchGrantPaths`
- * included) — the same shape `absencesPanel.test.tsx` uses, not
- * `trainingsPanel.test.tsx`'s delegate-to-the-real-function mock, because
- * here the "rights unknown" case needs to hold `fetchGrantPaths` itself
- * pending.
+ * The mocks stop at the network boundary (`@/lib/api`), the same shape
+ * `absencesPanel.test.tsx` uses.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
@@ -29,22 +30,17 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const h = vi.hoisted(() => ({
-  profile: {
-    orgId: "org-1",
-    role: "supervisor" as string | null,
-  },
-  operator: (id: string, displayName: string, siteNodeId: string, homeNodeId: string | null) => ({
+  operator: (id: string, displayName: string) => ({
     id,
     displayName,
     employeeRef: null,
     active: true,
-    siteNodeId,
-    homeNodeId,
+    siteNodeId: "plant",
+    homeNodeId: null as string | null,
     source: "manual",
     externalId: null,
     homeShiftId: null,
   }),
-  /** A schedulable node under the org root, path === the id (no tree needed). */
   node: (id: string) => ({
     id,
     name: id,
@@ -64,18 +60,17 @@ const h = vi.hoisted(() => ({
     externalId: null,
   }),
   operators: [] as unknown[],
-  absences: [] as unknown[],
   fetchAbsences: vi.fn(),
   setAbsence: vi.fn(),
   removeAbsence: vi.fn(),
   fetchNodeSetting: vi.fn(),
-  fetchGrantPaths: vi.fn(),
+  fetchRecordableAbsencePeople: vi.fn(),
 }));
 
 vi.mock("@/features/auth/useSession", () => ({
   useSession: () => ({
     session: { user: { id: "u1" } },
-    profile: h.profile,
+    profile: { orgId: "org-1", role: "supervisor" },
     loading: false,
   }),
 }));
@@ -85,14 +80,14 @@ vi.mock("@/lib/api", () => ({
   setAbsence: (input: unknown) => h.setAbsence(input),
   removeAbsence: (id: string) => h.removeAbsence(id),
   fetchNodeSetting: (nodeId: string, key: string) => h.fetchNodeSetting(nodeId, key),
-  fetchGrantPaths: () => h.fetchGrantPaths(),
+  fetchRecordableAbsencePeople: () => h.fetchRecordableAbsencePeople(),
   describeSchedulerError: (e: unknown) =>
     (e as { message?: string })?.message ?? "Something went wrong.",
 }));
 
 vi.mock("@/features/admin/hooks/useOperators", () => ({
   useOperatorsAdmin: () => ({
-    data: { operators: h.operators, nodes: [h.node("plant.line1"), h.node("plant.line2")] },
+    data: { operators: h.operators, nodes: [h.node("plant")] },
     isLoading: false,
     isError: false,
     error: null,
@@ -126,77 +121,83 @@ function personOptions(): string[] {
     .map((o) => o.textContent ?? "");
 }
 
+// The tester's live measurement as Ana on a fresh seed (session 183t): six
+// people visible, the server accepts two.
+const PLANT_A = [
+  ["sam", "Sam Patel"],
+  ["maria", "Maria Lopez"],
+  ["john", "John Kim"],
+  ["lena", "Lena Novak"],
+  ["priya", "Priya Shah"],
+  ["tom", "Tom Baker"],
+] as const;
+const SERVER_ACCEPTS = ["sam", "maria"];
+
 beforeEach(() => {
-  h.profile.role = "supervisor";
-  h.operators = [];
+  h.operators = PLANT_A.map(([id, name]) => h.operator(id, name));
   h.fetchAbsences.mockReset().mockResolvedValue({ absences: [], skipped: 0 });
   h.setAbsence.mockReset();
   h.removeAbsence.mockReset();
   h.fetchNodeSetting.mockReset().mockResolvedValue("America/Chicago");
-  h.fetchGrantPaths.mockReset();
+  h.fetchRecordableAbsencePeople.mockReset();
 });
 
-describe("DEF-0035: the Person dropdown offers only who set_absence would accept", () => {
-  it("a reader whose writable grant covers only plant.line1 is offered the line1 person, not line2 — the table still lists both", async () => {
-    h.operators = [
-      h.operator("O-line1", "Alice", "plant.line1", "plant.line1"),
-      h.operator("O-line2", "Bob", "plant.line2", "plant.line2"),
-    ];
-    h.absences = [h.absence("A1", "O-line1"), h.absence("A2", "O-line2")];
-    h.fetchAbsences.mockResolvedValue({ absences: h.absences, skipped: 0 });
-    h.fetchGrantPaths.mockResolvedValue({ adminPaths: [], writablePaths: ["plant.line1"] });
+describe("DEF-0035: the Person dropdown offers exactly who the server says set_absence accepts", () => {
+  it("Ana is offered the two the server names and none of the other four — the table still lists everyone", async () => {
+    h.fetchAbsences.mockResolvedValue({
+      absences: [h.absence("A1", "sam"), h.absence("A2", "john")],
+      skipped: 0,
+    });
+    h.fetchRecordableAbsencePeople.mockResolvedValue(SERVER_ACCEPTS);
 
     wrap(<AbsencesPanel />);
 
-    // Wait for the grant read to land: an option list that only ever had one
-    // entry would pass this assertion by accident before rights resolved.
-    await waitFor(() => expect(personOptions()).toEqual(["Choose a person…", "Alice"]));
-
-    // The absences TABLE narrows nothing — both people's rows still show.
-    expect(screen.getByRole("cell", { name: "Alice" })).toBeTruthy();
-    expect(screen.getByRole("cell", { name: "Bob" })).toBeTruthy();
+    await waitFor(() =>
+      expect(personOptions()).toEqual(["Choose a person…", "Sam Patel", "Maria Lopez"]),
+    );
+    // The absences TABLE narrows nothing: John Kim's row is still there.
+    expect(screen.getByRole("cell", { name: "John Kim" })).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "Sam Patel" })).toBeTruthy();
   });
 
-  it("rights unknown (fetchGrantPaths still pending) fails OPEN and offers both", async () => {
-    h.operators = [
-      h.operator("O-line1", "Alice", "plant.line1", "plant.line1"),
-      h.operator("O-line2", "Bob", "plant.line2", "plant.line2"),
-    ];
-    h.fetchAbsences.mockResolvedValue({ absences: [], skipped: 0 });
-    // Never resolves: `rights.known` stays false for the life of the test.
-    h.fetchGrantPaths.mockReturnValue(new Promise(() => {}));
+  it("the answer is used as given — nobody the server did not name slips in, nobody it named is dropped", async () => {
+    h.fetchRecordableAbsencePeople.mockResolvedValue(["tom", "lena", "not-a-visible-person"]);
 
     wrap(<AbsencesPanel />);
 
-    await screen.findByLabelText("Person");
-    expect(personOptions()).toEqual(["Choose a person…", "Alice", "Bob"]);
+    await waitFor(() =>
+      expect(personOptions()).toEqual(["Choose a person…", "Lena Novak", "Tom Baker"]),
+    );
   });
 
-  it("rights REFUSED (fetchGrantPaths rejects) also fails OPEN and offers both", async () => {
-    h.operators = [
-      h.operator("O-line1", "Alice", "plant.line1", "plant.line1"),
-      h.operator("O-line2", "Bob", "plant.line2", "plant.line2"),
-    ];
-    h.fetchAbsences.mockResolvedValue({ absences: [], skipped: 0 });
-    h.fetchGrantPaths.mockRejectedValue({ kind: "SchedulerError", message: "boom" });
+  it("an empty answer (a viewer) offers nobody, and the form still renders", async () => {
+    h.fetchRecordableAbsencePeople.mockResolvedValue([]);
 
     wrap(<AbsencesPanel />);
 
-    await waitFor(() => expect(personOptions()).toEqual(["Choose a person…", "Alice", "Bob"]));
+    await waitFor(() => expect(personOptions()).toEqual(["Choose a person…"]));
   });
 
-  it("a person with homeNodeId: null is decided on siteNodeId, the same coalesce set_absence runs", async () => {
-    h.operators = [
-      // homeNodeId null -> falls back to siteNodeId, which IS covered.
-      h.operator("O-site1", "Cara", "plant.line1", null),
-      // homeNodeId null -> falls back to siteNodeId, which is NOT covered.
-      h.operator("O-site2", "Dee", "plant.line2", null),
-    ];
-    h.fetchAbsences.mockResolvedValue({ absences: [], skipped: 0 });
-    h.fetchGrantPaths.mockResolvedValue({ adminPaths: [], writablePaths: ["plant.line1"] });
+  it("while the answer is pending the panel says Loading — it never offers a list it cannot vouch for", async () => {
+    h.fetchRecordableAbsencePeople.mockReturnValue(new Promise(() => {}));
 
     wrap(<AbsencesPanel />);
 
-    await waitFor(() => expect(personOptions()).toEqual(["Choose a person…", "Cara"]));
+    expect(await screen.findByText("Loading…")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Person" })).toBeNull();
+  });
+
+  it("when the answer fails the panel says so in words, and offers nobody", async () => {
+    h.fetchRecordableAbsencePeople.mockRejectedValue({
+      kind: "Unknown",
+      message: "the recordable people could not be read",
+    });
+
+    wrap(<AbsencesPanel />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "the recordable people could not be read",
+    );
+    expect(screen.queryByRole("combobox", { name: "Person" })).toBeNull();
   });
 });

@@ -244,6 +244,32 @@ export async function setAbsence(input: SetAbsenceInput): Promise<AbsenceRecord>
 }
 
 /** `remove_absence` — delete one absence by id. */
+/**
+ * The people the caller may record an absence for, BY THE SERVER'S OWN ANSWER
+ * (migration 0084, DEF-0035 reopened). `absence_recordable_people()` is
+ * SECURITY DEFINER and runs the same expression `set_absence` gates on,
+ * `app_can_edit_node(coalesce(home_node_id, site_node_id))`, so the Absences
+ * form offers exactly what the writer accepts (R-431).
+ *
+ * ⚠️ NOT A CLIENT PREVIEW, AND THAT IS THE POINT. Session 182 filtered the
+ * form with `canEditNode` over the person's home node and the tester reopened
+ * the defect the same day: a line supervisor can read people owned at the
+ * plant above her but not the cells on other lines they are homed at, so the
+ * client held no path for four of six and the preview failed open (its rule).
+ * A gate on a node the caller cannot see is the server's to answer.
+ *
+ * Returns the ids as strings; a non-array or a bad element is a shape mismatch
+ * rather than a silent "nobody" (a silent empty set would hide the whole form).
+ */
+export async function fetchRecordableAbsencePeople(): Promise<string[]> {
+  const { data, error } = await supabase.rpc("absence_recordable_people");
+  if (error) throw toSchedulerError(error);
+  if (!Array.isArray(data) || data.some((id) => typeof id !== "string")) {
+    throw shapeMismatch("absence_recordable_people", "expected an array of operator ids");
+  }
+  return data as string[];
+}
+
 export async function removeAbsence(id: string): Promise<void> {
   const { error } = await supabase.rpc("remove_absence", { p_id: id });
   if (error) throw toSchedulerError(error);

@@ -1184,6 +1184,80 @@ EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB34: unexpected % (sq
 END $$;
 ROLLBACK TO SAVEPOINT sp_AB34;
 
+-- 0084 (DEF-0035 reopened) --- the people the caller may record for, answered
+-- by the server, and held to set_absence per person.
+\echo 'AB35: absence_recordable_people() names exactly the people set_absence accepts --- Ana, Marco, the viewer, the company admin'
+SAVEPOINT sp_AB35;
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001';
+        v_el uuid := '50000000-0000-0000-0000-000000000004';   -- Elena, home Assembly (Ana's)
+        v_ma uuid := '50000000-0000-0000-0000-000000000001';   -- Maria, home Machining (Marco's)
+        v_who record; v_op record; v_set uuid[]; v_in boolean; v_accepts boolean; v_n int := 0;
+        v_ok boolean := true; v_why text := '';
+BEGIN
+  -- Four callers: Ana (a2, Assembly), Marco (a3, Machining), the viewer (b1),
+  -- the company admin (a1). For each: the set, then PARITY --- every operator
+  -- in the org is in the set exactly when set_absence accepts them (a unique
+  -- far-future day per attempt so no overlap can interfere).
+  FOR v_who IN SELECT * FROM (VALUES
+      ('00000000-0000-0000-0000-0000000000a2'::uuid, 'Ana',    v_el, v_ma),      -- has Elena, not Maria
+      ('00000000-0000-0000-0000-0000000000a3'::uuid, 'Marco',  v_ma, v_el),      -- has Maria, not Elena
+      ('00000000-0000-0000-0000-0000000000b1'::uuid, 'viewer', NULL::uuid, v_el),-- has nobody
+      ('00000000-0000-0000-0000-0000000000a1'::uuid, 'admin',  v_el, NULL::uuid) -- has everyone
+    ) AS t(sub, name, has, lacks) LOOP
+    PERFORM set_config('request.jwt.claim.sub', v_who.sub::text, true);
+    SET LOCAL ROLE authenticated;
+    SELECT coalesce(array_agg(id ORDER BY id), ARRAY[]::uuid[]) INTO v_set FROM absence_recordable_people() AS id;
+    RESET ROLE;
+    -- the named people (the fixture's other seven fall under the parity loop below)
+    IF v_who.has IS NOT NULL AND NOT (v_who.has = ANY (v_set)) THEN
+      v_ok := false; v_why := v_why || format(' %s lacks %s', v_who.name, v_who.has);
+    END IF;
+    IF v_who.lacks IS NOT NULL AND v_who.lacks = ANY (v_set) THEN
+      v_ok := false; v_why := v_why || format(' %s was given %s', v_who.name, v_who.lacks);
+    END IF;
+    IF v_who.name = 'viewer' AND cardinality(v_set) <> 0 THEN
+      v_ok := false; v_why := v_why || format(' the viewer got %s', v_set);
+    END IF;
+    IF v_who.name = 'admin' AND cardinality(v_set) <> (SELECT count(*) FROM operators WHERE org_id = v_org) THEN
+      v_ok := false; v_why := v_why || format(' the admin got %s of everyone', cardinality(v_set));
+    END IF;
+    -- parity with the writer, person by person
+    FOR v_op IN SELECT id FROM operators WHERE org_id = v_org ORDER BY id LOOP
+      v_n := v_n + 1;
+      v_in := v_op.id = ANY (v_set);
+      PERFORM set_config('request.jwt.claim.sub', v_who.sub::text, true);
+      SET LOCAL ROLE authenticated;
+      BEGIN
+        PERFORM set_absence(v_op.id, DATE '2029-01-01' + v_n, DATE '2029-01-01' + v_n, 'parity');
+        v_accepts := true;
+      EXCEPTION WHEN OTHERS THEN
+        v_accepts := false;
+        IF SQLERRM NOT ILIKE '%not_permitted%' AND SQLERRM NOT ILIKE '%cannot record%' THEN
+          v_ok := false; v_why := v_why || format(' %s/%s refused for another reason: %s', v_who.name, v_op.id, SQLERRM);
+        END IF;
+      END;
+      RESET ROLE;
+      IF v_in <> v_accepts THEN
+        v_ok := false;
+        v_why := v_why || format(' %s: %s is %s the set but set_absence %s', v_who.name, v_op.id,
+                                 CASE WHEN v_in THEN 'in' ELSE 'not in' END,
+                                 CASE WHEN v_accepts THEN 'accepted' ELSE 'refused' END);
+      END IF;
+    END LOOP;
+  END LOOP;
+  -- a caller with no profile row gets nothing, never another company's people
+  INSERT INTO auth.users (id) VALUES ('00000000-0000-0000-0000-00000000af35') ON CONFLICT DO NOTHING;
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000af35', true);
+  SET LOCAL ROLE authenticated;
+  SELECT coalesce(array_agg(id), ARRAY[]::uuid[]) INTO v_set FROM absence_recordable_people() AS id;
+  RESET ROLE;
+  IF cardinality(v_set) <> 0 THEN v_ok := false; v_why := v_why || format(' a profile-less caller got %s', v_set); END IF;
+  IF v_ok THEN RAISE NOTICE 'PASS AB35'; ELSE RAISE NOTICE 'FAIL AB35:%', v_why; END IF;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE NOTICE 'FAIL AB35: unexpected % (sqlstate %)', SQLERRM, SQLSTATE;
+END $$;
+ROLLBACK TO SAVEPOINT sp_AB35;
+
 ROLLBACK;
 
-\echo '88_absences_test.sql complete (AB0-AB34 with AB8b, AB9b, AB10b, AB11b, AB28b)'
+\echo '88_absences_test.sql complete (AB0-AB35 with AB8b, AB9b, AB10b, AB11b, AB28b)'

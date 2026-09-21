@@ -1306,6 +1306,7 @@ export type Database = {
         Args: { p_operator_id: string; p_timerange: unknown }
         Returns: Json
       }
+      absence_recordable_people: { Args: never; Returns: string[] }
       api_raise: {
         Args: { p_detail: Json; p_error: string; p_message: string }
         Returns: undefined

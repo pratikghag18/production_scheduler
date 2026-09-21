@@ -95,6 +95,12 @@ it into `requirements` in that turn, before the code.
   resolver (a shift pattern, a setting, a person's home) finds nothing and answers NULL for a node
   that has an answer. DEF-0016 and DEF-0017 were both this, found by the tester after the developer's
   reviewer had passed the feature. The definer takes a node id and guards the org boundary itself.
+  **The same holds for a permission on a node the caller cannot read.** `canEditNode` is a preview
+  that fails open when it has no path, and a supervisor has no path for a cell on another line she
+  can read the person of but not the place; a screen that filters by it offers what the server
+  refuses (DEF-0035, reopened the day it was "fixed"). When the predicate needs a node outside the
+  caller's view, ask the server for the answer as a set (`absence_recordable_people`, 0084) and
+  hold that function to the writer in the SQL suite, person by person.
 - **Before every commit, walk the changed screens as the LEAST-privileged demo person they touch**
   (Ana on Line 1, a viewer), not only as the admin who built them. `e2e/roleWalk.spec.ts` drives
   every demo person through the board and the rail and asserts the facts a line supervisor sees

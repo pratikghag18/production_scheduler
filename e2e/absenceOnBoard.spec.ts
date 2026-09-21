@@ -99,7 +99,15 @@ test("Ana records an absence and the board marks the person on leave", async ({ 
   await fillWindowStart(page, monday);
   await expect(firstTrack).toBeVisible({ timeout: 20_000 });
 
-  // 3. The operator panel marks whoever is away this week.
+  // 3. The operator panel marks whoever is away this week. Since R-448 the
+  //    rail lists the people on shift NOW by default and keeps the other
+  //    bands behind a chip each; the person just recorded may be on any band
+  //    (Sam Patel is on Shift 2 after the 21 Sept seed), so press every chip
+  //    that is off before looking, as linePeople.spec.ts does (F-189).
+  const panel = page.getByRole("complementary", { name: "Operators" });
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  const offChips = panel.getByRole("button", { name: /^Shift \d+$/, pressed: false });
+  for (let i = (await offChips.count()) - 1; i >= 0; i--) await offChips.nth(i).click();
   await expect(page.getByText("on leave").first()).toBeVisible({ timeout: 15_000 });
 
   // 4. The create pop-up names the leave BEFORE Save. Open it, choose the

@@ -7,30 +7,33 @@
    TABLE — reading is wider than writing, by design, and the table narrows
    nothing.
 
-   ⭐⭐ DEF-0035 / R-431 — THE PERSON LIST ON THE CREATE FORM IS DECIDED BY THE
-   SAME PREDICATE `set_absence` RUNS, NOT A GUESS. This panel used to offer
-   every visible person, on the theory that the server's own refusal was
-   enough of a guard (CLAUDE.md section 4's other half — "surfaces what it
-   refuses"). The tester found the gap the theory missed: `set_absence` /
-   `remove_absence` gate on `app_can_edit_node(coalesce(home_node_id,
-   site_node_id))` — a supervisor or admin OF THE PERSON'S PLACE — and a Line 1
-   supervisor was offered five of Plant A's six people only to be refused
-   `not_permitted` on four of them. R-431 is the standing rule this breaks:
-   "nothing offered that the server refuses". The fix filters rather than
-   guesses: `useEditRights(canQuery, profile?.role ?? null)` gives `canEdit`,
-   the same `canEditNode` preview `TrainingsPanel` mirrors the server with, and
-   the Person `<select>` offers only `visiblePeople` for whom
-   `canEdit(nodesById.get(person.homeNodeId ?? person.siteNodeId)?.path ??
-   null)` — the SAME coalesce order `set_absence` uses.
+   ⭐⭐ DEF-0035 / R-431 — THE PERSON LIST ON THE CREATE FORM IS THE SERVER'S
+   OWN ANSWER. This panel used to offer every visible person, on the theory
+   that the server's refusal was guard enough; the tester found a Line 1
+   supervisor offered five of Plant A's six and refused `not_permitted` on
+   four (`set_absence` / `remove_absence` gate on
+   `app_can_edit_node(coalesce(home_node_id, site_node_id))`, the person's
+   PLACE). Session 182 then mirrored that gate on the client with
+   `canEditNode` over the person's home node, and the tester REOPENED it the
+   same day: she can READ the people owned at the plant above her, but not
+   the cells on other lines they are homed at, so the client held no path for
+   four of six and the preview failed open, as its own rule says it must. A
+   gate on a node the caller cannot see is not one a client can transcribe.
 
-   ⚠️ IT STILL FAILS OPEN, AND A REFUSAL IS STILL SHOWN IN WORDS. `canEditNode`
-   answers TRUE whenever the grant read has not landed, has failed, or the
-   owner cannot be resolved to a path (`editRights.ts`'s header) — this is a
-   PREVIEW, not the authority, and the database is right if the two ever
-   disagree. So the fail-open case still offers a person the server may go on
-   to refuse, and `addMutation.onError -> setFormError` still surfaces that
-   refusal exactly as before; this narrows what is OFFERED, it does not retire
-   the sentence that answers for what is REFUSED.
+   So the form asks: `fetchRecordableAbsencePeople()` is migration 0084's
+   `absence_recordable_people()`, SECURITY DEFINER, running the SAME
+   expression `set_absence` gates on and returning the ids the writer would
+   accept; the Person `<select>` offers `visiblePeople` intersected with that
+   set, and nothing else (R-431, CLAUDE.md section 4's "the server's rule,
+   transcribed" — here, the server's rule, ASKED). 88_absences_test.sql AB35
+   holds the function to `set_absence` person by person.
+
+   ⚠️ NO FAIL-OPEN HERE, BECAUSE THERE IS NOTHING TO GUESS. The answer is a
+   read like the operators and the absences: while it is pending the panel
+   says Loading, and if it fails the panel shows that error in words rather
+   than a list it cannot vouch for. A refusal the server still raises after
+   the click (an overlap, a grant changed since the read) is worded by
+   `addMutation.onError -> setFormError` exactly as before.
 
    ⚠️ THE DATES ARE SHOWN IN THE CHOSEN PLANT'S FORMAT (R-333), via
    `useDateFormat(plant.choice)` — a plant root resolves its own override, All
@@ -53,6 +56,7 @@ import {
   describeSchedulerError,
   fetchAbsences,
   fetchNodeSetting,
+  fetchRecordableAbsencePeople,
   removeAbsence,
   setAbsence,
   type AbsenceRecord,
@@ -65,7 +69,6 @@ import { formatClock, zonedTimeToInstant } from "@/features/board/lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
-import { useEditRights } from "../hooks/useEditRights";
 import { useOperatorsAdmin } from "../hooks/useOperators";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import { useDateFormat } from "../hooks/useOrgSettings";
@@ -112,18 +115,22 @@ function parseHm(s: string): { h: number; mi: number } | null {
 }
 
 export function AbsencesPanel() {
-  const { session, profile, loading: sessionLoading } = useSession();
+  const { session, loading: sessionLoading } = useSession();
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
   const queryClient = useQueryClient();
-
-  // DEF-0035 / R-431: the same preview `TrainingsPanel` uses, so the Person
-  // list below can be filtered by the SAME predicate `set_absence` runs.
-  const { canEdit } = useEditRights(canQuery, profile?.role ?? null);
 
   const operatorsQuery = useOperatorsAdmin(canQuery);
   const absencesQuery = useQuery({
     queryKey: [...absenceKeys.all, "admin"],
     queryFn: fetchAbsences,
+    enabled: canQuery,
+  });
+  // DEF-0035 / R-431: the people `set_absence` would accept, BY THE SERVER'S
+  // ANSWER (0084). Under `absenceKeys.all` so every write's `invalidate`
+  // refreshes it with the rows.
+  const recordableQuery = useQuery<string[], SchedulerError>({
+    queryKey: [...absenceKeys.all, "recordable"],
+    queryFn: fetchRecordableAbsencePeople,
     enabled: canQuery,
   });
 
@@ -138,18 +145,14 @@ export function AbsencesPanel() {
     () => rowsInPlant(operators, plant.choice, plant.plants, nodesById),
     [operators, plant.choice, plant.plants, nodesById],
   );
-  // DEF-0035 / R-431: the create form's Person list, narrowed from
-  // `visiblePeople` to the people `set_absence` would actually accept.
-  // `person.homeNodeId ?? person.siteNodeId` is the SAME coalesce order the
-  // server's own `coalesce(home_node_id, site_node_id)` uses — never the
-  // owner alone and never re-ordered. The absences TABLE keeps reading
-  // `visiblePeople` untouched; only the create form narrows.
+  // DEF-0035 / R-431: the create form's Person list is `visiblePeople`
+  // intersected with the server's own answer — no client predicate. The
+  // absences TABLE keeps reading `visiblePeople` untouched; only the form
+  // narrows.
+  const recordableIds = useMemo(() => new Set(recordableQuery.data ?? []), [recordableQuery.data]);
   const recordablePeople = useMemo(
-    () =>
-      visiblePeople.filter((p) =>
-        canEdit(nodesById.get(p.homeNodeId ?? p.siteNodeId)?.path ?? null),
-      ),
-    [visiblePeople, nodesById, canEdit],
+    () => visiblePeople.filter((p) => recordableIds.has(p.id)),
+    [visiblePeople, recordableIds],
   );
   const nameById = useMemo(
     () => new Map(operators.map((o) => [o.id, o.displayName] as const)),
@@ -295,13 +298,27 @@ export function AbsencesPanel() {
     });
   }
 
-  if (!canQuery || operatorsQuery.isLoading || absencesQuery.isLoading) {
+  if (
+    !canQuery ||
+    operatorsQuery.isLoading ||
+    absencesQuery.isLoading ||
+    recordableQuery.isLoading
+  ) {
     return <p className={styles.muted}>Loading…</p>;
   }
   if (operatorsQuery.isError) {
     return (
       <p className={styles.error} role="alert">
         {describeSchedulerError(operatorsQuery.error as SchedulerError)}
+      </p>
+    );
+  }
+  // DEF-0035: the server's answer failed, so there is no list to vouch for —
+  // say so, rather than offer everyone or nobody.
+  if (recordableQuery.isError) {
+    return (
+      <p className={styles.error} role="alert">
+        {describeSchedulerError(recordableQuery.error)}
       </p>
     );
   }
