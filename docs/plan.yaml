@@ -3658,7 +3658,7 @@ requirements:
   verified_by:
   - kind: vitest
     file: src/test/scaleAudit.test.ts
-  status: covered
+  status: contradicted
 - id: R-D85
   title: nodes_select keeps an admin short-circuit that reads no table
   source:

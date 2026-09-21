@@ -120,8 +120,8 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">888</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">83</span><span class="l">database changes (migrations)</span></div>
-  <a class="stat act" href="#defects"><span class="n">2</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">335 / 392</span><span class="l">requirements covered by a test · 2 contradicted</span></div>
+  <a class="stat act" href="#defects"><span class="n">3</span><span class="l">open defects — index</span></a>
+  <div class="stat act"><span class="n">334 / 392</span><span class="l">requirements covered by a test · 3 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>9f61c3f</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -878,7 +878,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="defects">
   <span class="eyebrow">Defects</span>
-  <h2>2 open defects</h2>
+  <h2>3 open defects</h2>
   <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>. Click a defect to jump to it; a closed one is folded and opens on click.</p>
   <table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody><tr class="open">
     <td><a href="#DEF-0034"><code>DEF-0034</code></a></td>
@@ -895,6 +895,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
     <td>The Absences 'Person' dropdown offers a supervisor every operator she can see, but set_absence only lets her record for those on her line — she picks one the server then refuses, and R-357's e2e proof fails on the current seed</td>
     <td><a href="#R-357">R-357</a></td>
     <td class="fine">2026-09-21 · <a href="defects/DEF-0035.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0036"><code>DEF-0036</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>minor</td>
+    <td>The scale-standard's completeness guard (D89) walks only the admin directory, so new board stylesheets escape the D84 audit — the operator rail and shift band added this window are in no scale list and unchecked</td>
+    <td><a href="#R-D84">R-D84</a></td>
+    <td class="fine">2026-09-21 · <a href="defects/DEF-0036.md">file</a></td>
   </tr>
 <tr class="closed">
     <td><a href="#DEF-0001"><code>DEF-0001</code></a></td>
@@ -2444,6 +2452,24 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>So Ana can record for only some of the people the dropdown offers her (A2, on her line), and the first offered person is one the server refuses (PT403) or that overlaps (PT409). The screen offers what the server refuses. The spec's own comment — <em>&quot;the first person Ana may place&quot;</em> — shows it was written expecting the dropdown to already be filtered to placeable people; it is not, so index 1 is not recordable and R-357's e2e proof fails on the current seed. (The single row in <code>absences</code> after a failed run is the seeded one; the earlier &quot;0 E2E rows&quot; reading was correct but was mis-explained as a silent server no-op.)</p>
 <p><b>Lead</b></p>
 <p><b>A lead, not a fact — the developer decides, and there is a direction call here for the maintainer.</b> The Person dropdown lists <code>visiblePeople = rowsInPlant(operators, ...)</code> — everyone in the plant Ana can SEE (<code>AbsencesPanel.tsx:110</code>, <code>:284</code>) — but <code>set_absence</code> only lets her record for people she can PLACE (it raises <code>not_permitted</code> / PT403 at the guard on line ~65 of the function). Per CLAUDE.md §4 (&quot;whatever a client offers must be decided by the same test the server runs&quot;), the fix is probably to filter the dropdown to the operators <code>set_absence</code> would accept — the same placeability predicate — so a supervisor is never offered someone the server will refuse. The panel's header comment defends the opposite (offer all, let the server refuse, show the error), so this is a genuine design call: either filter the dropdown (align with §4, and <code>absenceOnBoard.spec.ts</code> index 1 then lands on a placeable person) or change the spec to select a known-placeable operator by name rather than by index. Note the server and the error-surfacing are already correct — this is not a data or security problem, which is why it is filed minor.</p>
+</div>
+<div class="find" id="DEF-0036">
+  <span class="tag">DEF-0036 · minor · test-cannot-fail · open</span>
+  <h3>The scale-standard's completeness guard (D89) walks only the admin directory, so new board stylesheets escape the D84 audit — the operator rail and shift band added this window are in no scale list and unchecked</h3>
+  <p class="fine">Violates <a href="#R-D84">R-D84</a> · filed 2026-09-21 by tester · pinned by <code>src/test/defects/DEF-0036.test.ts</code> · <a href="defects/DEF-0036.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>``<code> grep -n &quot;OperatorPanel.module.css\|ShiftLayer.module.css&quot; src/test/scaleAudit.ts   # no hits </code>``</p>
+<p><code>src/test/scaleAudit.ts</code> is the enforcement half of R-D84. It names its surfaces in two hand-kept lists — <code>CHROME_FILES</code> (board chrome that must scale with <code>--ui-scale</code>) and <code>REM_SURFACES</code> (admin stylesheets that must size in rem). The completeness guard that stops a new surface from silently escaping — the <code>missingRemSurfaces</code> walk, added as D89 after <code>ShapePicker.module.css</code> &quot;sat outside the D84 audit while the audit reported green&quot; — states in its own comment that it <em>&quot;walks the <b>admin</b> feature directory.&quot;</em> There is no equivalent walk of <code>src/features/board</code>.</p>
+<p>So a new board stylesheet is audited only if a person remembered to add it to <code>CHROME_FILES</code>, and nothing fails if they did not. Two board panels added this window are in neither list:</p>
+<p>``<code> src/features/board/components/OperatorPanel.module.css   (operator rail, S65) src/features/board/components/ShiftLayer.module.css       (shift band on cells, S66-c) </code>``</p>
+<p><b>Expected</b></p>
+<p>R-D84's claim: <em>&quot;:root font-size is 100% times --chrome-scale ... and new surfaces size in rem. Breakpoints stay in px. The board keeps calc(px </em> scale) because its geometry is computed ...&quot;* The audit that proves R-D84 (<code>scaleAudit.test.ts</code>) must cover <b>new surfaces</b>, board ones included — that is the whole point of the D89 completeness guard: adding a surface without auditing it should be a test failure, not something noticed on a 4K monitor three briefs later.</p>
+<p><b>Actual</b></p>
+<p>The suite is green (<code>scaleAudit.test.ts</code> passes) while the operator rail and the shift band are audited by nothing. The rail's stylesheet in fact mixes the scaling idiom with bare pixels —</p>
+<p>``<code> src/features/board/components/OperatorPanel.module.css   10:  width: calc(190px <em> var(--ui-scale, 1));     &lt;- scales   82:  width: 8px;                                    &lt;- does not   91:  gap: 6px;                                      &lt;- does not   92:  padding: calc(10px </em> var(--ui-scale, 1)) ...   &lt;- scales </code>``</p>
+<p>so whether it honours R-D84's &quot;the board keeps calc(px * scale)&quot; is exactly the question the audit exists to answer, and the audit is not asked. This is not a proven visual defect — some bare pixels (a 1px hairline, an 8px grab handle) are legitimate under the standard — it is a coverage hole: the guard cannot fail for a file it never reads.</p>
+<p><b>Lead</b></p>
+<p><b>A lead, not a fact — the developer decides.</b> Give the board the same completeness guard the admin tree has: extend the <code>missingRemSurfaces</code>-style walk (D89) to <code>src/features/board</code>, deciding for each board <code>*.module.css</code> whether it belongs in <code>CHROME_FILES</code> (scales via <code>--ui-scale</code>) or an explicit board-pixel ignore list, and fail when one is in neither — the same two-place edit the admin side already forces. Then enrol <code>OperatorPanel.module.css</code> and <code>ShiftLayer.module.css</code> and let the audit judge their bare pixels. The pin (<code>src/test/defects/DEF-0036.test.ts</code>) asserts <code>scaleAudit.ts</code> names both files; it goes green once they are brought under the audit by whichever list.</p>
 </div>
 </section>
 
@@ -4037,7 +4063,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>392 requirements · 335 covered · 31 uncovered · 2 contradicted · 24 superseded</caption>
+<caption>392 requirements · 334 covered · 31 uncovered · 3 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -4262,12 +4288,12 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="fine">sql · <code>supabase/tests/80_cross_org_test.sql</code> C1–C7</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-covered" id="R-D84">
+<tr class="r-contradicted" id="R-D84">
   <td class="g-n">R-D84</td>
   <td class="reqmain"><b>Scaling is the unit: rem surfaces on a scaled root</b><br><span class="fine">:root font-size is 100% times --chrome-scale, guarded by @supports with a plain default, and new surfaces size in rem. Breakpoints stay in px. The board keeps calc(px * scale) because its geometry is computed in pixels.</span>
       <br><span class="fine">§19.16, D84 · agent</span></td>
   <td class="fine">vitest · <code>src/test/scaleAudit.test.ts</code></td>
-  <td class="chipcol"><span class="chip done">covered</span></td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-covered" id="R-D85">
   <td class="g-n">R-D85</td>
