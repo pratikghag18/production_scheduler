@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-21'
-  tip: '9656982'
+  tip: 'adcf0f7'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -9496,15 +9496,21 @@ requirements:
       Ana records an absence over the shown week, the board marks the person on leave on the
       operator panel and names it in the create pop-up's line, then the absence is removed
       (and the spec clears its own leftovers first, session 182)
+  - kind: sql
+    file: supabase/tests/88_absences_test.sql
+    cases: "AB35 (0084): absence_recordable_people() names exactly the people set_absence accepts --- Ana has Elena not Maria, Marco the mirror, the viewer nobody, the company admin everyone, a profile-less caller nobody; and for every person in the org, membership equals whether set_absence accepts them"
   - kind: vitest
     file: src/test/defects/DEF-0035.test.tsx
-    cases: "the Person list offers the person whose home a writable grant covers and withholds the one it does not, while the table lists both; rights pending or failed offer everyone (fail-open); a null home is decided on the site"
+    cases: "the tester's six-people scenario against the server's answer: the two named are offered and the four are not while the table lists everyone; the answer is used as given; an empty answer offers nobody; pending shows Loading and no list; a failed read shows the error in words and no list"
+  - kind: vitest
+    file: src/test/defects/DEF-0035-reopen.test.ts
+    cases: "the migration defines the definer function on set_absence's own gate; AB35 exists and asserts parity; the panel reads the server's answer and applies no canEdit; the api read refuses a malformed answer"
   - kind: vitest
     file: src/test/errors.test.ts
     cases: "absence_overlap parses the person and the requested days and is worded with them, never as Something went wrong (F-185)"
   status: contradicted
   note: >-
-    CONTRADICTED until the tester verifies DEF-0035 (fix-claimed in session 182). Filed 21 Sept (DEF-0035, session 181t): the Person dropdown offered a supervisor everyone she could see while set_absence accepts only people whose home (falling back to site) she manages. FIXED session 182: the list is decided by canEditNode on the same coalesce, fail-open; the refusal is still worded. Found on the way: the overlap refusal was not parsed (F-185); the rail's on-leave mark could shrink to nothing (F-186).
+    CONTRADICTED until the tester verifies DEF-0035 (fix-claimed in session 184). Filed 21 Sept (DEF-0035, session 181t): the Person dropdown offered a supervisor everyone she could see while set_absence accepts only people whose home (falling back to site) she manages. Session 182 filtered the list by canEditNode on the same coalesce; the tester REOPENED it the same day (session 183t): the preview has no path for a cell on another line and fails open, so all six were still offered. Session 184: the form asks the server (absence_recordable_people, 0084, the same expression set_absence gates on), no client predicate, AB35 holds the two to each other. Found on the way in 182: the overlap refusal was not parsed (F-185); the rail's on-leave mark could shrink to nothing (F-186).
 - id: R-351
   title: An admin invites a person by email and they land with their grants
   source:
@@ -12789,9 +12795,11 @@ findings:
     app_can_edit_node(coalesce(home_node_id, site_node_id)), so Ana (Line 1) was refused not_permitted on four of
     Plant A's six people after the yes. The panel's own header defended offering everyone.
   fix: >-
-    Session 182 (9624295), the maintainer's call: the list is filtered by canEditNode on homeNodeId ?? siteNodeId,
-    the same coalesce, fail-open, refusal still worded; home_node_id joins the operator read. Pinned in
-    src/test/defects/DEF-0035.test.tsx.
+    Session 182 (9624295) filtered the list by canEditNode on homeNodeId ?? siteNodeId, and the tester reopened it
+    the same day: the preview has no path for a cell on another line and fails open, so all six were still offered.
+    Session 184 (adcf0f7): the form asks the server --- migration 0084's absence_recordable_people(), SECURITY
+    DEFINER on the same expression set_absence gates on --- and offers exactly that answer; AB35 holds the function
+    to set_absence person by person; both pins rewritten to the new contract; CLAUDE.md section 4 records the rule.
 - id: F-185
   title: Recording an absence over existing leave said "Something went wrong", because absence_overlap was not a code the client knew
   tag: A refusal the server had worded, shown as a shrug
@@ -17427,6 +17435,43 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 184
+  date: 2026-09-21
+  title: "DEF-0035 re-fixed --- the Absences form asks the server who it may record for, because a preview cannot see the cells it is gating on (migration 0084, AB35; R-357, R-431)"
+  shipped: []
+  commits: ['adcf0f7']
+  numbers:
+    app_tests: 4173
+    app_test_files: 165
+    tsc: 0
+    eslint: 0
+    db_checks: 891
+    migrations: 84
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    npm run test after the fix: `Tests 4173 passed (4173)` in 165 files, copied verbatim (the tester's
+    4169 plus this session's cases, the rewritten reopen pin included). tsc clean after `npm run db:types`
+    (one line: the new function). eslint clean; prettier clean apart from package.json and the untracked
+    folder, both pre-existing. 88_absences_test.sql on a rebuilt scratch database: `41 passed, 0 failed`
+    (AB35 new), so the suite's count is 890 plus one; the other numbered files were not rerun. e2e on the
+    running app, migrated with `supabase migration up`: absences 3/3, absenceOnBoard 1/1, roleWalk 5/5.
+  summary: >-
+    The tester reopened DEF-0035 the day it was fixed, and the reopen note named the mechanism: a Line 1
+    supervisor reads the people owned at the plant above her but not the cells on other lines they are
+    homed at, so the client had no path for four of six and canEditNode failed open, by its own rule. A
+    gate on a node the caller cannot read is not one a client can transcribe --- the same shape as the
+    definer resolvers of DEF-0016/0017, and now written beside them in CLAUDE.md section 4. Migration 0084
+    adds absence_recordable_people(), SECURITY DEFINER, running the same expression set_absence gates on
+    and returning the ids the writer accepts; the form offers the visible people intersected with that
+    answer, says Loading while it is pending and the error in words if it fails, and the edit-rights
+    preview is gone from the panel. AB35 holds the function to set_absence person by person for Ana,
+    Marco, the viewer, the company admin and a profile-less caller. Both pins rewritten to the new
+    contract and say so: the developer's renders the tester's six-people scenario against the server's
+    answer; the tester's, which asserted the old filter over canEditNode, asserts the migration, the
+    parity case, the panel's read and the absence of any client predicate. The absence-on-board spec
+    presses the shift chips before looking for the leave mark, since everyone has a band since F-187.
+    Next: the tester verifies DEF-0035; F-182; the queue as it stood.
 - id: 183t
   date: 2026-09-21
   title: "Tester re-verify of session 182's fixes: DEF-0034 and DEF-0036 verified cold, DEF-0035 REOPENED --- the Absences dropdown still offers a supervisor people the server refuses"
