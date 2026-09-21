@@ -2,12 +2,35 @@
    AbsencesPanel — record and remove absences, whole-day or part-day, for the
    people the reader can see in the chosen plant (R-357, R-359).
 
-   TAKES NO PROPS and DECIDES NO PERMISSION. Like every admin panel it reads the
-   plant filter off `usePlantFilter` and shows the people that filter admits; who
-   may actually record or remove an absence is the SERVER's call (`set_absence` /
-   `remove_absence`, gated on the person's place), and a refusal is shown here in
-   words rather than pre-guessed. That is CLAUDE.md section 4's rule: a screen
-   that offers what the server allows, and surfaces what it refuses.
+   TAKES NO PROPS. Like every admin panel it reads the plant filter off
+   `usePlantFilter` and shows every person that filter admits in the absences
+   TABLE — reading is wider than writing, by design, and the table narrows
+   nothing.
+
+   ⭐⭐ DEF-0035 / R-431 — THE PERSON LIST ON THE CREATE FORM IS DECIDED BY THE
+   SAME PREDICATE `set_absence` RUNS, NOT A GUESS. This panel used to offer
+   every visible person, on the theory that the server's own refusal was
+   enough of a guard (CLAUDE.md section 4's other half — "surfaces what it
+   refuses"). The tester found the gap the theory missed: `set_absence` /
+   `remove_absence` gate on `app_can_edit_node(coalesce(home_node_id,
+   site_node_id))` — a supervisor or admin OF THE PERSON'S PLACE — and a Line 1
+   supervisor was offered five of Plant A's six people only to be refused
+   `not_permitted` on four of them. R-431 is the standing rule this breaks:
+   "nothing offered that the server refuses". The fix filters rather than
+   guesses: `useEditRights(canQuery, profile?.role ?? null)` gives `canEdit`,
+   the same `canEditNode` preview `TrainingsPanel` mirrors the server with, and
+   the Person `<select>` offers only `visiblePeople` for whom
+   `canEdit(nodesById.get(person.homeNodeId ?? person.siteNodeId)?.path ??
+   null)` — the SAME coalesce order `set_absence` uses.
+
+   ⚠️ IT STILL FAILS OPEN, AND A REFUSAL IS STILL SHOWN IN WORDS. `canEditNode`
+   answers TRUE whenever the grant read has not landed, has failed, or the
+   owner cannot be resolved to a path (`editRights.ts`'s header) — this is a
+   PREVIEW, not the authority, and the database is right if the two ever
+   disagree. So the fail-open case still offers a person the server may go on
+   to refuse, and `addMutation.onError -> setFormError` still surfaces that
+   refusal exactly as before; this narrows what is OFFERED, it does not retire
+   the sentence that answers for what is REFUSED.
 
    ⚠️ THE DATES ARE SHOWN IN THE CHOSEN PLANT'S FORMAT (R-333), via
    `useDateFormat(plant.choice)` — a plant root resolves its own override, All
@@ -42,6 +65,7 @@ import { formatClock, zonedTimeToInstant } from "@/features/board/lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
+import { useEditRights } from "../hooks/useEditRights";
 import { useOperatorsAdmin } from "../hooks/useOperators";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import { useDateFormat } from "../hooks/useOrgSettings";
@@ -88,9 +112,13 @@ function parseHm(s: string): { h: number; mi: number } | null {
 }
 
 export function AbsencesPanel() {
-  const { session, loading: sessionLoading } = useSession();
+  const { session, profile, loading: sessionLoading } = useSession();
   const canQuery = canQueryAsUser(session?.user.id ?? null, sessionLoading);
   const queryClient = useQueryClient();
+
+  // DEF-0035 / R-431: the same preview `TrainingsPanel` uses, so the Person
+  // list below can be filtered by the SAME predicate `set_absence` runs.
+  const { canEdit } = useEditRights(canQuery, profile?.role ?? null);
 
   const operatorsQuery = useOperatorsAdmin(canQuery);
   const absencesQuery = useQuery({
@@ -109,6 +137,19 @@ export function AbsencesPanel() {
   const visiblePeople = useMemo(
     () => rowsInPlant(operators, plant.choice, plant.plants, nodesById),
     [operators, plant.choice, plant.plants, nodesById],
+  );
+  // DEF-0035 / R-431: the create form's Person list, narrowed from
+  // `visiblePeople` to the people `set_absence` would actually accept.
+  // `person.homeNodeId ?? person.siteNodeId` is the SAME coalesce order the
+  // server's own `coalesce(home_node_id, site_node_id)` uses — never the
+  // owner alone and never re-ordered. The absences TABLE keeps reading
+  // `visiblePeople` untouched; only the create form narrows.
+  const recordablePeople = useMemo(
+    () =>
+      visiblePeople.filter((p) =>
+        canEdit(nodesById.get(p.homeNodeId ?? p.siteNodeId)?.path ?? null),
+      ),
+    [visiblePeople, nodesById, canEdit],
   );
   const nameById = useMemo(
     () => new Map(operators.map((o) => [o.id, o.displayName] as const)),
@@ -281,7 +322,7 @@ export function AbsencesPanel() {
           onChange={(e) => setDraft((d) => ({ ...d, operatorId: e.target.value }))}
         >
           <option value="">Choose a person…</option>
-          {visiblePeople.map((p) => (
+          {recordablePeople.map((p) => (
             <option key={p.id} value={p.id}>
               {p.displayName}
             </option>

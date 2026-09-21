@@ -37,6 +37,9 @@ function op(id: string, displayName: string, siteNodeId: string, active = true):
     source: "manual",
     externalId: null,
     homeShiftId: null,
+    // DEF-0035: OPERATOR_COLUMNS/OperatorRecord grew home_node_id after this
+    // fixture was written.
+    homeNodeId: null,
   };
 }
 function osk(operatorId: string, skillId: string, expiresAt: string | null): OperatorSkillRecord {

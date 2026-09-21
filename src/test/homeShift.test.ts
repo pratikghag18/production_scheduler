@@ -44,6 +44,10 @@ function operatorRowFromSelect(over: Record<string, unknown> = {}): Record<strin
     source: "manual",
     external_id: null,
     home_shift_id: null,
+    // DEF-0035: OPERATOR_COLUMNS grew home_node_id after this fixture was
+    // written; built FROM the constant same as every other column here, so a
+    // sample missing one is a row `parseOperatorRecord` now rejects outright.
+    home_node_id: null,
   };
   const row: Record<string, unknown> = {};
   for (const col of selectedOperatorColumns()) row[col] = sample[col];

@@ -84,7 +84,13 @@ export type SchedulerErrorCode =
   // Migration 0079 / F-131. A run-attached create_assignment (p_run_id set) whose
   // timerange does not lie inside the run's own timerange (`@>`, inclusive of
   // equality). A direct (p_product_id) block is never checked against this.
-  | "outside_run";
+  | "outside_run"
+  // Migration 0069 / R-357 (`set_absence`). Recording an absence for a person
+  // who already has one over some of those days or hours. Raised on the
+  // Absences tab, never on a placement -- a placement's leave refusal is
+  // `absent` above. Unparsed until 21 Sept (F-185), so the tab said
+  // "Something went wrong" for a refusal the server had worded.
+  | "absence_overlap";
 
 export type SchedulerError =
   | {
@@ -283,6 +289,20 @@ export type SchedulerError =
       runTimerange: string;
       timerange: string;
     }
+  /**
+   * Migration 0069 / R-357 (F-185): `set_absence` refused because this person
+   * already has an absence over some of those days (whole-day) or hours
+   * (part-day). `jsonb_build_object('operator_id', ..., 'from', ..., 'to', ...,
+   * 'reason', 'overlaps')` -- `from`/`to` are the REQUESTED inclusive
+   * `YYYY-MM-DD` bounds, not the existing row's, so the sentence names the
+   * days the person asked for.
+   */
+  | {
+      kind: "AbsenceOverlap";
+      operatorId: string;
+      from: string | null;
+      to: string | null;
+    }
   /*
    * ⭐ §19.63 — THE FIVE BELOW EXIST BECAUSE NOT EVERY WRITE IS AN RPC.
    *
@@ -349,6 +369,7 @@ const SCHEDULER_ERROR_KINDS: ReadonlySet<SchedulerError["kind"]> = new Set([
   "OwnerChangeBlocked",
   "Absent",
   "OutsideRun",
+  "AbsenceOverlap",
   "RaceLost",
   "WriteRefused",
   "DuplicateValue",
@@ -641,6 +662,17 @@ function parseDetail(detail: Record<string, unknown>): SchedulerError | undefine
         return { kind: "Absent", nodeId: detail.node_id, policy, operators };
       }
       return undefined;
+    }
+    case "absence_overlap": {
+      // F-185 / migration 0069. `operator_id` is on every raise; `from`/`to`
+      // are the requested days, taken when present, null otherwise.
+      if (!hasStringProp(detail, "operator_id")) return undefined;
+      return {
+        kind: "AbsenceOverlap",
+        operatorId: detail.operator_id,
+        from: typeof detail.from === "string" ? detail.from : null,
+        to: typeof detail.to === "string" ? detail.to : null,
+      };
     }
     case "outside_run": {
       // F-131. All four keys are on every raise site (create_assignment's own
@@ -992,6 +1024,13 @@ export function describeSchedulerError(e: SchedulerError): string {
     }
     case "OutsideRun":
       return "That block would fall outside the job it is joining.";
+    case "AbsenceOverlap": {
+      // F-185. The server's own words, with the requested days when it sent
+      // them -- raw `YYYY-MM-DD`, like `Absent`; a surface with the org's date
+      // format reformats them.
+      const range = e.from !== null && e.to !== null ? ` (${e.from} – ${e.to})` : "";
+      return `This person already has an absence over some of those days${range}.`;
+    }
     case "RaceLost":
       return "Someone else changed this run first — refetching and retrying.";
     case "WriteRefused":

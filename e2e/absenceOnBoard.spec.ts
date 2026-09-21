@@ -60,10 +60,30 @@ test("Ana records an absence and the board marks the person on leave", async ({ 
   const to = plusDays(monday, 13);
   const reason = `E2E on-board leave ${Date.now()}`;
 
-  // 1. Record the absence for the first person Ana may place.
+  // 1. Record the absence: the panel offers only the people she may record
+  //    for (DEF-0035), so index 1 is always someone `set_absence` accepts.
   await signIn(page, SUPERVISOR, "/admin");
   await page.getByRole("button", { name: "Absences" }).click();
   await expect(page.getByRole("heading", { name: "Absences" })).toBeVisible({ timeout: 15_000 });
+
+  // 0. A run that died between step 1 and step 5 leaves its absence behind, and
+  //    the next run's step 1 then lands on a person who already has leave over
+  //    these days -- the server refuses the overlap and the row never appears
+  //    (21 Sept: one such leftover, on the first person Ana is offered, failed
+  //    this spec after DEF-0035 narrowed her list). Remove this spec's own
+  //    leftovers first, by their reason prefix, so the world is as the seed
+  //    left it before anything is recorded.
+  //    The list arrives after the heading ("Loading…" first), so wait for it
+  //    -- a count taken before it lands is 0 and reads as "nothing to clean".
+  await expect(page.getByRole("table").or(page.getByText("No absences recorded"))).toBeVisible({
+    timeout: 15_000,
+  });
+  for (;;) {
+    const leftover = page.getByRole("row").filter({ hasText: "E2E on-board leave" }).first();
+    if ((await leftover.count()) === 0) break;
+    await leftover.getByRole("button", { name: "Remove" }).click();
+    await expect(leftover).toHaveCount(0, { timeout: 15_000 });
+  }
   await page.getByLabel("Person").selectOption({ index: 1 });
   await page.getByLabel("From").fill(from);
   await page.getByLabel("To").fill(to);

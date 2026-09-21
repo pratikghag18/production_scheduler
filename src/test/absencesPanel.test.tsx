@@ -1,12 +1,18 @@
 /**
  * absencesPanel.test.tsx — the Absences admin section (R-357).
  *
- * Two things: the SECTION is offered to a supervisor and a viewer never reaches
- * the admin screen at all (adminSectionsFor / adminAccess, run for real); and the
+ * Three things: the SECTION is offered to a supervisor and a viewer never reaches
+ * the admin screen at all (adminSectionsFor / adminAccess, run for real); the
  * PANEL records and removes through the api and shows a refusal as a sentence
  * rather than swallowing it (CLAUDE.md section 4 — the screen surfaces what the
- * server refuses). The mocks stop at the network boundary and at the two hooks
- * that would otherwise pull the whole api behind them.
+ * server refuses); and, since DEF-0035, the Person LIST it offers is decided by
+ * the same `canEditNode` preview `set_absence` mirrors (R-431) — its own suite
+ * is `src/test/defects/DEF-0035.test.tsx`, so every case here runs with rights
+ * that cover everyone (`role: "admin"`, arm (1)) and never has to think about it.
+ * The mocks stop at the network boundary and at the two hooks that would
+ * otherwise pull the whole api behind them — `useEditRights` is NOT one of
+ * them: it is exercised for real, off the mocked `fetchGrantPaths` below, the
+ * same way `useOperatorsAdmin` is exercised for real off `fetchOperatorsAdmin`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
@@ -23,6 +29,11 @@ const h = vi.hoisted(() => ({
     siteNodeId: "root-1",
     source: "manual",
     externalId: null,
+    homeShiftId: null,
+    // DEF-0035: `null` here is the ordinary case (falls back to `siteNodeId`
+    // in the same coalesce order `set_absence` uses) — the two-plant, two-path
+    // case belongs to DEF-0035.test.tsx, not to this file's existing cases.
+    homeNodeId: null as string | null,
   }),
   absence: (id: string, operatorId: string) => ({
     id,
@@ -49,12 +60,19 @@ const h = vi.hoisted(() => ({
   removeAbsence: vi.fn(),
   fetchAbsences: vi.fn(),
   fetchNodeSetting: vi.fn(),
+  // DEF-0035: `useEditRights` runs for real in this file, so its own network
+  // call needs a mock at the same boundary every other read here uses.
+  fetchGrantPaths: vi.fn(),
 }));
 
 vi.mock("@/features/auth/useSession", () => ({
   useSession: () => ({
     session: { user: { id: "u1" } },
-    profile: { orgId: "org-1" },
+    // DEF-0035: `role: "admin"` — arm (1) of `canEditNode` — is what makes
+    // every existing case in this file true regardless of grants, so the
+    // Person list this suite already exercises stays exactly as wide as it
+    // was before the filter existed.
+    profile: { orgId: "org-1", role: "admin" },
     loading: false,
   }),
 }));
@@ -64,6 +82,7 @@ vi.mock("@/lib/api", () => ({
   setAbsence: (input: unknown) => h.setAbsence(input),
   removeAbsence: (id: string) => h.removeAbsence(id),
   fetchNodeSetting: (nodeId: string, key: string) => h.fetchNodeSetting(nodeId, key),
+  fetchGrantPaths: () => h.fetchGrantPaths(),
   describeSchedulerError: (e: unknown) =>
     (e as { message?: string })?.message ?? "Something went wrong.",
 }));
@@ -101,6 +120,10 @@ beforeEach(() => {
   h.removeAbsence.mockReset().mockResolvedValue(undefined);
   h.fetchAbsences.mockReset().mockResolvedValue({ absences: [h.absence("A1", "O1")], skipped: 0 });
   h.fetchNodeSetting.mockReset().mockResolvedValue("America/Chicago");
+  // DEF-0035: unused by these cases (rights cover everyone via `role: "admin"`
+  // before this ever resolves) but must resolve rather than hang, or a case
+  // awaiting an unrelated `findBy*` would hang with it.
+  h.fetchGrantPaths.mockReset().mockResolvedValue({ adminPaths: [], writablePaths: [] });
 });
 
 describe("who is offered the section", () => {

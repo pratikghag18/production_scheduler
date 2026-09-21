@@ -36,6 +36,9 @@ function operator(over: Partial<OperatorRecord> = {}): OperatorRecord {
     source: "import",
     externalId: "EXT-1",
     homeShiftId: null,
+    // DEF-0035: OPERATOR_COLUMNS/OperatorRecord grew home_node_id after this
+    // fixture was written.
+    homeNodeId: null,
     ...over,
   };
 }

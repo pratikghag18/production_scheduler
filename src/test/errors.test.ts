@@ -617,3 +617,57 @@ describe("toSchedulerError — not_offered_here, both shapes (DEF-0003)", () => 
     expect(err.ownerNodeId).toBe(undefined);
   });
 });
+
+describe("toSchedulerError — absence_overlap on the Absences tab (F-185)", () => {
+  // set_absence (migration 0069) raises this when the person already has an
+  // absence over some of the requested days or hours. Until 21 Sept the code
+  // was not in the parser's closed set, so the Absences tab worded a refusal
+  // the server had explained as "Something went wrong. Please try again."
+  const raise = (detail: Record<string, unknown>) => ({
+    message: "this person already has an absence over some of those days",
+    details: JSON.stringify({ error: "absence_overlap", ...detail }),
+    hint: null,
+    code: "PT409",
+  });
+
+  it("parses the person and the requested days", () => {
+    const err = toSchedulerError(
+      raise({
+        operator_id: "40000000-0000-0000-0000-000000000001",
+        from: "2026-09-21",
+        to: "2026-10-04",
+        reason: "overlaps",
+      }),
+    );
+    expect(err.kind).toBe("AbsenceOverlap");
+    if (err.kind !== "AbsenceOverlap") throw new Error("unreachable");
+    expect(err.operatorId).toBe("40000000-0000-0000-0000-000000000001");
+    expect(err.from).toBe("2026-09-21");
+    expect(err.to).toBe("2026-10-04");
+  });
+
+  it("is worded with the days, never as Something went wrong", () => {
+    const err = toSchedulerError(
+      raise({
+        operator_id: "40000000-0000-0000-0000-000000000001",
+        from: "2026-09-21",
+        to: "2026-10-04",
+      }),
+    );
+    expect(describeSchedulerError(err)).toBe(
+      "This person already has an absence over some of those days (2026-09-21 – 2026-10-04).",
+    );
+  });
+
+  it("a bare raise (no days) still says the true thing", () => {
+    const err = toSchedulerError(raise({ operator_id: "40000000-0000-0000-0000-000000000001" }));
+    expect(err.kind).toBe("AbsenceOverlap");
+    expect(describeSchedulerError(err)).toBe(
+      "This person already has an absence over some of those days.",
+    );
+  });
+
+  it("a raise with no operator_id is malformed and falls through to Unknown", () => {
+    expect(toSchedulerError(raise({ from: "2026-09-21" })).kind).toBe("Unknown");
+  });
+});

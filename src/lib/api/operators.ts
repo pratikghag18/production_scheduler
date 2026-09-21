@@ -47,9 +47,13 @@ import { fetchAll } from "./paging";
 import type { BoardNode, HierarchyLevel } from "./shapes";
 
 // ---------------------------------------------------------------------------
-// Row shapes. camelCase out; `home_node_id` and `certified_at` are read by
-// NOTHING in this app and are deliberately absent — a field on a type is an
-// invitation to surface it.
+// Row shapes. camelCase out; `certified_at` is read by NOTHING in this app
+// and is deliberately absent — a field on a type is an invitation to surface
+// it. `home_node_id` USED to be the other one and is not any more (DEF-0035):
+// `AbsencesPanel`'s Person list has to mirror `set_absence`'s own gate,
+// `app_can_edit_node(coalesce(home_node_id, site_node_id))`
+// (`20260907000069_absence_by_the_hour.sql:285`), and `site_node_id` alone is
+// the wrong half of that coalesce whenever the two differ.
 // ---------------------------------------------------------------------------
 
 export interface OperatorRecord {
@@ -78,6 +82,19 @@ export interface OperatorRecord {
    * band recorded, which `shift_fit` answers `no_shift` for.
    */
   homeShiftId: string | null;
+  /**
+   * `operators.home_node_id` — DEF-0035, added additively (nothing renamed,
+   * `home_shift_id`'s own pattern above). Nullable, "an unenforced
+   * roster-filter default pointing at any node"
+   * (`20260827000023_shared_list_owners.sql:89`) — NOT the ownership root
+   * `siteNodeId` names. `set_absence` / `remove_absence` gate on
+   * `coalesce(home_node_id, site_node_id)`, never on `site_node_id` alone, so
+   * a screen that mirrors that gate has to carry this column too or it
+   * disagrees with the server for every person whose home differs from their
+   * site. `null` = no home node recorded, which the same coalesce reads as
+   * "use the site".
+   */
+  homeNodeId: string | null;
 }
 
 export interface SkillRecord {
@@ -192,8 +209,16 @@ export function parseOperatorRecord(v: unknown): OperatorRecord | null {
   // `strOrNull` — `undefined` (the key absent) still rejects the row, the
   // same contract every other column here keeps.
   const homeShiftId = strOrNull(v.home_shift_id);
+  // DEF-0035: nullable the same way, and for the same reason -- `strOrNull`
+  // so a missing SELECT is rejected rather than silently read as "no home".
+  const homeNodeId = strOrNull(v.home_node_id);
   if (id === null || displayName === null || source === null || siteNodeId === null) return null;
-  if (employeeRef === undefined || externalId === undefined || homeShiftId === undefined) {
+  if (
+    employeeRef === undefined ||
+    externalId === undefined ||
+    homeShiftId === undefined ||
+    homeNodeId === undefined
+  ) {
     return null;
   }
   if (typeof v.active !== "boolean") return null;
@@ -206,6 +231,7 @@ export function parseOperatorRecord(v: unknown): OperatorRecord | null {
     source,
     externalId,
     homeShiftId,
+    homeNodeId,
   };
 }
 
@@ -474,7 +500,7 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
 // pairing `SKILL_COLUMNS`/`parseSkillRecord` and `OPERATOR_SKILL_COLUMNS` are
 // exported for below (homeShift.test.ts, added with home_shift_id).
 export const OPERATOR_COLUMNS =
-  "id, display_name, employee_ref, active, site_node_id, source, external_id, home_shift_id";
+  "id, display_name, employee_ref, active, site_node_id, source, external_id, home_shift_id, home_node_id";
 /**
  * ⚠⚠ EXPORTED SO A TEST CAN HOLD IT AND `parseSkillRecord` TO EACH OTHER.
  * They are two halves of one contract — what we ask the database for, and what

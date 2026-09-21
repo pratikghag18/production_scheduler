@@ -65,6 +65,7 @@ const OPERATOR_ROW = {
   active: false,
   site_node_id: "node-1",
   home_shift_id: null,
+  home_node_id: null, // DEF-0035: OPERATOR_COLUMNS reads it now, and the parser refuses a row without it
   source: "manual",
   external_id: null,
 };

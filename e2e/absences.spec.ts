@@ -31,8 +31,8 @@ test("Ana records an absence, sees it and removes it", async ({ page }) => {
   await page.getByRole("button", { name: "Absences" }).click();
   await expect(page.getByRole("heading", { name: "Absences" })).toBeVisible();
 
-  // Pick the first real person the supervisor may place (the panel offers only
-  // the people she can see) and record a distinctive absence.
+  // Pick the first real person: the panel offers only the people she may
+  // record for (DEF-0035). Record a distinctive absence.
   const reason = `E2E leave ${Date.now()}`;
   await page.getByLabel("Person").selectOption({ index: 1 });
   await page.getByLabel("From").fill("2027-09-14");
