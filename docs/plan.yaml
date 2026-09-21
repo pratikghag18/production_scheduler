@@ -11993,7 +11993,7 @@ requirements:
     cases: "the bar's own spec names Sam Patel"
   - kind: manual
     steps: "scripts/demo/rename-plant-a-operators.sql applied through the database container, the six rows read back, a second run changes nothing (session 174)"
-  status: covered
+  status: contradicted
   note: >-
     STATED 15 Sept (session 174): "the operator names being A1, A2, etc is a bit more challenging to understand vs actual people names, should we try modifying plant A with actual people names?" Brief docs/agent-briefs/s60-a-real-names-brief.md.
 - id: R-424
