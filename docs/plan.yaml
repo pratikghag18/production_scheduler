@@ -9508,7 +9508,7 @@ requirements:
   - kind: vitest
     file: src/test/errors.test.ts
     cases: "absence_overlap parses the person and the requested days and is worded with them, never as Something went wrong (F-185)"
-  status: contradicted
+  status: covered
   note: >-
     CONTRADICTED until the tester verifies DEF-0035 (fix-claimed in session 184). Filed 21 Sept (DEF-0035, session 181t): the Person dropdown offered a supervisor everyone she could see while set_absence accepts only people whose home (falling back to site) she manages. Session 182 filtered the list by canEditNode on the same coalesce; the tester REOPENED it the same day (session 183t): the preview has no path for a cell on another line and fails open, so all six were still offered. Session 184: the form asks the server (absence_recordable_people, 0084, the same expression set_absence gates on), no client predicate, AB35 holds the two to each other. Found on the way in 182: the overlap refusal was not parsed (F-185); the rail's on-leave mark could shrink to nothing (F-186).
 - id: R-351
@@ -17435,6 +17435,38 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 185t
+  date: 2026-09-21
+  title: "Tester re-verify: DEF-0035 VERIFIED on the second fix --- the Absences form asks the server who it may record for, and the definer answers the same gate set_absence runs"
+  commits: []
+  numbers:
+    app_tests: 4173
+    app_test_files: 165
+    tsc: 0
+    eslint: 0
+    db_checks: 891
+    migrations: 84
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    Merged Development onto the tester branch (fast-forward to dfb5a60), which added migration 0084;
+    re-ran `supabase db reset` so it applied, and `db:types` came back byte-identical to the committed
+    file. `npm run test` on the stable stack reads `Test Files 165 passed (165)`, `Tests 4173 passed
+    (4173)`, copied verbatim --- all green, the reopen pin and the rewritten DEF-0035.test.tsx among
+    them. Spot-ran the SQL that changed: `88_absences_test.sql` = 41 passed, 0 failed, PASS AB35; did
+    not re-run the whole SQL suite, so db_checks carries session 184's 891. tsc/eslint clean.
+  summary: >-
+    Re-verified the reopened DEF-0035 cold, four ways, and it holds. The second fix (adcf0f7) stops
+    the client guessing: migration 0084's `absence_recordable_people()`, a SECURITY DEFINER running
+    the SAME `app_can_edit_node(coalesce(home_node_id, site_node_id))` gate `set_absence` runs, returns
+    the ids the writer accepts, and the Absences form offers the visible people intersected with that
+    answer --- no more `canEdit`/`useEditRights` preview that failed open on cells a line supervisor
+    cannot read. Driven live as Ana the RPC returns exactly her two on-line people (Sam Patel, Maria
+    Lopez) and an empty set for the viewer Viva; `e2e/absenceOnBoard.spec.ts` passes; `88_absences_test.sql`
+    AB35 holds membership to `set_absence` per person across five roles; the full unit suite is 4173
+    green. This is the DEF-0016/0017 shape done right --- a predicate about a node the caller cannot see
+    is answered by the server as a definer, never transcribed by a fail-open client. DEF-0035 verified,
+    R-357 back to covered. All three of the tester's defects from session 181t are now closed.
 - id: 184
   date: 2026-09-21
   title: "DEF-0035 re-fixed --- the Absences form asks the server who it may record for, because a preview cannot see the cells it is gating on (migration 0084, AB35; R-357, R-431)"
