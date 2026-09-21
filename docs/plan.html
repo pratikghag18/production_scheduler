@@ -120,8 +120,8 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">888</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">83</span><span class="l">database changes (migrations)</span></div>
-  <a class="stat act" href="#defects"><span class="n">1</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">336 / 392</span><span class="l">requirements covered by a test · 1 contradicted</span></div>
+  <a class="stat act" href="#defects"><span class="n">2</span><span class="l">open defects — index</span></a>
+  <div class="stat act"><span class="n">335 / 392</span><span class="l">requirements covered by a test · 2 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>9f61c3f</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -878,15 +878,23 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="defects">
   <span class="eyebrow">Defects</span>
-  <h2>1 open defect</h2>
+  <h2>2 open defects</h2>
   <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>. Click a defect to jump to it; a closed one is folded and opens on click.</p>
   <table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody><tr class="open">
     <td><a href="#DEF-0034"><code>DEF-0034</code></a></td>
     <td><span class="chip bad">open</span></td>
     <td>major</td>
-    <td>Plant A's demo operators are Operator A1..A6, not Sam Patel and the other real names, on every fresh stack — the rename script R-423 depends on is run by no automated reset or e2e path, so six e2e specs fail every run</td>
+    <td>Plant A's demo operators are Operator A1..A6, not Sam Patel and the other real names, on every fresh stack — the rename script R-423 depends on is run by no automated reset or e2e path, so four e2e specs fail every run</td>
     <td><a href="#R-423">R-423</a></td>
     <td class="fine">2026-09-21 · <a href="defects/DEF-0034.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0035"><code>DEF-0035</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>major</td>
+    <td>Ana (a Line 1 supervisor) records an absence in the app and it silently does nothing — no row is written, no error is shown, and the person is never marked on leave</td>
+    <td><a href="#R-357">R-357</a></td>
+    <td class="fine">2026-09-21 · <a href="defects/DEF-0035.md">file</a></td>
   </tr>
 <tr class="closed">
     <td><a href="#DEF-0001"><code>DEF-0001</code></a></td>
@@ -2390,7 +2398,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 </details>
 <div class="find" id="DEF-0034">
   <span class="tag">DEF-0034 · major · doc-drift · open</span>
-  <h3>Plant A's demo operators are Operator A1..A6, not Sam Patel and the other real names, on every fresh stack — the rename script R-423 depends on is run by no automated reset or e2e path, so six e2e specs fail every run</h3>
+  <h3>Plant A's demo operators are Operator A1..A6, not Sam Patel and the other real names, on every fresh stack — the rename script R-423 depends on is run by no automated reset or e2e path, so four e2e specs fail every run</h3>
   <p class="fine">Violates <a href="#R-423">R-423</a> · filed 2026-09-21 by tester · pinned by <code>src/test/defects/DEF-0034.test.ts</code> · <a href="defects/DEF-0034.md">open the file</a> · <a href="#defects">back to the index</a></p>
   <p><b>Reproduction</b></p>
 <p>On a fresh stack built the way CI and the tester harness build one — <code>supabase db reset</code> (migrations + <code>seed.sql</code> + <code>dev_demo.sql</code>, per <code>config.toml</code> <code>sql_paths</code>), which is exactly what <code>scripts/ci-e2e.sh</code> line 65 and <code>npm run tester -- --e2e</code> do — read Plant A's operator roster:</p>
@@ -2411,10 +2419,31 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>``` Error: expect(received).toEqual(expected) // deep equality</p><ul><li>Expected  - 6</li></ul><p>+ Received  + 6   Array [</p><ul><li>  &quot;John Kim&quot;,</li><li>  &quot;Lena Novak&quot;,</li><li>  &quot;Maria Lopez&quot;,</li><li>  &quot;Priya Shah&quot;,</li><li>  &quot;Sam Patel&quot;,</li><li>  &quot;Tom Baker&quot;,</li></ul><p>+   &quot;Operator A1&quot;, +   &quot;Operator A2&quot;, +   &quot;Operator A3&quot;,     ... ```</p>
 <p><code>e2e/viewerBoard.spec.ts:71</code> never finds an operator chip:</p>
 <p>``<code> Error: expect(locator).toBeVisible() failed Locator: getByRole('button', { name: /(?:Operator A\d|Sam Patel|Maria Lopez|John Kim|Priya Shah|Tom Baker|Lena Novak) on /i }).first() Error: element(s) not found </code>``</p>
-<p>Full serial run (<code>npx playwright test --workers=1</code>): <b>35 passed, 10 failed</b>. The four board-data specs run in isolation, serially, on a quiet machine still fail (<b>6 failed, 2 passed</b>) — so this is not contention flakiness. (<code>typedWalk</code>/<code>voiceBar</code> additionally need the served model service; <code>touch</code> T2/T3/T5 are a separate gesture-flakiness question, not this defect.)</p>
+<p>This defect covers the <b>four real-name specs only</b>: <code>linePeople:102</code>, <code>linePeople:125</code>, <code>viewerBoard:42</code>, <code>viewerBoard:71</code>. They fail in isolation, serially, on a quiet machine (not contention). <code>typedWalk</code> also depends on these names (<code>operatorId(dana, &quot;Sam Patel&quot;)</code>) but is left out of the count because it additionally needs the served model service, which cannot run locally.</p>
+<p><b>Not part of this defect</b> (verified separately after the over-broad first pass): <code>weekTemplates</code> PASSES on a fresh stack — its earlier failure was pollution from repeated runs against an un-reset DB. <code>absenceOnBoard</code> fails for an unrelated reason (a recorded absence is never written) and is filed as its own defect, DEF-0035. <code>touch</code> T2/T3/T5 are a separate gesture-flakiness question.</p>
 <p>This is invisible to <code>confirmed: true</code> sessions because those run <code>npm run test</code> (unit) only — e2e is never in that count, so these six specs have been red on every automated run since S60 shipped without moving the confirmed number.</p>
 <p><b>Lead</b></p>
 <p><b>A lead, not a fact — the developer decides.</b> R-423 deliberately keeps the rename OUT of the seed files (&quot;no seed file creates them&quot;), so the fix is probably not <code>config.toml</code> <code>sql_paths</code>. The likely home is a post-reset step in the automated harness: apply <code>scripts/demo/rename-plant-a-operators.sql</code> through the db container right after <code>supabase db reset</code> in <code>scripts/ci-e2e.sh</code>, and in whatever <code>tester-run.mjs</code> uses to build its <code>--e2e</code> stack, and/or a playwright <code>globalSetup</code>. The pin (<code>src/test/defects/DEF-0034.test.ts</code>) asserts the contradiction statically — the rename script exists and names the six, but no automated entry point references it — so it goes green the moment the rename is wired into one. Worth deciding at the same time whether R-423's manual-script design is what you still want, given it means every fresh demo shows &quot;Operator A1&quot; until someone runs a script by hand.</p>
+</div>
+<div class="find" id="DEF-0035">
+  <span class="tag">DEF-0035 · major · write-no-op · open</span>
+  <h3>Ana (a Line 1 supervisor) records an absence in the app and it silently does nothing — no row is written, no error is shown, and the person is never marked on leave</h3>
+  <p class="fine">Violates <a href="#R-357">R-357</a> · filed 2026-09-21 by tester · <a href="defects/DEF-0035.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>On a fresh stack (<code>supabase db reset</code>), signed in as <code>ana@example.test</code> (<code>devpassword</code>), a Line 1 supervisor on Plant A:</p>
+<p>1. Go to <code>/admin</code>, open the <b>Absences</b> tab. 2. In <b>Person</b>, pick the first operator (the create form's <code>selectOption({ index: 1 })</code>). 3. Fill <b>From</b>, <b>To</b>, a <b>Reason</b>, and click <b>Record absence</b>.</p>
+<p>Automated form: <code>npx playwright test e2e/absenceOnBoard.spec.ts --project=chromium --workers=1</code>.</p>
+<p>Confirmed on a pristine, isolated, serial run (not contention, not pollution — <code>weekTemplates</code> in the same clean-room run passed).</p>
+<p><b>Expected</b></p>
+<p>R-357's claim: <em>&quot;An absence is recorded in the app ... and the board and Copy Week treat it as a clash.&quot;</em> The spec's own words: Ana <em>&quot;records an absence for someone she can place over the shown week ... and reads that the person is marked on leave.&quot;</em> After <b>Record absence</b>, the new row must appear in the Absences list, and the operator must show as on leave on the board.</p>
+<p><b>Actual</b></p>
+<p>The new row never appears. <code>e2e/absenceOnBoard.spec.ts</code> fails at the first check after recording:</p>
+<p>``<code> Error: expect(locator).toBeVisible() failed Locator: getByRole('row').filter({ hasText: 'E2E on-board leave 1790003931703' }) Expected: visible Error: element(s) not found </code>``</p>
+<p>And nothing was written to the database — read back as the postgres superuser (so this is not an RLS-hidden row, it genuinely does not exist):</p>
+<p>``<code> select count(<em>) from absences where reason like 'E2E%';   -- 0 select count(</em>) from absences;                             -- 1  (the single seeded row only) </code>``</p>
+<p>No error is surfaced in the UI. So the write reports nothing wrong and changes nothing — the person is never marked on leave.</p>
+<p><b>Lead</b></p>
+<p><b>A lead, not a fact — the developer decides.</b> <code>absences</code> has RLS on with only a SELECT policy (<code>absences_select</code>); every write goes through the <code>set_absence</code> SECURITY DEFINER RPC (<code>src/lib/api/absences.ts</code> <code>setAbsence</code> → <code>supabase.rpc(&quot;set_absence&quot;)</code>, which does <code>if (error) throw toSchedulerError(error)</code>). No error was thrown and zero rows landed, so <code>set_absence</code> most likely <b>inserted zero rows for Ana's chosen operator without raising</b> — a scope/eligibility guard inside the definer that no-ops instead of refusing loudly — and <code>setAbsence</code> treats the empty result as success. This is the project's own &quot;a write that reports success can have changed nothing&quot; trap (CLAUDE.md §4): read <code>ROW_COUNT</code> back inside <code>set_absence</code> and raise when it is zero. The other candidate to rule out: the <b>Person</b> dropdown may be offering Ana an operator she has no right to record for (it lists <code>rowsInPlant</code> — the whole plant — while a Line 1 supervisor may only place her line), i.e. the screen offers what the server refuses; check whether the operator at index 1 is one Ana may actually place, and whether <code>set_absence</code> guards on that.</p>
 </div>
 </section>
 
@@ -4008,7 +4037,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>392 requirements · 336 covered · 31 uncovered · 1 contradicted · 24 superseded</caption>
+<caption>392 requirements · 335 covered · 31 uncovered · 2 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -6067,12 +6096,12 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="fine">sql · <code>supabase/tests/89_week_templates_test.sql</code> TP0-TP6 with TP-EQ, TP-ON and TP-APPLY: save then list; a duplicate name refused case-insensitively; a supervisor who can place may save from and apply to a week and may not delete (TP3), and one whose board root is a line below the plant resolves to the plant, saves only the rows she can read, and applies (TP6); a viewer refused at save, apply, rename and delete (TP4); a plan from a template equals a plan from the week it was saved from, item for item, on the same target (TP-EQ); an overnight item crosses the day boundary with end_min past 1440 (TP-ON); apply-from-template writes exactly what Copy Week writes, rows compared in relative time (TP-APPLY); execute granted to authenticated and revoked from anon and public on the writers (TP5)<br>vitest · <code>src/test/weekTemplates.test.ts</code> save, list, rename and delete parse from one column constant and surface a refusal; the template source is threaded through copy_week_plan and apply_copy_week with a null source; the counts sentence names the template as the source<br>vitest · <code>src/test/copyWeekDialogTemplate.test.tsx</code> the source picker, another week or a template, and the same preview path with a template id; a supervisor gets only the template source; Copy week is admin-only while Apply a template and Save are offered to a placing supervisor and to no viewer<br>e2e · <code>e2e/weekTemplates.spec.ts</code> an admin saves this week and applies it through Copy Week onto a scratch week, then deletes it in the admin Templates tab; a supervisor is offered Save and Apply a template, template source only, and never Copy week; a viewer is offered none<br>sql · <code>supabase/tests/89_week_templates_test.sql</code> TP-XT (0068): as an org-1 plant admin, rename and delete of a fabricated org-2 template id raise the same invalid_argument / no_such_template a bogus id raises, and the foreign row survives both calls<br>vitest · <code>src/test/defects/DEF-0021.test.ts</code> rename_week_template's and delete_week_template's existence lookups are org-scoped; the reader sees the shape list_week_templates already uses</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-covered" id="R-357">
+<tr class="r-contradicted" id="R-357">
   <td class="g-n">R-357</td>
   <td class="reqmain"><b>An absence is recorded in the app or imported by file, and the board and Copy Week treat it as a clash</b><br><span class="fine">The maintainer, 7 Sept, from three options put side by side (entered in the app; CSV import; both): BOTH. An absence is a person, a date range and a reason, recorded on an Absences tab in admin by a supervisor or admin of the person's place, and also imported by file through the existing import pipeline in the same shape as operators and trainings. On the board and in Copy Week an assignment that overlaps a person's absence is a clash of its own kind, decided by the same server function that decides eligibility and surfaced the way an expired certificate is (R-338): the screen shows it before the save, the server refuses or warns under the plant's existing warn-or-block policy, and the client's picture of it is the same predicate the server runs. ⭐ THE SERVER AND ADMIN HALVES LANDED IN SESSION 85 (migration 0066: the table, the writers gated on the person's home, the definer predicate <code>absence_overlap</code>, and <code>create_assignment</code>, <code>move_run</code>, <code>reassign_assignment</code> and <code>copy_week_plan</code> consulting it beside eligibility; the Absences tab and the CSV importer; <code>absenceGaps</code> as the client mirror). THE BOARD'S OWN SURFACING LANDED THE SAME SESSION: an &quot;on leave&quot; mark on the operator panel for anyone away over the shown window, the leave named on a line in the create and reassign pop-ups before the save (a warning under warn, Create disabled in place under block, the R-338 shape), and a sentence for the <code>absent</code> refusal. The board reads absences with a second query rather than a re-emitted board_window, on the evidence that <code>absences_select</code> and <code>operators_select</code> gate on the same predicate, so the set of people with absences shown is exactly the set of people drawn; nothing is resolved upward, so no definer is needed. Two edges left named for the queue: the warn-path warnings after a successful crew drag (<code>absence_warnings</code>) are parsed but not yet shown in the drag toast, and the Copy Week dialog's <code>absent</code> clash sentence belongs to the templates lane.</span>
       <br><span class="fine">session 85 conversation, queue item &quot;PTO/absence source decision + conflict surfacing&quot; · maintainer</span></td>
   <td class="fine">sql · <code>supabase/tests/88_absences_test.sql</code> AB0-AB14 (19 with the b cases): the exclusion constraint; a supervisor of the person's place may record and one of another place may not (AB2-AB4); remove gated the same way (AB5); a viewer reads and cannot write and a direct INSERT is refused (AB6-AB7); the absence_overlap boundary both ways, an absence ending on the shift's start day clashes and a shift ending at midnight on the absence's start day does not (AB8, AB8b); an assignment over an absence refused under block and warned under warn for create, move, reassign and the copy plan (AB9-AB12); the definer predicate answers for a supervisor and is null-safe (AB13); authenticated-only grants (AB14)<br>vitest · <code>src/test/absence.test.ts</code> absenceGaps boundary cases mirrored on the SQL cases by name (AB8, AB8b), earliest first, per operator, open-ended window<br>vitest · <code>src/test/absenceImport.test.ts</code> column detection; person match by import id, employee ref or name with a non-unique match an error; bad date, inverted range, blank reason; insert versus update on the derived id; mixed-file counts<br>vitest · <code>src/test/absencesPanel.test.tsx</code> the section is offered to a supervisor and a viewer is denied admin; the panel records and removes through the api and shows a refusal as a sentence; an inverted range is refused client-side<br>e2e · <code>e2e/absences.spec.ts</code> Ana records, sees and removes an absence; Viva is never offered the tab; Dana imports a CSV and a bad row is refused<br>vitest · <code>src/test/absenceOnBoard.test.tsx</code> the board's own surfacing, each named for its 88_absences_test.sql twin: the create pop-up names the leave before Create and refuses in place under block or warns under warn (AB8, AB8b, AB9); the reassign pop-up does the same for the chosen person and never walls a field-only edit (AB11); the operator panel marks whoever is away over the shown window; the `absent` describer names one person or the whole crew (AB10) and falls through to Unknown on a malformed payload; the warn-path keys parse, defaulting to not-absent on an older payload<br>e2e · <code>e2e/absenceOnBoard.spec.ts</code> Ana records an absence over the shown week, the board marks the person on leave on the operator panel and names it in the create pop-up's line, then the absence is removed</td>
-  <td class="chipcol"><span class="chip done">covered</span></td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-covered" id="R-351">
   <td class="g-n">R-351</td>

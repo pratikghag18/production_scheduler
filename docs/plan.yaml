@@ -9489,7 +9489,7 @@ requirements:
     cases: >-
       Ana records an absence over the shown week, the board marks the person on leave on the
       operator panel and names it in the create pop-up's line, then the absence is removed
-  status: covered
+  status: contradicted
 - id: R-351
   title: An admin invites a person by email and they land with their grants
   source:
