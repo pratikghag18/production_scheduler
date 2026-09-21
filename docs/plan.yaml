@@ -12740,6 +12740,23 @@ requirements:
     developer's written rule, "#1 Yes". The 9 Sept guidance to fold a capability into an existing control was
     the same rule unstated.
 findings:
+- id: F-189
+  title: The line-people spec read two of Plant A's six, because it predates the rail's shift chips
+  tag: A walk that assumed the rail it was written against
+  status: fixed
+  found_by: agent
+  stage: S66
+  refs:
+  - R-448
+  - R-345
+  story: >-
+    Found 21 Sept (session 182), the first time e2e/linePeople.spec.ts ran with the real names in the
+    seed: the case reads the rail's default list plus the "other people" click and expects the plant's six,
+    but since R-448 (session 180) the default list is the people on shift NOW, with the other bands behind
+    a chip each; only the two on Shift 2 were there. Nobody saw it because the names had kept the spec red.
+  fix: >-
+    Session 182: the case presses every chip that is off before reading, since it is about the place rule,
+    not the clock; linePeople 2/2, viewerBoard 2/2, roleWalk 5/5 on the reset database.
 - id: F-183
   title: Plant A's people were Operator A1..A6 on every fresh stack, because the rename was a script no reset or e2e path ran
   tag: A fact the demo depends on lived outside the seed
@@ -17414,7 +17431,7 @@ sessions:
   date: 2026-09-21
   title: "The tester's three defects fixed --- the real names in the seed, the Absences list decided by the server's own gate, the scale audit walking the board --- and three more found on the way (DEF-0034 to DEF-0036; F-183 to F-188)"
   shipped: []
-  commits: ['ce26188', '9624295', '9656982']
+  commits: ['ce26188', '9624295', '9656982', '6c8c90a']
   numbers:
     app_tests: 4168
     app_test_files: 164
@@ -17430,10 +17447,12 @@ sessions:
     was clean). tsc and eslint clean; prettier clean apart from package.json and the maintainer's untracked
     folder, both untouched today. The demo-world SQL file reads `13 passed, 0 failed` (D11 and D12 new),
     so the suite's count is the tester's 888 plus two; the numbered files were not rerun (no migration).
-    e2e on the running app: absences 3/3, absenceOnBoard 1/1, roleWalk 5/5. linePeople and viewerBoard were
-    NOT run: they need the real names in the live database, which is still on Operator A1..A6 after the
-    F-181 re-seed, and a write to it was refused by the session's permission gate --- the maintainer
-    resets or applies the seed's section 6a by hand (see the summary), then runs those two.
+    e2e on the running app: absences 3/3, absenceOnBoard 1/1, roleWalk 5/5. linePeople and viewerBoard
+    needed the real names in the live database, which was still on Operator A1..A6 after the F-181 re-seed
+    and which the session's permission gate would not let it write; the maintainer ran `npm run db:reset`
+    (the seed's new checks passed on the way, the six read back with their names and Sam Patel on Shift 2),
+    then linePeople 2/2, viewerBoard 2/2 and roleWalk 5/5 after one linePeople case was
+    brought up to the shift chips (F-189).
   summary: >-
     Merged the tester (fast-forward), read the three defects to the maintainer, and took the two calls:
     the real names go into the demo seed, and the Absences dropdown is filtered by the server's own

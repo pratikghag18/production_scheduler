@@ -109,6 +109,16 @@ test("a line supervisor sees the whole plant's people: the default list plus the
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await expect(panel.getByText(PLANT_A_NAME_RE).first()).toBeVisible({ timeout: 15_000 });
 
+  // R-448 (S66-c, session 180): the rail lists the people on shift NOW by
+  // default, with a chip per shift that brings the other bands in. This case
+  // is about the PLACE rule (the plant's six, split by the click), not the
+  // clock, so press every chip that is off before reading -- otherwise the
+  // list is whichever band the plant's clock is in (two of six, 21 Sept,
+  // found the first time this ran with the real names in the seed, F-189).
+  const offChips = panel.getByRole("button", { name: /^Shift \d+$/, pressed: false });
+  for (let i = (await offChips.count()) - 1; i >= 0; i--) await offChips.nth(i).click();
+  await expect(panel.getByRole("button", { name: /^Shift \d+$/, pressed: false })).toHaveCount(0);
+
   const { here, behind } = await readSplit(panel, (t) =>
     t.trim().split(/\s/).slice(0, 2).join(" "),
   );
