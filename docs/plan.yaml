@@ -17432,8 +17432,8 @@ sessions:
   title: "Tester re-verify of session 182's fixes: DEF-0034 and DEF-0036 verified cold, DEF-0035 REOPENED --- the Absences dropdown still offers a supervisor people the server refuses"
   commits: []
   numbers:
-    app_tests: 4168
-    app_test_files: 164
+    app_tests: 4169
+    app_test_files: 165
     tsc: 0
     eslint: 0
     db_checks: 890
@@ -17448,6 +17448,9 @@ sessions:
     suite DURING a db:reset with the edge container down; re-run alone on the stable stack they pass.)
     Did NOT re-run the full SQL suite this session --- the three defects are seed/UI/audit, verified by
     unit, targeted e2e and live queries --- so db_checks and migrations carry session 182's numbers.
+    Then added a RED reproduction pin for the reopened DEF-0035 (`src/test/defects/DEF-0035-reopen.test.ts`),
+    so the suite is now 4169 in 165 with exactly ONE failing by design --- that pin --- until the absence
+    dropdown is re-fixed. The developer's own `DEF-0035.test.tsx` stays green because it mocks the hook.
   summary: >-
     Re-ran each defect's own reproduction cold, not the code by eye. DEF-0034 VERIFIED: a fresh
     `supabase db reset` now names the six (EMP-1001 Sam Patel .. EMP-1006 Lena Novak) from the seed
