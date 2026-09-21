@@ -123,8 +123,9 @@ export const NO_BACKEND_REASON =
  * function is not being served", "could not sign in as Dana" and "Operator A2
  * not found" the same way — `console.warn` and `return` — which vitest counts
  * as PASSED, not skipped. (That third quote is DEF-0022.test.ts's own literal
- * string, not a live lookup of the operator's current display name — S60-a's
- * rename of Plant A's operators, R-423, does not touch it or make it stale.)
+ * string, not a live lookup of the operator's current display name — R-423
+ * (21 Sept, DEF-0034) put Plant A's real names in the seed itself, and that
+ * does not touch this literal string or make it stale.)
  *
  * ⛔ MEASURED, 9 Sept, not argued. `supabase_edge_runtime_production_scheduler`
  * had exited (255) overnight while the other nine containers stayed up. The

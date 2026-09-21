@@ -421,12 +421,20 @@ BEGIN
   -- picked by a hash of the employee ref so the spread is random-looking but
   -- the same on every seed -- the walks and the tester can name who is on
   -- which shift.
+  -- ⚠️ 21 Sept (F-187): the pattern is the PLANT's, found by walking up from
+  -- the person's own site to its root -- not by `st.site_node_id =
+  -- o2.site_node_id`, which only ever matched people owned at the root. The
+  -- one person per plant owned at Line 1 (EMP-x001, Sam Patel on Plant A)
+  -- joined nothing and kept `home_shift_id` NULL, so the walk's own person
+  -- showed "No shift" while R-441 promises every operator a home shift.
   UPDATE operators o SET home_shift_id = pick.shift_id
     FROM (
       SELECT o2.id AS operator_id,
              (array_agg(s.id ORDER BY s.start_min))[1 + (abs(hashtext(o2.employee_ref)) % count(*))::int] AS shift_id
         FROM operators o2
-        JOIN shift_templates st ON st.org_id = o2.org_id AND st.site_node_id = o2.site_node_id
+        JOIN nodes own ON own.id = o2.site_node_id
+        JOIN nodes root ON root.org_id = own.org_id AND root.parent_id IS NULL AND root.path @> own.path
+        JOIN shift_templates st ON st.org_id = o2.org_id AND st.site_node_id = root.id
         JOIN shifts s ON s.template_id = st.id
        WHERE o2.org_id = v_org
        GROUP BY o2.id
@@ -483,6 +491,66 @@ BEGIN
       END LOOP;
     END LOOP;
   END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 6a. PLANT A'S REAL NAMES (R-423, DEF-0034).
+--
+-- The maintainer, 15 Sept (session 174): "the operator names being A1, A2,
+-- etc is a bit more challenging to understand vs actual people names, should
+-- we try modifying plant A with actual people names?" That used to be a
+-- standalone rename script, kept out of the seed and applied by hand against
+-- this machine's database only -- no reset or e2e path ran it, so every
+-- fresh stack kept "Operator A1".."Operator A6" and `e2e/linePeople.spec.ts`
+-- and `e2e/viewerBoard.spec.ts` failed on every automated run (DEF-0034).
+-- The maintainer, 21 Sept: "put the real names in the seed." So the standalone
+-- script is deleted and this file names the six directly.
+--
+-- ⚠️ WHY THIS IS ITS OWN SECTION AND NOT PART OF THE LOOP IN §2/§4. Section 4
+-- builds the six operators per plant as `'Operator ' || v_letter || i`, and
+-- everything downstream of that INSERT keys on that exact display name: the
+-- training grants above (lines ~354-357, ~371), the F-181 Welding row, and
+-- the week of schedule's assignments (§6, `o.display_name = 'Operator ' ||
+-- v_letter || v_i`). Renaming inside the loop would break every one of those
+-- lookups for Plant A alone. So the rename happens here, AFTER the schedule
+-- is built and keyed on the old names, and BEFORE the dev credentials below.
+--
+-- `employee_ref` is left exactly as it was -- it is the literal string
+-- 'EMP-1001' .. 'EMP-1006', not a derived abbreviation like "A1": this seed
+-- builds fresh, so there is no old name to guard the UPDATE on, and the EMP
+-- refs are the key instead. `src/lib/command/resolve.ts` matches a spoken
+-- person word against `displayName` first and `employeeRef` second (its
+-- lines ~2062-2065), comparing against the ref field's actual contents -- so
+-- nothing about voice resolution changes by keeping the refs.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001'; v_named int;
+BEGIN
+  UPDATE operators SET display_name = 'Sam Patel'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1001';
+  UPDATE operators SET display_name = 'Maria Lopez'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1002';
+  UPDATE operators SET display_name = 'John Kim'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1003';
+  UPDATE operators SET display_name = 'Priya Shah'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1004';
+  UPDATE operators SET display_name = 'Tom Baker'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1005';
+  UPDATE operators SET display_name = 'Lena Novak'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1006';
+
+  -- Pairwise, not two IN lists: six rows that each carry SOME real name would
+  -- pass a looser count with two people swapped.
+  SELECT count(*) INTO v_named
+    FROM operators o
+    JOIN (VALUES ('EMP-1001', 'Sam Patel'),   ('EMP-1002', 'Maria Lopez'),
+                 ('EMP-1003', 'John Kim'),    ('EMP-1004', 'Priya Shah'),
+                 ('EMP-1005', 'Tom Baker'),   ('EMP-1006', 'Lena Novak')) AS want(ref, name)
+      ON want.ref = o.employee_ref AND want.name = o.display_name
+   WHERE o.org_id = v_org;
+  IF v_named <> 6 THEN
+    RAISE EXCEPTION 'dev_demo: Plant A real names missing (R-423)';
+  END IF;
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -553,8 +621,12 @@ DECLARE
   v_org uuid := '10000000-0000-0000-0000-000000000001';
   v_roots int; v_nodes int; v_structs int; v_prod int; v_ops int;
   v_unowned int; v_narrow int; v_runs int; v_orphan int; v_logins int;
-  v_placeless int; v_shared int;
+  v_placeless int; v_shared int; v_shiftless int;
 BEGIN
+  -- R-441 (F-187): every demo person has a home shift, the line-owned one
+  -- included. NULL here means the shift pick above joined nothing for them.
+  SELECT count(*) INTO v_shiftless FROM operators
+   WHERE org_id = v_org AND home_shift_id IS NULL;
   SELECT count(*) INTO v_roots FROM nodes WHERE org_id = v_org AND parent_id IS NULL;
   SELECT count(*) INTO v_nodes FROM nodes WHERE org_id = v_org;
   -- one copied structure per plant, plus the original the copies came from
@@ -615,6 +687,7 @@ BEGIN
   IF v_structs <> 4 THEN RAISE EXCEPTION 'dev_demo: % structures, expected 4 (one per plant + the original)', v_structs; END IF;
   IF v_prod <> 13 THEN RAISE EXCEPTION 'dev_demo: % products, expected 13 (12 per-plant + 1 shared across two plants, D115)', v_prod; END IF;
   IF v_ops <> 18 THEN RAISE EXCEPTION 'dev_demo: % operators, expected 18', v_ops; END IF;
+  IF v_shiftless <> 0 THEN RAISE EXCEPTION 'dev_demo: % operators with no home shift, expected 0 (R-441, F-187)', v_shiftless; END IF;
   IF v_unowned <> 0 THEN RAISE EXCEPTION 'dev_demo: % company-wide operators/skills/patterns, expected 0 (D108)', v_unowned; END IF;
   IF v_placeless <> 0 THEN RAISE EXCEPTION 'dev_demo: % products offered in no plant, expected 0 (D115)', v_placeless; END IF;
   IF v_shared <> 2 THEN RAISE EXCEPTION 'dev_demo: the shared part is in % plants, expected 2 (D115)', v_shared; END IF;

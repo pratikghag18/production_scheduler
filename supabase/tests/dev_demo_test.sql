@@ -263,3 +263,47 @@ BEGIN
   IF v_nodes > 0 THEN RAISE NOTICE 'PASS D10';
   ELSE RAISE NOTICE 'FAIL D10: org 2 has no nodes left — dev_demo reached across orgs'; END IF;
 END $$;
+
+\echo 'D11: Plant A''s six people carry real names, in the seed itself (R-423, DEF-0034)'
+DO $$
+DECLARE v_named int; v_placeholder int;
+BEGIN
+  -- The rename used to be a script no automated path ran, so a fresh stack
+  -- kept "Operator A1".."Operator A6" and e2e/linePeople + e2e/viewerBoard
+  -- failed (DEF-0034). The maintainer, 21 Sept: put the real names in the
+  -- seed. This asks both directions: the six real names are on the six EMP
+  -- refs, and no "Operator A#" placeholder survives anywhere in the org.
+  -- Pairwise (ref, name), so two people swapped cannot pass as six named rows.
+  SELECT count(*) INTO v_named
+    FROM operators o
+    JOIN (VALUES ('EMP-1001', 'Sam Patel'),   ('EMP-1002', 'Maria Lopez'),
+                 ('EMP-1003', 'John Kim'),    ('EMP-1004', 'Priya Shah'),
+                 ('EMP-1005', 'Tom Baker'),   ('EMP-1006', 'Lena Novak')) AS want(ref, name)
+      ON want.ref = o.employee_ref AND want.name = o.display_name
+   WHERE o.org_id = '10000000-0000-0000-0000-000000000001';
+  SELECT count(*) INTO v_placeholder FROM operators
+   WHERE org_id = '10000000-0000-0000-0000-000000000001'
+     AND display_name ~ '^Operator A[1-6]$';
+  IF v_named = 6 AND v_placeholder = 0 THEN RAISE NOTICE 'PASS D11';
+  ELSE RAISE NOTICE 'FAIL D11: % of 6 EMP-100x rows carry the real name, % Operator A# placeholders remain (want 6, 0)',
+                    v_named, v_placeholder; END IF;
+END $$;
+
+\echo 'D12: every demo person has a home shift, the line-owned one included (R-441, F-187)'
+DO $$
+DECLARE v_shiftless int; v_line_owned int;
+BEGIN
+  -- The shift pick used to join the pattern on the person's OWN site, so the
+  -- one person per plant owned at Line 1 (EMP-x001) got no shift at all and
+  -- the rail read "No shift" for the walk's own person. Both directions: nobody
+  -- is shiftless, and the line-owned people in particular carry one.
+  SELECT count(*) INTO v_shiftless FROM operators
+   WHERE org_id = '10000000-0000-0000-0000-000000000001' AND home_shift_id IS NULL;
+  SELECT count(*) INTO v_line_owned FROM operators o
+    JOIN nodes n ON n.id = o.site_node_id
+   WHERE o.org_id = '10000000-0000-0000-0000-000000000001'
+     AND n.parent_id IS NOT NULL AND o.home_shift_id IS NOT NULL;
+  IF v_shiftless = 0 AND v_line_owned = 3 THEN RAISE NOTICE 'PASS D12';
+  ELSE RAISE NOTICE 'FAIL D12: % people with no home shift (want 0), % line-owned people with one (want 3)',
+                    v_shiftless, v_line_owned; END IF;
+END $$;

@@ -37,11 +37,11 @@ const PASSWORD = "devpassword";
 const SUPERVISOR = "ana@example.test";
 
 /**
- * Plant A's six people. `dev_demo.sql` still seeds them as "Operator A1" ..
- * "Operator A6" (EMP-1001 .. EMP-1006); `scripts/demo/rename-plant-a-operators.sql`
- * (R-423) renames them on this machine's database to real names, in the same
- * order the employee_refs give them, and that is the running app this spec
- * drives. `employee_ref` itself is untouched by that script.
+ * Plant A's six people. `dev_demo.sql` names them directly (EMP-1001 ..
+ * EMP-1006, in that order) as part of the seed itself -- R-423, put in the
+ * seed by the maintainer 21 Sept (DEF-0034) after a standalone rename script
+ * that no automated reset or e2e path ran left every fresh stack showing
+ * "Operator A1" .. "Operator A6" instead. `employee_ref` is untouched.
  */
 const PLANT_A_PEOPLE = [
   "Sam Patel",

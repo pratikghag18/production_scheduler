@@ -46,13 +46,13 @@ test("a viewer sees the board and nothing to pick from: no panel, no Copy week",
   await fillWindowStart(page, mondayOfThisWeek());
 
   // The board itself, with its rows, is hers to read.
-  // R-423 (session 174): Plant A's six people carry real names, applied by
-  // scripts/demo/rename-plant-a-operators.sql after the seed; the placeholder
-  // form is kept for a stack seeded without that script (session 179).
+  // R-423 (21 Sept, DEF-0034): Plant A's six people carry real names, named
+  // directly by the seed itself (`supabase/dev_demo.sql`) rather than by a
+  // standalone script no automated path ran; a fresh stack always has them.
   await expect(
     page
       .getByRole("button", {
-        name: /(?:Operator A\d|Sam Patel|Maria Lopez|John Kim|Priya Shah|Tom Baker|Lena Novak) on /i,
+        name: /(?:Sam Patel|Maria Lopez|John Kim|Priya Shah|Tom Baker|Lena Novak) on /i,
       })
       .first(),
   ).toBeVisible({
