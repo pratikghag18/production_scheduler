@@ -3662,7 +3662,7 @@ requirements:
   - kind: vitest
     file: src/test/defects/DEF-0036.test.ts
     cases: "scaleAudit.ts names OperatorPanel.module.css and ShiftLayer.module.css"
-  status: contradicted
+  status: covered
   note: >-
     CONTRADICTED until the tester verifies DEF-0036 (fix-claimed in session 182). Filed 21 Sept (DEF-0036, session 181t): the D89 completeness walk covered the admin tree only, so the operator rail and the shift band were audited by nothing. FIXED session 182: the board has its own classification and walk; sixteen older board files carry bare px on a dated legacy list (BOARD_PX_LEGACY, about two hundred lengths) that may only shrink.
 - id: R-D85
@@ -12017,7 +12017,7 @@ requirements:
   - kind: e2e
     file: e2e/voiceBar.spec.ts
     cases: "the bar's own spec names Sam Patel"
-  status: contradicted
+  status: covered
   note: >-
     CONTRADICTED until the tester verifies DEF-0034 (fix-claimed in session 182; the validator keeps the status until then).
     STATED 15 Sept (session 174): "the operator names being A1, A2, etc is a bit more challenging to understand vs actual people names, should we try modifying plant A with actual people names?" Brief docs/agent-briefs/s60-a-real-names-brief.md. RESTATED 21 Sept (session 182) after DEF-0034: the rename was a script no automated path ran, so every fresh stack showed Operator A1..A6; the maintainer moved it into the seed (docs/agent-briefs/def-0034-names-in-the-seed-brief.md). The e2e cases were not rerun in session 182 (the live database still carried the placeholders); the tester's fresh stack is where they are proved.
@@ -17427,6 +17427,41 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 183t
+  date: 2026-09-21
+  title: "Tester re-verify of session 182's fixes: DEF-0034 and DEF-0036 verified cold, DEF-0035 REOPENED --- the Absences dropdown still offers a supervisor people the server refuses"
+  commits: []
+  numbers:
+    app_tests: 4168
+    app_test_files: 164
+    tsc: 0
+    eslint: 0
+    db_checks: 890
+    migrations: 83
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    Merged Development onto the tester branch (fast-forward to 3078055). `npm run test` on a stable,
+    freshly-reset stack with the edge runtime up reads `Test Files 164 passed (164)`, `Tests 4168
+    passed (4168)`, copied verbatim --- all green, the three defect pins included. (An earlier count
+    caught 2 failing, DEF-0020 and DEF-0022, but those are live-backend pins I raced by running the
+    suite DURING a db:reset with the edge container down; re-run alone on the stable stack they pass.)
+    Did NOT re-run the full SQL suite this session --- the three defects are seed/UI/audit, verified by
+    unit, targeted e2e and live queries --- so db_checks and migrations carry session 182's numbers.
+  summary: >-
+    Re-ran each defect's own reproduction cold, not the code by eye. DEF-0034 VERIFIED: a fresh
+    `supabase db reset` now names the six (EMP-1001 Sam Patel .. EMP-1006 Lena Novak) from the seed
+    itself, its rewritten pin passes, and e2e/linePeople + e2e/viewerBoard pass 4/4. DEF-0036 VERIFIED:
+    scaleAudit now carries a board completeness walk (`missingBoardSurfaces`) beside the admin one, with
+    `BOARD_SCALED_SURFACES` and an `unscaledBoardPx` matcher that exempts px inside a --ui-scale calc; the
+    two new board files are enrolled and the pin passes. R-423 and R-D84 back to covered. DEF-0035 is
+    REOPENED: the fix filters the Person list by `canEdit`, but `canEdit` fails OPEN for a line
+    supervisor (the panel's own header comment admits it), so on a fresh seed as Ana the dropdown still
+    offers all six operators --- e2e/absenceOnBoard picks index 1 (John Kim), whom `set_absence` refuses
+    PT403 (it accepts only her two, Sam Patel and Maria Lopez), and the record fails with "You do not
+    have edit rights on this cell". The `DEF-0035.test.tsx` pin passes only because it mocks
+    `useEditRights`; it cannot catch the real fail-open and must be rewritten against the real hook.
+    R-357 stays contradicted. Two of three fixes hold; the absence dropdown goes back to the developer.
 - id: 182
   date: 2026-09-21
   title: "The tester's three defects fixed --- the real names in the seed, the Absences list decided by the server's own gate, the scale audit walking the board --- and three more found on the way (DEF-0034 to DEF-0036; F-183 to F-188)"
