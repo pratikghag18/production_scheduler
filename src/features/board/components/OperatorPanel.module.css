@@ -79,7 +79,7 @@
      regardless of the rail's own overflow. */
   right: 0;
   bottom: 0;
-  width: 8px;
+  width: calc(8px * var(--ui-scale, 1));
   cursor: ew-resize;
   touch-action: none;
   z-index: 3;
@@ -88,7 +88,7 @@
 .panelHd {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
   padding: calc(10px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1))
     calc(8px * var(--ui-scale, 1));
   position: sticky;
@@ -111,7 +111,7 @@
   font-size: calc(11px * var(--ui-scale, 1));
   color: var(--muted);
   font-weight: 650;
-  letter-spacing: 0.3px;
+  letter-spacing: calc(0.3px * var(--ui-scale, 1));
 }
 
 /* POSITIONING ONLY. The button's chrome (border, size, hover, the chevron) is
@@ -128,7 +128,7 @@
 .list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
   padding: 0 calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
 }
 
@@ -249,7 +249,7 @@
   row-gap: calc(2px * var(--ui-scale, 1));
   align-items: center;
   padding: calc(5px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
-  border-radius: 7px;
+  border-radius: calc(7px * var(--ui-scale, 1));
   user-select: none;
   position: relative;
   /* S66-c (R-448 DECIDED, "I want the transitions to be smooth"): a row that
@@ -336,8 +336,8 @@
   font-weight: 700;
   color: var(--ink-2);
   border: 1px solid var(--axis);
-  border-radius: 4px;
-  padding: 0 3px;
+  border-radius: calc(4px * var(--ui-scale, 1));
+  padding: 0 calc(3px * var(--ui-scale, 1));
   flex: none;
 }
 
@@ -441,10 +441,16 @@
   font-size: calc(9px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--warn-fg, #9a5b00);
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* 21 Sept (F-186): `flex: 0 1 auto; min-width: 0` let this tag SHRINK TO
+     NOTHING. Line two packs the outside tag, this, the "No shift" tag, two
+     skill badges and the booking words into the rail's default width; the
+     badges and the words are `flex: none`, so once they fill the column the
+     three shrinkable tags are squeezed to zero and the leave mark -- the one
+     R-357 says the rail must show for anyone away -- was in the DOM at 0px
+     wide (e2e/absenceOnBoard.spec.ts step 3 found it). Being away outranks a
+     training badge, so this tag keeps its width and the skills truncate
+     first, which is the order `.line2`'s own comment promises. */
+  flex: none;
   white-space: nowrap;
 }
 

@@ -11,6 +11,11 @@ import {
   unscaledPxLengths,
   auditRemSurfaces,
   missingRemSurfaces,
+  BOARD_SCALED_SURFACES,
+  BOARD_PX_LEGACY,
+  unscaledBoardPx,
+  auditBoardSurfaces,
+  missingBoardSurfaces,
   missingControlFontReset,
   RESET_CONTROLS,
   DRAG_SHARED_SURFACE,
@@ -272,6 +277,113 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         // R-360 / 0069: the Operators tab's own absences block. Twenty-first
         // surface, same two-place edit.
         "src/features/admin/components/OperatorAbsences.module.css",
+      ].sort(),
+    );
+  });
+});
+
+/**
+ * DEF-0036 (R-D84, D89) — group B. `missingRemSurfaces`'s completeness walk
+ * covered `src/features/admin` only, so a new BOARD stylesheet was audited by
+ * nothing unless someone remembered to list it — nobody did for
+ * `OperatorPanel.module.css` (S65) and `ShiftLayer.module.css` (S66-c). This
+ * group is the board's own version of the D84/D89 groups above: a
+ * completeness walk (`missingBoardSurfaces`) over the board directory, a
+ * pixel-exemption matcher (`unscaledBoardPx`) whose extra rule is "exempt
+ * when the SAME declaration multiplies by `var(--ui-scale…)` inside a
+ * `calc(`", and a legacy list (`BOARD_PX_LEGACY`, the board's own
+ * `FIELD_LEGACY`) naming the pre-existing surfaces this fix did not migrate.
+ *
+ * Half the cases run against synthetic CSS or a trimmed copy of the real
+ * lists, on purpose — the same reason every other group in this file does:
+ * a case that only ever reads the clean repo passes for as long as the repo
+ * is clean and says nothing about whether the matcher can fail at all.
+ */
+describe("DEF-0036: the board's own scale audit (R-D84)", () => {
+  it("B1: no unaudited *.module.css under the board", () => {
+    expect(missingBoardSurfaces(repoRoot)).toEqual([]);
+  });
+
+  it("B2: the walk can fail — dropping one scaled surface reports it, same as the D89 ShapePicker case", () => {
+    const short = BOARD_SCALED_SURFACES.filter(
+      (f) => f !== "src/features/board/components/TrackRow.module.css",
+    );
+    expect(missingBoardSurfaces(repoRoot, undefined, CHROME_FILES, short)).toEqual([
+      "src/features/board/components/TrackRow.module.css",
+    ]);
+  });
+
+  it("B3: a file listed as BOTH chrome and scaled is reported — it cannot be both", () => {
+    const chromeWithOverlap = [
+      ...CHROME_FILES,
+      "src/features/board/components/TrackRow.module.css",
+    ];
+    expect(missingBoardSurfaces(repoRoot, undefined, chromeWithOverlap)).toEqual([
+      "src/features/board/components/TrackRow.module.css (in both CHROME_FILES and BOARD_SCALED_SURFACES)",
+    ]);
+  });
+
+  it("B4: every scaled surface NOT on the legacy list is clean", () => {
+    const current = BOARD_SCALED_SURFACES.filter((f) => !BOARD_PX_LEGACY.includes(f));
+    const offenders = auditBoardSurfaces(repoRoot, current).filter((r) => r.offenders.length > 0);
+    expect(offenders).toEqual([]);
+  });
+
+  it("B5: every legacy file still has offenders — the list may only shrink, a clean entry is stale", () => {
+    const stale = auditBoardSurfaces(repoRoot, BOARD_PX_LEGACY).filter(
+      (r) => r.offenders.length === 0,
+    );
+    expect(
+      stale.map((r) => `${r.file} has no offenders left — remove it from BOARD_PX_LEGACY`),
+    ).toEqual([]);
+  });
+
+  it("B6: the matcher exempts a px length the SAME declaration multiplies by var(--ui-scale) inside calc()", () => {
+    expect(unscaledBoardPx(".a { width: calc(6px * var(--ui-scale, 1)); }")).toEqual([]);
+  });
+
+  it("B7: a bare (unscaled) px length is flagged", () => {
+    expect(unscaledBoardPx(".a { gap: 6px; }").length).toBe(1);
+  });
+
+  it("B7b: a bare px length ALONGSIDE a scaled one in the same declaration is still flagged — the exemption is per-occurrence, not per-declaration", () => {
+    expect(unscaledBoardPx(".a { padding: 6px calc(8px * var(--ui-scale, 1)); }").length).toBe(1);
+  });
+
+  it("B8: a hairline border stays exempt, the same as the rem audit", () => {
+    expect(unscaledBoardPx(".a { border: 1px solid red; }")).toEqual([]);
+  });
+
+  it("B9: BOARD_SCALED_SURFACES is exactly the twenty board stylesheets that are not chrome", () => {
+    // The list that drives B1/B4/B5 is itself untested unless something
+    // asserts it — same hole R10/G12/J2 each exist to close one level up. A
+    // new board file forces the two-place edit: this literal, and the file
+    // itself classified as chrome or scaled.
+    expect([...BOARD_SCALED_SURFACES].sort()).toEqual(
+      [
+        "src/features/board/components/AssignmentChip.module.css",
+        "src/features/board/components/AssignmentPopover.module.css",
+        "src/features/board/components/BoardGrid.module.css",
+        "src/features/board/components/BoardHeader.module.css",
+        "src/features/board/components/CommandBar.module.css",
+        "src/features/board/components/CommandLauncher.module.css",
+        "src/features/board/components/ConfirmPopover.module.css",
+        "src/features/board/components/CopyWeekDialog.module.css",
+        "src/features/board/components/CreatePopover.module.css",
+        "src/features/board/components/DirectBlock.module.css",
+        "src/features/board/components/DragGhost.module.css",
+        "src/features/board/components/GroupRow.module.css",
+        // DEF-0036: the operator rail (S65). Was in neither list.
+        "src/features/board/components/OperatorPanel.module.css",
+        "src/features/board/components/RunBand.module.css",
+        "src/features/board/components/RunPopover.module.css",
+        "src/features/board/components/SaveTemplateDialog.module.css",
+        // DEF-0036: the shift band on cells (S66-c). Was in neither list.
+        "src/features/board/components/ShiftLayer.module.css",
+        "src/features/board/components/SplitCoveragePopover.module.css",
+        "src/features/board/components/TargetField.module.css",
+        "src/features/board/components/Toasts.module.css",
+        "src/features/board/components/TrackRow.module.css",
       ].sort(),
     );
   });
