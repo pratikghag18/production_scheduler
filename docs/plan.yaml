@@ -17281,6 +17281,52 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 181t
+  date: 2026-09-21
+  title: "Tester run: sessions 160-180 verified cold; three defects filed --- Plant A's real names are never seeded on any automated stack, the Absences dropdown offers a supervisor people the server refuses, and the scale audit's completeness guard misses the board (DEF-0034 to DEF-0036)"
+  commits: ['958455f', 'e227a50', '3231734', '2916952']
+  numbers:
+    app_tests: 4148
+    app_test_files: 163
+    tsc: 0
+    eslint: 0
+    db_checks: 888
+    migrations: 83
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    Merged Development onto the tester branch (fast-forward to adc32a5, no conflict). Baseline matched
+    session 180 EXACTLY before any change: `Tests 4144 passed (4144)` in 161 files, copied verbatim.
+    `tsc -b` clean on the fully-migrated MAIN stack; `db:types` regenerated there is byte-identical to
+    the committed file (the diff is EOL-only, the CRLF pipe artifact), so no client change was missed.
+    `eslint` clean. SQL suite all green including the new 98_home_shift, 98_command_bar_setting and
+    99_home_shift_writers. After filing, the suite reads `Tests 3 failed | 4145 passed (4148)` in 163
+    files: the 3 failures are the open-defect pins (DEF-0034 x1, DEF-0036 x2), red by design until
+    fixed; DEF-0020 passes with the edge-runtime container restarted. ⚠️ the authoritative
+    `tester-run.mjs --e2e` exited 1, but every red traced to the harness, not the merged code: it
+    regenerated database.types.ts from an UNDER-MIGRATED tester stack (false tsc/format/doc-drift),
+    the edge-runtime container had died (DEF-0020), and the 19 board-e2e failures were the app getting
+    no usable board from that stack. Reproduced clean against the migrated MAIN stack: roleWalk 5/5
+    serial. The residual board-data failures split into DEF-0034 (rename never applied), DEF-0035
+    (absence dropdown), and one pollution artifact (weekTemplates passes on a fresh reset). Live
+    probing as Ana and a viewer confirmed set_absence's server boundaries hold (viewer refused for all;
+    Ana refused off her line). typedWalk/voiceBar need the served model service (not run here); touch
+    T2/T3/T5 unverified gesture flakiness.
+  summary: >-
+    Merged twenty-one sessions of committed developer work (160-180) and judged every requirement they
+    touched from outside the code, across three parallel judgement lanes: the shift model and rail, the
+    board toolbar and command bar, and the model/training/voice-walk stages all read solid, with the
+    fix-claimed findings (F-168, F-169, F-181) genuinely addressed by real pins. The deterministic
+    instruments are clean --- build, 4144 unit, 888 SQL/RLS checks, the tree-walking standard audits.
+    Three defects came from the surfaces the unit count never sees. DEF-0034 (major): Plant A's operators
+    are Operator A1..A6 on every fresh stack because the rename script R-423 depends on is run by no
+    automated reset or e2e path; four e2e specs fail every run. DEF-0035 (minor): the Absences Person
+    dropdown offers a supervisor every operator she can see while set_absence only lets her record for
+    her line, so R-357's e2e proof lands on a refused person (the server and its error are correct ---
+    the screen offers what the server refuses). DEF-0036 (minor): the scale audit's D89 completeness
+    guard walks the admin tree only, so the operator rail and shift-band stylesheets added this window
+    escape R-D84 unchecked. Each has a red pin and its requirement marked contradicted. The through-line:
+    `confirmed` sessions run the unit suite only, never e2e, so all three shipped green on paper.
 - id: 180
   date: 2026-09-18
   title: "The afternoon: the rail on shift now with a chip per shift and the OT tag, the writers that answer, the sort headings and the row widths, and the seed that forgot Sam's training (S66-c, S64-c; F-168, F-169, F-180 to F-182)"
