@@ -141,6 +141,12 @@ export const REM_SURFACES: readonly string[] = [
   // — the two-place edit `missingRemSurfaces` exists to force (CLAUDE.md
   // section 4).
   "src/features/admin/components/OperatorAbsences.module.css",
+  // S70-a / R-360 amended, R-449: the one absence form extracted out of
+  // AbsencesPanel.tsx and OperatorAbsences.tsx. A new admin surface, so it
+  // is listed here AND in R10's copy in `scaleAudit.test.ts` — the
+  // two-place edit `missingRemSurfaces` exists to force (CLAUDE.md
+  // section 4).
+  "src/features/admin/components/AbsenceForm.module.css",
 ];
 
 /**

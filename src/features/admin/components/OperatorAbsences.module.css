@@ -55,27 +55,10 @@
   text-decoration: underline;
 }
 
-.addRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  margin-top: 0.5rem;
-}
-
-.partOfDayCheck {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.8125rem;
-  white-space: nowrap;
-}
-
-.zoneNote {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--muted);
-}
+/* S70-a: the create form's own layout (`.addRow`, `.partOfDayCheck`,
+   `.zoneNote`) moved to `AbsenceForm.module.css` with the form itself — this
+   file keeps only what this block still renders directly: the heading, the
+   list and the Loading/error text. */
 
 .muted {
   margin: 0;

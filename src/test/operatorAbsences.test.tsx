@@ -6,9 +6,22 @@
  * `absencesPanel.test.tsx` uses for its twin screen, so the two share one
  * fixture vocabulary and cannot silently drift into two different shapes for
  * "an absence".
+ *
+ * ⚠️ S70-a / R-360 AMENDED, R-449 — THIS BLOCK RECORDS THROUGH `AbsenceForm`,
+ * THE SAME COMPONENT `absencesPanel.test.tsx` EXERCISES, not a form coded
+ * here. `fetchRecordableAbsencePeople` is mocked to name ELENA (and TOM, for
+ * the cases that touch him) so the shared form's R-431 gate resolves `true`
+ * and every case below can drive the SAME `aria-label`s (`From`, `To`,
+ * `Reason`, `Record absence`, …) the form has always rendered — this file did
+ * not need to change its queries when the markup moved. `DEF-0035.test.tsx`
+ * is the recordable-answer suite proper, run against `AbsencesPanel.tsx`; the
+ * refusal case for a FIXED person is `absenceForm.test.tsx`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // The REAL parser — `@/lib/api` (the barrel) is mocked below, but this
@@ -40,6 +53,7 @@ const h = vi.hoisted(() => ({
   removeAbsence: vi.fn(),
   fetchAbsences: vi.fn(),
   fetchNodeSetting: vi.fn(),
+  fetchRecordableAbsencePeople: vi.fn(),
 }));
 
 vi.mock("@/features/auth/useSession", () => ({
@@ -55,6 +69,7 @@ vi.mock("@/lib/api", () => ({
   setAbsence: (input: unknown) => h.setAbsence(input),
   removeAbsence: (id: string) => h.removeAbsence(id),
   fetchNodeSetting: (nodeId: string, key: string) => h.fetchNodeSetting(nodeId, key),
+  fetchRecordableAbsencePeople: () => h.fetchRecordableAbsencePeople(),
   describeSchedulerError: (e: unknown) =>
     (e as { message?: string })?.message ?? "Something went wrong.",
 }));
@@ -82,6 +97,31 @@ beforeEach(() => {
   h.removeAbsence.mockReset().mockResolvedValue(undefined);
   h.fetchAbsences.mockReset().mockResolvedValue({ absences: [], skipped: 0 });
   h.fetchNodeSetting.mockReset().mockResolvedValue("America/Chicago");
+  // S70-a / R-431: every case in this file mounts ELENA's (and, where a
+  // fixture names them, TOM's) block, so the shared form's fixed-person gate
+  // must resolve `true` or none of the existing record/remove cases below
+  // could reach the form at all.
+  h.fetchRecordableAbsencePeople.mockReset().mockResolvedValue([ELENA.operatorId, TOM.operatorId]);
+});
+
+/* ===========================================================================
+ * S70-a / R-360 amended, R-449 — this block no longer codes its own form.
+ * CLAUDE.md section 4: `tsc` cannot see a string expectation, so this greps
+ * the SOURCE for the old form's own markup after its deletion, and for the
+ * shared component actually mounted in its place.
+ * ======================================================================== */
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const readSource = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
+
+describe("S70-a: the block records through the shared AbsenceForm, not a form of its own", () => {
+  it("mounts <AbsenceForm>, and codes no <form> of its own", () => {
+    const src = readSource("src/features/admin/components/OperatorAbsences.tsx").replace(
+      /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
+      "",
+    );
+    expect(src).toContain("<AbsenceForm");
+    expect(src).not.toMatch(/<form[\s>]/);
+  });
 });
 
 describe("OperatorAbsences — reading this person's own absences (R-360)", () => {

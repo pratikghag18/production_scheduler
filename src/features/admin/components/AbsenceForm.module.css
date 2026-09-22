@@ -1,0 +1,56 @@
+/* AbsenceForm — LAYOUT ONLY. Every editable box is the shared field skin
+   (Field.module.css, R-318); nothing here re-declares a border, background,
+   padding or font-size on an input, select or button, so this form cannot be
+   a further copy `fieldStandard.test.ts` guards against. Extracted from
+   AbsencesPanel.tsx / OperatorAbsences.tsx (R-360 amended, R-449) — these
+   rules are the union of what both screens' own `.addRow` blocks carried. */
+
+.addRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+/* The person picker gets a little more room than the dates. */
+.addRow > :global(select) {
+  min-width: 12rem;
+}
+
+/* R-359: "Part of a day" — a plain label + checkbox, no border or padding of
+   its own so it cannot become a second copy of the field skin. */
+.partOfDayCheck {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+/* The fixed-person case (a person's own record in the Operators tab): the
+   Person control is this name as text, not a dropdown (R-431 — the form
+   never offers a choice the caller cannot make anyway). */
+.fixedPerson {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+/* R-359: names the zone a part-day form's hours are read in. */
+.zoneNote {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.muted {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.error {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--crit);
+}

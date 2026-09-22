@@ -15,34 +15,10 @@
   color: var(--muted);
 }
 
-.addRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-/* The person picker gets a little more room than the dates. */
-.addRow > :global(select) {
-  min-width: 12rem;
-}
-
-/* R-359: "Part of a day" — a plain label + checkbox, no border or padding of
-   its own so it cannot become a second copy of the field skin. */
-.partOfDayCheck {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.8125rem;
-  white-space: nowrap;
-}
-
-/* R-359: names the zone a part-day form's hours are read in. */
-.zoneNote {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--muted);
-}
+/* S70-a: the create form's own layout (`.addRow`, `.partOfDayCheck`,
+   `.zoneNote`) moved to `AbsenceForm.module.css` with the form itself — this
+   file keeps only what the panel still renders directly: the scope note, the
+   table and its Loading/error text. */
 
 /* ⭐ THE BOUNDED SCROLL REGION (docs/conventions.md "Frozen table headers",
    R-372). This panel has no `.card` of its own — like Activity, the table sits

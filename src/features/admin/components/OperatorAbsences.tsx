@@ -28,6 +28,18 @@
    DECIDES NO PERMISSION AND PRE-GUESSES NO REFUSAL, same rule as
    `AbsencesPanel.tsx`: `set_absence` / `remove_absence` are the authority and a
    refusal is shown here in words.
+
+   ⭐⭐ S70-a / R-360 amended, R-449 — RECORDS THROUGH THE SAME FORM THE ABSENCES
+   TAB MOUNTS, `AbsenceForm.tsx`, with this person fixed rather than a
+   dropdown (one control, two entry points — the D100 shape the skills
+   pop-over already used). This block no longer codes its own `<form>`. It
+   still needs DEF-0035's recordable answer, because R-431 holds here too: a
+   supervisor who can read this person's record is not necessarily one
+   `set_absence` will accept a write for (their home cell can sit on a line
+   this reader cannot edit). The query is `fetchRecordableAbsencePeople`
+   under the SAME key `AbsencesPanel.tsx` uses (`[...absenceKeys.all,
+   "recordable"]`), so react-query shares one request between the two
+   screens rather than asking twice.
    --------------------------------------------------------------------------- */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,19 +47,19 @@ import {
   describeSchedulerError,
   fetchAbsences,
   fetchNodeSetting,
+  fetchRecordableAbsencePeople,
   removeAbsence,
-  setAbsence,
   type AbsenceRecord,
   type SchedulerError,
-  type SetAbsenceInput,
 } from "@/lib/api";
 import { formatCalendarDay, coerceDateFormat, DEFAULT_DATE_FORMAT } from "@/lib/format/dates";
 import { coerceTimezone, todayIsoInZone } from "@/lib/format/timezones";
-import { formatClock, zonedTimeToInstant } from "@/features/board/lib/time";
+import { formatClock } from "@/features/board/lib/time";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
 import fieldStyles from "@/components/Field.module.css";
 import { absenceKeys } from "./AbsencesImport";
+import { AbsenceForm } from "./AbsenceForm";
 import styles from "./OperatorAbsences.module.css";
 
 interface Props {
@@ -56,36 +68,6 @@ interface Props {
   /** The person's own place — `operators.site_node_id` — resolved for its
    *  zone and date format ON THE SERVER, never walked here (see header). */
   homeNodeId: string;
-}
-
-interface DraftState {
-  from: string;
-  to: string;
-  reason: string;
-  partOfDay: boolean;
-  startTime: string;
-  endTime: string;
-}
-
-const EMPTY_DRAFT: DraftState = {
-  from: "",
-  to: "",
-  reason: "",
-  partOfDay: false,
-  startTime: "",
-  endTime: "",
-};
-
-/** `"YYYY-MM-DD"` -> its three numbers, or `null` — never a naive `Date` parse. */
-function parseYmd(s: string): { y: number; mo: number; d: number } | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  return m === null ? null : { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]) };
-}
-
-/** `<input type="time">`'s `"HH:MM"` -> its two numbers, or `null`. */
-function parseHm(s: string): { h: number; mi: number } | null {
-  const m = /^(\d{2}):(\d{2})$/.exec(s);
-  return m === null ? null : { h: Number(m[1]), mi: Number(m[2]) };
 }
 
 // R-426: `todayUtc()` used to sit here. The UTC day is already TOMORROW through
@@ -133,6 +115,19 @@ export function OperatorAbsences({ operatorId, displayName, homeNodeId }: Props)
   });
   const dateFormat = coerceDateFormat(dateFormatQuery.data ?? DEFAULT_DATE_FORMAT);
 
+  // DEF-0035 / R-431, shared with AbsencesPanel.tsx: the SAME query key, so
+  // react-query shares one request between the two screens rather than
+  // asking the server twice. A supervisor who can READ this person is not
+  // necessarily one `set_absence` will accept a write for.
+  const recordableQuery = useQuery<string[], SchedulerError>({
+    queryKey: [...absenceKeys.all, "recordable"],
+    queryFn: fetchRecordableAbsencePeople,
+    enabled: canQuery,
+  });
+  const isRecordable = recordableQuery.isLoading
+    ? null
+    : (recordableQuery.data ?? []).includes(operatorId);
+
   const mine = useMemo(
     () =>
       (absencesQuery.data?.absences ?? [])
@@ -148,67 +143,15 @@ export function OperatorAbsences({ operatorId, displayName, homeNodeId }: Props)
   const past = useMemo(() => mine.filter((a) => a.to < today), [mine, today]);
   const shown = showPast ? mine : upcoming;
 
-  const [draft, setDraft] = useState<DraftState>(EMPTY_DRAFT);
-  const [formError, setFormError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: absenceKeys.all });
-
-  const addMutation = useMutation<AbsenceRecord, SchedulerError, SetAbsenceInput>({
-    mutationFn: (input) => setAbsence(input),
-    retry: false,
-    onSuccess: () => {
-      setDraft(EMPTY_DRAFT);
-      setFormError(null);
-      invalidate();
-    },
-    onError: (err) => setFormError(describeSchedulerError(err)),
-  });
 
   const removeMutation = useMutation<void, SchedulerError, string>({
     mutationFn: (id) => removeAbsence(id),
     retry: false,
     onSuccess: invalidate,
   });
-
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setFormError(null);
-    if (draft.reason.trim() === "") return setFormError("Give a reason.");
-
-    if (draft.partOfDay) {
-      if (draft.from === "" || draft.startTime === "" || draft.endTime === "") {
-        return setFormError("Give a date and a start and end time.");
-      }
-      if (draft.endTime <= draft.startTime) {
-        return setFormError("The end time is not after the start time.");
-      }
-      if (zoneQuery.isLoading) {
-        return setFormError("Still finding their time zone — try again in a moment.");
-      }
-      const ymd = parseYmd(draft.from);
-      const st = parseHm(draft.startTime);
-      const et = parseHm(draft.endTime);
-      if (ymd === null || st === null || et === null) {
-        return setFormError("Give a valid date and times.");
-      }
-      const startsAt = zonedTimeToInstant(zone, ymd.y, ymd.mo, ymd.d, st.h, st.mi).toISOString();
-      const endsAt = zonedTimeToInstant(zone, ymd.y, ymd.mo, ymd.d, et.h, et.mi).toISOString();
-      addMutation.mutate({
-        operatorId,
-        from: draft.from,
-        to: draft.from,
-        reason: draft.reason.trim(),
-        startsAt,
-        endsAt,
-      });
-      return;
-    }
-
-    if (draft.from === "" || draft.to === "") return setFormError("Give a start and an end date.");
-    if (draft.to < draft.from) return setFormError("The end date is before the start date.");
-    addMutation.mutate({ operatorId, from: draft.from, to: draft.to, reason: draft.reason.trim() });
-  }
 
   function remove(id: string) {
     setRowError(null);
@@ -274,91 +217,23 @@ export function OperatorAbsences({ operatorId, displayName, homeNodeId }: Props)
         </>
       )}
 
-      <form
-        className={styles.addRow}
-        onSubmit={submit}
-        aria-label={`Record an absence for ${displayName}`}
-      >
-        <label className={styles.partOfDayCheck}>
-          <input
-            type="checkbox"
-            checked={draft.partOfDay}
-            onChange={(e) =>
-              setDraft((d) => ({
-                ...d,
-                partOfDay: e.target.checked,
-                to: e.target.checked ? d.from : d.to,
-              }))
-            }
-          />
-          Part of a day
-        </label>
-        {draft.partOfDay ? (
-          <>
-            <input
-              className={fieldStyles.field}
-              type="date"
-              aria-label="Date"
-              value={draft.from}
-              onChange={(e) =>
-                setDraft((d) => ({ ...d, from: e.target.value, to: e.target.value }))
-              }
-            />
-            <input
-              className={fieldStyles.field}
-              type="time"
-              aria-label="Start time"
-              value={draft.startTime}
-              onChange={(e) => setDraft((d) => ({ ...d, startTime: e.target.value }))}
-            />
-            <input
-              className={fieldStyles.field}
-              type="time"
-              aria-label="End time"
-              value={draft.endTime}
-              onChange={(e) => setDraft((d) => ({ ...d, endTime: e.target.value }))}
-            />
-          </>
-        ) : (
-          <>
-            <input
-              className={fieldStyles.field}
-              type="date"
-              aria-label="From"
-              value={draft.from}
-              onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))}
-            />
-            <input
-              className={fieldStyles.field}
-              type="date"
-              aria-label="To"
-              value={draft.to}
-              onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))}
-            />
-          </>
-        )}
-        <input
-          className={fieldStyles.field}
-          type="text"
-          aria-label="Reason"
-          placeholder="Reason (e.g. Sick, Annual leave)"
-          value={draft.reason}
-          onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value }))}
-        />
-        <button className={fieldStyles.primaryBtn} type="submit" disabled={addMutation.isPending}>
-          {addMutation.isPending ? "Recording…" : "Record absence"}
-        </button>
-      </form>
-      {/* ⚠️ 09:00 means nothing without the zone (R-359). */}
-      {draft.partOfDay && (
-        <p className={styles.zoneNote}>
-          {zoneQuery.isLoading ? "Finding their time zone…" : `Times are in ${zone}.`}
-        </p>
-      )}
-      {formError !== null && (
+      {/* S70-a / R-360 amended, R-449: the one absence form, shared with
+          AbsencesPanel.tsx's dropdown mount — see AbsenceForm.tsx's header.
+          The person is fixed; DEF-0035's recordable answer still gates it
+          (R-431), because reading this person's record does not by itself
+          mean `set_absence` accepts a write for them. */}
+      {recordableQuery.isError ? (
         <p className={styles.error} role="alert">
-          {formError}
+          {describeSchedulerError(recordableQuery.error)}
         </p>
+      ) : (
+        <AbsenceForm
+          ariaLabel={`Record an absence for ${displayName}`}
+          people={[]}
+          fixedPerson={{ id: operatorId, displayName, siteNodeId: homeNodeId }}
+          fixedPersonRecordable={isRecordable}
+          canQuery={canQuery}
+        />
       )}
     </section>
   );
