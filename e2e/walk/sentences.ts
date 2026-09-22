@@ -33,7 +33,13 @@ export interface Sentence {
    *  button's own label is the whole of what the entry is proving (a
    *  Did-you-mean pick, a "Which part?" menu item); given where the QUESTION
    *  is the finding -- see the swap entry's own `model gap` note. */
-  expect: RegExp | { button: string; then: RegExp; question?: RegExp };
+  /** A button-form entry may also carry `orDirect`: the bar is allowed to
+   *  skip the question and land on this readout at once. Entry 10 is the
+   *  case -- the served model hears "Tom Bakker" on some runs and "Tom
+   *  Baker" on others (22 Sept: both seen, one run apart, on the same
+   *  wording), and either way the certificate refusal is what the entry
+   *  proves; the table records which path the bar took. */
+  expect: RegExp | { button: string; then: RegExp; question?: RegExp; orDirect?: RegExp };
   note?: string;
   voice?: true;
 }
@@ -117,10 +123,15 @@ export function headcountReadoutRe(product: string, cell: string, n: number): Re
 }
 
 export interface WalkDates {
-  /** ISO `YYYY-MM-DD` of today, tomorrow and a day well past the board's
-   *  default 3-day window (`boardView.ts`'s own `windowDayCount: 3`), in
-   *  Plant A's own zone (America/Chicago). */
-  today: string;
+  /** ISO `YYYY-MM-DD` of the walk's own day, the day after it, and a day
+   *  well past the board's default 3-day window (`boardView.ts`'s own
+   *  `windowDayCount: 3`), in Plant A's own zone (America/Chicago).
+   *  F-182: `day` is the Monday of NEXT week (`walkDayInZone`), never
+   *  today -- every sentence below that names a day says it as its ISO
+   *  date, the shape entry 19 always used, so the walk's writes and its
+   *  closing clears land on a day nobody is using. The one sentence that
+   *  still means "today" (entry 20, day-less) asks and writes nothing. */
+  day: string;
   tomorrow: string;
   far: string;
 }
@@ -138,14 +149,14 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // resolver's own words (`resolve.ts`: `"${label} has nobody on it
     // ${iso}."`), never a question (CB-x-5's own pin).
     {
-      say: "clear Cell 4 today",
+      say: `clear Cell 4 ${dates.day}`,
       expect: /^Cell 4 has nobody on it .+\.$/,
     },
 
     // 2. Assign with a part -- an ordinary single sentence, runs on its own
     // readout, no yes (S47).
     {
-      say: "Assign John Kim to Housing A on Cell 3 in Line 2 from 8am to 12pm today",
+      say: `Assign John Kim to Housing A on Cell 3 in Line 2 from 8am to 12pm ${dates.day}`,
       expect: assignReadoutRe("John Kim", "Housing A", "Cell 3", "08:00", "12:00"),
     },
 
@@ -153,7 +164,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // directly through `matchName`'s own plural-stripping fallback tier --
     // no question at all.
     {
-      say: "Assign Priya Shah to Common Fasteners on Cell 4 in Line 2 from 8am to 12pm today",
+      say: `Assign Priya Shah to Common Fasteners on Cell 4 in Line 2 from 8am to 12pm ${dates.day}`,
       note: '"Common Fasteners" matches "Common Fastener" directly (the plural-stripping tier in matchName) -- no Did-you-mean question raised.',
       expect: assignReadoutRe("Priya Shah", "Common Fastener", "Cell 4", "08:00", "12:00"),
     },
@@ -162,7 +173,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // against "Housing A" (D133 item 2) and offers it as a Did-you-mean
     // button.
     {
-      say: "Assign Maria Lopez to Housing Pay on Cell 4 in Line 2 from 1pm to 3pm today",
+      say: `Assign Maria Lopez to Housing Pay on Cell 4 in Line 2 from 1pm to 3pm ${dates.day}`,
       expect: {
         button: "Housing A",
         then: assignReadoutRe("Maria Lopez", "Housing A", "Cell 4", "13:00", "15:00"),
@@ -172,7 +183,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // 5. A sentence with no part at all -- "Which part? Cell 1 makes:" with
     // the cell's own menu as buttons (S60-b, R-422).
     {
-      say: "Assign Sam Patel to Cell 1 from 8am to 4pm today",
+      say: `Assign Sam Patel to Cell 1 from 8am to 4pm ${dates.day}`,
       note: 'no part named -- "Which part?" with Cell 1\'s own menu.',
       expect: {
         button: "Housing A",
@@ -182,7 +193,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
 
     // 6. A booking with headcount.
     {
-      say: "book Bracket A on Cell 3 in Line 2 for 3 people from 1pm to 5pm today",
+      say: `book Bracket A on Cell 3 in Line 2 for 3 people from 1pm to 5pm ${dates.day}`,
       expect: bookReadoutRe("Bracket A", "Cell 3", "13:00", "17:00", 3),
     },
 
@@ -192,7 +203,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // Shift 3 (22:00-06:00) -- the bar's own status line is asserted either
     // way, never hand-picked.
     {
-      say: "Assign Priya Shah to Line 1 Subassembly A on Cell 2 in Line 1 from 2 until end of shift today",
+      say: `Assign Priya Shah to Line 1 Subassembly A on Cell 2 in Line 1 from 2 until end of shift ${dates.day}`,
       note: 'model gap until the sixth run: the rules read "2" as 14:00 (Shift 2, ends 22:00); a model reading may take it literally as 02:00 (Shift 3, ends 06:00). Both are accepted; the spec records which one the bar actually showed.',
       expect: new RegExp(
         `^Priya Shah ${ARROW} Line 1 Subassembly A${DOT}.*Cell 2${DOT}.+${DOT}(?:14:00${EN_DASH}22:00|02:00${EN_DASH}06:00)${READ_SUFFIX}$`,
@@ -202,14 +213,14 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // 8. Tom Baker's setup block, off Line 1 (no certification needed) --
     // plumbing for the swap-refusal case next.
     {
-      say: "Assign Tom Baker to Area 2 Frame A on Cell 6 in Line 3 from 8am to 2pm today",
+      say: `Assign Tom Baker to Area 2 Frame A on Cell 6 in Line 3 from 8am to 2pm ${dates.day}`,
       note: "setup: Tom Baker's own block, so the swap-refusal entry below has a block of his to swap FROM.",
       expect: assignReadoutRe("Tom Baker", "Area 2 Frame A", "Cell 6", "08:00", "14:00"),
     },
 
     // 9. end/extend adjusts -- "end" shortens Sam's own Cell 1 block.
     {
-      say: "end Sam Patel's block at 2pm",
+      say: `end Sam Patel's block at 2pm ${dates.day}`,
       expect: adjustReadoutRe("Sam Patel", "Cell 1", "end", "14:00", "16:00"),
     },
 
@@ -228,19 +239,21 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // written either way, which the spec's own database reads after this
     // entry still prove.
     {
-      say: "swap Tom Baker and Sam Patel today",
-      note: "model gap: Tom Bakker (sixth run)",
+      say: `swap Tom Baker and Sam Patel ${dates.day}`,
+      note: "model gap: Tom Bakker (sixth run) -- on some runs; on others the name is heard and the refusal lands at once (orDirect)",
       expect: {
         question: /^No person called "Tom Bakker" on this board\. Did you mean one of these\?$/,
         button: "Tom Baker",
         then: /^Tom Baker is not certified for Cell 1: missing Welding\. Nothing was written\.$/,
+        orDirect:
+          /^Tom Baker is not certified for Cell 1: missing Welding\. Nothing was written\.$/,
       },
     },
 
     // 11. A split -- Sam's own Cell 1 block (now 08:00-14:00) split at 1pm.
     // CB-y-1: a split is a lot of two (move, then assign), one yes runs both.
     {
-      say: "split Sam Patel's block at 1pm",
+      say: `split Sam Patel's block at 1pm ${dates.day}`,
       answer: "yes",
       note: "splits Sam's 08:00-14:00 Cell 1 block into 08:00-13:00 and 13:00-14:00; a two-command lot (move, then assign), one yes runs both (CB-y-1).",
       expect: /^2 commands ready: .+ — say or type yes to do them, no to leave them\.$/,
@@ -248,13 +261,15 @@ export function buildSentences(dates: WalkDates): Sentence[] {
 
     // 12. extend -- John Kim's own Cell 3 block (08:00-12:00) by an hour.
     {
-      say: "extend John Kim's block by an hour",
+      say: `extend John Kim's block by an hour ${dates.day}`,
       expect: adjustReadoutRe("John Kim", "Cell 3", "end", "13:00", "12:00"),
     },
 
-    // 13. The headcount form -- the run booked in entry 6.
+    // 13. The headcount form -- the run booked in entry 6. The day goes
+    // BEFORE the count: "... 4 people 2026-09-28" is no_time to the rules
+    // (a day after the count is not read -- queued, F-182 follow-up).
     {
-      say: "make the Bracket A job on Cell 3 4 people",
+      say: `make the Bracket A job on Cell 3 on ${dates.day} 4 people`,
       expect: headcountReadoutRe("Bracket A", "Cell 3", 4),
     },
 
@@ -262,7 +277,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // next; matches John Kim's own Cell 3 window (08:00-13:00, post-extend)
     // exactly, so the swap crosses two full blocks cleanly.
     {
-      say: "Assign Lena Novak to Area 2 Frame A on Cell 5 in Line 3 from 8am to 1pm today",
+      say: `Assign Lena Novak to Area 2 Frame A on Cell 5 in Line 3 from 8am to 1pm ${dates.day}`,
       note: "setup: gives Lena Novak a block of her own to swap with John Kim's.",
       expect: assignReadoutRe("Lena Novak", "Area 2 Frame A", "Cell 5", "08:00", "13:00"),
     },
@@ -270,15 +285,15 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // 15. A swap -- both hold no Line 1 cell, so nothing is refused; a lot
     // of four (two removals, two crossed assigns), one yes runs all of it.
     {
-      say: "swap Lena Novak and John Kim today",
+      say: `swap Lena Novak and John Kim ${dates.day}`,
       answer: "yes",
       expect: /^4 commands ready: .+ — say or type yes to do them, no to leave them\.$/,
     },
 
-    // 16. A copy to tomorrow -- Cell 3's own blocks/runs, copied forward a
-    // day.
+    // 16. A copy to the day after -- Cell 3's own blocks/runs, copied
+    // forward a day (both days said as dates: F-182).
     {
-      say: "copy today to tomorrow for Cell 3",
+      say: `copy ${dates.day} to ${dates.tomorrow} for Cell 3`,
       answer: "yes",
       expect: /^\d+ commands? ready: .+$/,
     },
@@ -288,7 +303,9 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // is the door when it is not -- "next week" was simply a day the walk's
     // own window never held, so the list, not the bar, was wrong.
     //
-    // "this week" is the nearest week the board can hold. Note what
+    // "next week" IS the walk's own week (F-182: the walk day is next
+    // Monday), so the five days named are the walk's, never the week a
+    // person is using. Note what
     // `resolveWeekDays` actually asks for: the WHOLE week, Monday to Sunday,
     // must be on the board before a `weekdays` repeat expands at all, and
     // what it then expands to is `days.slice(0, 5)` -- Monday to Friday, a
@@ -299,14 +316,14 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // question now names the WEEK, so the board widens to the seven days the
     // repeat needs and anchors on that week's Monday, rather than shuffling a
     // three-day window from one missing day to the next. The window is
-    // Mon-Sun afterwards, which still holds today -- entries 18 to 22 below
-    // say "today" and are unaffected.
+    // Mon-Sun afterwards, which still holds the walk day -- entries 18, 21
+    // and 22 below name it and are unaffected.
     {
-      say: "Assign Lena Novak to Bracket A on Cell 4 in Line 2 every weekday this week from 8am to 12pm",
+      say: "Assign Lena Novak to Bracket A on Cell 4 in Line 2 every weekday next week from 8am to 12pm",
       answer: "no",
       note: "a repeat day must be on the board (R-416); F-158 makes the question name the week, so its own Show that day widens the board to seven days. Five commands, Monday to Friday (CB-y-2), and no leaves every one of them unwritten.",
       expect: {
-        question: /^this week is not on the board\. Move the board to that day first\.$/,
+        question: /^next week is not on the board\. Move the board to that day first\.$/,
         button: "Show that day",
         then: /^5 commands ready: .+ — say or type yes to do them, no to leave them\.$/,
       },
@@ -316,7 +333,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // under "warn", a typed reason re-resolves with the override and writes
     // the block anyway (S61-b/R-425).
     {
-      say: "Assign Tom Baker to Housing A on Cell 1 in Line 1 from 3pm to 5pm today",
+      say: `Assign Tom Baker to Housing A on Cell 1 in Line 1 from 3pm to 5pm ${dates.day}`,
       answer: "the line supervisor approved the cover",
       note: "not_certified under warn: the typed reason re-resolves with eligibility_override -- the DB read after asserts eligibility_override = true.",
       expect:
@@ -333,22 +350,20 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       },
     },
 
-    // 20. A day-LESS sentence (defaults to "today") once the window has
-    // moved away from today (entry 19's own "Show that day") -- today is
-    // off the board now, so the SAME question is asked again, this time
-    // naming "today". "Show that day" here returns the window to today,
-    // which the final cleanup entry below needs.
+    // 20. A day-LESS sentence (defaults to "today") with the window on the
+    // walk's own week -- today is off the board, so the SAME question is
+    // asked again, this time naming "today". The button is NOT pressed
+    // (F-182): pressing it would move the window to the day a person is
+    // using and write there. The question itself is the proof; `runEntry`
+    // closes the standing question so entry 21 starts clean.
     {
       say: "Assign Maria Lopez to Bracket A on Cell 3 in Line 2 from 8am to 12pm",
-      note: 'no day word at all (defaults to "today"); the board is still showing the far date entry 19 moved it to, so today is off it -- day_off_board asks about "today" specifically.',
-      expect: {
-        button: "Show that day",
-        then: assignReadoutRe("Maria Lopez", "Bracket A", "Cell 3", "08:00", "12:00"),
-      },
+      note: 'no day word at all (defaults to "today"); the board is showing the walk\'s own days, so today is off it -- day_off_board asks about "today" specifically, and the walk declines to move there (F-182).',
+      expect: /^today is not on the board\. Move the board to that day first\.$/,
     },
 
-    // 21 and 22. The clear of today, at the end -- TWO sentences, one per
-    // area. R-407's `everyone` form takes ONE place, and a place ABOVE the
+    // 21 and 22. The clear of the walk day, at the end -- TWO sentences,
+    // one per area. R-407's `everyone` form takes ONE place, and a place ABOVE the
     // cells clears every cell under it, so an area is the whole of its
     // lines' cells in a single sentence. A comma-separated list of cells is
     // not a sentence this grammar has at all: the parser reads "Cell 1, Cell
@@ -359,16 +374,22 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // (Cells 1-2) and Line 2 (Cells 3-4); Area 2 carries Line 3 (Cells 5-6).
     // Between them the two sentences name every cell this walk has written
     // to, and the spec asserts the two listings' counts SUM to an
-    // independent database count of today's rows taken just before the
-    // first of them -- never a hand-summed number here.
+    // independent database count of the walk day's rows taken just before
+    // the first of them -- never a hand-summed number here.
+    // The window is still on the far Monday entry 19 moved it to, so the
+    // first clear asks for the walk day and goes through "Show that day";
+    // the second finds it on the board.
     {
-      say: "clear Area 1 today",
+      say: `clear Area 1 ${dates.day}`,
       answer: "yes",
-      note: "R-407: a place above the cells clears every cell under it -- Area 1 is Cells 1 to 4.",
-      expect: /^\d+ commands? ready: .+$/,
+      note: "R-407: a place above the cells clears every cell under it -- Area 1 is Cells 1 to 4. Reached through Show that day: the window sat on entry 19's far Monday.",
+      expect: {
+        button: "Show that day",
+        then: /^\d+ commands? ready: .+$/,
+      },
     },
     {
-      say: "clear Area 2 today",
+      say: `clear Area 2 ${dates.day}`,
       answer: "yes",
       note: "the other half of the clear -- Area 2 is Cells 5 and 6.",
       expect: /^\d+ commands? ready: .+$/,

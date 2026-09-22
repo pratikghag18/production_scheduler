@@ -15,12 +15,12 @@ import {
   parseTimerange,
   PASSWORD,
   PLANT_A_ADMIN,
+  plantZone,
 } from "./walk/db";
-import { todayInPlantA, addDaysToIso, clockMsInZone, PLANT_A_ZONE } from "./walk/time";
+import { walkDayInZone, addDaysToIso, clockMsInZone } from "./walk/time";
+import { fillWindowStart } from "./boardWindow";
 
 const isoPlusDays = addDaysToIso;
-const chicagoWallMs = (iso: string, hh: number, mm: number): number =>
-  clockMsInZone(iso, PLANT_A_ZONE, hh, mm);
 
 /**
  * S61-c (docs/agent-briefs/s61-c-typed-walk-spec-brief.md) -- the typed half
@@ -36,44 +36,51 @@ test.skip(!hasRealBackend, NO_BACKEND_REASON);
 
 const ADMIN = PLANT_A_ADMIN;
 
-const TODAY = todayInPlantA();
-const TOMORROW = isoPlusDays(TODAY, 1);
-// Within the setup/teardown window (today-1 .. today+8) but past the
-// board's own default 3-day window (today, tomorrow, today+2) -- so it is
+// F-182: the walk runs on a day of its own -- the Monday of NEXT week on
+// Plant A's clock -- never on the day the board opens on. Its last two
+// sentences clear every block on that day, and until 22 Sept that day was
+// today: every run emptied the maintainer's own board, their morning's
+// overtime block included. Every sentence that names a day now says this
+// date (entry 19's own shape); the board is moved here before the first
+// sentence; and nothing before this day is ever read or cleared.
+//
+// F-190: every day and instant below is built from the PLANT'S zone, read
+// from the server at setup (`plantZone`, the same resolver the app and
+// `board_window` use) -- the walk carried America/Chicago as a constant from
+// its brief, the 21 Sept reset left the demo plant with no zone at all (UTC,
+// `board_window`'s own default), and every block the walk wrote landed five
+// hours off. A premise about the world is read from the database (F-181).
+// `initWalkDays` fills these before the first sentence; nothing reads them
+// earlier.
+let ZONE = "UTC";
+let WALK_DAY = "";
+let TOMORROW = "";
+// Within the setup/teardown window (walk day .. walk day + 8) but past the
+// board's own default 3-day window (walk day, +1, +2) -- so it is
 // guaranteed off-board for entry 19's own "Show that day" case, and still
-// cleaned up by afterAll.
-const FAR = isoPlusDays(TODAY, 7);
+// cleaned up at the end.
+let FAR = "";
+let CLEAN_FROM_MS = 0;
+let CLEAN_TO_MS = 0;
+let WALK_DAY_START_MS = 0;
+let WALK_DAY_END_MS = 0;
+let SENTENCES: Sentence[] = [];
 
-const CLEAN_FROM_MS = chicagoWallMs(isoPlusDays(TODAY, -1), 0, 0);
-const CLEAN_TO_MS = chicagoWallMs(isoPlusDays(TODAY, 8), 0, 0);
-const TODAY_START_MS = chicagoWallMs(TODAY, 0, 0);
-const TODAY_END_MS = chicagoWallMs(TOMORROW, 0, 0);
+/** `hh:mm` on `iso` in the plant's own zone, as epoch ms -- what
+ *  `assignments.timerange` stores a sentence's clock time as. */
+const wallMs = (iso: string, hh: number, mm: number): number => clockMsInZone(iso, ZONE, hh, mm);
 
-const SENTENCES = buildSentences({ today: TODAY, tomorrow: TOMORROW, far: FAR });
-const [
-  clearEmptyCell,
-  assignWithPart,
-  pluralNearMiss,
-  realNearMiss,
-  noPart,
-  bookingHeadcount,
-  endOfShiftAmbiguous,
-  tomSetup,
-  adjustEnd,
-  swapRefused,
-  split,
-  adjustExtend,
-  headcountForm,
-  lenaSetup,
-  swapSuccess,
-  copyToTomorrow,
-  everyWeekdayNo,
-  tomOverride,
-  dayOffBoardFar,
-  dayLessToday,
-  clearArea1,
-  clearArea2,
-] = SENTENCES;
+function initWalkDays(zone: string): void {
+  ZONE = zone;
+  WALK_DAY = walkDayInZone(zone);
+  TOMORROW = isoPlusDays(WALK_DAY, 1);
+  FAR = isoPlusDays(WALK_DAY, 7);
+  CLEAN_FROM_MS = wallMs(WALK_DAY, 0, 0);
+  CLEAN_TO_MS = wallMs(isoPlusDays(WALK_DAY, 9), 0, 0);
+  WALK_DAY_START_MS = wallMs(WALK_DAY, 0, 0);
+  WALK_DAY_END_MS = wallMs(TOMORROW, 0, 0);
+  SENTENCES = buildSentences({ day: WALK_DAY, tomorrow: TOMORROW, far: FAR });
+}
 
 async function signIn(page: Page, email: string, path_ = "/"): Promise<void> {
   await page.goto(`/sign-in?redirect=${encodeURIComponent(path_)}`);
@@ -217,13 +224,15 @@ function candidateButtons(page: Page): Locator {
   return page.locator('[class*="candidates"]').getByRole("button");
 }
 
-/** Signs in as Dana, waits for the board, opens the corner launcher (S48-a:
- *  the bar lives behind it), and lands on today's window. */
+/** Signs in as Dana, waits for the board, moves it to the walk's own day
+ *  (F-182: never today), and opens the corner launcher (S48-a: the bar lives
+ *  behind it). */
 async function openBoard(page: Page): Promise<void> {
   await signIn(page, ADMIN, "/");
-  await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 20_000 });
-  const todayButton = page.getByRole("button", { name: "Today" });
-  if ((await todayButton.count()) > 0) await todayButton.click({ timeout: ACTION_TIMEOUT_MS });
+  const firstTrack = page.getByLabel(/press Enter to create/).first();
+  await expect(firstTrack).toBeVisible({ timeout: 20_000 });
+  await fillWindowStart(page, WALK_DAY);
+  await expect(firstTrack).toBeVisible({ timeout: 20_000 });
   await ensureBarOpen(page);
 }
 
@@ -384,6 +393,39 @@ async function runEntry(page: Page, entry: Sentence): Promise<EntryResult> {
   await submit(page, entry.say);
   if (typeof entry.expect === "object" && "button" in entry.expect) {
     const button = candidateButtons(page).filter({ hasText: entry.expect.button }).first();
+    // `orDirect`: the bar may skip the question (entry 10's model gap comes
+    // and goes between runs). If the direct readout lands first, the turn is
+    // over here, and the table says so in its middle column.
+    if (entry.expect.orDirect !== undefined) {
+      const direct = entry.expect.orDirect;
+      let landedDirect = false;
+      try {
+        await expect(async () => {
+          if (direct.test(await currentStatusText(page))) {
+            landedDirect = true;
+            return;
+          }
+          if (await button.isVisible()) return;
+          throw new Error("neither the question nor the direct readout yet");
+        }).toPass({ timeout: ENTRY_TIMEOUT_MS, intervals: [300] });
+      } catch {
+        return recordMismatch(
+          page,
+          entry,
+          "neither the question this sentence should have raised nor its direct readout came",
+        );
+      }
+      if (landedDirect) {
+        const barSaid = await currentStatusText(page);
+        const written = await answerIfAny(page, entry, barSaid);
+        return {
+          say: entry.say,
+          barSaid,
+          written,
+          note: `${entry.note ?? ""} [direct, no question]`,
+        };
+      }
+    }
     try {
       await expect(button).toBeVisible({ timeout: ENTRY_TIMEOUT_MS });
       if (entry.expect.question !== undefined) {
@@ -465,6 +507,33 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
     // ------------------------------------------------------------------
     const dana = await signedInClient(ADMIN);
     const nodes = await loadPlantANodes(dana);
+    // The plant's zone first (F-190): every day and instant below hangs off it.
+    initWalkDays(await plantZone(dana, nodes.plantId));
+    console.log(`walk day ${WALK_DAY} in ${ZONE} (today's board is never touched: F-182)`);
+    const [
+      clearEmptyCell,
+      assignWithPart,
+      pluralNearMiss,
+      realNearMiss,
+      noPart,
+      bookingHeadcount,
+      endOfShiftAmbiguous,
+      tomSetup,
+      adjustEnd,
+      swapRefused,
+      split,
+      adjustExtend,
+      headcountForm,
+      lenaSetup,
+      swapSuccess,
+      copyToTomorrow,
+      everyWeekdayNo,
+      tomOverride,
+      dayOffBoardFar,
+      dayLessToday,
+      clearArea1,
+      clearArea2,
+    ] = SENTENCES;
     const cellId = (name: string): string => {
       const id = nodes.cellIdByName.get(name);
       if (!id) throw new Error(`no such cell in Plant A: ${name}`);
@@ -506,8 +575,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.john,
         nodeId: cellId("Cell 3"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 12, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 12, 0),
       });
 
       // 3. Plural near-miss.
@@ -515,8 +584,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.priya,
         nodeId: cellId("Cell 4"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 12, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 12, 0),
       });
 
       // 4. Real near-miss ("Housing Pay" -> Housing A).
@@ -524,8 +593,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.maria,
         nodeId: cellId("Cell 4"),
-        startMs: chicagoWallMs(TODAY, 13, 0),
-        endMs: chicagoWallMs(TODAY, 15, 0),
+        startMs: wallMs(WALK_DAY, 13, 0),
+        endMs: wallMs(WALK_DAY, 15, 0),
       });
 
       // 5. No part named ("Which part?").
@@ -533,8 +602,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.sam,
         nodeId: cellId("Cell 1"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 16, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 16, 0),
       });
 
       // 6. A booking with headcount -- a run, not an assignment.
@@ -552,7 +621,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         }[];
         const hit = rows.find((r) => {
           const { startMs, endMs } = parseTimerange(r.timerange);
-          return startMs === chicagoWallMs(TODAY, 13, 0) && endMs === chicagoWallMs(TODAY, 17, 0);
+          return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
         });
         expect(hit, "the booked Bracket A run on Cell 3, 13:00-17:00, should exist").toBeTruthy();
         expect(hit!.planned_headcount).toBe(3);
@@ -575,8 +644,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         await waitForAssignment(dana, {
           operatorId: opId.priya,
           nodeId: cellId("Cell 2"),
-          startMs: chicagoWallMs(TODAY, startH, 0),
-          endMs: chicagoWallMs(TODAY, endH, 0),
+          startMs: wallMs(WALK_DAY, startH, 0),
+          endMs: wallMs(WALK_DAY, endH, 0),
         });
       }
 
@@ -586,8 +655,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.tom,
         nodeId: cellId("Cell 6"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 14, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 14, 0),
       });
 
       // 9. Adjust: "end" shortens Sam's own Cell 1 block.
@@ -595,8 +664,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.sam,
         nodeId: cellId("Cell 1"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 14, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 14, 0),
       });
 
       // 10. The uncertified swap -- refused before the yes; nothing changes.
@@ -604,14 +673,14 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.sam,
         nodeId: cellId("Cell 1"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 14, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 14, 0),
       });
       await waitForAssignment(dana, {
         operatorId: opId.tom,
         nodeId: cellId("Cell 6"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 14, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 14, 0),
       });
 
       // 11. A split.
@@ -619,20 +688,20 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignmentGone(dana, {
         operatorId: opId.sam,
         nodeId: cellId("Cell 1"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 14, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 14, 0),
       });
       await waitForAssignment(dana, {
         operatorId: opId.sam,
         nodeId: cellId("Cell 1"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 13, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 13, 0),
       });
       await waitForAssignment(dana, {
         operatorId: opId.sam,
         nodeId: cellId("Cell 1"),
-        startMs: chicagoWallMs(TODAY, 13, 0),
-        endMs: chicagoWallMs(TODAY, 14, 0),
+        startMs: wallMs(WALK_DAY, 13, 0),
+        endMs: wallMs(WALK_DAY, 14, 0),
       });
 
       // 12. Adjust: "extend" John Kim's own Cell 3 block.
@@ -640,25 +709,38 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.john,
         nodeId: cellId("Cell 3"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 13, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 13, 0),
       });
 
       // 13. The headcount form, on the run booked in entry 6.
       table.push(await runEntry(page, headcountForm));
       {
-        const { data, error } = await dana
-          .from("runs")
-          .select("planned_headcount, timerange")
-          .eq("node_id", cellId("Cell 3"));
-        expect(error, error?.message).toBeNull();
-        const rows = (data ?? []) as { planned_headcount: number | null; timerange: string }[];
-        const hit = rows.find((r) => {
-          const { startMs, endMs } = parseTimerange(r.timerange);
-          return startMs === chicagoWallMs(TODAY, 13, 0) && endMs === chicagoWallMs(TODAY, 17, 0);
-        });
-        expect(hit, "the Bracket A run on Cell 3 should still be there").toBeTruthy();
-        expect(hit!.planned_headcount).toBe(4);
+        // Polled, like every other database check here: the readout lands
+        // before the row does (22 Sept: a single read right after it saw the
+        // old count once, on a run where the model timed out and the rules
+        // wrote late).
+        const readHeadcount = async (): Promise<number | null | undefined> => {
+          const { data, error } = await dana
+            .from("runs")
+            .select("planned_headcount, timerange")
+            .eq("node_id", cellId("Cell 3"));
+          expect(error, error?.message).toBeNull();
+          const rows = (data ?? []) as { planned_headcount: number | null; timerange: string }[];
+          const hit = rows.find((r) => {
+            const { startMs, endMs } = parseTimerange(r.timerange);
+            return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
+          });
+          expect(hit, "the Bracket A run on Cell 3 should still be there").toBeTruthy();
+          return hit!.planned_headcount;
+        };
+        const deadline = Date.now() + 45_000;
+        let headcount = await readHeadcount();
+        while (headcount !== 4 && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 300));
+          headcount = await readHeadcount();
+        }
+        expect(headcount).toBe(4);
       }
 
       // 14. Lena Novak's own setup block, plumbing for the swap next.
@@ -666,8 +748,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.lena,
         nodeId: cellId("Cell 5"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 13, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 13, 0),
       });
 
       // 15. A swap -- crosses Lena's and John Kim's own blocks.
@@ -675,26 +757,26 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignmentGone(dana, {
         operatorId: opId.lena,
         nodeId: cellId("Cell 5"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 13, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 13, 0),
       });
       await waitForAssignmentGone(dana, {
         operatorId: opId.john,
         nodeId: cellId("Cell 3"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 13, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 13, 0),
       });
       await waitForAssignment(dana, {
         operatorId: opId.lena,
         nodeId: cellId("Cell 3"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 13, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 13, 0),
       });
       await waitForAssignment(dana, {
         operatorId: opId.john,
         nodeId: cellId("Cell 5"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 13, 0),
+        startMs: wallMs(WALK_DAY, 8, 0),
+        endMs: wallMs(WALK_DAY, 13, 0),
       });
 
       // 16. A copy to tomorrow -- Cell 3's own blocks, one day forward.
@@ -702,8 +784,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.lena,
         nodeId: cellId("Cell 3"),
-        startMs: chicagoWallMs(TOMORROW, 8, 0),
-        endMs: chicagoWallMs(TOMORROW, 13, 0),
+        startMs: wallMs(TOMORROW, 8, 0),
+        endMs: wallMs(TOMORROW, 13, 0),
       });
 
       // 17. A repeat day answered no -- the listing counts five (Monday to
@@ -723,13 +805,13 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
             listing.match(/^(\d+) commands? ready/)?.[1],
             `the repeat day's own listing should count five: "${listing}"`,
           ).toBe("5");
-          // F-158: Monday to Friday of the week today falls in -- the five
+          // F-158: Monday to Friday of the walk day's own week -- the five
           // days the repeat names, read off the sentence's own week, never
           // hand-summed. Every readout in the listing carries its day label,
           // so each of the five must appear by name.
           const monday = isoPlusDays(
-            TODAY,
-            -((new Date(`${TODAY}T00:00:00Z`).getUTCDay() + 6) % 7),
+            WALK_DAY,
+            -((new Date(`${WALK_DAY}T00:00:00Z`).getUTCDay() + 6) % 7),
           );
           for (let i = 0; i < 5; i++) {
             const iso = isoPlusDays(monday, i);
@@ -747,21 +829,25 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
             expect(listing, `the listing should name ${label}`).toContain(label);
           }
         }
-        // Monday of the week `today` falls in, and the seven days after it --
+        // Monday of the week the walk day falls in, and the seven days after it --
         // "no" must have left every one of them empty on that cell.
-        const monday = isoPlusDays(TODAY, -((new Date(`${TODAY}T00:00:00Z`).getUTCDay() + 6) % 7));
+        const monday = isoPlusDays(
+          WALK_DAY,
+          -((new Date(`${WALK_DAY}T00:00:00Z`).getUTCDay() + 6) % 7),
+        );
         const rows = await assignmentsStartingInWindow(
           dana,
           [cellId("Cell 4")],
-          chicagoWallMs(monday, 0, 0),
-          chicagoWallMs(isoPlusDays(monday, 7), 0, 0),
+          wallMs(monday, 0, 0),
+          wallMs(isoPlusDays(monday, 7), 0, 0),
         );
         const lenaRows = rows.filter((r) => r.operator_id === opId.lena);
         expect(lenaRows, '"no" to the lot should have written nothing this week').toHaveLength(0);
       }
-      // The "Show that day" this entry went through moved the window off
-      // today; entry 19 below moves it again and entry 20 brings it back,
-      // so nothing between here and the clear depends on where it sits.
+      // The "Show that day" this entry went through widened the window to
+      // the walk day's week; entry 19 below moves it to the far Monday, entry
+      // 20 asks about today and stays put, and entry 21 brings it back to
+      // the walk day through its own "Show that day".
 
       // 18. An uncertified person on Cell 1, under warn -- a typed reason
       // runs it anyway.
@@ -770,8 +856,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         const row = await waitForAssignment(dana, {
           operatorId: opId.tom,
           nodeId: cellId("Cell 1"),
-          startMs: chicagoWallMs(TODAY, 15, 0),
-          endMs: chicagoWallMs(TODAY, 17, 0),
+          startMs: wallMs(WALK_DAY, 15, 0),
+          endMs: wallMs(WALK_DAY, 17, 0),
         });
         expect(row.eligibility_override, "eligibility_override should be true").toBe(true);
         expect(row.override_reason).toBe(tomOverride.answer);
@@ -782,32 +868,29 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await waitForAssignment(dana, {
         operatorId: opId.maria,
         nodeId: cellId("Cell 3"),
-        startMs: chicagoWallMs(FAR, 8, 0),
-        endMs: chicagoWallMs(FAR, 12, 0),
+        startMs: wallMs(FAR, 8, 0),
+        endMs: wallMs(FAR, 12, 0),
       });
 
-      // 20. A day-less sentence -- today is off the (moved) board now.
+      // 20. A day-less sentence -- today is off the board, and stays off it:
+      // the question is the proof and nothing is written (F-182).
       table.push(await runEntry(page, dayLessToday));
-      await waitForAssignment(dana, {
-        operatorId: opId.maria,
-        nodeId: cellId("Cell 3"),
-        startMs: chicagoWallMs(TODAY, 8, 0),
-        endMs: chicagoWallMs(TODAY, 12, 0),
-      });
 
-      // 21 and 22. The clear of today, one sentence per area (R-407: a place
-      // above the cells clears every cell under it). Between them the two
-      // listings must name EVERY block this walk left on today -- counted
+      // 21 and 22. The clear of the walk day, one sentence per area (R-407: a
+      // place above the cells clears every cell under it). Between them the
+      // two listings must name EVERY block this walk left on that day -- counted
       // against an independent database read taken before either runs, never
       // a hand-summed number.
       const beforeClear = await assignmentsStartingInWindow(
         dana,
         allCellIds,
-        TODAY_START_MS,
-        TODAY_END_MS,
+        WALK_DAY_START_MS,
+        WALK_DAY_END_MS,
       );
       const listedCount = (result: EntryResult): number => {
-        const match = result.barSaid.match(/^(\d+) commands?/);
+        // Entry 21 reaches its listing through "Show that day", so the
+        // listing is what the bar showed AFTER the button, not `barSaid`.
+        const match = (result.listing ?? result.barSaid).match(/^(\d+) commands?/);
         if (match === null) return Number.NaN; // already recorded as the finding
         return Number(match[1]);
       };
@@ -820,7 +903,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       if (area1Result.unpredicted === undefined && area2Result.unpredicted === undefined) {
         expect(
           area1Listed + area2Listed,
-          "the two areas' listings together should name every block the walk left on today",
+          "the two areas' listings together should name every block the walk left on the walk day",
         ).toBe(beforeClear.length);
       }
       const afterClear = await (async () => {
@@ -831,8 +914,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           const rows = await assignmentsStartingInWindow(
             dana,
             allCellIds,
-            TODAY_START_MS,
-            TODAY_END_MS,
+            WALK_DAY_START_MS,
+            WALK_DAY_END_MS,
           );
           if (rows.length === 0) return rows;
           if (Date.now() > deadline) return rows;
@@ -841,7 +924,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       })();
       expect(
         afterClear,
-        "every block on today should be gone after the two areas' own yeses",
+        "every block on the walk day should be gone after the two areas' own yeses",
       ).toHaveLength(0);
 
       // ------------------------------------------------------------------
@@ -877,7 +960,14 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         const entry = parsedTrace[i];
         expect(entry.heard, `trace line ${i + 1}'s heard`).toBe(nonVoice[i].say);
         expect(entry.asked, `trace line ${i + 1}'s asked`).not.toBeNull();
-        expect(entry.answered, `trace line ${i + 1}'s answered`).not.toBeNull();
+        // Entry 20 asks and is declined (F-182): its line has no answer, and
+        // the trace says so honestly (R-434) -- every other turn was answered.
+        // An entry that landed on its direct readout (orDirect) was never a
+        // question either, so its line carries no answer.
+        const landedDirect = table[i]?.note?.includes("[direct, no question]") ?? false;
+        if (nonVoice[i] !== dayLessToday && !landedDirect) {
+          expect(entry.answered, `trace line ${i + 1}'s answered`).not.toBeNull();
+        }
       }
 
       // ------------------------------------------------------------------

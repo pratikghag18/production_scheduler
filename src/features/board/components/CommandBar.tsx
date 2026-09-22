@@ -676,11 +676,9 @@ function isTargetOnBoard(
   // week `today` falls in, exactly as the window move anchors it.
   const weekShift = SHOW_DAY_WEEK_WORD_SHIFT[target];
   if (weekShift !== undefined) {
-    if (ctx.todayIndex === null) return false;
-    const todayIso = ctx.days.find((d) => d.index === ctx.todayIndex)?.iso;
-    if (todayIso === undefined) return false;
+    // F-191: the plant's own today, on the board or not.
     const have = new Set(ctx.days.map((d) => d.iso));
-    return isoWeekOf(todayIso)
+    return isoWeekOf(ctx.todayIso)
       .map((iso) => isoPlusDaysUtc(iso, weekShift))
       .every((iso) => have.has(iso));
   }

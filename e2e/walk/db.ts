@@ -36,6 +36,25 @@ export async function signedInClient(email: string): Promise<SupabaseClient> {
   });
 }
 
+/**
+ * The plant's own zone, resolved on the SERVER by `app_resolve_node_setting`
+ * (migrations 0050/0068) -- the same SECURITY DEFINER walk `board_window`
+ * and the app's `fetchNodeSetting` use -- with `board_window`'s own COALESCE
+ * default ('UTC') when nothing resolves at the plant or the company. F-190:
+ * the walk had this as a constant (America/Chicago, the brief's word) and the
+ * 21 Sept reset put the demo back on the seed's own zone, which is no zone at
+ * all; a premise about the world lives in the database and is read from it,
+ * never retyped (F-181's rule, again).
+ */
+export async function plantZone(dana: SupabaseClient, nodeId: string): Promise<string> {
+  const { data, error } = await dana.rpc("app_resolve_node_setting", {
+    p_node_id: nodeId,
+    p_key: "timezone",
+  });
+  if (error) throw new Error(`resolving the plant's timezone: ${error.message}`);
+  return typeof data === "string" && data !== "" ? data : "UTC";
+}
+
 export interface PlantANodes {
   plantId: string;
   /** Cell display name ("Cell 1" .. "Cell 6") -> node id. */

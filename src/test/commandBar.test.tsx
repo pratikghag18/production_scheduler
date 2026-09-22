@@ -121,6 +121,16 @@ const BUILD_CTX_DAYS: BoardDay[] = [
 
 /** Brief §5's fixture, verbatim: a 7-day window from Monday 2026-08-31,
  *  today = index 3 (Thursday 2026-09-03), the plain (no-changeover) stub. */
+/** F-191: the ISO of `todayIndex` among `days`, or a Monday far in the
+ *  past when today is off the board (the resolver then asks about the week
+ *  word, never about "today"). */
+function todayIsoOf(
+  days: ReadonlyArray<{ index: number; iso: string }>,
+  todayIndex: number | null,
+): string {
+  return days.find((d) => d.index === todayIndex)?.iso ?? "2000-01-03";
+}
+
 function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
   const finalDays = over.days ?? BUILD_CTX_DAYS;
   const nodes = [
@@ -151,6 +161,11 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
       nodeId === "c1b" ? [{ id: "cov" }] : [{ id: "ha" }, { id: "hb" }],
     days: BUILD_CTX_DAYS,
     todayIndex: 3,
+    // F-191: the plant's calendar today, derived from the days and
+    // `todayIndex` a case passes so the two never disagree; a case with
+    // today off the board gets a Monday far in the past unless it says
+    // otherwise.
+    todayIso: todayIsoOf(finalDays, over.todayIndex === undefined ? 3 : over.todayIndex),
     wallToOffset: (d: number, m: number) => d * 1440 + m,
     runs: [],
     fitsRun: (a, r) => a.startMin >= r.startMin && a.endMin <= r.endMin,

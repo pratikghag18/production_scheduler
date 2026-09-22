@@ -728,6 +728,9 @@ export default function BoardPage() {
       offeredAt: (nodeId: string) => productsOfferedAtNode(active, nodeId),
       days,
       todayIndex: t === -1 ? null : t,
+      // F-191: the plant's calendar today, from the same zoned parts
+      // `nowMinuteOfDay` is built from -- on the board or not.
+      todayIso: `${nowParts.year}-${String(nowParts.month).padStart(2, "0")}-${String(nowParts.day).padStart(2, "0")}`,
       wallToOffset: axis.wallToOffset,
       runs,
       fitsRun: assignmentFitsRun,
@@ -880,11 +883,10 @@ export default function BoardPage() {
     // moves a three-day window, so an ISO-named repeat asked about Monday,
     // moved, then asked about Thursday, for ever.
     if (target in SHOW_DAY_WEEK_WORD_OFFSETS) {
-      const anchorDay =
-        commandCtx.todayIndex !== null
-          ? commandCtx.days[commandCtx.todayIndex]
-          : commandCtx.days[0];
-      const monday = isoMondayOfWeek(anchorDay.iso);
+      // F-191: anchored on the plant's own today, never on the window's
+      // first day -- a board already showing next week must not read "next
+      // week" as the week after it.
+      const monday = isoMondayOfWeek(commandCtx.todayIso);
       const iso = isoPlusDays(monday, SHOW_DAY_WEEK_WORD_OFFSETS[target]);
       setWindowStartDate(dayMarker(iso));
       setWindowDayCount(Math.max(windowDayCount, 7));

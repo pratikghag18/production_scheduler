@@ -125,6 +125,12 @@ export interface ResolveContext {
   days: ReadonlyArray<BoardDay>;
   /** The day `now` falls on in the plant's zone, or null when today is not on the board. */
   todayIndex: number | null;
+  /** The plant's calendar today as `YYYY-MM-DD`, on or off the board (F-191:
+   *  a week word -- "this week", "next week" -- is anchored on the plant's
+   *  today, never on where the window happens to sit; with today off the
+   *  board, `todayIndex` alone made "next week" ask about "today", and the
+   *  Show-that-day handler anchored the week on the window's first day). */
+  todayIso: string;
   /** D88a/D88b: real minutes from the window's origin to wall-clock `minuteOfDay`
    *  on day `dayIndex` — `index.dayAxis.wallToOffset`. On a DST changeover day
    *  this is NOT `dayIndex * 1440 + minuteOfDay`; never do that arithmetic here. */
@@ -4140,6 +4146,22 @@ function daysInMonth(year: number, month1to12: number): number {
  * green by construction, not by the developer remembering not to touch this
  * function. `delta` may be negative (`yesterday`'s own -1, and `last_week`'s
  * -7 through `resolveWeekDays`). */
+/** F-191: the weekday of an ISO day, 0 = Sunday, by Sakamoto's arithmetic --
+ *  this module may construct no Date (commandPurity U1) and may not import
+ *  the format helpers at runtime, so this is the local twin of
+ *  `weekdayOfIso`, exactly as `addDaysToIso` below is of `isoPlusDays`. */
+function weekdayOfIsoDay(iso: string): number {
+  const [y0, m, d] = iso.split("-").map(Number);
+  const t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+  const y = m < 3 ? y0 - 1 : y0;
+  return (y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) + t[m - 1] + d) % 7;
+}
+
+/** F-191: the Monday of the week `iso` falls in (the local twin of `isoMondayOfWeek`). */
+function mondayOfIsoWeek(iso: string): string {
+  return addDaysToIso(iso, -((weekdayOfIsoDay(iso) + 6) % 7));
+}
+
 function addDaysToIso(iso: string, delta: number): string {
   let [y, m, d] = iso.split("-").map(Number);
   d += delta;
@@ -4206,28 +4228,27 @@ function resolveWeekDays(
   ctx: ResolveContext,
   naming: OffBoardNaming = "iso",
 ): { ok: true; days: number[] } | { ok: false; question: Question } {
-  if (ctx.todayIndex === null) {
-    return { ok: false, question: { kind: "day_off_board", text: "today" } };
-  }
-  const todayDay = ctx.days.find((d) => d.index === ctx.todayIndex)!;
-  const daysFromMonday = (todayDay.weekday + 6) % 7; // Sun(0)->6 .. Sat(6)->5, Mon(1)->0
+  // F-191: the week is the plant's own -- Monday of the week TODAY falls
+  // in, on the plant's calendar (`ctx.todayIso`), shifted by the word --
+  // whether or not today is on the board. Anchoring on `todayIndex` made a
+  // board showing next week answer "every weekday next week" with "today is
+  // not on the board", a question about a day the sentence never named.
   const weekOffset = kind === "last_week" ? -7 : kind === "next_week" ? 7 : 0;
-  const mondayIndex = ctx.todayIndex - daysFromMonday + weekOffset;
+  const monday = addDaysToIso(mondayOfIsoWeek(ctx.todayIso), weekOffset);
   const indexes: number[] = [];
-  for (let i = 0; i < 7; i++) indexes.push(mondayIndex + i);
-  for (const idx of indexes) {
-    if (!ctx.days.some((d) => d.index === idx)) {
+  for (let i = 0; i < 7; i++) {
+    const iso = addDaysToIso(monday, i);
+    const day = ctx.days.find((d) => d.iso === iso);
+    if (day === undefined) {
       return {
         ok: false,
         question: {
           kind: "day_off_board",
-          text:
-            naming === "week_word"
-              ? WEEK_WORD[kind]
-              : addDaysToIso(todayDay.iso, idx - ctx.todayIndex),
+          text: naming === "week_word" ? WEEK_WORD[kind] : iso,
         },
       };
     }
+    indexes.push(day.index);
   }
   return { ok: true, days: indexes };
 }

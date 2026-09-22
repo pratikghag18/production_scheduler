@@ -80,6 +80,7 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
       { index: 6, iso: "2026-09-06", weekday: 0 },
     ],
     todayIndex: 3,
+    todayIso: "2026-09-03", // F-191: the plant's today, day 3 above
     wallToOffset: (d: number, m: number) => d * 1440 + m,
     runs: [],
     fitsRun: (a, r) => a.startMin >= r.startMin && a.endMin <= r.endMin,

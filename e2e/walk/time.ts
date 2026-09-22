@@ -1,16 +1,18 @@
 /**
- * S61-c — Chicago-zone date helpers for the typed walk spec.
+ * S61-c — plant-zone date helpers for the typed walk spec.
  *
- * Plant A is on America/Chicago (brief). `beforeAll`/`afterAll` need the
- * spec's own window (today - 1 to today + 8, Chicago) as UTC instants so the
- * cleanup query can compare against `timerange`'s lower bound; the spec body
- * needs "today" as a plain ISO date to fill the board's own window-start
- * field. `zonedTimeToInstant` is `src/lib/format/timezones.ts`'s own seam --
+ * Plant A's zone is whatever its settings say (R-426: the plant's zone is the
+ * one clock), read by the spec from the server at setup (`plantZone` in
+ * `db.ts`) and passed in here -- never a constant (F-190: the brief said
+ * America/Chicago, the reset said UTC, and the spec wrote every block five
+ * hours off). The spec needs its own window (the walk day to the walk day +
+ * 8) as UTC instants so the cleanup query can compare against `timerange`'s
+ * lower bound; the spec body needs the walk day as a plain ISO date to fill
+ * the board's own window-start field. `zonedTimeToInstant` is `src/lib/format/timezones.ts`'s own seam --
  * the SAME one `CommandBar.tsx`'s `renderReadout` uses -- imported rather
  * than re-implemented (CLAUDE.md §4: never a second copy of a zone rule).
  * This file only READS from `src/`; nothing here is edited there.
  */
-export const PLANT_A_ZONE = "America/Chicago";
 
 /**
  * `zonedTimeToInstant`, reimplemented here rather than imported from
@@ -108,29 +110,46 @@ export function midnightInZone(isoDate: string, zone: string): Date {
 
 /** `hh:mm` of `isoDate` in `zone`, as epoch milliseconds -- what the
  *  database's own `assignments.timerange` stores a sentence's clock time as
- *  once Plant A's own zone (America/Chicago) has been applied to it. */
+ *  once the plant's own zone has been applied to it. */
 export function clockMsInZone(isoDate: string, zone: string, hh: number, mm: number): number {
   const [y, m, d] = isoDate.split("-").map(Number);
   return zonedTimeToInstant(zone, y, m, d, hh, mm).getTime();
 }
 
-/** Today's `YYYY-MM-DD` on Plant A's own clock. */
-export function todayInPlantA(): string {
-  return isoDateInZone(new Date(), PLANT_A_ZONE);
+/** Today's `YYYY-MM-DD` on the plant's own clock. */
+export function todayInZone(zone: string): string {
+  return isoDateInZone(new Date(), zone);
 }
 
 /**
- * The spec's own cleanup window (brief §1): "today - 1 to today + 8,
- * Chicago" -- half-open `[start, end)` in UTC, where `start` is midnight of
- * (today - 1) and `end` is midnight of (today + 9) (one past the last day
- * the window names, so "today + 8" is included whole).
+ * The walk's own day (F-182): the Monday of the week AFTER the one today
+ * falls in, on the plant's clock. Never the day the board opens on, so the
+ * clears the walk ends with never empty the day a person is using; "next
+ * week" in the repeat entry is this very week by construction; and the demo
+ * seed, anchored on the current week, never writes here. On a Sunday that is
+ * tomorrow -- still a day nobody is scheduling by hand while the walk runs.
  */
-export function cleanupWindow(): { startUtc: Date; endUtc: Date } {
-  const today = todayInPlantA();
-  const startIso = addDaysToIso(today, -1);
-  const endIso = addDaysToIso(today, 9);
+export function walkDayInZone(zone: string): string {
+  const today = todayInZone(zone);
+  const dow = new Date(`${today}T00:00:00Z`).getUTCDay(); // 0 = Sunday
+  const daysToNextMonday = dow === 0 ? 1 : 8 - dow;
+  return addDaysToIso(today, daysToNextMonday);
+}
+
+/**
+ * The spec's own cleanup window: the walk day to the walk day + 8, Chicago
+ * (F-182: the walk's own week and the Monday after it, which `far` lands
+ * on) -- half-open `[start, end)` in UTC, where `start` is midnight of the
+ * walk day and `end` is midnight of (walk day + 9), one past the last day
+ * the window names, so "+ 8" is included whole. Nothing before the walk day
+ * is touched: the day a person is using is never in this window.
+ */
+export function cleanupWindow(zone: string): { startUtc: Date; endUtc: Date } {
+  const day = walkDayInZone(zone);
+  const startIso = day;
+  const endIso = addDaysToIso(day, 9);
   return {
-    startUtc: midnightInZone(startIso, PLANT_A_ZONE),
-    endUtc: midnightInZone(endIso, PLANT_A_ZONE),
+    startUtc: midnightInZone(startIso, zone),
+    endUtc: midnightInZone(endIso, zone),
   };
 }
