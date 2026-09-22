@@ -100,15 +100,24 @@
 }
 
 /* S63-a: `flex: 1 1 auto` + `min-height: 0` (see `.thread`'s own comment) --
-   this is the element that actually scrolls. `justify-content: flex-end`
-   is the maintainer's own fix (looking at the panel): with few turns this
-   bottom-anchors them against the input instead of the top of the panel, so
-   any blank space in a tall or lightly-used panel sits ABOVE the
-   conversation, never below it. */
+   this is the element that actually scrolls.
+   F-192 (the maintainer, 22 Sept, after the spoken walk: "I can't scroll on
+   chat history, big issue."): `justify-content: flex-end` USED to be the
+   bottom-anchoring fix here, and it was wrong -- in a flex column,
+   `flex-end` together with `overflow-y: auto` pushes whatever overflows
+   ABOVE the box's own top edge, where no scrollbar ever reaches it (the
+   classic flexbox trap: `justify-content` repositions the flex line as a
+   whole, it does not clip-and-scroll from the top). With many turns the
+   oldest ones were simply gone. `margin-top: auto` on the first turn below
+   (`.turn:first-child`) gets the SAME bottom anchoring for the few-turns
+   case -- an auto margin on a flex item still pushes everything after it to
+   the end of the container when there is spare room -- but, unlike
+   `flex-end`, that margin collapses to nothing once the content is taller
+   than the box, so the box's own top edge becomes the true top of the
+   scrollable content and every turn, oldest first, is reachable. */
 .threadBody {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   flex: 1 1 auto;
   min-height: 0;
   gap: 8px;
@@ -116,11 +125,21 @@
   padding-right: 4px;
 }
 
+/* F-192: see `.threadBody`'s own comment above -- this is the replacement
+   for that rule's old `justify-content: flex-end`. Only the FIRST turn (or,
+   with none filed yet, the live current-turn block -- both share this one
+   `.turn` class) carries the auto margin, which is what bottom-anchors the
+   whole column when it is shorter than the box; every later turn keeps its
+   ordinary `gap`-only spacing from `.threadBody`. */
 .turn {
   display: flex;
   flex-direction: column;
   gap: 4px;
   font-size: calc(11px * var(--chrome-scale, 1));
+}
+
+.turn:first-child {
+  margin-top: auto;
 }
 
 /*

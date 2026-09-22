@@ -2778,9 +2778,16 @@ export function CommandBar({
     // question standing long enough to ask.
     //
     // This handler is the DOM input's own `onChange` -- `onInterim` (S46-a)
-    // calls `setText` directly and never reaches here, so a speech result
-    // that is still interim (the person may be about to say "yes") leaves a
-    // standing question alone regardless, on purpose.
+    // calls `setText` directly and never reaches here, so `status` itself is
+    // untouched by an interim result. F-197 (22 Sept): that used to be only
+    // half true in effect -- `onInterim` still unconditionally cleared
+    // `heldRef.current`, the ref an override-reason answer is re-resolved
+    // against, so a spoken reason lost its held command even though the
+    // question stayed on screen. `onInterim` now carries the same
+    // `answerTakes`-gated guard this block does, so a speech result that is
+    // still interim (the person may be about to say "yes", or still
+    // speaking a reason) leaves both the question AND the command it will
+    // answer alone, on purpose.
     //
     // S51 (brief §2 item 1): a typed edit drops a standing LOT entirely,
     // same as it drops a single block question -- computed off `status`
@@ -2824,6 +2831,30 @@ export function CommandBar({
     // `onFinal`, below) -- the trace entry's `by`.
     by: "typed" | "browser" | "local" = "typed",
   ): void {
+    // F-197 REVIEW FIX (the reviewer, 22 Sept): `submitText` is called both
+    // from a fresh, current-render closure (`handleKeyDown`'s own Enter
+    // branch, always up to date) and from `onFinal`, a closure created back
+    // when `startListening` was called -- a browser session can run for
+    // several seconds, and this component re-renders (and `status` changes)
+    // freely in that window, so by the time a LATE final actually arrives
+    // the `status` this function would otherwise close over is whatever it
+    // was AT THE MOMENT THE MIC WAS PRESSED, not what is standing now. Every
+    // branch below decides what a `value` MEANS (a reason, a candidate
+    // pick, a lot's yes, a cancel, or a whole new sentence) by reading
+    // `status` -- so a stale `status` here does not just show a stale
+    // MESSAGE, it can re-answer a question that already finished, a
+    // different way, a second time (CB-stale-1's own pin, below, found by
+    // the reviewer: an ambiguous "Which person?" question widened F-197's own
+    // mic-press guard now keeps alive through a press; the person types
+    // "Sam Patel" instead of finishing the voice turn -- written once -- and
+    // the still-listening session's own LATE final, "Sam Ortiz", matched
+    // that same (long since answered) candidate list and wrote it AGAIN).
+    // Reading the store directly here, once, shadows the outer `status` for
+    // the rest of this function with whatever is standing AT THE MOMENT
+    // THIS SUBMISSION IS ACTUALLY PROCESSED -- identical to the outer one
+    // for every TYPED call (nothing else runs between the keystroke and this
+    // line), and the fix for a LATE spoken one.
+    const status = store.getState().status;
     // S51 review fix: a lot writing in the background cannot be cancelled
     // or re-confirmed out from under itself -- Enter on ANY word (a cancel
     // word, a stray "yes", an ordinary sentence) is a no-op while
@@ -3261,7 +3292,25 @@ export function CommandBar({
     // not erase the very question the word is about to answer. Anything
     // else (a readout, a shape hint, an ordinary question) still clears, as
     // before S47.
-    setStatus((prev) => (prev?.kind === "question" && prev.blockHighlight ? prev : null));
+    //
+    // F-197 (the spoken walk, 22 Sept, R-425/R-434): S47's own guard only
+    // ever named `blockHighlight` (remove_which/move_which/block_exists),
+    // never the other question kinds a fresh mic press can be answering --
+    // a `not_certified` warn question wanting a REASON ("The line supervisor
+    // approved the cover.") is exactly as answerable by voice as a removal's
+    // "yes", and the walk's own trace shows the question wiped the instant
+    // the mic was pressed, before a word was even said. `answerTakes` (this
+    // file's own "is there an answer box standing" predicate, already used
+    // by `handleChange`'s identical typed-edit guard below) is the SAME
+    // check, taken from there rather than re-derived (CLAUDE.md §4/§7): it
+    // is non-null for every question kind that genuinely wants an answer
+    // (a reason, a lot's yes/no, an ambiguous name, a block question's own
+    // yes) and null for the handful that do not (a shape hint, a readout, a
+    // reading, a bare "Show that day" prompt) -- so this widens the survivor
+    // set to match `handleChange`'s, never narrows it (every `blockHighlight`
+    // question `answerTakes` already answers "yes or no" for, so nothing
+    // S47 protected stops being protected).
+    setStatus((prev) => (answerTakes(prev) !== null ? prev : null));
     const mySeq = ++recognitionSeqRef.current;
     function isCurrent(): boolean {
       return recognitionSeqRef.current === mySeq;
@@ -3269,7 +3318,23 @@ export function CommandBar({
     const handle = activeRecognizer({
       onInterim(interimText: string): void {
         if (!isCurrent()) return;
-        heldRef.current = null;
+        // F-197 (the spoken walk, 22 Sept): mirrors `handleChange`'s own
+        // `keepingTheAnswer` guard below -- while an answer box stands, an
+        // interim transcript is the ANSWER being composed, not a new
+        // sentence, exactly the same reason a typed keystroke does not drop
+        // it either (that guard's own comment already claimed this handler
+        // "leaves a standing question alone regardless, on purpose", which
+        // was true for `status` but not for `heldRef`: every interim result
+        // -- there are several before the final one -- unconditionally
+        // cleared `heldRef.current` here, so by the time the final
+        // transcript reached `submitText`'s own `awaitingOverrideReason`
+        // branch the held command was already gone, its "belt and braces"
+        // early return fired, and the trace line was left with `answered`
+        // set to the spoken reason and `outcome` stuck at null -- written
+        // nowhere. `answerTakes` is the same predicate `startListening`'s
+        // own mic-press guard above now uses, taken from there rather than
+        // re-derived.
+        if (answerTakes(status) === null) heldRef.current = null;
         setText(interimText);
       },
       onFinal(finalText: string): void {
@@ -3586,9 +3651,12 @@ export function CommandBar({
         </div>
         {/* S63-a review fix (the maintainer): an empty thread with nothing
             open is not a blank box -- one board-side bubble, bottom-aligned
-            just above the input (the same `flex-end`/`flex: 1 1 auto`
-            `.threadBody` above it already uses to push its own content down
-            leaves this sitting right after it). Not a turn: no `key`,
+            just above the input (`.threadBody`'s own `flex: 1 1 auto` above
+            it grows to fill the panel and leaves this sitting right after
+            it -- F-192 replaced that rule's OWN bottom-anchoring, the now
+            -removed `justify-content: flex-end`, with `margin-top: auto` on
+            `.turn:first-child`, which does not touch this sibling at all).
+            Not a turn: no `key`,
             nothing in the store, nothing traced -- gone the instant a
             sentence is submitted (`status` becomes non-null the moment one
             is) or a history turn exists, both checked here and nowhere else

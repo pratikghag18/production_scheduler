@@ -1,20 +1,27 @@
 /**
  * S59-c (brief §1, design-plan §19.104 / D133 item 4) — `buildRecognizerHint`
  * pinned alone: order, de-duplication, the ~200-word cap, an empty board.
+ *
+ * F-195 (the spoken walk, 22 Sept): `vocab()`/`VOCAB_WORD_COUNT` grew the
+ * same twelve words `recognizerHint.ts`'s own `VOCABULARY` did -- "end,
+ * block, clear, copy, make, until, from, to, today, tomorrow, week, on"
+ * ("job" and "shift" were already in both lists, so they are not repeated).
+ * The cap (200) is nowhere near hit by this (46 words against it), so
+ * nothing fell off either end.
  */
 import { describe, expect, it } from "vitest";
 import { buildRecognizerHint } from "@/lib/voice/recognizerHint";
 
 const VOCAB_WORD_COUNT =
-  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10".split(
+  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10".split(
     /\s+/,
-  ).length; // 34: 14 single-word terms + 10 spelled digits + 10 typed digits
+  ).length; // 46: 26 single-word terms + 10 spelled digits + 10 typed digits
 
 describe("RHINT: buildRecognizerHint (S59-c brief §1)", () => {
   it("RHINT-1: an empty board is the vocabulary alone", () => {
     const hint = buildRecognizerHint({ cells: [], places: [], parts: [], people: [] });
     expect(hint).toBe(
-      "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10",
+      "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10",
     );
   });
 
@@ -112,5 +119,5 @@ describe("RHINT: buildRecognizerHint (S59-c brief §1)", () => {
 });
 
 function vocab(): string {
-  return "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
+  return "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
 }

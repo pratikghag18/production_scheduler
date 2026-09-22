@@ -16,9 +16,22 @@
 
 /** The bar's own words, ahead of any board name -- D133 item 4's own list,
  *  verbatim, plus the ten digits spelled and typed (the model's own two
- *  forms for a headcount or a shift index, S55/S58's own commands). */
+ *  forms for a headcount or a shift index, S55/S58's own commands).
+ *
+ * F-195 (the spoken walk, 22 Sept): the first list only carried enough of
+ * the bar's vocabulary to get D133's own two examples ("cell" as "sell", "A"
+ * as "pay") past review -- the walk's own trace (`data/voice/trace/bar.jsonl`,
+ * 17:36-17:41Z) showed the gaps directly: "end" came back as "and" five
+ * tries running ("and Sam Patel's blog/Block", "N, Sam Patel's vlog", "A and
+ * D, Sam Patel's blog"), "block" as "blog"/"vlog", "swap" as "So, Tom, Tom"/
+ * "Swab", "on Cell" as "oneself", and "until"/"shift" both misheard inside
+ * "from 2 until end of the shift" (F-194's own entry, a grammar gap, but the
+ * same mishearing). "job" and "shift" were already here (D133's own list);
+ * "end, block, clear, copy, make, until, from, to, today, tomorrow, week,
+ * on" are the walk's own additions, appended in the same style -- one word
+ * or phrase per comma, the digits' own two blocks last, unchanged. */
 const VOCABULARY =
-  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
+  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
 
 /** Roughly whisper.cpp's own comfortable prompt length -- long enough to
  *  carry a full plant's worth of cells and parts, short enough that the

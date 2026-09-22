@@ -17,8 +17,15 @@
  * Same shape as `settingsPanel.test.tsx`: `@testing-library/react` + jsdom.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { formatDayLabel } from "@/features/board/lib/time";
+// CH-scroll (F-192): the thread's own store, built directly so many turns
+// can be seeded before the first render rather than driven one sentence at a
+// time through the UI (`createConversationStore`/`appendTurn` are the same
+// door `CommandBar`'s own `conversation` prop and `CommandLauncher` use).
+import { createConversationStore } from "@/features/board/store/commandConversation";
 import {
   formatCommand,
   parseCommand,
@@ -6105,6 +6112,86 @@ describe("CH: the conversation thread (R-427)", () => {
     expect(screen.getByRole("button", { name: "Clear history" })).toBeTruthy();
   });
 
+  // CH-scroll (F-192, R-427/R-429): `.threadBody` used to bottom-anchor its
+  // turns with `justify-content: flex-end`, which in a flex column pushes
+  // whatever overflows ABOVE the box's own top edge -- outside the
+  // scrollbar's reach (`CommandBar.module.css`'s own comment on the fix).
+  // jsdom computes no layout at all (no scroll height, no flex line
+  // position), so this cannot measure where the oldest turn actually sits
+  // the way a browser could -- the same limit `TB-13` in
+  // `boardToolbar.test.tsx` documents for R-447. What IS honestly testable
+  // from here: (1) every one of many turns is genuinely IN the DOM inside
+  // the one scrolling element (`overflow-y: auto` has something to scroll,
+  // and nothing above it is silently dropped or windowed), and (2) the
+  // stylesheet's own `.threadBody` rule no longer declares the offending
+  // `flex-end` value and a `.turn:first-child` rule now carries the
+  // replacement (`margin-top: auto`) -- the same "read the module's own
+  // source text" technique `fieldStandard.test.ts` uses for a property value
+  // jsdom cannot compute either. The maintainer's own look at the real
+  // browser (this brief's §1, reported below) is what actually proves
+  // scrolling; this pin only stops a future edit from quietly bringing
+  // `flex-end` back.
+  it("CH-scroll: many turns all render inside the one scrolling threadBody, and the stylesheet no longer bottom-anchors it with flex-end", () => {
+    stubFetch();
+    const conversation = createConversationStore();
+    for (let i = 0; i < 20; i++) {
+      conversation.getState().appendTurn({
+        at: `2026-09-22T17:${String(30 + i).padStart(2, "0")}:00.000Z`,
+        heard: `Turn number ${i}`,
+        by: "typed",
+        read: `read ${i}`,
+        asked: `asked ${i}`,
+        offered: [],
+        answered: "auto",
+        ran: [`ran ${i}`],
+        outcome: "written",
+      });
+    }
+    render(
+      <CommandBar
+        ctx={buildCtx({ runs: [] })}
+        dateFormat="d_mon_yyyy"
+        zone="UTC"
+        reader={null}
+        recognizer={null}
+        onOpen={vi.fn().mockReturnValue(WRITTEN)}
+        onRetime={vi.fn().mockReturnValue(WRITTEN)}
+        onBook={vi.fn().mockReturnValue(WRITTEN)}
+        onRetimeRun={vi.fn().mockReturnValue(WRITTEN)}
+        onUnassign={vi.fn().mockReturnValue(WRITTEN)}
+        onMove={vi.fn().mockReturnValue(WRITTEN)}
+        onSetHeadcount={vi.fn().mockReturnValue(WRITTEN)}
+        onRunLot={vi.fn()}
+        onHighlight={vi.fn()}
+        onShowDay={vi.fn()}
+        conversation={conversation}
+      />,
+    );
+
+    const threadBody = document.querySelector('[class*="threadBody"]') as HTMLElement;
+    expect(threadBody).toBeTruthy();
+    // Every turn, oldest first, is actually in the DOM inside it -- nothing
+    // above the newest one is dropped or lazily windowed.
+    for (let i = 0; i < 20; i++) {
+      expect(threadBody.textContent).toContain(`Turn number ${i}`);
+    }
+    expect(threadBody.getAttribute("role")).toBe("log");
+
+    // The stylesheet itself: `.threadBody` no longer carries `flex-end`, and
+    // `.turn:first-child` carries the replacement. Comments stripped first
+    // (`fieldStandard.test.ts`'s own warning: a matcher that read comments
+    // would flag this file's OWN prose about the fix, which names the very
+    // declaration being matched).
+    const cssPath = path.join(process.cwd(), "src/features/board/components/CommandBar.module.css");
+    const raw = fs.readFileSync(cssPath, "utf8");
+    const withoutComments = raw.replace(/\/\*[\s\S]*?\*\//g, "");
+    const threadBodyRule = /\.threadBody\s*\{[^}]*\}/.exec(withoutComments)?.[0] ?? "";
+    expect(threadBodyRule).not.toBe("");
+    expect(threadBodyRule).not.toMatch(/flex-end/);
+    const firstChildRule = /\.turn:first-child\s*\{[^}]*\}/.exec(withoutComments)?.[0] ?? "";
+    expect(firstChildRule).toMatch(/margin-top:\s*auto/);
+  });
+
   it("CH-2: a refused write shows Refused with the writer's own message", async () => {
     stubFetch();
     const { onOpen, input } = renderBar({ runs: [] });
@@ -6327,6 +6414,14 @@ describe("CP: a finished turn is bubbles, not prefixed lines (R-428)", () => {
 });
 
 describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
+  // CB-nc-8 (F-197, below) is the one case in this block that stubs `fetch`
+  // (to read the trace it posts) -- unstubbed after every test here, same
+  // as the "CH"/"CB-t" describe blocks' own `afterEach`, so a later
+  // `describe` never inherits a stub this block set.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   /** `certificateGaps` answers one gap ("Welding", never-trained) for
    *  Operator 1 (op1) on Cell 1 (c1a) -- P1_SENTENCE's own person and cell
    *  -- everyone/everywhere else stays fully eligible. */
@@ -6512,5 +6607,105 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     // so a block written with two overrides read as if it carried one.
     expect(statusText()).toContain("· override: covering for Sam");
     expect(statusText()).toContain("· area override: short-handed on Line 1");
+  });
+
+  // CB-nc-8 (F-197, R-425/R-434, the spoken walk 22 Sept): typed, a reason
+  // answers a standing warn question and runs the override (CB-nc-2, above).
+  // Spoken, the walk's own trace shows the same reason recorded as
+  // `answered` with `outcome: null` -- nothing written. Root cause (two
+  // guards, both fixed together): `startListening`'s own mic-press guard
+  // only preserved a `blockHighlight` question, so pressing the mic to
+  // ANSWER a `not_certified` question wiped it before a word was said; and
+  // `onInterim` unconditionally cleared `heldRef.current` (the command the
+  // reason re-resolves), so even with the question surviving, the final
+  // transcript's own `awaitingOverrideReason` branch found no held command
+  // and returned having already set `answered` but never `outcome`. This
+  // drives the SAME fake recogniser the CB-t/CB-mic cases use through both:
+  // a standing warn question, an interim result while the reason is still
+  // being spoken (the exact moment that used to drop `heldRef`), then the
+  // final transcript.
+  it("CB-nc-8: a spoken answer to a standing warn question runs the override exactly as a typed one, and the trace shows both answered and the outcome", () => {
+    const fetchMock = stubFetch();
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { onOpen, input } = renderBar(notCertifiedCtx("warn"), null, recognizer);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe(
+      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    // The mic press alone must not wipe the standing question (the first of
+    // the two bugs: the guard used to preserve only a `blockHighlight`
+    // question).
+    expect(statusText()).toBe(
+      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+    );
+
+    // An interim result while the reason is still being spoken (the second
+    // bug: this used to null out `heldRef.current` unconditionally).
+    fire.interim("Covering");
+    fire.final("Covering an absence");
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.override).toEqual({ reason: "Covering an absence" });
+
+    const entry = postedEntry(fetchMock);
+    expect(entry.answered).toBe("Covering an absence");
+    expect(entry.outcome).toBe("written");
+  });
+});
+
+// CB-stale (F-197 review fix, the reviewer, 22 Sept): F-197 widened
+// `startListening`'s own mic-press guard from "preserve a blockHighlight
+// question" to "preserve anything `answerTakes` recognises" -- an ambiguous
+// name, a not_certified reason, a lot's yes/no, all now genuinely survive a
+// mic press. That widening opened a second door nobody walked through: a
+// browser recognition session keeps running (nothing here ever calls its own
+// `stop()`) until it produces a result, so a session started while one of
+// these NOW-preserved questions stood can still be alive after the SAME
+// question is instead answered a different way (typing, in this pin) --
+// `onFinal`'s own callback was created back when `startListening` ran and
+// closed over `status` as it stood THEN, so its eventual, leftover final
+// transcript was matched against a question that had already been answered
+// and moved on from. Root cause and fix: `submitText` decides what a
+// transcript MEANS (a reason, a candidate pick, a lot's yes, a new sentence)
+// by reading `status` -- it now reads it fresh off the store
+// (`store.getState().status`) as its very first line, rather than closing
+// over whatever render's `status` `submitText` happened to be defined
+// against, so a late spoken result is judged against what is standing NOW,
+// never a stale snapshot.
+describe("CB-stale: a leftover voice session must not re-answer an already-resolved question (F-197 review fix)", () => {
+  it("CB-stale-1: an ambiguous question survives a mic press (F-197's own widening); the person types the answer instead; the mic's own leftover final must not re-pick a candidate against the question it already answered", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { onOpen, input } = renderBar({}, null, recognizer);
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe('Which person? "Sam" matches 2:');
+
+    // Mic pressed -- the widened guard now preserves this ambiguous
+    // question (it did not before F-197: no blockHighlight on it).
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    // The person answers by TYPING instead of finishing the voice turn --
+    // the mic is still "listening" (never stopped, never produced a final).
+    fireEvent.change(input, { target: { value: "Sam Patel" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved1] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved1.operatorId).toBe("sp");
+
+    // A LEFTOVER final now arrives from the still-active (stale) voice
+    // session -- e.g. the browser recogniser finally settles on words heard
+    // before the person switched to typing. The question it closed over is
+    // long gone (already answered above). Pre-fix this matched the SAME
+    // candidate list and wrote a second block for a different person onto
+    // the same cell -- a genuine double write, found by the reviewer.
+    fire.final("Sam Ortiz");
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });
