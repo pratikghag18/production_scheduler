@@ -307,3 +307,22 @@ BEGIN
   ELSE RAISE NOTICE 'FAIL D12: % people with no home shift (want 0), % line-owned people with one (want 3)',
                     v_shiftless, v_line_owned; END IF;
 END $$;
+
+\echo 'D13: the demo plant is in Chicago and its seeded hours are Chicago hours (R-450, F-190)'
+DO $$
+DECLARE v_zone text; v_plant uuid; v_rows int; v_at_six int;
+BEGIN
+  -- Both halves, together: the zone every plant resolves to after a reset, and
+  -- the seeded Shift 1 rows reading 06:00 IN THAT ZONE. Either alone is the
+  -- bug F-190 found -- a zone with UTC hours reads 01:00; UTC with no zone
+  -- reads 06:00 until someone sets the zone by hand.
+  SELECT n.id INTO v_plant FROM nodes n
+   WHERE n.org_id = '10000000-0000-0000-0000-000000000001' AND n.parent_id IS NULL AND n.name LIKE 'Plant A%';
+  v_zone := app_resolve_node_setting(v_plant, 'timezone');
+  SELECT count(*), count(*) FILTER (WHERE to_char(lower(timerange) AT TIME ZONE 'America/Chicago', 'HH24:MI') = '06:00')
+    INTO v_rows, v_at_six
+    FROM assignments WHERE org_id = '10000000-0000-0000-0000-000000000001';
+  IF v_zone = 'America/Chicago' AND v_rows > 0 AND v_at_six = v_rows THEN RAISE NOTICE 'PASS D13';
+  ELSE RAISE NOTICE 'FAIL D13: Plant A resolves to % (want America/Chicago); % of % seeded blocks start at 06:00 Chicago',
+                    coalesce(v_zone, '(none)'), v_at_six, v_rows; END IF;
+END $$;

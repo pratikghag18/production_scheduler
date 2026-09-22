@@ -445,16 +445,30 @@ END $$;
 -- ---------------------------------------------------------------------------
 -- 6. A WEEK OF SCHEDULE, so no board opens empty.
 --
--- Anchored on `date_trunc('week', now())`, so it is always the current week
--- rather than a fixed date that drifts into the past.
+-- Anchored on the Monday of the current week IN THE DEMO PLANT'S ZONE, so it
+-- is always the current week rather than a fixed date that drifts into the
+-- past, and every hour below is the wall-clock hour it names in that zone.
+--
+-- ⭐ R-450 (the maintainer, 22 Sept: "The demo plant should be in Chicago
+-- timezone"). Until then this block added '6 hours' to a UTC Monday, so the
+-- seeded Shift 1 was 06:00 UTC, which read as 06:00 only while the plant had
+-- no zone at all -- and as 01:00 the moment someone set Chicago on the
+-- Settings tab (F-190: the typed walk wrote five hours off on a reset stack).
+-- The zone is named ONCE (v_zone), the day is a plain local timestamp, and
+-- each range is that local wall clock turned into an instant with AT TIME
+-- ZONE, which is DST-correct (a 06:00 on the changeover Sunday is still
+-- 06:00). Section 6b below sets the same zone company-wide, so the board
+-- reads these rows back as the hours written here after every reset.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
   v_org uuid := '10000000-0000-0000-0000-000000000001';
-  v_letter text; v_day timestamptz; v_cell uuid; v_run uuid; v_prod uuid;
-  v_i int; v_d int;
+  v_zone text := 'America/Chicago';
+  v_letter text; v_day timestamp; v_cell uuid; v_run uuid; v_prod uuid;
+  v_i int; v_d int; v_from timestamptz; v_to timestamptz;
 BEGIN
-  v_day := date_trunc('week', now());
+  -- Monday 00:00 of the current week, on the plant's own calendar.
+  v_day := date_trunc('week', now() AT TIME ZONE v_zone);
 
   FOREACH v_letter IN ARRAY ARRAY['A','B','C'] LOOP
     FOR v_d IN 0..6 LOOP
@@ -474,24 +488,36 @@ BEGIN
         -- this line still named it for one session and the demo world stopped
         -- building here (DEF-0006). `dev_demo_test.sql` now applies this file
         -- on a runner, so the next dropped column fails loudly instead.
+        -- 06:00 to 14:00 on day v_d, as Chicago wall-clock instants.
+        v_from := (v_day + (v_d || ' days')::interval + interval '6 hours') AT TIME ZONE v_zone;
+        v_to   := (v_day + (v_d || ' days')::interval + interval '14 hours') AT TIME ZONE v_zone;
+
         INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
-        VALUES (v_org, v_cell, v_prod,
-                tstzrange(v_day + (v_d || ' days')::interval + interval '6 hours',
-                          v_day + (v_d || ' days')::interval + interval '14 hours'),
-                1)
+        VALUES (v_org, v_cell, v_prod, tstzrange(v_from, v_to), 1)
         RETURNING id INTO v_run;
 
         INSERT INTO assignments (org_id, node_id, operator_id, run_id, timerange, efficiency)
-        SELECT v_org, v_cell, o.id, v_run,
-               tstzrange(v_day + (v_d || ' days')::interval + interval '6 hours',
-                         v_day + (v_d || ' days')::interval + interval '14 hours'),
-               1.000
+        SELECT v_org, v_cell, o.id, v_run, tstzrange(v_from, v_to), 1.000
           FROM operators o
          WHERE o.org_id = v_org AND o.display_name = 'Operator ' || v_letter || v_i;
       END LOOP;
     END LOOP;
   END LOOP;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- 6b. THE DEMO COMPANY'S ZONE (R-450).
+--
+-- The company-wide fallback every plant inherits (0063: orgs.settings.timezone,
+-- read by app_resolve_node_setting and board_window's COALESCE). Set here, in
+-- the seed, so a reset never turns the demo back into a UTC plant; set at the
+-- company rather than on each root so a fourth plant would inherit it too. The
+-- hours in section 6 are written in this same zone (v_zone there and the
+-- literal here are the one fact; D13 in dev_demo_test.sql holds them together).
+-- ---------------------------------------------------------------------------
+UPDATE orgs
+   SET settings = COALESCE(settings, '{}'::jsonb) || '{"timezone": "America/Chicago"}'::jsonb
+ WHERE id = '10000000-0000-0000-0000-000000000001';
 
 -- ---------------------------------------------------------------------------
 -- 6a. PLANT A'S REAL NAMES (R-423, DEF-0034).
