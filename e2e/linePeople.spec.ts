@@ -107,7 +107,13 @@ test("a line supervisor sees the whole plant's people: the default list plus the
 
   const panel = page.getByRole("complementary", { name: "Operators" });
   await expect(panel).toBeVisible({ timeout: 15_000 });
-  await expect(panel.getByText(PLANT_A_NAME_RE).first()).toBeVisible({ timeout: 15_000 });
+  // The chips are the wait for the rail's data: the default list may honestly
+  // be EMPTY (22 Sept, the first run on the Chicago plant, R-450: 10:50 there
+  // is Shift 1, and none of Plant A's six is homed on Shift 1 by R-441's
+  // hash), so nothing here waits for a name before the chips are pressed.
+  await expect(panel.getByRole("button", { name: /^Shift \d+$/ }).first()).toBeVisible({
+    timeout: 15_000,
+  });
 
   // R-448 (S66-c, session 180): the rail lists the people on shift NOW by
   // default, with a chip per shift that brings the other bands in. This case
@@ -118,6 +124,7 @@ test("a line supervisor sees the whole plant's people: the default list plus the
   const offChips = panel.getByRole("button", { name: /^Shift \d+$/, pressed: false });
   for (let i = (await offChips.count()) - 1; i >= 0; i--) await offChips.nth(i).click();
   await expect(panel.getByRole("button", { name: /^Shift \d+$/, pressed: false })).toHaveCount(0);
+  await expect(panel.getByText(PLANT_A_NAME_RE).first()).toBeVisible({ timeout: 15_000 });
 
   const { here, behind } = await readSplit(panel, (t) =>
     t.trim().split(/\s/).slice(0, 2).join(" "),
