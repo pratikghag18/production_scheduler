@@ -12803,6 +12803,25 @@ requirements:
     walk's brief) treated it as a Chicago one. BUILT the same session (69318e7): the zone named once in the
     schedule block, each hour an AT TIME ZONE instant, the company-wide fallback set in a new section 6b.
 findings:
+- id: F-198
+  title: A one-word spoken answer ("yes") is never sent to Whisper, because a clip's speech only starts after half a second of steady loudness
+  tag: A silence rule that swallows short answers
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-434
+  - R-435
+  - F-197
+  story: >-
+    22 Sept (session 189), after the dev server was restarted: "Clear, Cell 3, Today" was heard first time and
+    the bar asked "1 commands ready: Removing the Bracket A job ... say or type yes"; the spoken yes came back
+    five times as heard "", "Nothing was heard", about fifteen seconds after each press. localRecognizer.ts
+    starts a clip's speech only after two consecutive frames above the loudness floor, and a frame is 4096
+    samples at 16 kHz, a quarter of a second: a one-syllable yes is shorter than that, so speech never starts,
+    the clip runs to the twelve-second cap and is dropped as no-speech without reaching Whisper. The retries
+    of the whole sentence in between were misheard and each replaced the standing question. The person typed
+    yes in the end. "I eventually had to type yes."
 - id: F-197
   title: A spoken override reason was recorded as the answer and nothing was written, so the person typed it again and the bar read it as a new sentence
   tag: A free-text answer that only the keyboard delivers
@@ -25767,6 +25786,11 @@ next:
   text: "The admin rail resizes and remembers (R-446), the side-panel standard's first hit --- lane running 18 Sept"
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
+- kind: task
+  text: "S70-e: a one-word spoken answer is heard --- speech starts on one frame, a quiet short clip is still sent at the cap, yes and no join the hint (F-198) --- docs/agent-briefs/s70-e-short-spoken-answer-brief.md"
+  why: >-
+    22 Sept (session 189): the clear works and lists the job; the spoken yes that should run it never reaches
+    Whisper. The first thing a person says after every question is one word.
 - kind: task
   text: "F-193 and F-196: a date said in words, and a capitalised small word read as a place --- the sixth run's data (the generator) and, until then, a question instead of a silent write (R-435) and choices at the dead end (R-430)"
   why: >-
