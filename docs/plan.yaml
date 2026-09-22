@@ -25625,7 +25625,6 @@ next:
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
 - kind: task
-  stage: S70
   text: "S70-a: one absence form, mounted on the Absences tab and on the person's block in the Operators tab with the person fixed (R-360 amended, R-449) --- docs/agent-briefs/s70-a-one-absence-form-brief.md"
   why: >-
     Decided 22 Sept (session 188): "I want option A, but why can't we reuse the form on the same page itself?"
@@ -25634,7 +25633,6 @@ next:
     loses its own form; the pins move with it. Waits until the maintainer's spoken walk is done, since the dev
     server reloads on every save.
 - kind: task
-  stage: S70
   text: "S70-b: the rules read a day after a headcount's count, as every other form does (\"... 4 people tomorrow\") --- docs/agent-briefs/s70-b-headcount-trailing-day-brief.md"
   why: >-
     Found 22 Sept (session 186) re-dating the typed walk. The served model already reads the sentence (probed
