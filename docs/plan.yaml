@@ -9884,6 +9884,11 @@ requirements:
     two writers (`set_absence`, `remove_absence`) the Absences tab uses, gated by the same server
     predicate, so a refusal is shown in words and never pre-guessed. The Absences tab stays: it is
     the company-wide view, this is the person-wide one.
+    AMENDED 22 Sept (session 188, R-449's audit): the person's block keeps its list and its Remove, and
+    records through the SAME form component the Absences tab mounts (one control, two entry points, the
+    D100 shape the skills pop-over already has), with the person fixed and the server's recordable answer
+    (DEF-0035) shared; a second, separately coded form is what R-449 forbids. The maintainer: "I want option
+    A, but why can't we reuse the form on the same page itself?"
   verified_by:
   - kind: vitest
     file: src/test/operatorAbsences.test.tsx
@@ -12763,7 +12768,9 @@ requirements:
     AUDITED 22 Sept (session 186, docs/agent-briefs/s69-b-one-place-audit-brief.md): one hit, not folded --- an
     absence is recorded and removed both on the Absences tab and in the person's own block on the Operators
     tab, two separately coded forms; R-360 (7 Sept) asked for exactly that pair ("the company-wide view" and
-    "the person-wide one"), so the two standards disagree and the maintainer breaks the tie (queued). The
+    "the person-wide one"), so the two standards disagree and the maintainer breaks the tie (queued).
+    DECIDED 22 Sept (session 188): one form component, mounted on both screens with the person fixed on the
+    Operators tab --- R-360 amended, no exception on this row. The
     bulk imports write the same facts as the tabs and stay as the many-rows capability the forms cannot offer.
     Everything else has one writer, or one shared control mounted twice (the skills pop-over, D100).
 - id: R-450
@@ -25618,16 +25625,22 @@ next:
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
 - kind: task
-  text: "The Absences pair, a maintainer decision: R-360 (7 Sept) keeps a per-person absence form on the Operators tab beside the Absences tab; R-449 (18 Sept) says one fact, one screen. Either the person's block becomes a read-only list with a link to the Absences tab, or R-449 names this pair as its written exception"
+  stage: S70
+  text: "S70-a: one absence form, mounted on the Absences tab and on the person's block in the Operators tab with the person fixed (R-360 amended, R-449) --- docs/agent-briefs/s70-a-one-absence-form-brief.md"
   why: >-
-    The one hit of the R-449 audit (22 Sept, session 186, docs/agent-briefs/s69-b-one-place-audit-brief.md). The
-    developer did not choose between two of the maintainer's own decisions. The fold would rewrite R-360's own
-    words and pin (src/test/operatorAbsences.test.tsx); the exception is one sentence on R-449.
+    Decided 22 Sept (session 188): "I want option A, but why can't we reuse the form on the same page itself?"
+    The one hit of the R-449 audit. Extract the Absences tab's form (the one DEF-0035 hardened to the server's
+    recordable answer) into a component both screens mount; OperatorAbsences.tsx keeps its list and Remove and
+    loses its own form; the pins move with it. Waits until the maintainer's spoken walk is done, since the dev
+    server reloads on every save.
 - kind: task
-  text: "A day after a headcount's count is not read: \"make the Bracket A job on Cell 3 4 people tomorrow\" is no_time to the rules; the day only reads before the count"
+  stage: S70
+  text: "S70-b: the rules read a day after a headcount's count, as every other form does (\"... 4 people tomorrow\") --- docs/agent-briefs/s70-b-headcount-trailing-day-brief.md"
   why: >-
-    Found 22 Sept (session 186) re-dating the typed walk (F-182): every other form takes a trailing day. Small
-    grammar work in parseHeadcountRest; the walk says the day before the count until then.
+    Found 22 Sept (session 186) re-dating the typed walk. The served model already reads the sentence (probed
+    22 Sept: headcount 4, tomorrow); the RULES, which answer when the model is slow or absent, refuse it as
+    no_time. parseHeadcountRest takes the trailing day like the others; HC cases pin both positions. Same wait
+    as S70-a.
 - kind: task
   text: "The voice half of the walk through Whisper: the maintainer speaks docs/walks/voice-walk-2026-09-22.md, the developer reads the trace and the thread after"
   why: >-
