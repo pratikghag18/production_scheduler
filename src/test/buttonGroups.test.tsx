@@ -124,6 +124,9 @@ vi.mock("@/lib/api", () => ({
   fetchNodeSetting: () => Promise.resolve(null),
   setAbsence: vi.fn(),
   removeAbsence: vi.fn(),
+  // S70-a: the person's block asks who it may record for (DEF-0035); an empty
+  // answer keeps every case here about the panel, not the absence form.
+  fetchRecordableAbsencePeople: () => Promise.resolve([]),
 }));
 
 vi.mock("@/features/admin/components/AbsencesImport", () => ({
