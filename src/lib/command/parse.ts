@@ -737,9 +737,15 @@ const ALL_DAY_RE = /\ball\s+day\b/i;
  *  above never gets this option. F-151: that captured start is a LONE
  *  START -- read through `applyLoneStartRule` (not `applyLoneEdgeRule`)
  *  where it is used, below, never here (this regex only finds the token). */
+// F-194: "until"/"till" take an optional "the" before "end", and "end of"
+// takes an optional "the" too ("of the"/"of" -- the same optional word in
+// both slots, wherever the grammar reads it) -- "until end of the shift"
+// was `bad_time` for want of it. "to the end of the shift" and "for the
+// rest of the shift" are fixed phrasings, unaffected.
 const END_OF_SHIFT_CORE =
-  "(?:until\\s+end\\s+of\\s+shift|till\\s+end\\s+of\\s+shift|to\\s+the\\s+end\\s+of\\s+the\\s+shift|" +
-  "until\\s+the\\s+end\\s+of\\s+shift|for\\s+the\\s+rest\\s+of\\s+the\\s+shift)";
+  "(?:(?:until|till)\\s+(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?shift|" +
+  "to\\s+the\\s+end\\s+of\\s+the\\s+shift|" +
+  "for\\s+the\\s+rest\\s+of\\s+the\\s+shift)";
 const END_OF_DAY_CORE =
   "(?:for\\s+the\\s+rest\\s+of\\s+the\\s+day|until\\s+end\\s+of\\s+day|till\\s+the\\s+end\\s+of\\s+the\\s+day)";
 const END_OF_SHIFT_RE = new RegExp(
@@ -2651,13 +2657,46 @@ function parseHeadcountRest(rest: string, quotes: string[]): ParseResult | null 
   const product = restoreQuotes(jobMatch[1], quotes);
   const tail = jobMatch[2];
 
-  const countMatch = tail.match(HEADCOUNT_TRAILING_RE);
+  // F-182: every other grammar takes a trailing day word, but this one only
+  // read one BEFORE the count -- "... 4 people tomorrow" fell through to
+  // `no_time` because HEADCOUNT_TRAILING_RE is anchored at the string's own
+  // end and "tomorrow" sat after "4 people". Strip a trailing day off the
+  // very end of `tail` FIRST (the shared `extractDayWord`, never a second
+  // regex for a day), so the count is anchored again; merged below with
+  // whatever day the body/time-clause read on their own, exactly as a
+  // leading day and the time clause's own trailing day are already merged
+  // (F-133's rule: two that disagree is `two_days`, the same word twice is
+  // fine).
+  const tailDay = extractDayWord(tail);
+  if (!tailDay.ok) return tailDay;
+
+  // Reviewer fix (S70-b review): a SECOND day word stacked right after the
+  // first ("... 4 people tomorrow yesterday") left `tailDay.rest` ending in
+  // the earlier word, not "people" -- HEADCOUNT_TRAILING_RE's own anchor
+  // then failed outright and the whole sentence read as not headcount-
+  // shaped (`no_time` from the ordinary assign pipeline) instead of the
+  // `two_days` F-133 promises for two day words that disagree. Strip one
+  // more trailing day off what F-182's own strip left behind, in the same
+  // way, and merge it in the order the words were said (the newly-found one
+  // sat BEFORE the first one stripped, so it is `mergeDay`'s leading side).
+  let tailRest = tailDay.rest;
+  let tailDayWord = { day: tailDay.day, word: tailDay.word };
+  const secondTailDay = extractDayWord(tailRest);
+  if (!secondTailDay.ok) return secondTailDay;
+  if (secondTailDay.day !== null) {
+    const combined = mergeDay({ day: secondTailDay.day, word: secondTailDay.word }, tailDayWord);
+    if (!combined.ok) return combined;
+    tailDayWord = { day: combined.day, word: tailDayWord.word ?? secondTailDay.word };
+    tailRest = secondTailDay.rest;
+  }
+
+  const countMatch = tailRest.match(HEADCOUNT_TRAILING_RE);
   if (!countMatch) return null;
   const n = Number(countMatch[1]);
   if (!Number.isInteger(n) || n < 1 || n > 99) {
     return { ok: false, failure: { kind: "bad_headcount", text: countMatch[1] } };
   }
-  let body = tail.slice(0, countMatch.index).trim();
+  let body = tailRest.slice(0, countMatch.index).trim();
   body = body.replace(/^(?:on|at|in)\s+/i, "");
 
   const boundary = extractShiftOrBoundaryClause(body, quotes);
@@ -2673,9 +2712,14 @@ function parseHeadcountRest(rest: string, quotes: string[]): ParseResult | null 
 
   const dayResult = extractDayWord(body);
   if (!dayResult.ok) return dayResult;
-  const merged = mergeDay(
+  const beforeCount = mergeDay(
     { day: dayResult.day, word: dayResult.word },
     { day: tc.trailingDay, word: tc.trailingWord },
+  );
+  if (!beforeCount.ok) return beforeCount;
+  const merged = mergeDay(
+    { day: beforeCount.day, word: dayResult.word ?? tc.trailingWord },
+    tailDayWord,
   );
   if (!merged.ok) return merged;
 

@@ -265,11 +265,10 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       expect: adjustReadoutRe("John Kim", "Cell 3", "end", "13:00", "12:00"),
     },
 
-    // 13. The headcount form -- the run booked in entry 6. The day goes
-    // BEFORE the count: "... 4 people 2026-09-28" is no_time to the rules
-    // (a day after the count is not read -- queued, F-182 follow-up).
+    // 13. The headcount form -- the run booked in entry 6. F-182: the day
+    // now reads AFTER the count too, so this says it in the natural order.
     {
-      say: `make the Bracket A job on Cell 3 on ${dates.day} 4 people`,
+      say: `make the Bracket A job on Cell 3 4 people ${dates.day}`,
       expect: headcountReadoutRe("Bracket A", "Cell 3", 4),
     },
 

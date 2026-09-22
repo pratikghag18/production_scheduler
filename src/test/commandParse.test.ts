@@ -2428,6 +2428,30 @@ describe("commandParse: S55 boundaries -- ALL_DAY/END_OF_SHIFT/END_OF_DAY (R-404
     ).toEqual(expected);
   });
 
+  it("BD2a (F-194): end of shift takes an optional 'the' -- 'until end of the shift' (with the), 'until end of shift' (without), and 'till the end of the shift' all read the same", () => {
+    const expected = ok({
+      intent: "assign",
+      operator: "Sam",
+      product: "Housing A",
+      place: ["Cell 1"],
+      day: null,
+      start: { hour: 10, minute: 0 },
+      end: null,
+      attach: null,
+      existing: null,
+      shift: END_OF_SHIFT,
+    });
+    expect(
+      parseCommand("assign Sam to Housing A on Cell 1 from 10 until end of the shift"),
+    ).toEqual(expected);
+    expect(parseCommand("assign Sam to Housing A on Cell 1 from 10 until end of shift")).toEqual(
+      expected,
+    );
+    expect(
+      parseCommand("assign Sam to Housing A on Cell 1 from 10 till the end of the shift"),
+    ).toEqual(expected);
+  });
+
   it("BD3: put Sam on Housing A on Cell 1 for the rest of the day -- start null, shift END_OF_DAY; until end of day / till the end of the day the same", () => {
     const expected = ok({
       intent: "assign",
@@ -4215,6 +4239,44 @@ describe("commandParse: S58 grammar widening, group 2 (R-412 to R-416, D132)", (
         existing: null,
         shift: null,
       } satisfies AssignCommand),
+    );
+  });
+
+  it("HC11 (F-182): make the Housing A job on Cell 1 4 people tomorrow -- a trailing day now reads AFTER the count too, not only before it", () => {
+    expect(parseCommand("make the Housing A job on Cell 1 4 people tomorrow")).toEqual(
+      headcountOk({ day: { kind: "tomorrow" } }),
+    );
+  });
+
+  it("HC12 (F-182): make the Housing A job on Cell 1 4 people 2026-09-23 -- a trailing ISO date after the count reads the same as any other trailing day", () => {
+    expect(parseCommand("make the Housing A job on Cell 1 4 people 2026-09-23")).toEqual(
+      headcountOk({ day: { kind: "date", iso: "2026-09-23" } }),
+    );
+  });
+
+  it("HC13 (F-182): make the Housing A job on Cell 1 tomorrow 4 people -- the day BEFORE the count still works, unchanged", () => {
+    expect(parseCommand("make the Housing A job on Cell 1 tomorrow 4 people")).toEqual(
+      headcountOk({ day: { kind: "tomorrow" } }),
+    );
+  });
+
+  it("HC14 (F-182): make the Housing A job on Cell 1 tomorrow 4 people yesterday -- two_days, never a guess, same as every other grammar's leading/trailing day conflict", () => {
+    expect(parseCommand("make the Housing A job on Cell 1 tomorrow 4 people yesterday")).toEqual({
+      ok: false,
+      failure: { kind: "two_days", first: "tomorrow", second: "yesterday" },
+    });
+  });
+
+  it("HC15 (S70-b review): make the Housing A job on Cell 1 4 people tomorrow yesterday -- two day words stacked AFTER the count is still two_days, not a fall-through to no_time", () => {
+    expect(parseCommand("make the Housing A job on Cell 1 4 people tomorrow yesterday")).toEqual({
+      ok: false,
+      failure: { kind: "two_days", first: "tomorrow", second: "yesterday" },
+    });
+  });
+
+  it("HC16 (S70-b review): make the Housing A job on Cell 1 4 people tomorrow tomorrow -- the same word twice stacked after the count is fine (F-133), not a conflict", () => {
+    expect(parseCommand("make the Housing A job on Cell 1 4 people tomorrow tomorrow")).toEqual(
+      headcountOk({ day: { kind: "tomorrow" } }),
     );
   });
 
