@@ -186,8 +186,96 @@ async function resampleTo16k(
 
 /** RMS above this is "speech" in a frame. */
 const RMS_FLOOR = 0.02;
-/** How many consecutive above-floor frames start a clip's speech. */
+/** How many consecutive above-floor (`RMS_FLOOR`) frames start a clip's
+ *  speech when no single frame alone is loud enough (`SPEECH_ON_LOUD_FRAME_RMS`
+ *  below) -- the ORIGINAL rule, restored after the review finding below.
+ *
+ *  F-198 (22 Sept, the spoken walk): a `BUFFER_SIZE` frame is 4096 samples
+ *  at `TARGET_SAMPLE_RATE` (16 kHz) -- 0.256s. This was 2, so speech never
+ *  "started" until 2 * 0.256s = 0.512s of SUSTAINED above-floor audio had
+ *  been seen; a one-syllable "yes" or "no" is shorter than that, so the
+ *  clip ran to `MAX_CLIP_MS` and `finalize` raised `no-speech` without ever
+ *  posting the audio -- the trace (`data/voice/trace/bar.jsonl`,
+ *  2026-09-22T19:42-19:45Z) shows exactly this, five times running.
+ *
+ *  Dropping this to 1 (a single frame at `RMS_FLOOR` starts speech) fixed
+ *  that, but the reviewer found it reintroduces a false start `SPEECH_ON_FRAMES
+ *  = 2` had accidentally been guarding against: a keyboard click, a door, or
+ *  the mic button's own click transient is a few milliseconds of energy
+ *  inside one 256ms frame, and synthesizing several against the real
+ *  `rmsOf` measured a keyboard click at RMS 0.0244, the mic button's own
+ *  click at 0.0216, and a door thud at 0.0713 -- all above `RMS_FLOOR`
+ *  (0.02), so a lone transient at session start used to set `speechStarted`
+ *  immediately, anchoring the 1500ms silence-end timer to the CLICK rather
+ *  than to real speech; traced against the exact state machine, a click at
+ *  frame 0 followed by an ordinary ~1.8s reaction pause before the person
+ *  actually spoke finalized the clip (via `SILENCE_END_MS`) BEFORE their
+ *  real word ever arrived, silently dropping the answer -- a new shape of
+ *  the same F-198 bug.
+ *
+ *  The fix keeps both rules at once (maintainer decision, 22 Sept): a
+ *  single frame starts speech immediately only when it is unambiguously
+ *  voice-loud (`SPEECH_ON_LOUD_FRAME_RMS`, well above any measured click or
+ *  door but comfortably under real speech's 0.12-0.39 RMS); otherwise this
+ *  constant's original two-consecutive-frame rule applies; and frame index
+ *  0 -- where the mic button's own transient lives -- is barred from
+ *  starting speech alone under EITHER rule (see `handleFrame`), though it
+ *  still counts as the first of a two-consecutive-frame pair. */
 const SPEECH_ON_FRAMES = 2;
+/** Review finding (F-198, maintainer decision 22 Sept): a single frame at or
+ *  above this RMS starts speech immediately, without waiting for a second
+ *  consecutive frame -- chosen to sit above every synthesized transient
+ *  measured against the real `rmsOf` (a keyboard click at 0.0244, the mic
+ *  button's own click at 0.0216, a door thud at 0.0713) and well under the
+ *  real spoken-word band `jfk.wav` gave (0.12-0.39 RMS), so an ordinary
+ *  loud "yes" or "no" still starts speech on its first frame while a click
+ *  or a door cannot. Frame index 0 is excluded from this rule entirely (see
+ *  `handleFrame`) -- the mic button's own transient lives there, and no
+ *  measured margin is safe against a click captured AT the button press
+ *  itself, only against one after it. */
+const SPEECH_ON_LOUD_FRAME_RMS = 0.08;
+/** F-198: when the twelve-second cap (`MAX_CLIP_MS`) is reached and speech
+ *  never "started" (every frame stayed at or under `RMS_FLOOR`), the clip
+ *  is sent to Whisper anyway if any frame's RMS came within this factor of
+ *  the floor -- a quiet answer spoken a little too far from the mic to
+ *  cross `RMS_FLOOR` outright, rather than true silence. `RMS_FLOOR *
+ *  QUIET_SEND_FACTOR` = 0.015, chosen against the same `jfk.wav` room-tone
+ *  measurement: its quiet stretches ran 0.0088-0.0127 RMS per 4096-sample
+ *  frame (max observed 0.0127), so 0.015 sits above that ceiling with
+ *  margin -- true silence never crosses it -- while still under
+ *  `RMS_FLOOR` itself, catching a frame that is audibly louder than the
+ *  room but not loud enough to trigger normal speech-start. A clip whose
+ *  every frame stays under 0.015 is still `no-speech`; CLAUDE.md's own
+ *  rule holds regardless -- an empty transcript from Whisper still reads
+ *  "Nothing was heard", the service's own answer, never a guess made here.
+ *
+ *  Review finding (F-198, reviewed 22 Sept): "an empty transcript" is not
+ *  what whisper.cpp actually returns for a long quiet clip. Tested against
+ *  the running `scheduler-whisper` container (127.0.0.1:8090/inference,
+ *  whisper.cpp's own server): a full `MAX_CLIP_MS` (12s) clip at a uniform
+ *  quiet amplitude (rms ~0.010, well under `RMS_FLOOR`) came back
+ *  `" (clippers buzzing)\n"` -- an invented, non-empty sentence -- in 2/2
+ *  trials, and a 9s clip at the same amplitude did too (2/2). The SAME
+ *  amplitude at 1.5s, 3s and 6s came back genuinely empty text (2/2 each).
+ *  Literal digital silence (all-zero samples) came back `" [BLANK_AUDIO]\n"`
+ *  -- also non-empty. Posting the FULL captured clip (as this code did
+ *  before this finding) crosses that 6s-9s knee on every ordinary use of
+ *  this path, because `MAX_CLIP_MS` is 12s; `QUIET_CLIP_PAD_FRAMES`/
+ *  `QUIET_CLIP_MAX_FRAMES` below trim what is actually posted to a short
+ *  window around the frame(s) that set `hadQuietSound`, comfortably under
+ *  the observed knee, so this path keeps the chance of catching a
+ *  genuinely quiet answer without feeding Whisper the many seconds of
+ *  surrounding silence that made it invent text. */
+const QUIET_SEND_FACTOR = 0.75;
+/** Review finding (F-198): frames of padding kept on each side of the
+ *  quiet-sound window `finalize`'s cap-reached branch sends, ~1.024s each
+ *  side (see `QUIET_SEND_FACTOR`'s own note for the measurement). */
+const QUIET_CLIP_PAD_FRAMES = 4;
+/** Review finding (F-198): the most frames (~3.072s) the cap-reached
+ *  quiet-send path will ever post, regardless of how far apart the first
+ *  and last quiet-band frame were -- comfortably under the 6s-9s
+ *  hallucination knee measured against the running container. */
+const QUIET_CLIP_MAX_FRAMES = 12;
 /** Silence after speech that ends the clip. */
 const SILENCE_END_MS = 1500;
 /** Absolute cap on a clip's length, spoken or not. */
@@ -277,6 +365,17 @@ export function localRecognizer(
     let consecutiveAbove = 0;
     let lastAboveFloorAt: number | null = null;
     let recordingStartedAt: number | null = null;
+    // F-198: set when a frame's RMS reaches QUIET_SEND_FACTOR of the floor,
+    // even though it never crossed the floor itself -- `finalize`'s
+    // cap-reached branch reads this to decide whether a clip that never
+    // "started" speech is a quiet answer (send it) or true silence (don't).
+    let hadQuietSound = false;
+    // Review finding (F-198): the index (into `frames`) of the first and
+    // last frame that set `hadQuietSound` -- `finalize`'s cap-reached branch
+    // trims what it posts to a window around these, never the whole clip
+    // (see `QUIET_CLIP_PAD_FRAMES`/`QUIET_CLIP_MAX_FRAMES`'s own note).
+    let firstQuietFrameIndex: number | null = null;
+    let lastQuietFrameIndex: number | null = null;
     // Review finding: set from the ACTUAL context, once it opens (see
     // `startRecording`) -- `TARGET_SAMPLE_RATE` unless the platform refused
     // that rate, in which case this is whatever default rate it gave us and
@@ -315,12 +414,12 @@ export function localRecognizer(
       }
     }
 
-    async function transcribe(): Promise<void> {
+    async function transcribe(sourceFrames: Float32Array[] = frames): Promise<void> {
       let totalLength = 0;
-      for (const frame of frames) totalLength += frame.length;
+      for (const frame of sourceFrames) totalLength += frame.length;
       const merged = new Float32Array(totalLength);
       let offset = 0;
-      for (const frame of frames) {
+      for (const frame of sourceFrames) {
         merged.set(frame, offset);
         offset += frame.length;
       }
@@ -387,12 +486,37 @@ export function localRecognizer(
      *  silence, the twelve-second cap, or `stop()` all reach here) -- design
      *  §19.102 D131's own wording: "ends the clip on a stop click, on a
      *  second and a half of silence after speech was heard, or at twelve
-     *  seconds, THEN reports Transcribing... [and] posts the clip". */
-    function finalize(): void {
+     *  seconds, THEN reports Transcribing... [and] posts the clip".
+     *
+     *  F-198: `capReached` is true only when the twelve-second cap itself
+     *  triggered this call (`handleFrame` below) -- a quiet clip that never
+     *  "started" speech is still sent in that one case, when it had some
+     *  quiet sound in it (`hadQuietSound`); a manual `stop()` or any other
+     *  path with no speech stays `no-speech`, matching LREC-6/LREC-12.
+     *
+     *  Review finding (F-198): what is posted in that branch is a WINDOW
+     *  around `firstQuietFrameIndex`/`lastQuietFrameIndex`, padded by
+     *  `QUIET_CLIP_PAD_FRAMES` and capped at `QUIET_CLIP_MAX_FRAMES` frames
+     *  total -- never the full clip -- see `QUIET_SEND_FACTOR`'s own note
+     *  for why (a full-length quiet clip measurably makes whisper.cpp
+     *  invent text). */
+    function finalize(capReached = false): void {
       if (ended) return;
       ended = true;
       teardown();
       if (!speechStarted) {
+        if (capReached && hadQuietSound) {
+          events.onInterim("Transcribing…");
+          const start = Math.max(0, (firstQuietFrameIndex ?? 0) - QUIET_CLIP_PAD_FRAMES);
+          const end = Math.min(
+            frames.length,
+            start + QUIET_CLIP_MAX_FRAMES,
+            (lastQuietFrameIndex ?? 0) + QUIET_CLIP_PAD_FRAMES + 1,
+          );
+          const windowed = frames.slice(start, Math.max(end, start + 1));
+          void transcribe(windowed);
+          return;
+        }
         events.onError("no-speech");
         events.onEnd();
         return;
@@ -404,12 +528,31 @@ export function localRecognizer(
     function handleFrame(frame: Float32Array): void {
       if (ended) return;
       frames.push(frame);
+      const frameIndex = frames.length - 1;
       const now = d.now();
-      const above = rmsOf(frame) > RMS_FLOOR;
+      const rms = rmsOf(frame);
+      const above = rms > RMS_FLOOR;
+      if (rms >= RMS_FLOOR * QUIET_SEND_FACTOR) {
+        hadQuietSound = true;
+        if (firstQuietFrameIndex === null) firstQuietFrameIndex = frameIndex;
+        lastQuietFrameIndex = frameIndex;
+      }
       if (above) {
         consecutiveAbove++;
         lastAboveFloorAt = now;
-        if (!speechStarted && consecutiveAbove >= SPEECH_ON_FRAMES) speechStarted = true;
+        // Review finding (F-198, maintainer decision 22 Sept): a single
+        // frame starts speech immediately when it is unambiguously
+        // voice-loud (`SPEECH_ON_LOUD_FRAME_RMS`) -- UNLESS it is frame 0,
+        // where the mic button's own click transient lives; frame 0 can
+        // still be the first of a two-consecutive-frame pair (the `else`
+        // branch below), just never a one-frame trigger by itself.
+        if (!speechStarted) {
+          if (frameIndex !== 0 && rms >= SPEECH_ON_LOUD_FRAME_RMS) {
+            speechStarted = true;
+          } else if (consecutiveAbove >= SPEECH_ON_FRAMES) {
+            speechStarted = true;
+          }
+        }
       } else {
         consecutiveAbove = 0;
       }
@@ -419,7 +562,7 @@ export function localRecognizer(
         return;
       }
       if (recordingStartedAt !== null && now - recordingStartedAt >= MAX_CLIP_MS) {
-        finalize();
+        finalize(true);
       }
     }
 

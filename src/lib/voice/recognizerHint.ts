@@ -29,9 +29,17 @@
  * same mishearing). "job" and "shift" were already here (D133's own list);
  * "end, block, clear, copy, make, until, from, to, today, tomorrow, week,
  * on" are the walk's own additions, appended in the same style -- one word
- * or phrase per comma, the digits' own two blocks last, unchanged. */
+ * or phrase per comma, the digits' own two blocks last, unchanged.
+ *
+ * F-198 (22 Sept): the same walk's spoken "yes" retries came back as silence for a
+ * different reason (`localRecognizer.ts`'s speech-onset floor, fixed there), but once a
+ * clip does reach Whisper the hint had nothing biasing toward the answer itself -- "yes"
+ * and "no" are added here, plus the bar's own two button labels a spoken answer most often
+ * echoes back: `CommandBar.tsx`'s "Do all N" and "Show that day" (the literal label text,
+ * capitalised the same way -- extract, never retype), still ahead of every board name in
+ * `buildRecognizerHint`'s own ordering below. */
 const VOCABULARY =
-  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
+  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, yes, no, Do all, Show that day, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
 
 /** Roughly whisper.cpp's own comfortable prompt length -- long enough to
  *  carry a full plant's worth of cells and parts, short enough that the

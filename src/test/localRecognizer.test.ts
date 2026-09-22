@@ -257,7 +257,10 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
 
     expect(h.events.onInterim).toHaveBeenCalledWith("Listening…");
 
-    // Two frames above the floor start speech, then silence for >= 1500ms.
+    // F-198: ONE frame above the floor is now enough to start speech (was
+    // two, LREC-19 pins the one-frame minimum on its own); this happy path
+    // still sends two, then silence for >= 1500ms, to exercise the WAV/
+    // request-shape assertions below over more than a single frame's audio.
     h.clock.t = 0;
     processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
     h.clock.t = 100;
@@ -648,6 +651,283 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
     await flush();
     const form2 = (h2.fetchMock.mock.calls[0][1] as { body: FormData }).body;
     expect(form2.get("prompt")).toBeNull();
+  });
+
+  // F-198 (22 Sept, the spoken walk -- data/voice/trace/bar.jsonl,
+  // 2026-09-22T19:42-19:45Z): a one-syllable "yes" is one BUFFER_SIZE frame
+  // of loudness (0.256s), never two (0.512s) -- SPEECH_ON_FRAMES dropped
+  // from 2 to 1. These four pins replace no coverage that existed before
+  // (nothing in this file previously exercised a single above-floor frame,
+  // or the cap-reached quiet-clip path at all) -- the bug shipped with a
+  // green suite because the suite never tried a clip this short.
+  //
+  // Review finding + maintainer decision (22 Sept): dropping SPEECH_ON_FRAMES
+  // to 1 outright reopened a false-start risk (a keyboard click, a door, the
+  // mic button's own click transient -- all measured above RMS_FLOOR in a
+  // single 256ms frame). The fix keeps SPEECH_ON_FRAMES at its original 2,
+  // adds a `SPEECH_ON_LOUD_FRAME_RMS` threshold a single frame can cross
+  // alone, and excludes frame index 0 (where a click transient at the mic
+  // button press itself would land) from ever starting speech by itself --
+  // see `SPEECH_ON_LOUD_FRAME_RMS`'s own doc and LREC-25 through LREC-28.
+  // LREC-19's own contract changed with it: the single above-floor frame
+  // that starts speech is no longer allowed to be the very first one
+  // recorded, so a silent priming frame at index 0 now precedes it below;
+  // the "one frame is enough, and it is sent" claim otherwise still holds.
+
+  it("LREC-19: ONE loud frame (not frame 0) starts speech and is sent -- was no-speech under the pre-F-198 SPEECH_ON_FRAMES=2, and frame 0 itself is excluded by the review fix (F-198)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "yes" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } }); // frame 0: never eligible to start speech alone
+    h.clock.t = 256;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } }); // frame 1: one loud frame is enough
+    h.clock.t = 1757; // 1501ms of silence after that single loud frame
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.events.onFinal).toHaveBeenCalledWith("yes");
+    expect(h.events.onError).not.toHaveBeenCalled();
+  });
+
+  it("LREC-20: a quiet clip that never crosses the floor, but has a frame within QUIET_SEND_FACTOR of it, is still sent when the twelve-second cap is reached (F-198)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "yes" }));
+    const processor = await startAndRecord(h);
+
+    // rms 0.016: under RMS_FLOOR (0.02) so speech never "starts", but at or
+    // above RMS_FLOOR * QUIET_SEND_FACTOR (0.02 * 0.75 = 0.015) -- a quiet
+    // answer picked up a little too far from the mic, not true silence.
+    const QUIET_BUT_PRESENT = new Float32Array(16).fill(0.016);
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => QUIET_BUT_PRESENT } });
+    h.clock.t = 12000; // the cap, still no frame ever crossed RMS_FLOOR
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => QUIET_BUT_PRESENT } });
+
+    await flush();
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.events.onFinal).toHaveBeenCalledWith("yes");
+    expect(h.events.onError).not.toHaveBeenCalled();
+  });
+
+  it("LREC-21: a clip below QUIET_SEND_FACTOR of the floor throughout stays no-speech at the cap -- true silence is never sent (F-198)", async () => {
+    const h = makeHarness();
+    // rms 0.01: under RMS_FLOOR * QUIET_SEND_FACTOR (0.015) as well as the
+    // floor itself -- ordinary room noise, not a quiet answer.
+    const TOO_QUIET = new Float32Array(16).fill(0.01);
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => TOO_QUIET } });
+    h.clock.t = 12000;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => TOO_QUIET } });
+
+    await flush();
+    expect(h.fetchMock).not.toHaveBeenCalled();
+    expect(h.events.onError).toHaveBeenCalledWith("no-speech");
+    expect(h.events.onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("LREC-22: a quiet-but-present frame does NOT get sent on a manual stop() before the cap -- the cap-reached rule is scoped to the cap, not to every no-speech ending (F-198)", async () => {
+    const h = makeHarness();
+    const QUIET_BUT_PRESENT = new Float32Array(16).fill(0.016);
+    const processor = await startAndRecord(h);
+    const handle = (processor as unknown as { __handle: ReturnType<Recognizer> }).__handle;
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => QUIET_BUT_PRESENT } });
+    h.clock.t = 500; // well short of the twelve-second cap
+    handle.stop();
+
+    await flush();
+    expect(h.fetchMock).not.toHaveBeenCalled();
+    expect(h.events.onError).toHaveBeenCalledWith("no-speech");
+  });
+
+  it("LREC-23: the twelve-second cap still ends a clip that never crosses the floor at all -- still no-speech, still no network call (F-198 regression guard on LREC-6)", async () => {
+    const h = makeHarness();
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+    h.clock.t = 12000;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onError).toHaveBeenCalledWith("no-speech");
+    expect(h.events.onEnd).toHaveBeenCalledTimes(1);
+    expect(h.fetchMock).not.toHaveBeenCalled();
+  });
+
+  // Review finding (F-198, reviewed 22 Sept): tested against the running
+  // scheduler-whisper container (127.0.0.1:8090/inference), a FULL 12s clip
+  // at a uniform quiet amplitude (rms ~0.010) came back " (clippers
+  // buzzing)\n" -- an invented sentence -- every time (2/2 trials), and a 9s
+  // clip did too (2/2); the same amplitude at 1.5s/3s/6s came back
+  // genuinely empty text every time (2/2 each). The cap-reached quiet-send
+  // path must therefore post a bounded WINDOW around the quiet frame(s),
+  // never the whole captured clip.
+  it("LREC-24: the cap-reached quiet-send path posts only a window around the quiet frame(s), never the full clip (F-198 review finding)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "yes" }));
+    const processor = await startAndRecord(h);
+
+    const QUIET_BUT_PRESENT = new Float32Array(16).fill(0.016);
+    const SILENT_FRAME = new Float32Array(16).fill(0);
+
+    // The real ~256ms frame cadence across the full twelve-second cap: one
+    // quiet-band frame near the very start (a stray noise), then many
+    // frames of true silence until the cap -- ~47 frames total, the shape
+    // of clip that measurably made the real service hallucinate when the
+    // FULL clip was posted.
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => QUIET_BUT_PRESENT } });
+    const totalFrames = 47; // ~12000ms / 256ms
+    for (let i = 1; i < totalFrames; i++) {
+      h.clock.t = i * 256;
+      processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT_FRAME } });
+    }
+    h.clock.t = 12000;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT_FRAME } });
+
+    await flush();
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.events.onFinal).toHaveBeenCalledWith("yes");
+
+    const [, init] = h.fetchMock.mock.calls[0];
+    const form = init.body as FormData;
+    const file = form.get("file") as File;
+    // Each fake frame here is 16 samples; the window this path posts is
+    // capped at 12 frames (QUIET_CLIP_MAX_FRAMES) -- a 44-byte WAV header
+    // plus at most 12*16 samples * 2 bytes/sample -- nowhere near the ~47
+    // frames (752 samples) the full clip would have carried.
+    const maxWindowedBytes = 44 + 12 * 16 * 2;
+    expect(file.size).toBeLessThanOrEqual(maxWindowedBytes);
+    expect(file.size).toBeGreaterThan(44); // still carries some audio, not an empty clip
+  });
+
+  // F-198 review fix, maintainer decision (22 Sept): speech starts on ONE
+  // frame only when that frame is clearly voice-loud (>= SPEECH_ON_LOUD_FRAME_RMS,
+  // 0.08), on TWO consecutive frames at the existing floor otherwise
+  // (SPEECH_ON_FRAMES, back to 2), and never on frame index 0 alone -- where
+  // the mic button's own click transient lives -- though frame 0 still
+  // counts toward the two-consecutive-frame rule. LREC-25 through LREC-28
+  // pin this against the reviewer's own measurements and trace.
+
+  it("LREC-25: a single click-sized frame at frame 0 (rms 0.024) never starts speech alone; the clip reaches the quiet-send window at the cap, not the local no-speech skip (F-198 review fix)", async () => {
+    const h = makeHarness();
+    // 0.024 is above RMS_FLOOR (0.02, so `above` is true and it would count
+    // toward the two-consecutive-frame rule on a LATER frame) but below
+    // SPEECH_ON_LOUD_FRAME_RMS (0.08); at frame index 0 it cannot start
+    // speech under either rule. It IS above RMS_FLOOR * QUIET_SEND_FACTOR
+    // (0.015), so hadQuietSound is set -- the cap-reached branch therefore
+    // posts this clip through the quiet-send window (LREC-20/24's path)
+    // rather than skipping the network with a bare no-speech; mocked to
+    // return empty text here so the OBSERVABLE outcome the bar sees is
+    // still no-speech, matching CLAUDE.md's rule that Whisper's own empty
+    // answer is what reads "Nothing was heard", never a guess made locally.
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "" }));
+    const CLICK = new Float32Array(16).fill(0.024);
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => CLICK } }); // frame 0 only
+    h.clock.t = 256;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } }); // consecutiveAbove resets; speechStarted still false
+    h.clock.t = 12000; // the cap
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    // The click reached the network through the quiet-send window (not the
+    // bare local no-speech skip) -- confirming which branch the numbers give.
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.events.onError).toHaveBeenCalledWith("no-speech");
+    expect(h.events.onFinal).not.toHaveBeenCalled();
+  });
+
+  it("LREC-26: a single loud frame at 0.10 (a normal 'yes', not frame 0) starts speech immediately and is sent (F-198 review fix)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "yes" }));
+    const processor = await startAndRecord(h);
+    const NORMAL_YES = new Float32Array(16).fill(0.1); // >= SPEECH_ON_LOUD_FRAME_RMS (0.08)
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } }); // frame 0: brief silence before the word
+    h.clock.t = 256;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => NORMAL_YES } }); // frame 1: one loud frame starts speech by itself
+    h.clock.t = 1757; // 1501ms of silence after that single loud frame
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.events.onFinal).toHaveBeenCalledWith("yes");
+    expect(h.events.onError).not.toHaveBeenCalled();
+  });
+
+  it("LREC-27: frame 0 alone never starts speech even when very loud (0.30); frame 0 still counts toward the two-consecutive-frame rule when both frames are at 0.03 (F-198 review fix)", async () => {
+    // Part A: frame 0 at 0.30 (well above SPEECH_ON_LOUD_FRAME_RMS) alone
+    // must NOT start speech -- if it wrongly did, the silence-after-speech
+    // branch would finalize this session ~1500ms later; it must still be
+    // listening (no onEnd, no network call) at that point.
+    const h1 = makeHarness();
+    const p1 = await startAndRecord(h1);
+    const VERY_LOUD = new Float32Array(16).fill(0.3);
+    h1.clock.t = 0;
+    p1.onaudioprocess?.({ inputBuffer: { getChannelData: () => VERY_LOUD } }); // frame 0 only
+    h1.clock.t = 1600; // well past SILENCE_END_MS (1500ms) since frame 0
+    p1.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+    await flush();
+    expect(h1.events.onEnd).not.toHaveBeenCalled();
+    expect(h1.fetchMock).not.toHaveBeenCalled();
+
+    // Part B: frame 0 AND frame 1 both at 0.03 (above RMS_FLOOR, below
+    // SPEECH_ON_LOUD_FRAME_RMS) -- frame 0 still counts toward the ordinary
+    // two-consecutive-frame rule, so speech starts at frame 1.
+    const h2 = makeHarness();
+    h2.fetchMock.mockResolvedValue(okJsonResponse({ text: "yes" }));
+    const p2 = await startAndRecord(h2);
+    const JUST_ABOVE_FLOOR = new Float32Array(16).fill(0.03);
+    h2.clock.t = 0;
+    p2.onaudioprocess?.({ inputBuffer: { getChannelData: () => JUST_ABOVE_FLOOR } }); // frame 0
+    h2.clock.t = 256;
+    p2.onaudioprocess?.({ inputBuffer: { getChannelData: () => JUST_ABOVE_FLOOR } }); // frame 1: 2nd consecutive -- starts speech
+    h2.clock.t = 1757; // 1501ms of silence after frame 1
+    p2.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+    await flush();
+    expect(h2.fetchMock).toHaveBeenCalledTimes(1);
+    expect(h2.events.onFinal).toHaveBeenCalledWith("yes");
+  });
+
+  it("LREC-28: the click-then-speech regression from the reviewer's own trace (click at frame 0, real speech 1.79s later) is sent with the real speech included, not cut off before it arrives (F-198 review fix)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "yes" }));
+    const processor = await startAndRecord(h);
+    const CLICK = new Float32Array(16).fill(0.024); // frame 0: the mic button's own click transient
+    const REAL_SPEECH = new Float32Array(16).fill(0.35); // a real spoken word, well above SPEECH_ON_LOUD_FRAME_RMS
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => CLICK } }); // frame 0
+    // Frames 1-6 (t=256..1536ms): silence. Under the pre-fix single-frame
+    // rule this click used to set speechStarted=true at frame 0 and the
+    // 1500ms silence timer, anchored to the click, finalized the clip at
+    // t=1536ms -- BEFORE the person's real "yes" at t=1792ms ever arrived
+    // (see the reviewer's own simulate.mjs trace). Under this fix, frame 0
+    // alone never starts speech, so no premature finalize happens here.
+    for (let i = 1; i <= 6; i++) {
+      h.clock.t = i * 256;
+      processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+    }
+    h.clock.t = 1792; // the real "yes" -- one loud frame, starts speech immediately (not frame 0)
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => REAL_SPEECH } });
+    h.clock.t = 1792 + 1501; // 1501ms of silence after the real word
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.events.onFinal).toHaveBeenCalledWith("yes");
+    expect(h.events.onError).not.toHaveBeenCalled();
   });
 });
 
