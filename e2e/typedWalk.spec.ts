@@ -953,7 +953,20 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         const deadline = Date.now() + 20_000;
         for (;;) {
           const raw = await readFile(traceFile, "utf-8").catch(() => "");
-          const lines = raw.split("\n").filter((l) => l.trim() !== "");
+          // Only the spec's own door: every sentence here is TYPED, so a
+          // spoken turn from a person using the bar at the same time (22
+          // Sept: three spoken clips landed between the walk's own lines and
+          // shifted the slice by one) is not this walk's to judge.
+          const lines = raw
+            .split("\n")
+            .filter((l) => l.trim() !== "")
+            .filter((l) => {
+              try {
+                return (JSON.parse(l) as { by?: string }).by === "typed";
+              } catch {
+                return false;
+              }
+            });
           const last = lines[lines.length - 1];
           if (last !== undefined && (JSON.parse(last) as { heard?: string }).heard === lastSay) {
             return lines;
