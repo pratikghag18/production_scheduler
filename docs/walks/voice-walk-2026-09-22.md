@@ -23,8 +23,14 @@ per turn, with `"by":"local"` on a Whisper turn. The developer reads that file a
 3. **Sign in as Dana** (`dana@example.test`, `devpassword`), the Plant A admin — the same person the
    spec walks as. Open the board on today (the toolbar's Today button), open the corner launcher,
    and keep the thread on screen so you can read what was heard before what was done.
-4. **The day.** Sentences 21 and 22 clear every block on Plant A today. Do this on a day whose
-   board you are happy to empty, or stop after sentence 20 and type the two clears later.
+4. **The board must start EMPTY, the way the spec starts.** The spec removes every block and
+   every job on Plant A for its own days before it speaks; the list below was proved against
+   that empty board. Your board today carries the seed: a block and a job on each of Cells 1 to
+   4, 06:00 to 14:00, today and every day this week. With those in place sentence 1 lists Priya
+   Shah instead of saying nobody, and sentence 6 books a job over one that is already there. So
+   before you speak, the developer runs the same clean-up the spec runs, Plant A from today
+   through the next seven days, through the app's own door as Dana, and tells you "cleared".
+   Ask for it; do not start until you have it. Sentences 21 and 22 leave the day empty at the end.
 5. **The microphone.** The button reads "Speak a sentence". Press it, say one sentence, stop. The
    clip ends by itself a second and a half after you stop speaking, or at twelve seconds — a long
    sentence said slowly can hit the cap, so say it in one breath. The text lands in the bar and
