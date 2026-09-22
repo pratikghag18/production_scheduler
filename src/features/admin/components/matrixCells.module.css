@@ -147,6 +147,11 @@
   margin-top: 0.125rem;
 }
 
+/* R-447 (the audit lane, S69-a): Save changes/Record training, Remove and
+   Cancel used to size each button to its own word. One shared `min-width`
+   in em, the same fix `LevelEditor.module.css`'s `.cancelBtn`/`.saveBtn`
+   uses for its own footer, sized to the longest word in this cluster
+   ("Record training"). */
 .popPrimary,
 .popDanger,
 .popCancel {
@@ -156,6 +161,8 @@
   font-size: 0.8125rem;
   background: var(--surface);
   color: var(--ink);
+  min-width: 9em;
+  text-align: center;
   cursor: pointer;
 }
 

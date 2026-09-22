@@ -421,6 +421,22 @@
   max-width: 12rem;
 }
 
+/* R-447 (the audit lane, S69-a): the detail header's own cluster --
+   Edit/Deactivate|Reactivate/Delete, or Save/Cancel while editing -- sat
+   loose among the name/select/input siblings in this same row, so each
+   button sized to its own word ("Edit" narrower than "Deactivate" beside
+   it). `.renameRow` also carries inputs, a select and text, so it cannot
+   become a grid the way a dedicated `.actions` wrapper can (`ProductsPanel`,
+   `TrainingsPanel`); a shared `min-width` in em on the buttons themselves --
+   the same mechanism `BoardToolbar.module.css`'s `.moreButton` and
+   `LevelEditor.module.css`'s `.cancelBtn`/`.saveBtn` use -- reaches every
+   button here without touching the row's layout or the controls beside them.
+   Sized to the longest word in the cluster, "Deactivate"/"Reactivate". */
+.renameRow button {
+  min-width: 6.5rem;
+  text-align: center;
+}
+
 .headMeta {
   font-size: 0.75rem;
   color: var(--ink-2);

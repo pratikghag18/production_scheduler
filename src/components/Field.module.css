@@ -126,6 +126,26 @@
   flex-wrap: wrap;
 }
 
+/* R-447 (the audit lane, S69-a): the inline-edit footer's own Save/Cancel --
+   `InlineEdit.tsx`, the one edit-in-place control (R-318), used across every
+   editable cell that composes this module -- sized each button to its own
+   word ("Save" narrower than "Cancel"). Scoped to `.editor` rather than to
+   the base `.btn`/`.primaryBtn` classes, which this module also hands out as
+   single standalone buttons elsewhere (`AbsencesPanel`'s Remove, the auth
+   pages' submit) that have nothing beside them to match widths with.
+
+   Review fix: 4.5em was sized to `.primaryBtn`'s own content ("Save", bold,
+   font-weight 600) and left `.btn`'s "Cancel" (regular weight, one letter
+   longer) wider than the floor -- Chromium measured Save at 51.75px and
+   Cancel at 55.59px at this module's own font-size/padding, so the two
+   buttons did NOT end up one width, the opposite of what this rule exists
+   to do. 5em clears both (57.5px each, verified the same way). */
+.editor .btn,
+.editor .primaryBtn {
+  min-width: 5em;
+  text-align: center;
+}
+
 .editorInput {
   composes: field;
   width: 4.5rem;

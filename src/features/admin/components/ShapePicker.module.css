@@ -92,6 +92,15 @@
   margin-top: 0.625rem;
 }
 
+/* R-447 (the audit lane, S69-a): Create/Cancel here carried no class at all
+   (plain default buttons), so nothing gave them a shared width even by
+   coincidence. Same shared-min-width fix as this file's own `.popActions`
+   button, reached by the form wrapper rather than a class on each button. */
+.createForm button {
+  min-width: 4.5em;
+  text-align: center;
+}
+
 .createForm input[type="text"] {
   flex: 1;
   min-width: 8rem;

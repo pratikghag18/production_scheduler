@@ -124,8 +124,15 @@
   gap: 0.125rem;
 }
 
+/* R-447 (the audit lane, S69-a): "All"/"None" is a segmented pair -- the same
+   shape as `BoardToolbar.module.css`'s `.zoom`/`.daynav` -- so it gets the
+   same fix: a grid whose columns share one track size, `inline-grid` so the
+   pair stays sized to its own content inside the picker menu rather than
+   stretching the whole row. */
 .opActions {
-  display: flex;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 0.375rem;
   padding: 0.25rem 0.375rem 0.5rem;
   border-bottom: 1px solid var(--grid);
@@ -139,6 +146,7 @@
   color: var(--ink-2);
   font-size: 0.75rem;
   padding: 0.1875rem 0.625rem;
+  text-align: center;
   cursor: pointer;
 }
 
