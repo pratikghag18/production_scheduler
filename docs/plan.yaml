@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-22'
-  tip: '088c42d'
+  tip: '69318e7'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12115,6 +12115,12 @@ requirements:
     the whole board should use for any further development happening here on after? And any kind of
     development we do going forward will also check if a standard exists or a prior code should change based
     on new standard?" Written into CLAUDE.md §7 so it loads in every session.
+    ASKED 22 Sept (session 187): should assignment times be stored in the plant's local time beside UTC?
+    Answered no: timerange stays the one instant column. A local wall-clock time is ambiguous for an hour
+    every autumn (01:30 happens twice) and missing for an hour every spring; two columns are two copies of
+    one fact and the second drifts; a plant that changes zone would need every row rewritten; and the seam
+    already exists in one place (partsInZone / zonedTimeToInstant). A local reading for a report or a query by
+    hand is AT TIME ZONE on the way out, never a stored twin.
 - id: R-427
   title: The bar shows its conversation --- every turn with what was said, asked, offered, chosen and written, kept for the last day per person
   source:
@@ -12760,6 +12766,29 @@ requirements:
     "the person-wide one"), so the two standards disagree and the maintainer breaks the tie (queued). The
     bulk imports write the same facts as the tabs and stay as the many-rows capability the forms cannot offer.
     Everything else has one writer, or one shared control mounted twice (the skills pop-over, D100).
+- id: R-450
+  title: The demo plant is in Chicago --- the seed sets Plant A's zone to America/Chicago and writes every hour it seeds in that zone, so a reset never changes the clock
+  source:
+  - 'session 187 conversation (the maintainer, 22 Sept: "The demo plant should be in Chicago timezone")'
+  stated_by: maintainer
+  claim: >-
+    After every reset, Plant A's timezone setting is America/Chicago, and every instant dev_demo.sql writes (the
+    seeded shifts, runs, absences) is the wall-clock hour it names in that zone --- Shift 1 at 06:00 is 06:00 in
+    Chicago, 11:00Z in summer and 12:00Z in winter --- so the board reads the seed the way the seed meant it, and
+    no spec, walk or tester run depends on a zone someone set by hand. The typed walk reads the zone from the
+    server (F-190) and so follows this without a change.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/dev_demo_test.sql
+    cases: "D13: Plant A resolves to America/Chicago through app_resolve_node_setting and every seeded block starts at 06:00 in that zone"
+  - kind: manual
+    steps: "22 Sept (session 187): proved on the scratch demo database (14 passed), the local database reset with the maintainer's word and read back (America/Chicago; 84 of 84 seeded blocks at 06:00 Chicago); the whole e2e suite on the reset stack: 36 passed, 5 skipped (the volume fixture), 1 failed --- linePeople's first assertion assumed someone homed on the current band; fixed the same session and re-run with roleWalk and viewerBoard, 9 passed"
+  status: covered
+  note: >-
+    STATED 22 Sept (session 187), answering the question F-190 raised. Until then the seed wrote its hours
+    as UTC and set no zone, so the plant was a UTC plant after every reset while the design (F-159, the
+    walk's brief) treated it as a Chicago one. BUILT the same session (69318e7): the zone named once in the
+    schedule block, each hour an AT TIME ZONE instant, the company-wide fallback set in a new section 6b.
 findings:
 - id: F-191
   title: A board showing next week answered "every weekday next week" with "today is not on the board", because a week word was anchored on today's board index
@@ -17506,6 +17535,34 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 187
+  date: 2026-09-22
+  title: "The demo company is in Chicago: the seed sets the zone and writes its hours in it (R-450); the storage question answered --- one instant column, never a local twin"
+  shipped: []
+  commits: ['69318e7']
+  numbers:
+    app_tests: 4181
+    app_test_files: 166
+    tsc: 0
+    eslint: 0
+    db_checks: 892
+    migrations: 84
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    No app code changed; app_tests carries session 186's 4181 in 166 files. db_checks is 891 plus D13
+    (dev_demo_test.sql: 14 passed, 0 failed on the scratch demo database). The whole e2e suite on the reset
+    stack: 36 passed, 5 skipped (the volume fixture), 1 failed --- linePeople's first assertion assumed someone homed on the current band; fixed the same session and re-run with roleWalk and viewerBoard, 9 passed.
+  summary: >-
+    The maintainer, on F-190's question: "The demo plant should be in Chicago timezone" --- R-450 written
+    before the code, the seed changed, proved on the scratch database, the local database reset on the
+    maintainer's word ("I'm not using the app") and read back, the e2e suite re-run. The maintainer also asked
+    whether assignment times should be stored in the plant's local time beside UTC, two columns. Answered no,
+    with the reasons recorded on R-426's note: one instant column is the fact; a local wall-clock time is
+    ambiguous on the autumn changeover and missing on the spring one; a second column is a second copy of a
+    fact that drifts (the rule section 4 and R-449 already state); a plant that changes zone would have every
+    row rewritten; and the day's problems were not storage but a setting nobody seeded and a spec that assumed
+    it. Where a local reading is wanted by hand or in a report, it is AT TIME ZONE in the query, never a column.
 - id: 186
   date: 2026-09-22
   title: "The typed walk moves to next Monday in the plant's own zone and finds a week-word gap in the bar; the two audits R-447 and R-449 run; the spoken Whisper walk is handed over (F-182, F-190, F-191)"
@@ -25555,12 +25612,6 @@ next:
   why: >-
     The model and the server shipped 17 Sept (session 178, 68badab) with the decisions R-441 to R-444 all
     in. Each piece is a lane with its own brief; the board piece also owns F-172 to F-174.
-- kind: task
-  text: "The demo plant's zone: the seed leaves Plant A on UTC (board_window's default) while the design treats it as a Chicago plant (F-159, F-190); decide the seeded zone, and if it is not UTC, write the seed's shift hours in it"
-  why: >-
-    Found 22 Sept (session 186) when the typed walk wrote five hours off on the reset stack. Today the seed's
-    06:00+00 rows only read as Shift 1 because the plant has no zone. A maintainer decision: which zone the demo
-    plant is in. Whatever it is, the seed sets it and its hours agree with it, so a reset never changes the clock.
 - kind: task
   stage: S68
   text: "The admin rail resizes and remembers (R-446), the side-panel standard's first hit --- lane running 18 Sept"
