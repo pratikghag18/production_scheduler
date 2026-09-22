@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-22'
-  tip: '0f5cef0'
+  tip: '7fdb578'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12806,7 +12806,7 @@ findings:
 - id: F-198
   title: A one-word spoken answer ("yes") is never sent to Whisper, because a clip's speech only starts after half a second of steady loudness
   tag: A silence rule that swallows short answers
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S57
   refs:
@@ -12822,6 +12822,14 @@ findings:
     the clip runs to the twelve-second cap and is dropped as no-speech without reaching Whisper. The retries
     of the whole sentence in between were misheard and each replaced the standing question. The person typed
     yes in the end. "I eventually had to type yes."
+  fix: >-
+    Session 189 (7fdb578): a single frame at or above 0.08 RMS starts speech at once (real speech measures 0.12
+    to 0.39 in whisper.cpp's own sample; a keyboard click 0.024, the mic button's transient 0.022, a door 0.071),
+    two consecutive frames at the old 0.02 floor still start it, and the first recorded frame never starts it
+    alone. The reviewer found that a plain one-frame rule let a click start and end the clip before the person
+    spoke, and that a twelve-second near-silent clip makes Whisper invent words, so a soft short clip that
+    crossed neither rule is sent as a three-second window around the sound; true silence is never posted. Yes,
+    no, Do all and Show that day join the hint. LREC-19 to LREC-28 pin every branch.
 - id: F-197
   title: A spoken override reason was recorded as the answer and nothing was written, so the person typed it again and the bar read it as a new sentence
   tag: A free-text answer that only the keyboard delivers
@@ -17673,6 +17681,34 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 189
+  date: 2026-09-22
+  title: "After the restart: the clear lists the job, the spoken yes never reached Whisper, and the recogniser's onset rule is rebuilt against real audio (F-198)"
+  shipped: []
+  commits: ['1ea88ee', '7fdb578']
+  numbers:
+    app_tests: 4215
+    app_test_files: 167
+    tsc: 0
+    eslint: 0
+    db_checks: 892
+    migrations: 84
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    npm run test reads Test Files 167 passed, Tests 4215 passed, copied from the runner; tsc and eslint clean;
+    no migration or RPC changed, so db_checks carries 892. No e2e spec touched.
+  summary: >-
+    The maintainer's dev server had been taken by the memory reaper with every other node process, so the
+    microphone posted its clips to nothing; after the restart "Clear, Cell 3, Today" was heard first time and
+    the bar asked with the job listed, and the spoken yes came back five times as nothing heard, the retries
+    of the sentence were misheard and each replaced the standing question, and the maintainer typed yes in the
+    end: "I eventually had to type yes." F-198 from the trace, a Sonnet lane from a brief, a Sonnet reviewer
+    that measured real audio and found two things --- a plain one-frame onset lets a click start and end the
+    clip before the person speaks, and a twelve-second quiet clip makes Whisper invent "clippers buzzing" ---
+    and the developer's decision on the onset rule (a voice-loud single frame, or two at the old floor, never
+    the first frame alone), built by the same reviewer and pinned. The maintainer can say yes now; the second
+    spoken pass with the same list is next.
 - id: 188
   date: 2026-09-22
   title: "The spoken walk through Whisper, read from the trace, and the four lanes it set off: one absence form, the headcount and end-of-shift grammar, the thread, the hint and the spoken answer, and a clear that removes the job (F-192 to F-197, R-360, R-436, R-449)"
@@ -25786,11 +25822,6 @@ next:
   text: "The admin rail resizes and remembers (R-446), the side-panel standard's first hit --- lane running 18 Sept"
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
-- kind: task
-  text: "S70-e: a one-word spoken answer is heard --- speech starts on one frame, a quiet short clip is still sent at the cap, yes and no join the hint (F-198) --- docs/agent-briefs/s70-e-short-spoken-answer-brief.md"
-  why: >-
-    22 Sept (session 189): the clear works and lists the job; the spoken yes that should run it never reaches
-    Whisper. The first thing a person says after every question is one word.
 - kind: task
   text: "F-193 and F-196: a date said in words, and a capitalised small word read as a place --- the sixth run's data (the generator) and, until then, a question instead of a silent write (R-435) and choices at the dead end (R-430)"
   why: >-
