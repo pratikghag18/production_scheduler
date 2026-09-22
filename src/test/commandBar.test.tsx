@@ -44,6 +44,7 @@ import type {
   ResolvedBook,
   ResolvedUnassign,
   ResolvedMove,
+  ResolvedRunRemoval,
   ResolvedHeadcount,
   ContextRun,
   ContextAssignment,
@@ -2922,6 +2923,82 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     // R-427: see CB-x-5's own note.
     expect(candidateButtons()).toHaveLength(0);
     expect(onRunLot).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------
+  // S70-d (R-436, docs/agent-briefs/s70-d-clear-removes-the-job-brief.md):
+  // "Unless specified clear means clearing everything" (the maintainer, 17
+  // Sept), restated 22 Sept after "clear area 1" left the Bracket A job
+  // standing -- an `everyone` clear now removes the RUNS on the place/day
+  // too, listed AFTER the people, and a yes on that lot calls the
+  // delete-run path (`deleteRun.mutateAsync`, `useDragGesture.ts`'s
+  // `runLot`) once per job with the run's own id.
+  // ---------------------------------------------------------------------
+
+  it("CB-x-18: 'clear Cell 1 today' with two people and a job expands to a lot of three, the job worded and listed last, and yes calls onRunLot with a remove_run step for it (R-436)", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input, onHighlight } = renderXBar(
+      { assignments: [XBLK1, XBLK2], runs: [RUN_X] },
+      null,
+      { onRunLot },
+    );
+
+    fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Still only the two blocks outlined -- a run names no assignment id to
+    // highlight (S51's own `buildLotHighlights` doc: a create/booking names
+    // nothing either, and a run removal is the same shape of nothing-to-
+    // outline here).
+    expect(statusText()).toMatch(/^3 commands ready: /);
+    expect(statusText()).toContain(
+      renderedReadout(
+        "Removing the Housing A job · Plant X › Line X › Cell 1 · 2026-09-03 · 08:00–16:00 · 3 people",
+      ),
+    );
+    expect(onHighlight).toHaveBeenLastCalledWith([
+      { kind: "remove", assignmentIds: ["xblk1"] },
+      { kind: "remove", assignmentIds: ["xblk2"] },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 3" }));
+    await waitFor(() => expect(threadText()).toContain("Done: 3 commands."));
+
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    // People first, the job after -- brief §2: a job's `delete_run` cascade
+    // must never remove a block the lot has already listed as its own
+    // earlier step.
+    expect(resolvedList.map((r) => r.intent)).toEqual(["unassign", "unassign", "remove_run"]);
+    expect((resolvedList[0] as ResolvedUnassign).assignmentId).toBe("xblk1");
+    expect((resolvedList[1] as ResolvedUnassign).assignmentId).toBe("xblk2");
+    expect((resolvedList[2] as ResolvedRunRemoval).runId).toBe("runX");
+  });
+
+  it("CB-x-19: 'clear Cell 1 today' with a job and nobody on it lists the job alone -- never 'has nobody on it' -- and yes calls onRunLot with the one remove_run step (R-436)", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderXBar({ runs: [RUN_X] }, null, { onRunLot });
+
+    fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^1 commands ready: /);
+    expect(statusText()).toContain("Removing the Housing A job");
+    expect(statusText()).not.toContain("has nobody on it");
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 1" }));
+    await waitFor(() => expect(threadText()).toContain("Done: 1 commands."));
+
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolvedList.map((r) => r.intent)).toEqual(["remove_run"]);
+    expect((resolvedList[0] as ResolvedRunRemoval).runId).toBe("runX");
   });
 });
 

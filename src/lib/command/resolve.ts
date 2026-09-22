@@ -309,6 +309,29 @@ export interface ResolvedUnassign {
 }
 
 /**
+ * S70-d (R-436, brief §1): a clear-everyone sentence removes the RUNS on the
+ * named place/day too, never just the people on them -- "clear Cell 3 today"
+ * left the Bracket A job standing until the maintainer said again, 22 Sept,
+ * "The clear area 1 did not clear the Bracket A assignment, we talked about
+ * this." Already fully resolved by `expandEveryoneUnassign` (a run gathered
+ * by place/day/window needs no further person/place/day resolution the way
+ * an `UnassignCommand` would), so this never rides inside a `SeveralCommand`
+ * (`parse.ts`'s own invariant: `commands: SingleCommand[]`, a closed union
+ * with no fifth shape) -- it rides beside it, on `Expansion.runRemovals`,
+ * and the caller appends it to a lot's own `done` AFTER every person command
+ * has resolved (people first, jobs after, brief §2: a job's cascade delete
+ * must never remove a block the lot has already listed as its own step).
+ */
+export interface ResolvedRunRemoval {
+  intent: "remove_run";
+  runId: string;
+  /** "Removing the Bracket A job · Plant 1 › Assembly › Line 1 › Cell 3 ·
+   *  2026-09-03 · 08:00–16:00" (+ " · 3 people" when the run has a
+   *  headcount -- the same suffix `ResolvedBook.readout` appends). */
+  readout: string;
+}
+
+/**
  * S41-c (docs/agent-briefs/s41-c-move-brief.md §4): "Move Sam on Cell 1 to
  * Cell 2 in Line 1" resolves to the ONE existing block it names, moved to
  * `nodeId` (the TARGET -- the source cell for a `retime`, the new cell for a
@@ -3116,6 +3139,14 @@ export type Expansion =
       // single write) -- so it must be a member here too, not just of
       // `Command`.
       command: SingleCommand | SeveralCommand | HeadcountCommand;
+      /** S70-d (R-436): `expandEveryoneUnassign`'s own run removals,
+       *  ALREADY resolved -- see `ResolvedRunRemoval`'s own doc for why
+       *  these ride beside `command` rather than inside it. Undefined (never
+       *  an empty array) for every expansion that is not an `everyone`
+       *  removal with at least one run on the place/day; the caller treats
+       *  "absent" and "empty" the same, so either is fine to produce, but an
+       *  absent field is the honest one when there is nothing to say. */
+      runRemovals?: ResolvedRunRemoval[];
     }
   | { ok: false; question: Question };
 
@@ -3539,7 +3570,26 @@ function resolveWindowForCell(
  * each cell's own window, in `ctx.assignments`' own order -- fully inside
  * becomes an `unassign`, across exactly one edge becomes a `move` of the
  * part OUTSIDE the window (`toPlace: null`), across BOTH edges is
- * `split_needed` (nothing built). No blocks at all is `nothing_to_do`.
+ * `split_needed` (nothing built). §3.2 below (S70-d, R-436): every RUN on
+ * the gathered cells overlapping each cell's own window, in `ctx.runs`' own
+ * order, becomes a `ResolvedRunRemoval`, appended AFTER every person
+ * command -- the maintainer, 17 Sept: "Unless specified clear means clearing
+ * everything," restated 22 Sept after "clear area 1" left the Bracket A job
+ * standing: "we talked about this." No blocks and no runs at all is
+ * `nothing_to_do`.
+ *
+ * R-436's own second clause -- a sentence that NAMES A PART, or says "the
+ * operators" / "take everyone off", keeps removing only the people, never
+ * the jobs -- is not reachable here: `UnassignCommand` (`parse.ts`) carries
+ * no `product` field at all (unlike `AssignCommand`/`BookCommand`), and
+ * `EVERYONE_ALIASES` ("everyone"/"everybody"/"all") is the ONLY thing
+ * `parse.ts` folds into the reserved `EVERYONE` operator word -- "the
+ * operators" and "take everyone off" are not aliases it recognizes today,
+ * and nothing in `UnassignCommand` distinguishes them from a bare "clear"
+ * even if they were. So today every `everyone` removal this function sees
+ * carries no part and no such wording to tell apart -- the second clause has
+ * no sentence to apply to yet; it needs a `parse.ts` field (out of this
+ * lane's boundary) before it can be checked here.
  */
 function expandEveryoneUnassign(command: UnassignCommand, ctx: ResolveContext): Expansion {
   const byPath = buildPathIndex(ctx.nodeById);
@@ -3617,21 +3667,104 @@ function expandEveryoneUnassign(command: UnassignCommand, ctx: ResolveContext): 
       return crossesBothEdgesQuestion(op, x, xCell, window, ctx);
     }
   }
-  if (commands.length === 0) {
-    const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+
+  const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+
+  // S70-d (R-436, brief §1/§3.2): one `ResolvedRunRemoval` per RUN on the
+  // gathered cells overlapping each cell's own window, in `ctx.runs`' own
+  // (board) order -- placed AFTER the loop above so `commands` above never
+  // sees a run, and the people/job split stays exactly the two loops it is.
+  // A run is never clipped or edge-adjusted the way a block is (brief §1:
+  // "removes ... and leaves every job (run) standing" was the bug; the fix
+  // is the whole run, always gone, never split) -- `deleteRun`'s own
+  // `cascade` mode is what a job removal means here (brief §2).
+  const runRemovals: ResolvedRunRemoval[] = [];
+  for (const run of ctx.runs) {
+    if (!cellIds.has(run.nodeId)) continue;
+    const window = windows.get(run.nodeId);
+    if (!window || !ctx.overlaps(window, run)) continue;
+    const runCell = ctx.nodeById.get(run.nodeId) as Node;
+    const ancestorNames = ancestorsOf(runCell, byPath).map((n) => n.name);
+    const chain = [...ancestorNames, runCell.name].join(" › ");
+    const headcountSuffix = run.headcount !== null ? ` · ${run.headcount} people` : "";
+    // REVIEWER FIX (S70-d review): `deleteRun`'s `cascade` mode deletes
+    // EVERY assignment with `run_id = p_run_id`, with no window of its
+    // own -- `delete_run`'s SQL is `DELETE FROM assignments WHERE run_id =
+    // p_run_id` (migration 20260821000009_api_surface.sql), never scoped to
+    // a timerange. A run is gathered here the moment its OWN timerange
+    // overlaps the sentence's (possibly narrower, "this afternoon") window
+    // at all -- so a crew member on this same run whose OWN block sits
+    // entirely outside that window (an 08:00-10:00 block on a run that
+    // runs 08:00-16:00, cleared with "this afternoon") was never added to
+    // `commands` above (the window-overlap check just skipped it) and was
+    // never named in the run's own readout either (`run.span` is the run's
+    // hours, not any one crew member's) -- yet cascade removes it anyway.
+    // That is exactly the shape CLAUDE.md's screen/bar rule forbids in
+    // reverse: something removed that the lot never showed. Brief §3
+    // ("list the extra blocks" is the other of its two named fixes,
+    // alongside excluding the run) -- listing keeps the "clear means
+    // everything" contract (R-436) intact while keeping every removal
+    // named, so it is the one taken here: each such crew block becomes its
+    // own ordinary `unassign` command (people-first ordering holds --
+    // this still runs inside the `commands` array, all of it before any
+    // `runRemovals` entry).
+    for (const x of ctx.assignments) {
+      if (x.runId !== run.id) continue;
+      const w = windows.get(x.nodeId);
+      if (w && ctx.overlaps(w, x)) continue; // already in `commands` above
+      const op = operatorById(x.operatorId, ctx);
+      if (op === null) continue; // a departed person's block has no words to name it by
+      commands.push({
+        intent: "unassign",
+        operator: personWords(op),
+        place: cellWordsOf(runCell, byPath),
+        day: dayWordForIndex(dayIndex, ctx),
+        span: hoursOfBlock(x.startMin, x.endMin, ctx),
+        existing: { kind: "remove", assignmentId: x.id },
+        shift: null,
+        until: null,
+      });
+    }
+    runRemovals.push({
+      intent: "remove_run",
+      runId: run.id,
+      // REVIEWER FIX (S70-d review): `run.productName` is null only once its
+      // product has been deleted (D110, see `ContextRun.productName`'s own
+      // doc) -- the un-fixed `${run.productName ?? "job"} job` read
+      // "Removing the job job · ..." for that run, the same doubled word a
+      // reader would trip on. The word is dropped, never duplicated, same
+      // as every OTHER `?? "block"` fallback in this file reads (e.g.
+      // `${x.productName ?? "block"} ${x.label}` -- "block 10:00-12:00",
+      // no second "block").
+      readout: `Removing the ${run.productName === null ? "job" : `${run.productName} job`} · ${chain} · ${iso} · ${run.span}${headcountSuffix}`,
+    });
+  }
+
+  if (commands.length === 0 && runRemovals.length === 0) {
     const label = command.place.length > 0 ? command.place[0] : "The board";
     return {
       ok: false,
       question: { kind: "nothing_to_do", text: `${label} has nobody on it ${iso}.` },
     };
   }
-  if (commands.length > LOT_CEILING) {
-    return {
-      ok: false,
-      question: { kind: "lot_too_big", count: commands.length, max: LOT_CEILING },
-    };
+  const total = commands.length + runRemovals.length;
+  if (total > LOT_CEILING) {
+    return { ok: false, question: { kind: "lot_too_big", count: total, max: LOT_CEILING } };
   }
-  return wrapMany(commands);
+  // S70-d: a run removal can never be a `SingleCommand` (no sentence names
+  // one directly, and `parse.ts`'s grammar has no such intent) -- so the
+  // moment there is at least one, this ALWAYS returns a `several` (never
+  // `wrapMany`'s single-command shortcut, even when `commands` itself has 0
+  // or 1 entries), with the runs riding on `runRemovals` beside it. A place
+  // with a job and nobody on it (brief §3's pin) is `commands: []`,
+  // `runRemovals: [the one job]` -- a several of zero SingleCommands plus
+  // one already-resolved run, which the lot lists as "1 commands ready: 1.
+  // Removing the ... job ...", the job listed alone, never folded into
+  // `nothing_to_do`. Every ordinary `everyone` removal with no runs on the
+  // place/day (today's whole behavior before this lane) is `wrapMany`,
+  // byte-for-byte unchanged.
+  if (runRemovals.length === 0) return wrapMany(commands);
+  return { ok: true, command: { intent: "several", commands }, runRemovals };
 }
 
 /**

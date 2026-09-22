@@ -29,6 +29,7 @@ import type {
   ResolvedBook,
   ResolvedUnassign,
   ResolvedMove,
+  ResolvedRunRemoval,
   ResolvedHeadcount,
   Question,
   Candidate,
@@ -1501,7 +1502,12 @@ export function CommandBar({
     }
     const resolvedCommand = expanded.command;
     if (resolvedCommand.intent === "several") {
-      startLot(resolvedCommand.commands);
+      // S70-d (R-436): `expanded.runRemovals` -- an `everyone` clear's own
+      // run removals, ALREADY resolved -- rides beside `resolvedCommand`
+      // rather than inside its `commands` (see `ResolvedRunRemoval`'s own
+      // doc in `resolve.ts`); `startLot` holds them until every person
+      // command has resolved, then appends them to `done` after.
+      startLot(resolvedCommand.commands, expanded.runRemovals);
       return;
     }
     // `heldRef` keeps the ORIGINAL sentence's command (brief §2: "the one a
@@ -1572,9 +1578,13 @@ export function CommandBar({
   }
 
   /** S51: starts a fresh lot from a several's inner commands and resolves
-   *  the first one (brief §2 item 1). */
-  function startLot(commands: SingleCommand[]): void {
-    lotRef.current = { commands, index: 0, done: [] };
+   *  the first one (brief §2 item 1). S70-d (R-436): `runRemovals` --
+   *  `expandEveryoneUnassign`'s own already-resolved run removals -- ride
+   *  alongside `commands` and are appended to `done` once every one of
+   *  `commands` has resolved (`resolveLotStep`'s own terminal branch),
+   *  never resolved themselves. */
+  function startLot(commands: SingleCommand[], runRemovals?: ResolvedRunRemoval[]): void {
+    lotRef.current = { commands, index: 0, done: [], runRemovals: runRemovals ?? [] };
     resolveLotStep();
   }
 
@@ -1591,6 +1601,16 @@ export function CommandBar({
     const lot = lotRef.current;
     if (!lot) return;
     if (lot.index >= lot.commands.length) {
+      // S70-d (R-436): every person command has resolved -- fold the lot's
+      // own run removals (already resolved, never through `resolveCommand`)
+      // onto the end of `done` now, ONCE (`runRemovals` is cleared right
+      // after, so a repeat call -- `updateLotCommand` re-resolving the last
+      // step, say -- never appends them twice). People first, jobs after:
+      // brief §2, so a job's cascade delete never removes a block the lot
+      // has already listed as its own earlier step.
+      if (lot.runRemovals && lot.runRemovals.length > 0) {
+        lotRef.current = { ...lot, done: [...lot.done, ...lot.runRemovals], runRemovals: [] };
+      }
       showLotStatus();
       return;
     }

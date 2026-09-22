@@ -2894,6 +2894,18 @@ export function useDragGesture(args: UseDragGestureArgs) {
                 readout: r.readout,
               });
             }
+          } else if (r.intent === "remove_run") {
+            // S70-d (R-436): an `everyone` clear's own job removal --
+            // `expandEveryoneUnassign` already found the exact run, so this
+            // is the SAME `deleteRun` mutation `deleteRunWithMode`'s own
+            // button calls, `cascade` mode (the run's own remaining
+            // assignments, if any are still attached by the time this step
+            // runs, go with it) -- `mutateAsync`, not `mutate`, so a refusal
+            // (the run already gone, a permission change mid-lot) is this
+            // lot step's own caught failure, the same as every other write
+            // here, never a background toast the lot's own "Done: N" text
+            // contradicts.
+            await deleteRun.mutateAsync({ runId: r.runId, mode: "cascade" });
           } else {
             // S58 (R-415, D132 item 4): `r` narrows to `never` here -- every
             // member of `ResolvedAny` is handled above, and `ResolvedHeadcount`
@@ -2919,6 +2931,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [
       ctx,
       deleteAssignment,
+      deleteRun,
       retimeAssignmentForLot,
       retimeRunForLot,
       createFromCommand,

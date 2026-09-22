@@ -64,6 +64,7 @@ import type {
   ResolvedBook,
   ResolvedCommand,
   ResolvedMove,
+  ResolvedRunRemoval,
   ResolvedUnassign,
 } from "@/lib/command/resolve";
 import type { Highlight } from "../lib/highlight";
@@ -75,7 +76,16 @@ import { renderLine, type TraceEntry } from "@/lib/voice/trace";
  * `CommandBar.tsx` (which re-exports it, so every existing importer is
  * unchanged) because the LOT that holds them is this store's state now.
  */
-export type ResolvedAny = ResolvedCommand | ResolvedBook | ResolvedUnassign | ResolvedMove;
+export type ResolvedAny =
+  | ResolvedCommand
+  | ResolvedBook
+  | ResolvedUnassign
+  | ResolvedMove
+  // S70-d (R-436): an `everyone` clear's own run removals -- ALREADY
+  // resolved by `expandEveryoneUnassign`, so they reach a lot's own `done`
+  // the same way the other four do, never through `resolveCommand` (see
+  // `ResolvedRunRemoval`'s own doc in `resolve.ts` for why).
+  | ResolvedRunRemoval;
 
 /**
  * What pressing one of the bar's candidate buttons does. Data, never a
@@ -188,6 +198,16 @@ export interface Lot {
   commands: SingleCommand[];
   index: number;
   done: ResolvedAny[];
+  /** S70-d (R-436): `expandEveryoneUnassign`'s own run removals, held here
+   *  UNTIL every one of `commands` has resolved, then appended to `done`
+   *  once (`CommandBar.tsx`'s `resolveLotStep`) so the lot's own order is
+   *  people first, jobs after -- never resolved through `commands`/
+   *  `resolveCommand` at all (there is no `SingleCommand` shape for one).
+   *  Optional (never required) so every existing `Lot` literal -- this
+   *  module's own tests included -- stays valid unchanged; `undefined` and
+   *  `[]` mean the same thing, "no runs on this lot", and every reader
+   *  treats them alike. */
+  runRemovals?: ResolvedRunRemoval[];
 }
 
 /** S59 (R-419): the command a "Show that day" press is waiting to re-run. */

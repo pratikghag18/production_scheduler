@@ -12,6 +12,7 @@ import {
   waitForAssignment,
   waitForAssignmentGone,
   assignmentsStartingInWindow,
+  runsStartingInWindow,
   parseTimerange,
   PASSWORD,
   PLANT_A_ADMIN,
@@ -878,15 +879,23 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
 
       // 21 and 22. The clear of the walk day, one sentence per area (R-407: a
       // place above the cells clears every cell under it). Between them the
-      // two listings must name EVERY block this walk left on that day -- counted
-      // against an independent database read taken before either runs, never
-      // a hand-summed number.
-      const beforeClear = await assignmentsStartingInWindow(
+      // two listings must name EVERY block AND EVERY JOB this walk left on
+      // that day (R-436, S70-d: "clear means clearing everything" -- the job
+      // rows join the lot) -- counted against an independent database read
+      // taken before either runs, never a hand-summed number.
+      const beforeClearBlocks = await assignmentsStartingInWindow(
         dana,
         allCellIds,
         WALK_DAY_START_MS,
         WALK_DAY_END_MS,
       );
+      const beforeClearJobs = await runsStartingInWindow(
+        dana,
+        allCellIds,
+        WALK_DAY_START_MS,
+        WALK_DAY_END_MS,
+      );
+      const beforeClear = beforeClearBlocks.length + beforeClearJobs.length;
       const listedCount = (result: EntryResult): number => {
         // Entry 21 reaches its listing through "Show that day", so the
         // listing is what the bar showed AFTER the button, not `barSaid`.
@@ -903,20 +912,23 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       if (area1Result.unpredicted === undefined && area2Result.unpredicted === undefined) {
         expect(
           area1Listed + area2Listed,
-          "the two areas' listings together should name every block the walk left on the walk day",
-        ).toBe(beforeClear.length);
+          "the two areas' listings together should name every block and every job the walk left on the walk day",
+        ).toBe(beforeClear);
       }
       const afterClear = await (async () => {
         // waitForAssignmentGone needs one specific row; here we want ALL of
         // them gone, so poll the whole-window count down to zero instead.
         const deadline = Date.now() + 45_000;
         for (;;) {
-          const rows = await assignmentsStartingInWindow(
-            dana,
-            allCellIds,
-            WALK_DAY_START_MS,
-            WALK_DAY_END_MS,
-          );
+          const rows = [
+            ...(await assignmentsStartingInWindow(
+              dana,
+              allCellIds,
+              WALK_DAY_START_MS,
+              WALK_DAY_END_MS,
+            )),
+            ...(await runsStartingInWindow(dana, allCellIds, WALK_DAY_START_MS, WALK_DAY_END_MS)),
+          ];
           if (rows.length === 0) return rows;
           if (Date.now() > deadline) return rows;
           await new Promise((r) => setTimeout(r, 300));
@@ -924,7 +936,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       })();
       expect(
         afterClear,
-        "every block on the walk day should be gone after the two areas' own yeses",
+        "every block and every job on the walk day should be gone after the two areas' own yeses",
       ).toHaveLength(0);
 
       // ------------------------------------------------------------------
