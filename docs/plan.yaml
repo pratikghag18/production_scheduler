@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-22'
-  tip: '69318e7'
+  tip: '0f5cef0'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12330,6 +12330,7 @@ requirements:
     question whether it should clear product assignment as well." The first half builds now (S70-d): the lot a
     clear lists names the jobs beside the people ("Removing the Bracket A job · Cell 3 · 13:00-17:00") and runs
     delete_run for each; the undo waits for the activity-log piece.
+    BUILT 22 Sept (session 188, 40d2561): the first half. The second (the undo) still waits.
 - id: R-437
   title: Enter empties the box --- a sent sentence lives in the thread, never in the input
   source:
@@ -12805,7 +12806,7 @@ findings:
 - id: F-197
   title: A spoken override reason was recorded as the answer and nothing was written, so the person typed it again and the bar read it as a new sentence
   tag: A free-text answer that only the keyboard delivers
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S57
   refs:
@@ -12818,6 +12819,11 @@ findings:
     listed no block of Tom's. The maintainer then typed the same words and the bar read them as a fresh
     sentence, "unassign Line Supervisor", and answered "No person called Line Supervisor". Typed, the same
     reason runs the override (the typed walk's entry 18, green twice the same day); spoken, it is swallowed.
+  fix: >-
+    Session 188 (f9f7457): pressing the microphone and every interim transcript now ask the same answerTakes
+    predicate the typed path uses before wiping a standing question or the held command; the reviewer found the
+    wider guard let a late final re-answer a question already typed and write a second block, so submitText reads
+    the standing question off the store at the moment it runs. CB-nc-8 and CB-stale-1 pin both.
 - id: F-196
   title: The model reads a capitalised small word as a place ("Sam Patel's Block", "In Line 3", "N-line 2"), and the dead end that follows offers nothing
   tag: A model gap the rules already cover, and a dead end with no choices
@@ -12838,7 +12844,7 @@ findings:
 - id: F-195
   title: The recogniser's hint lacks the bar's own verbs and nouns, so "end" came back as "and", "block" as "blog", "clock" and "vlog", "on Cell" as "oneself"
   tag: A vocabulary hint missing the words the walk says most
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S59
   refs:
@@ -12851,10 +12857,13 @@ findings:
     The hint's own list (recognizerHint.ts VOCABULARY) has assign, book, remove, move, cover, swap, split, extend
     and the digits, but not end, block, clear, copy, make, job, until, shift; D133 item 4 said it fixes "cell
     heard as sell", and these are the same shape.
+  fix: >-
+    Session 188 (f9f7457): end, block, clear, copy, make, until, from, to, today, tomorrow, week and on join the
+    hint's vocabulary, ahead of the board's names, 46 words against a cap of 200.
 - id: F-194
   title: '"from 2 until end of the shift" is bad_time to the rules, and the model gave no form for it'
   tag: One extra word the grammar does not allow
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S55
   refs:
@@ -12863,6 +12872,9 @@ findings:
     Spoken walk, 22 Sept: Whisper wrote "from 2 until end of the shift today" (a "the" the list did not have),
     twice; the model answered nothing usable and the rules said "I could not read end of the shift" both times.
     Without the "the" the rules read it (14:00 until end of shift, written). A person says it either way.
+  fix: >-
+    Session 188 (d80c12b): the end-of-shift phrase takes an optional "the" before "end" and after "of"; BD2a pins
+    the three spellings.
 - id: F-193
   title: A date said in words ("on 28th of September") was read as a weekday and written on today, with no question
   tag: A wrong day written silently
@@ -12881,7 +12893,7 @@ findings:
 - id: F-192
   title: The bar's conversation cannot be scrolled back
   tag: A flex-end column that overflows upward
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S63
   refs:
@@ -12893,6 +12905,10 @@ findings:
     auto; in a flex column that pair pushes the overflow ABOVE the box, where no scrollbar reaches it -- the
     classic trap. With many turns the oldest are unreachable. The fix is margin-top: auto on the first turn (or a
     spacer) instead of flex-end, which keeps the bottom anchoring and lets the box scroll.
+  fix: >-
+    Session 188 (f9f7457): the first turn carries margin-top auto instead of the box's justify-content flex-end,
+    so a short thread still sits at the bottom and a long one scrolls; checked in the browser with two and with
+    twenty turns, and the panel's resize (R-446) intact. CH-scroll pins the class contract.
 - id: F-191
   title: A board showing next week answered "every weekday next week" with "today is not on the board", because a week word was anchored on today's board index
   tag: A week resolved from where the window sits, not from the plant's calendar
@@ -17638,6 +17654,37 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 188
+  date: 2026-09-22
+  title: "The spoken walk through Whisper, read from the trace, and the four lanes it set off: one absence form, the headcount and end-of-shift grammar, the thread, the hint and the spoken answer, and a clear that removes the job (F-192 to F-197, R-360, R-436, R-449)"
+  shipped: []
+  commits: ['d80c12b', '6862a33', 'f9f7457', '40d2561', '15a0d7e', '0f5cef0']
+  numbers:
+    app_tests: 4205
+    app_test_files: 167
+    tsc: 0
+    eslint: 0
+    db_checks: 892
+    migrations: 84
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    npm run test after the four lanes reads Test Files 167 passed, Tests 4205 passed, copied from the
+    runner; tsc and eslint clean; no migration or RPC changed, so db_checks carries session 187's 892. The typed
+    walk on the running app after the clear change: two green runs on the lane's code (1.8 minutes each), one on the reviewed code (2.6 minutes) after the trace read was narrowed to the walk's own typed turns; the eight-command clear on Area 1 lists the jobs.
+  summary: >-
+    The maintainer spoke the list (36 turns for 22 sentences, 12 clean) and the trace told the rest: six
+    findings, each with its trace line as the story (F-192 the thread cannot scroll, F-193 a spoken date written
+    on the wrong day without a question, F-194 "end of the shift", F-195 the hint's missing words, F-196 a
+    capitalised small word read as a place, F-197 a spoken reason swallowed), and R-436 restated when the clear
+    left the Bracket A job. Four Sonnet lanes from brief files, each reviewed by a second Sonnet agent that
+    tried to break it and each time found one thing: the grammar reviewer two day words stacked after the count;
+    the absence-form reviewer the refusal sentence naming a cell on a person's page; the bar reviewer a late
+    voice final re-answering a typed question and writing twice. Before the lanes, the maintainer's two questions
+    answered in the plan: reuse the form on the person's page (yes, one component, two doors) and why the model
+    did not read the headcount sentence (it did; the rules fallback did not). The two-column storage question
+    was answered on R-426 the session before. F-193 and F-196 are the model's and wait for the sixth run and the
+    S64 dead-end fixes; R-432's half-landed lot was seen live. Next: the second spoken pass with the same list.
 - id: 187
   date: 2026-09-22
   title: "The demo company is in Chicago: the seed sets the zone and writes its hours in it (R-450); the storage question answered --- one instant column, never a local twin"
@@ -25720,32 +25767,6 @@ next:
   text: "The admin rail resizes and remembers (R-446), the side-panel standard's first hit --- lane running 18 Sept"
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
-- kind: task
-  text: "S70-a: one absence form, mounted on the Absences tab and on the person's block in the Operators tab with the person fixed (R-360 amended, R-449) --- docs/agent-briefs/s70-a-one-absence-form-brief.md"
-  why: >-
-    Decided 22 Sept (session 188): "I want option A, but why can't we reuse the form on the same page itself?"
-    The one hit of the R-449 audit. Extract the Absences tab's form (the one DEF-0035 hardened to the server's
-    recordable answer) into a component both screens mount; OperatorAbsences.tsx keeps its list and Remove and
-    loses its own form; the pins move with it. Waits until the maintainer's spoken walk is done, since the dev
-    server reloads on every save.
-- kind: task
-  text: "S70-b: the rules read a day after a headcount's count, as every other form does (\"... 4 people tomorrow\") --- docs/agent-briefs/s70-b-headcount-trailing-day-brief.md"
-  why: >-
-    Found 22 Sept (session 186) re-dating the typed walk. The served model already reads the sentence (probed
-    22 Sept: headcount 4, tomorrow); the RULES, which answer when the model is slow or absent, refuse it as
-    no_time. parseHeadcountRest takes the trailing day like the others; HC cases pin both positions. Same wait
-    as S70-a.
-- kind: task
-  text: "S70-c: the thread scrolls (F-192), the hint carries the bar's own words (F-195), and a spoken free-text answer runs the way a typed one does (F-197) --- docs/agent-briefs/s70-c-thread-hint-spoken-answer-brief.md"
-  why: >-
-    The spoken walk of 22 Sept (session 188): the three findings a person hits first. The thread's overflow is a
-    CSS trap; the hint is a list of words; the spoken reason is the one path where the voice half and the typed
-    half disagree, and the typed half is pinned.
-- kind: task
-  text: "S70-d: a clear removes the jobs beside the people, listed in the same lot (R-436, first half) --- docs/agent-briefs/s70-d-clear-removes-the-job-brief.md"
-  why: >-
-    Restated 22 Sept after the walk left the Bracket A job on Cell 3. delete_run exists (mutations.ts); the lot
-    already names each removal; the job rows join it.
 - kind: task
   text: "F-193 and F-196: a date said in words, and a capitalised small word read as a place --- the sixth run's data (the generator) and, until then, a question instead of a silent write (R-435) and choices at the dead end (R-430)"
   why: >-
