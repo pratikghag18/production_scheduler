@@ -12325,6 +12325,11 @@ requirements:
     STATED 17 Sept (session 178): "Unless specified clear means clearing everything, we can program an undo
     option since we have the activity data, it should be easy." Today clear removes the people and leaves the
     run (the Bracket A run on Cell 3 stayed on 17 Sept).
+    RESTATED 22 Sept (session 188), after the spoken walk left the Bracket A job on Cell 3 again: "The clear
+    area 1 did not clear the Bracket A assignment, we talked about this, if not sure the board should ask the
+    question whether it should clear product assignment as well." The first half builds now (S70-d): the lot a
+    clear lists names the jobs beside the people ("Removing the Bracket A job · Cell 3 · 13:00-17:00") and runs
+    delete_run for each; the undo waits for the activity-log piece.
 - id: R-437
   title: Enter empties the box --- a sent sentence lives in the thread, never in the input
   source:
@@ -12797,6 +12802,97 @@ requirements:
     walk's brief) treated it as a Chicago one. BUILT the same session (69318e7): the zone named once in the
     schedule block, each hour an AT TIME ZONE instant, the company-wide fallback set in a new section 6b.
 findings:
+- id: F-197
+  title: A spoken override reason was recorded as the answer and nothing was written, so the person typed it again and the bar read it as a new sentence
+  tag: A free-text answer that only the keyboard delivers
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-425
+  - R-434
+  story: >-
+    The spoken walk, 22 Sept (session 188): "Assign Tom Baker to Housing A on Cell 1 ... from 3pm to 5pm today"
+    asked for the reason, as it should (warn); the maintainer spoke "The line supervisor approved the cover."
+    The trace line carries it as answered and its outcome is null: no block landed, and the clear that followed
+    listed no block of Tom's. The maintainer then typed the same words and the bar read them as a fresh
+    sentence, "unassign Line Supervisor", and answered "No person called Line Supervisor". Typed, the same
+    reason runs the override (the typed walk's entry 18, green twice the same day); spoken, it is swallowed.
+- id: F-196
+  title: The model reads a capitalised small word as a place ("Sam Patel's Block", "In Line 3", "N-line 2"), and the dead end that follows offers nothing
+  tag: A model gap the rules already cover, and a dead end with no choices
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-430
+  - R-418
+  story: >-
+    Spoken walk, 22 Sept: Whisper wrote "Split Sam Patel's Block at 1 p.m." and the model answered a split on a
+    place called "Block"; "Assign Lena Novaap 2, Area 2 Frame A on Cell 5, In Line 3 ..." became a place "In
+    Line 3"; "on Cell 3, N-line 2" a place "N-Line 2". Each time the bar said "No cell called Block on this
+    board" or "There is no Cell 5 in In Line 3" and offered no button, so a sentence the rules read correctly
+    (SP1 pins "split Sam's block at noon") was lost. The split never ran in the walk. Two halves: the model's
+    reading of a capitalised preposition or possessive noun (sixth-run data), and the dead end without choices
+    (R-430's audit, S64).
+- id: F-195
+  title: The recogniser's hint lacks the bar's own verbs and nouns, so "end" came back as "and", "block" as "blog", "clock" and "vlog", "on Cell" as "oneself"
+  tag: A vocabulary hint missing the words the walk says most
+  status: open
+  found_by: maintainer
+  stage: S59
+  refs:
+  - R-420
+  story: >-
+    Spoken walk, 22 Sept: "end Sam Patel's block at 2pm" took five tries -- "and Sam Patel's blog at 2pm", "and
+    Sam Patel's Block", "N, Sam Patel's vlog", "A and D, Sam Patel's blog", and finally "Close Sam Patel's clock
+    at 2 p.m.", which the model, to its credit, read as an end at 14:00. "swap" came back as "So, Tom, Tom" and
+    "Swab"; "book Bracket A on Cell 3" as "Book, Bracket A, oneself 3"; "to Line 1" as "2 Line 1" three times.
+    The hint's own list (recognizerHint.ts VOCABULARY) has assign, book, remove, move, cover, swap, split, extend
+    and the digits, but not end, block, clear, copy, make, job, until, shift; D133 item 4 said it fixes "cell
+    heard as sell", and these are the same shape.
+- id: F-194
+  title: '"from 2 until end of the shift" is bad_time to the rules, and the model gave no form for it'
+  tag: One extra word the grammar does not allow
+  status: open
+  found_by: maintainer
+  stage: S55
+  refs:
+  - R-402
+  story: >-
+    Spoken walk, 22 Sept: Whisper wrote "from 2 until end of the shift today" (a "the" the list did not have),
+    twice; the model answered nothing usable and the rules said "I could not read end of the shift" both times.
+    Without the "the" the rules read it (14:00 until end of shift, written). A person says it either way.
+- id: F-193
+  title: A date said in words ("on 28th of September") was read as a weekday and written on today, with no question
+  tag: A wrong day written silently
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-435
+  - R-419
+  story: >-
+    Spoken walk, 22 Sept, entry 19: "Assign Maria Lopez to bracket A on Cell 3, in line 2 from 8am to 12pm on
+    28th of September" -- the model answered day "tue" and the bar wrote Maria on Cell 3 TODAY, 08:00-12:00,
+    read by the model, no question. The next, day-less sentence then found her already there. R-435: two
+    honest readings become a question; here one wrong reading became a write. The rules know only ISO dates
+    and weekday names; a spoken date is neither, and the model guessed.
+- id: F-192
+  title: The bar's conversation cannot be scrolled back
+  tag: A flex-end column that overflows upward
+  status: open
+  found_by: maintainer
+  stage: S63
+  refs:
+  - R-427
+  - R-429
+  story: >-
+    The maintainer, 22 Sept, after the spoken walk: "I can't scroll on chat history, big issue." .threadBody in
+    CommandBar.module.css bottom-anchors the turns with justify-content: flex-end and scrolls with overflow-y:
+    auto; in a flex column that pair pushes the overflow ABOVE the box, where no scrollbar reaches it -- the
+    classic trap. With many turns the oldest are unreachable. The fix is margin-top: auto on the first turn (or a
+    spacer) instead of flex-end, which keeps the bottom anchoring and lets the box scroll.
 - id: F-191
   title: A board showing next week answered "every weekday next week" with "today is not on the board", because a week word was anchored on today's board index
   tag: A week resolved from where the window sits, not from the plant's calendar
@@ -25640,13 +25736,28 @@ next:
     no_time. parseHeadcountRest takes the trailing day like the others; HC cases pin both positions. Same wait
     as S70-a.
 - kind: task
-  text: "The voice half of the walk through Whisper: the maintainer speaks docs/walks/voice-walk-2026-09-22.md, the developer reads the trace and the thread after"
+  text: "S70-c: the thread scrolls (F-192), the hint carries the bar's own words (F-195), and a spoken free-text answer runs the way a typed one does (F-197) --- docs/agent-briefs/s70-c-thread-hint-spoken-answer-brief.md"
   why: >-
-    The maintainer, 18 Sept: "We still have to do testing on the whisper model for voice testing." Same list,
-    spoken, with the thread on screen; the list is prepared (session 186, docs/walks/voice-walk-2026-09-22.md),
-    both voice containers were started and answered healthy, and the trace on disk records every turn with
-    by: local, so nothing is written down by hand. What the developer reads after: mishearings the hint caught,
-    mishearings that need a hint word, clips cut at twelve seconds, and anything the bar did wrong once it heard right.
+    The spoken walk of 22 Sept (session 188): the three findings a person hits first. The thread's overflow is a
+    CSS trap; the hint is a list of words; the spoken reason is the one path where the voice half and the typed
+    half disagree, and the typed half is pinned.
+- kind: task
+  text: "S70-d: a clear removes the jobs beside the people, listed in the same lot (R-436, first half) --- docs/agent-briefs/s70-d-clear-removes-the-job-brief.md"
+  why: >-
+    Restated 22 Sept after the walk left the Bracket A job on Cell 3. delete_run exists (mutations.ts); the lot
+    already names each removal; the job rows join it.
+- kind: task
+  text: "F-193 and F-196: a date said in words, and a capitalised small word read as a place --- the sixth run's data (the generator) and, until then, a question instead of a silent write (R-435) and choices at the dead end (R-430)"
+  why: >-
+    Both are model readings the rules do not share. The bar cannot know the model misread a date, so the
+    honest interim is the rules' own check: a day word the rules cannot read is a question, never a write.
+    Sized with the S64 dead-end fixes.
+- kind: task
+  text: "The spoken walk, second pass, after S70-c and S70-d: the same list, with the trace read the same way; R-432's half-landed lot (the weekday repeat did 1 of 5 and kept it) is the S64 lot RPC's own case"
+  why: >-
+    22 Sept (session 188): 36 spoken turns for 22 sentences; 12 landed first time, the rest are the findings
+    above. The repeat answered "Do all 5" and the second failed on the cap; the thread said "Nothing changed.
+    The 1 done stayed", which is both R-432's breach and a sentence that contradicts itself.
     The typed half passes as a spec (e2e/typedWalk.spec.ts); the maintainer's 17 Sept typed walk of ten sentences
     ran clean end to end. Next is the same list spoken, in a fresh session (the maintainer's call, 17 Sept).
 - kind: task

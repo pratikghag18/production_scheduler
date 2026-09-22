@@ -21,6 +21,11 @@ Every other form takes a trailing day word; the headcount form only reads one BE
 3. `e2e/walk/sentences.ts` entry 13 may say the day after the count once the rules read it — change
    it back to the natural order and say so in the report; do NOT run the walk (the maintainer is
    using the app), the developer runs it.
+3b. F-194, same file, same lane: "from 2 until end of the shift today" is `bad_time` to the rules
+   because of the "the"; "until end of shift" reads. Let the end-of-shift phrase take an optional
+   "the" (and "of the" / "of"), wherever the grammar reads it (grep `end of shift`, `isDayEndSpelling`
+   and the `until` regex around line 1743). Pin it beside the existing end-of-shift cases: with "the",
+   without, and "till the end of the shift".
 4. `npx vitest run src/test/commandParse.test.ts src/test/commandPurity.test.ts
    src/test/commandResolve.test.ts`; then `npx prettier --write`, `npx eslint`, `npx tsc -b`.
 
