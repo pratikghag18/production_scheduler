@@ -126,6 +126,15 @@ it into `requirements` in that turn, before the code.
 
 ## 5. Parallel agents
 
+**Every subagent runs on Sonnet, with a detailed brief** (the maintainer, 22 Sept 2026: "always have
+subagents use sonnet with detailed instructions to set it up for success"). Pass `model: sonnet` on
+every Agent call; a lane launched without it inherits the main session's model and is relaunched.
+The brief is a file under `docs/agent-briefs/` that names the standard or finding it serves, what is
+already done and must not be redone, the walk step by step, the exact files the lane owns and the
+ones it must not touch, what other lanes are editing at the same time, which tests to run and how,
+and the shape of the report. The main session briefs, reviews and keeps the plan; it does not write
+the lane's code itself when a lane can.
+
 Up to three lanes have worked cleanly. Pre-seat the shared files first, give each agent
 exclusive named files, and tell each: ignore `tsc` errors in files you do not own; do not run
 the full `npm run test`. A different agent than the author reviews the result with one job —

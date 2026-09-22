@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-21'
-  tip: 'adcf0f7'
+  updated: '2026-09-22'
+  tip: '088c42d'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12256,7 +12256,7 @@ requirements:
   verified_by:
   - kind: e2e
     file: e2e/typedWalk.spec.ts
-    cases: "the ten-sentence typed walk of 17 Sept"
+    cases: "the twenty-two sentences, dated to next Monday in the plant's zone since 22 Sept (F-182, F-190); green twice on 22 Sept before the spoken list was handed over"
   - kind: manual
     steps: "each hand-over names the spec and its two green runs in the session summary"
   status: covered
@@ -12666,8 +12666,11 @@ requirements:
   - kind: vitest
     file: src/test/boardToolbar.test.tsx
     cases: "TB-13: the zoom and day-navigation groups carry the one-track grid class"
+  - kind: vitest
+    file: src/test/buttonGroups.test.tsx
+    cases: "the Operators tab's Edit/Deactivate/Delete and Save/Cancel clusters, the node tree's add-root footer and both pop-over footers, and the inline editor's Save/Cancel carry the class whose rule gives them one width"
   - kind: manual
-    steps: "measured in the browser 18 Sept: the toggle 102px at the same x in both states; the zoom and day-navigation segments one width each (session 179)"
+    steps: "measured in the browser 18 Sept: the toggle 102px at the same x in both states; the zoom and day-navigation segments one width each (session 179); the audit of 22 Sept in docs/agent-briefs/s69-a-button-width-audit-brief.md walks every stylesheet's button groups with a verdict each"
   status: covered
   note: >-
     STATED 18 Sept (session 179) over three messages on the band: "align the week plan buttons vertically ...
@@ -12679,6 +12682,12 @@ requirements:
     editor footer and the template row actions fixed; four data exceptions written (the bar's candidates, the
     shift chips, the delete dialog's sentence, the counted Apply). ANSWERED 18 Sept: "equal width always" --- the
     per-row Edit/Deactivate/Delete clusters in admin tables share one width too; a lane applies it.
+    AUDITED 22 Sept (session 186, docs/agent-briefs/s69-a-button-width-audit-brief.md): every button group in
+    every stylesheet walked with a verdict; six hits fixed in CSS alone --- the inline editor's Save/Cancel, the
+    Operators tab's header cluster, the node tree's two pop-over footers and its add-root form, the matrix
+    picker's All/None pair, the shape picker's Create/Cancel, and the matrix pop-over's three buttons; no new
+    data exception. The matrix picker's pair is fixed but not pinned: it sits inside a native details element
+    jsdom cannot open or close, so it is a browser check, like TB-13's own pixel measurement.
 - id: R-448
   title: The rail shows the people on shift now, with a way to bring in the other shifts; an overtime block carries a coloured OT tag beside the name
   source:
@@ -12738,14 +12747,68 @@ requirements:
     file: src/test/operatorsPanel.test.tsx
     cases: "OS-2 and OS-6: the list row carries no shift control; the shift is changed in the Edit form with the place"
   - kind: manual
-    steps: "the audit this standard owes (queued 18 Sept); each hit fixed or written down"
+    steps: "the audit of 22 Sept in docs/agent-briefs/s69-b-one-place-audit-brief.md: every fact an admin screen or a board pop-up writes, its defining screen, and every other control that writes it, with a decision each"
   status: covered
   note: >-
     STATED 18 Sept (session 179): "why do reinvent stuff? The shift should have been part of where we select
     the hierarchy level, why do we want the user to have multiple places where they must update?" and, on the
     developer's written rule, "#1 Yes". The 9 Sept guidance to fold a capability into an existing control was
     the same rule unstated.
+    AUDITED 22 Sept (session 186, docs/agent-briefs/s69-b-one-place-audit-brief.md): one hit, not folded --- an
+    absence is recorded and removed both on the Absences tab and in the person's own block on the Operators
+    tab, two separately coded forms; R-360 (7 Sept) asked for exactly that pair ("the company-wide view" and
+    "the person-wide one"), so the two standards disagree and the maintainer breaks the tie (queued). The
+    bulk imports write the same facts as the tabs and stay as the many-rows capability the forms cannot offer.
+    Everything else has one writer, or one shared control mounted twice (the skills pop-over, D100).
 findings:
+- id: F-191
+  title: A board showing next week answered "every weekday next week" with "today is not on the board", because a week word was anchored on today's board index
+  tag: A week resolved from where the window sits, not from the plant's calendar
+  status: fixed
+  found_by: agent
+  stage: S58
+  refs:
+  - R-416
+  - R-435
+  - F-158
+  story: >-
+    Found 22 Sept (session 186) by the re-dated typed walk, whose board sits on next week with today off it:
+    the repeat sentence naming next week was answered with a question about today, a day the sentence never
+    said, and the Show-that-day handler anchored the week on the window's first day, so a board already on next
+    week would have read "next week" as the week after. resolveWeekDays derived the week from todayIndex and
+    gave up when it was null; nobody saw it because every walk before ran with today on the board (F-182).
+  fix: >-
+    Session 186: ResolveContext carries todayIso, the plant's calendar today from the same zoned parts the
+    board's own clock is built from, on the board or not; resolveWeekDays anchors the week on it and maps the
+    seven days onto the window by date, asking with the week word when one is missing; the bar's on-board check
+    and the board's Show-that-day handler anchor on it too. RW6 and RW7 in src/test/commandResolve.test.ts pin
+    both halves (a board on next week expands the five; today and next week both off the board ask "next week").
+    The resolver stays pure (commandPurity U1): the Monday is found by arithmetic, a local twin of the format
+    helper, as addDaysToIso already is.
+- id: F-190
+  title: The typed walk wrote every block five hours off, because Plant A's zone was a constant in the spec and a setting nobody seeded
+  tag: A walk premise that lived in the database, not in the seed
+  status: fixed
+  found_by: agent
+  stage: S61
+  refs:
+  - R-426
+  - R-433
+  - F-181
+  story: >-
+    Found 22 Sept (session 186), the first run of the re-dated walk: "Assign John Kim ... from 8am to 12pm
+    2026-09-28" was read right and written right by the bar, and the spec's own database check waited 45
+    seconds for a row at 13:00Z that had landed at 08:00Z. The spec carried America/Chicago as a constant
+    from its brief; the zone is a node setting (0063) the seed never writes, the 21 Sept reset left Plant A
+    with none, and board_window's COALESCE default is UTC. The same shape as F-181: a fact about the world
+    the walk assumed instead of read. Open beside it, for the maintainer: the demo plant's zone is UTC after
+    every reset, while the design has treated it as a Chicago plant since F-159; the seed writes its shift
+    hours as 06:00+00, so a seeded zone would move every seeded block unless the seed's hours moved with it.
+  fix: >-
+    Session 186: the spec reads the plant's zone at setup through app_resolve_node_setting (the same definer
+    the app's fetchNodeSetting and board_window use), falls back to UTC as board_window does, and builds every
+    day and instant from it (initWalkDays in e2e/typedWalk.spec.ts; plantZone in e2e/walk/db.ts); the Chicago
+    constant is gone from e2e/walk/time.ts. The seed question is queued.
 - id: F-189
   title: The line-people spec read two of Plant A's six, because it predates the rail's shift chips
   tag: A walk that assumed the rail it was written against
@@ -12920,7 +12983,7 @@ findings:
 - id: F-182
   title: The typed walk clears Plant A's today at its end, the maintainer's own blocks included
   tag: A spec that runs on the day a person is using
-  status: open
+  status: fixed
   found_by: agent
   stage: S61
   refs:
@@ -12932,6 +12995,14 @@ findings:
     to look for the OT tag. R-433 wants the walk run before every hand-over, which means it runs while the
     maintainer works. Fix: the walk runs on a day of its own (a far date the demo never seeds, re-dated the
     way the list already re-dates), or on its own plant, and never on the day the board opens on.
+  fix: >-
+    Session 186 (22 Sept): the walk day is the Monday of next week on the plant's clock (walkDayInZone in
+    e2e/walk/time.ts); every sentence that named a day now says that date, the shape entry 19 always used
+    ("clear Cell 4 2026-09-28"), the repeat entry says "next week", the board is moved to the walk day before
+    the first sentence, and the cleanup window is the walk day to the walk day + 8, never a day before it.
+    The one day-less sentence (entry 20) still asks "today is not on the board" and the walk declines to move
+    there; the first clear reaches the walk day through its own Show that day. The spoken list keeps "today":
+    the maintainer is the person, on their own day, by choice (docs/walks/voice-walk-2026-09-22.md).
 - id: F-181
   title: The typed walk relied on a training the seed never gave --- Sam Patel held Welding by a lane's hand, and the re-seed took it away
   tag: A walk premise that lived in the database, not in the seed
@@ -17435,6 +17506,45 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 186
+  date: 2026-09-22
+  title: "The typed walk moves to next Monday in the plant's own zone and finds a week-word gap in the bar; the two audits R-447 and R-449 run; the spoken Whisper walk is handed over (F-182, F-190, F-191)"
+  shipped: []
+  commits: ['36bad19', '088c42d']
+  numbers:
+    app_tests: 4181
+    app_test_files: 166
+    tsc: 0
+    eslint: 0
+    db_checks: 891
+    migrations: 84
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    npm run test after the walk commit reads Test Files 166 passed, Tests 4181 passed, copied from the
+    runner; tsc and eslint clean over the changed files; no migration or RPC changed, so db_checks carries
+    session 184's 891. e2e/typedWalk.spec.ts green twice in a row on the running app (2.6 and 2.7 minutes),
+    the first two runs since the re-dating; no other e2e spec touched.
+  summary: >-
+    Merged the tester (session 185t: DEF-0035 verified, nothing open) and asked for a plan; the maintainer:
+    "start now, do the audits in parallel", and, on seeing the lanes' model, "always have subagents use sonnet
+    with detailed instructions to set it up for success. Make this part of claude.md if required" --- written
+    into CLAUDE.md section 5 the same minute, the two lanes stopped and relaunched on Sonnet from their brief
+    files. F-182: the typed walk runs on the Monday of next week, every sentence dated, the board moved there
+    first, the cleanup window never before it; the first run then wrote five hours off because the spec
+    carried Chicago as a constant and the reset had left the plant on UTC (F-190: the zone is read from the
+    server now, and the seed's zone is a queued maintainer question); the second run found the bar answering
+    "every weekday next week" with a question about today when today is off the board (F-191: the resolver
+    context carries the plant's calendar today, the week is anchored on it, RW6/RW7 pin it); the swap entry's
+    model gap comes and goes, so an entry may name a direct readout beside its question; the headcount
+    check polls. Two green runs. The R-447 audit (Sonnet lane, Sonnet reviewer) fixed six button groups in CSS
+    and pinned the admin clusters; the reviewer measured every fix in a browser and raised one floor a longer
+    label overflowed. The R-449 audit found one hit it did not fold --- absences recorded on two screens, which
+    R-360 asked for on 7 Sept --- and hands the tie to the maintainer; imports are the written capability
+    exception. The demo re-anchor item retired: the seed anchors on the current week and the 21 Sept reset did
+    it. The spoken walk is docs/walks/voice-walk-2026-09-22.md; both voice containers up and healthy. Not a
+    standard, a working rule: every subagent on Sonnet with a brief file (CLAUDE.md section 5). Next: the
+    maintainer speaks the list; the Absences pair decision; the seed's zone; the headcount day word.
 - id: 185t
   date: 2026-09-21
   title: "Tester re-verify: DEF-0035 VERIFIED on the second fix --- the Absences form asks the server who it may record for, and the definer answers the same gate set_absence runs"
@@ -25417,10 +25527,6 @@ next:
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
 - kind: task
-  text: "F-182: the typed walk runs on a day of its own, never on the day the board opens on --- before the next walk or hand-over"
-  why: >-
-    Found 18 Sept (session 180): the walk's last sentences clear Plant A's today, the maintainer's blocks included.
-- kind: task
   text: "The board's bare pixels: BOARD_PX_LEGACY in src/test/scaleAudit.ts names sixteen board stylesheets with about two hundred px lengths outside calc(px * --ui-scale); shrink the list a file at a time, whenever a board piece is next touched"
   why: >-
     Debt, not a finding: DEF-0036 (session 182) brought the board under the scale audit and the older files did
@@ -25450,31 +25556,35 @@ next:
     The model and the server shipped 17 Sept (session 178, 68badab) with the decisions R-441 to R-444 all
     in. Each piece is a lane with its own brief; the board piece also owns F-172 to F-174.
 - kind: task
-  text: "Re-anchor the demo week on the maintainer's word, then the three toolbar spec cases and the tester's e2e baseline"
+  text: "The demo plant's zone: the seed leaves Plant A on UTC (board_window's default) while the design treats it as a Chicago plant (F-159, F-190); decide the seeded zone, and if it is not UTC, write the seed's shift hours in it"
   why: >-
-    The demo's runs sit in the week of 7 Sept; the current week has none, so copyWeek, viewerBoard and
-    weekTemplates fail before any toolbar assertion (the tester saw the same drift in session 159). Re-applying
-    dev_demo.sql deletes and recreates the demo rows, so it waits for the maintainer.
+    Found 22 Sept (session 186) when the typed walk wrote five hours off on the reset stack. Today the seed's
+    06:00+00 rows only read as Shift 1 because the plant has no zone. A maintainer decision: which zone the demo
+    plant is in. Whatever it is, the seed sets it and its hours agree with it, so a reset never changes the clock.
 - kind: task
   stage: S68
   text: "The admin rail resizes and remembers (R-446), the side-panel standard's first hit --- lane running 18 Sept"
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
 - kind: task
-  text: "The audit R-447 owes: every button group in the app at one width (dialog footers, the pop-ups' chips, the admin tab rows, the launcher), each fixed or written down as the data exception, with TB-13 as the toolbar's pin"
+  text: "The Absences pair, a maintainer decision: R-360 (7 Sept) keeps a per-person absence form on the Operators tab beside the Absences tab; R-449 (18 Sept) says one fact, one screen. Either the person's block becomes a read-only list with a link to the Absences tab, or R-449 names this pair as its written exception"
   why: >-
-    Stated 18 Sept (session 179). R-426's second duty. The toolbar's four groups are done the same hour; the
-    rest is a grep of every stylesheet for a row or column of buttons.
+    The one hit of the R-449 audit (22 Sept, session 186, docs/agent-briefs/s69-b-one-place-audit-brief.md). The
+    developer did not choose between two of the maintainer's own decisions. The fold would rewrite R-360's own
+    words and pin (src/test/operatorAbsences.test.tsx); the exception is one sentence on R-449.
 - kind: task
-  text: "The audit R-449 owes: every admin screen and pop-up walked for a fact that can be changed in two places, each hit fixed or written down"
+  text: "A day after a headcount's count is not read: \"make the Bracket A job on Cell 3 4 people tomorrow\" is no_time to the rules; the day only reads before the count"
   why: >-
-    Stated 18 Sept (session 179). R-426's second duty. The shift on the Operators tab was the first hit and is fixed.
+    Found 22 Sept (session 186) re-dating the typed walk (F-182): every other form takes a trailing day. Small
+    grammar work in parseHeadcountRest; the walk says the day before the count until then.
 - kind: task
-  text: "The voice half of the walk through Whisper, read from the trace and the thread"
+  text: "The voice half of the walk through Whisper: the maintainer speaks docs/walks/voice-walk-2026-09-22.md, the developer reads the trace and the thread after"
   why: >-
     The maintainer, 18 Sept: "We still have to do testing on the whisper model for voice testing." Same list,
-    spoken, on a re-anchored demo, with the thread on screen; the developer prepares the list and reads the
-    trace after.
+    spoken, with the thread on screen; the list is prepared (session 186, docs/walks/voice-walk-2026-09-22.md),
+    both voice containers were started and answered healthy, and the trace on disk records every turn with
+    by: local, so nothing is written down by hand. What the developer reads after: mishearings the hint caught,
+    mishearings that need a hint word, clips cut at twelve seconds, and anything the bar did wrong once it heard right.
     The typed half passes as a spec (e2e/typedWalk.spec.ts); the maintainer's 17 Sept typed walk of ten sentences
     ran clean end to end. Next is the same list spoken, in a fresh session (the maintainer's call, 17 Sept).
 - kind: task
