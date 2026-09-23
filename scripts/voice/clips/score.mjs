@@ -26,6 +26,15 @@
 // what it writes NOW. There is no ground truth for a live sentence, so
 // "then vs now" is the only comparison this mode makes; the maintainer
 // reads the words.
+//
+// S71-h (brief docs/agent-briefs/s71-h-replay-uses-the-apps-hint-brief.md
+// §1, R-453): a fair replay uses the SAME prompt the app actually sent --
+// each manifest line's own `hint` (`clipServer.ts`, from `postClip`'s
+// `x-clip-hint` header) -- so `--from-trace` needs neither `--prompt-file`
+// nor `--no-prompt`; when given, either overrides the manifest's hint for
+// EVERY clip in the run instead (so the same clips can be re-scored against
+// a different prompt). The recorded-set mode below still requires one of
+// the two, since it has no per-clip hint of its own to fall back on.
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { wordErrorRate, nameHits, isExact } from "./lib/score.mjs";
@@ -65,11 +74,14 @@ function parseArgs(argv) {
     } else throw new Error(`score.mjs: unknown argument "${a}"`);
   }
   if (!out.whisper) throw new Error("score.mjs: --whisper <url> is required");
-  if (!out.noPrompt && !out.promptFile) {
-    throw new Error("score.mjs: pass --prompt-file <path> or --no-prompt, not neither");
-  }
   if (out.noPrompt && out.promptFile) {
     throw new Error("score.mjs: --no-prompt and --prompt-file are exclusive");
+  }
+  // S71-h: `--from-trace` has a default prompt of its own (each clip's own
+  // manifest `hint`) -- neither flag is required there. The recorded-set
+  // mode below has no such fallback, so it still requires one of the two.
+  if (out.fromTrace === null && !out.noPrompt && !out.promptFile) {
+    throw new Error("score.mjs: pass --prompt-file <path> or --no-prompt, not neither");
   }
   return out;
 }
@@ -128,25 +140,71 @@ function readBarHeard(barPath) {
   return heardByAt;
 }
 
+/** S71-h (brief §1): the container's model name from `GET /health`, printed
+ *  as a one-line header in `--from-trace` mode -- the brief's own note: the
+ *  whisper.cpp server's `/health` does not actually report a model name, so
+ *  in practice this always prints the "not reported" line; it is still a
+ *  real fetch (not hard-coded) so a future server that does add one is
+ *  picked up with no change here. Never fatal: a fetch failure prints its
+ *  own one-line explanation instead of stopping the run. */
+async function printModelHeader(whisperUrl) {
+  try {
+    const res = await fetch(`${whisperUrl}/health`);
+    if (!res.ok) {
+      console.log(`model: (unavailable -- /health -> ${res.status} ${res.statusText})`);
+      return;
+    }
+    const payload = await res.json().catch(() => null);
+    const model =
+      payload && typeof payload === "object"
+        ? (payload.model ?? payload.model_path ?? payload.whisper_model)
+        : undefined;
+    console.log(
+      typeof model === "string" && model !== ""
+        ? `model: ${model}`
+        : `model: (not reported by /health)`,
+    );
+  } catch (err) {
+    console.log(`model: (unavailable -- ${err instanceof Error ? err.message : String(err)})`);
+  }
+}
+
 /** S71-f (brief §1.D): scores the newest `args.fromTrace` clips the bar
  *  itself posted to `/__clip` against a running whisper.cpp server, printing
  *  what it wrote THEN (the matching `bar.jsonl` entry's `heard`, joined on
- *  `at`) beside what it writes NOW, and their WER against each other. */
-async function runFromTrace(args, promptText) {
+ *  `at`) beside what it writes NOW, and their WER against each other.
+ *
+ *  S71-h (brief §1): `override` is `null` when neither `--prompt-file` nor
+ *  `--no-prompt` was given -- each clip is then scored against ITS OWN
+ *  manifest `hint` (the exact string the app sent Whisper live), printed as
+ *  `prompt=hint` or `prompt=none` per row (S71-h review: `prompt=dropped`
+ *  when `clipServer.ts` had to drop an over-cap or undecodable hint header
+ *  rather than lose the clip over it -- scored with no prompt, same as
+ *  `none`, but printed differently so the row says why). A non-null
+ *  `override` (from either flag) is used for every clip instead, printed as
+ *  `prompt=override`, so the same clips can be re-scored against a
+ *  different prompt. */
+async function runFromTrace(args, override) {
   const clipsDir = resolve(TRACE_CLIPS_DIR);
   const manifestPath = join(clipsDir, "manifest.jsonl");
+  // Reviewer fix: no clips yet is the ordinary state of a fresh checkout or
+  // a dev server nobody has talked to yet, not an error -- it used to throw
+  // and exit 1, which read like something was broken. One line, exit 0.
   if (!existsSync(manifestPath)) {
-    throw new Error(
-      `score.mjs: no manifest at ${manifestPath} -- say a sentence to the board first ` +
-        `(the dev server must be running)`,
+    console.log(
+      `no clips yet -- say a sentence to the board first (the dev server must be running), then re-run this command`,
     );
+    return;
   }
   const entries = readFileSync(manifestPath, "utf8")
     .split("\n")
     .filter((line) => line.trim() !== "")
     .map((line) => JSON.parse(line));
   if (entries.length === 0) {
-    throw new Error(`score.mjs: ${manifestPath} lists no clips`);
+    console.log(
+      `no clips yet -- say a sentence to the board first (the dev server must be running), then re-run this command`,
+    );
+    return;
   }
   // The manifest is append-only, so the newest clips are the LAST lines;
   // reversed so the most recently said sentence prints first.
@@ -163,6 +221,16 @@ async function runFromTrace(args, promptText) {
       console.log(`${clip.at}  MISSING  ${wavPath}`);
       continue;
     }
+    // S71-h: `clip.hint` is `undefined` on a manifest line written before
+    // this change (no `hint` field at all) and `null` on one written after
+    // it for a recogniser that had no hint to send -- both mean "no prompt".
+    // S71-h review: `clip.hintDropped` (true only when the header was too
+    // long or failed to decode -- `clipServer.ts`'s "never cost the clip"
+    // rule) is a THIRD, distinct reason for no prompt, worth its own label
+    // so the row does not read like the app simply had nothing to say.
+    const promptText = override !== null ? override.text : (clip.hint ?? "");
+    const promptLabel =
+      override !== null ? "override" : clip.hintDropped ? "dropped" : clip.hint ? "hint" : "none";
     const { text: now } = await scoreOne(args.whisper, wavPath, promptText);
     const wer = wordErrorRate(then, now);
     rows.push({
@@ -170,12 +238,13 @@ async function runFromTrace(args, promptText) {
       durationMs: clip.durationMs,
       endedBy: clip.endedBy,
       peakRms: clip.peakRms,
+      prompt: promptLabel,
       then,
       now,
       wer,
     });
     console.log(
-      `${clip.at}  ${Math.round(clip.durationMs)}ms  ${clip.endedBy}  peak=${clip.peakRms.toFixed(3)}  wer=${wer.toFixed(3)}`,
+      `${clip.at}  ${Math.round(clip.durationMs)}ms  ${clip.endedBy}  peak=${clip.peakRms.toFixed(3)}  wer=${wer.toFixed(3)}  prompt=${promptLabel}`,
     );
     console.log(`    then: "${then}"`);
     console.log(`    now:  "${now}"`);
@@ -190,10 +259,25 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.fromTrace !== null) {
-    const promptText = args.noPrompt ? "" : readFileSync(resolve(args.promptFile), "utf8").trim();
+    // S71-h: an override is present only when the caller gave one of the
+    // two flags; otherwise `null` tells `runFromTrace` to use each clip's
+    // own manifest hint.
+    const override = args.noPrompt
+      ? { text: "", label: "(none)" }
+      : args.promptFile
+        ? {
+            text: readFileSync(resolve(args.promptFile), "utf8").trim(),
+            label: resolve(args.promptFile),
+          }
+        : null;
     console.log(`whisper: ${args.whisper}`);
-    console.log(`prompt: ${args.noPrompt ? "(none)" : resolve(args.promptFile)}`);
-    await runFromTrace(args, promptText);
+    await printModelHeader(args.whisper);
+    console.log(
+      override
+        ? `prompt: ${override.label} (overrides every clip's own hint)`
+        : `prompt: each clip's own hint from the manifest (the app's own prompt, replayed)`,
+    );
+    await runFromTrace(args, override);
     return;
   }
 

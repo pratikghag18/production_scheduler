@@ -1119,7 +1119,7 @@ export function CommandBar({
       meanRms: info.meanRms,
       framesAboveFloor: info.framesAboveFloor,
     };
-    postClip(traceRef.current.at, info.wav, traceRef.current.clip);
+    postClip(traceRef.current.at, info.wav, traceRef.current.clip, info.hint);
   }
 
   /**

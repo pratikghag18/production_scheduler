@@ -147,7 +147,7 @@ describe("trace: postClip (S71-f, R-453, R-434)", () => {
     vi.stubGlobal("fetch", fetchMock);
     const wav = new ArrayBuffer(48);
 
-    postClip("2026-09-23T00:00:00.000Z", wav, clip);
+    postClip("2026-09-23T00:00:00.000Z", wav, clip, null);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -169,13 +169,17 @@ describe("trace: postClip (S71-f, R-453, R-434)", () => {
         throw new Error("boom");
       }),
     );
-    expect(() => postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip)).not.toThrow();
+    expect(() =>
+      postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip, null),
+    ).not.toThrow();
   });
 
   it("PC-3: a rejected fetch promise is swallowed, never an unhandled rejection", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
     vi.stubGlobal("fetch", fetchMock);
-    expect(() => postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip)).not.toThrow();
+    expect(() =>
+      postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip, null),
+    ).not.toThrow();
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -184,7 +188,38 @@ describe("trace: postClip (S71-f, R-453, R-434)", () => {
     vi.stubEnv("DEV", false);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip);
+    postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip, "assign, cell, sam patel");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // S71-h (R-453, brief docs/agent-briefs/s71-h-replay-uses-the-apps-hint-
+  // brief.md §2): the hint travels as a header, URL-encoded (headers are
+  // Latin-1 -- the hint is free text with names, commas and punctuation),
+  // and is omitted entirely when there was none to send.
+  it("PC-5: sends the hint header, URL-encoded, and omits it when null", () => {
+    const fetchMock = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", fetchMock);
+
+    postClip(
+      "2026-09-23T00:00:00.000Z",
+      new ArrayBuffer(4),
+      clip,
+      "assign, cell, put on, Sam Patel, café",
+    );
+    const [, initWithHint] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headersWithHint = initWithHint.headers as Record<string, string>;
+    expect(headersWithHint["x-clip-hint"]).toBe(
+      encodeURIComponent("assign, cell, put on, Sam Patel, café"),
+    );
+    expect(decodeURIComponent(headersWithHint["x-clip-hint"])).toBe(
+      "assign, cell, put on, Sam Patel, café",
+    );
+    expect(headersWithHint["Content-Type"]).toBe("audio/wav");
+
+    fetchMock.mockClear();
+    postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip, null);
+    const [, initNoHint] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headersNoHint = initNoHint.headers as Record<string, string>;
+    expect("x-clip-hint" in headersNoHint).toBe(false);
   });
 });

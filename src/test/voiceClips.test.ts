@@ -101,11 +101,13 @@ function fakeClipReqRes(
   method: string,
   url: string,
   body: Buffer,
+  headers: Record<string, string> = {},
 ): { req: ClipRequestLike; res: ClipResponseLike & { ended: boolean } } {
   const listeners: Record<string, ((...args: unknown[]) => void)[]> = { data: [], end: [] };
   const reqImpl = {
     method,
     url,
+    headers,
     on(event: "data" | "end", listener: (...args: unknown[]) => void) {
       listeners[event].push(listener);
       if (event === "end") {
@@ -178,6 +180,7 @@ describe("clipServer: handleClipRequest (S71-f, R-453, R-434)", () => {
       meanRms: 0.09,
       framesAboveFloor: 4,
       heard: null,
+      hint: null,
     });
   });
 
@@ -290,6 +293,109 @@ describe("clipServer: handleClipRequest (S71-f, R-453, R-434)", () => {
     await handleClipRequest(req, res, blockedDir, blockedManifest);
     expect(res.statusCode).toBe(500);
   });
+
+  // S71-h (R-453, brief docs/agent-briefs/s71-h-replay-uses-the-apps-hint-
+  // brief.md §2): the hint travels as the `x-clip-hint` header, URL-encoded
+  // (`postClip`'s own doing) -- decoded back and written into the manifest
+  // line, or `null` when the header was never sent at all.
+  it("CS-9: a POST with the x-clip-hint header writes the decoded hint in the manifest", async () => {
+    const wav = Buffer.from([1, 2, 3, 4]);
+    const encoded = encodeURIComponent("assign, cell, put on, Sam Patel, café");
+    const { req, res } = fakeClipReqRes("POST", clipUrl("2026-09-23T00:00:00.000Z"), wav, {
+      "x-clip-hint": encoded,
+    });
+    await handleClipRequest(req, res, clipsDir, manifestPath);
+    expect(res.statusCode).toBe(204);
+
+    const lines = fs
+      .readFileSync(manifestPath, "utf8")
+      .split("\n")
+      .filter((l) => l !== "");
+    const entry = JSON.parse(lines[0]);
+    expect(entry.hint).toBe("assign, cell, put on, Sam Patel, café");
+  });
+
+  it("CS-9b: a POST with no x-clip-hint header writes hint: null", async () => {
+    const wav = Buffer.from([1, 2, 3, 4]);
+    const { req, res } = fakeClipReqRes("POST", clipUrl("2026-09-23T00:00:01.000Z"), wav);
+    await handleClipRequest(req, res, clipsDir, manifestPath);
+    expect(res.statusCode).toBe(204);
+
+    const lines = fs
+      .readFileSync(manifestPath, "utf8")
+      .split("\n")
+      .filter((l) => l !== "");
+    const entry = JSON.parse(lines[lines.length - 1]);
+    expect(entry.hint).toBeNull();
+  });
+
+  // S71-h review: "the hint must never cost the clip" -- a bad hint header
+  // no longer 400s the whole request; the clip is written exactly as normal
+  // and the manifest line says the hint was dropped instead.
+  it("CS-10: an over-long x-clip-hint header (over 16 KB) writes the clip normally, hint null, hintDropped true", async () => {
+    const wav = Buffer.from([1, 2, 3, 4]);
+    const overLong = "a".repeat(16385);
+    const { req, res } = fakeClipReqRes("POST", clipUrl("2026-09-23T00:00:02.000Z"), wav, {
+      "x-clip-hint": overLong,
+    });
+    await handleClipRequest(req, res, clipsDir, manifestPath);
+    expect(res.statusCode).toBe(204);
+
+    const written = fs.readFileSync(path.join(clipsDir, "2026-09-23T00-00-02.000Z.wav"));
+    expect(Buffer.compare(written, wav)).toBe(0);
+    const lines = fs
+      .readFileSync(manifestPath, "utf8")
+      .split("\n")
+      .filter((l) => l !== "");
+    const entry = JSON.parse(lines[lines.length - 1]);
+    expect(entry.hint).toBeNull();
+    expect(entry.hintDropped).toBe(true);
+  });
+
+  it("CS-10b: a malformed percent-encoded x-clip-hint header writes the clip normally, hint null, hintDropped true", async () => {
+    const wav = Buffer.from([1, 2, 3, 4]);
+    const { req, res } = fakeClipReqRes("POST", clipUrl("2026-09-23T00:00:03.000Z"), wav, {
+      "x-clip-hint": "%E0%A4%A",
+    });
+    await handleClipRequest(req, res, clipsDir, manifestPath);
+    expect(res.statusCode).toBe(204);
+
+    const written = fs.readFileSync(path.join(clipsDir, "2026-09-23T00-00-03.000Z.wav"));
+    expect(Buffer.compare(written, wav)).toBe(0);
+    const lines = fs
+      .readFileSync(manifestPath, "utf8")
+      .split("\n")
+      .filter((l) => l !== "");
+    const entry = JSON.parse(lines[lines.length - 1]);
+    expect(entry.hint).toBeNull();
+    expect(entry.hintDropped).toBe(true);
+  });
+
+  it("CS-11: a 200-word space-free hint (single-token entries, well under the 16 KB cap) round-trips intact", async () => {
+    const words = Array.from(
+      { length: 200 },
+      (_, i) => `CODE-${String(i).padStart(3, "0")}-STATION`,
+    );
+    const hint = words.join(" ");
+    expect(hint.split(/\s+/).filter(Boolean)).toHaveLength(200);
+    const encoded = encodeURIComponent(hint);
+    expect(encoded.length).toBeLessThanOrEqual(16384);
+
+    const wav = Buffer.from([1, 2, 3, 4]);
+    const { req, res } = fakeClipReqRes("POST", clipUrl("2026-09-23T00:00:04.000Z"), wav, {
+      "x-clip-hint": encoded,
+    });
+    await handleClipRequest(req, res, clipsDir, manifestPath);
+    expect(res.statusCode).toBe(204);
+
+    const lines = fs
+      .readFileSync(manifestPath, "utf8")
+      .split("\n")
+      .filter((l) => l !== "");
+    const entry = JSON.parse(lines[lines.length - 1]);
+    expect(entry.hint).toBe(hint);
+    expect(entry.hintDropped).toBeUndefined();
+  });
 });
 
 describe("S71-f review", () => {
@@ -310,5 +416,64 @@ describe("S71-f review", () => {
       const files = fs.readdirSync(clipsDir).filter((f) => f.endsWith(".wav"));
       expect(files).toContain("not-a-date.wav");
     }
+  });
+});
+
+describe("S71-h review", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "clip-server-s71h-review-"));
+  const clipsDir = path.join(tmpDir, "clips");
+  const manifestPath = path.join(clipsDir, "manifest.jsonl");
+
+  afterEach(() => {
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.mkdirSync(tmpDir, { recursive: true });
+  });
+
+  // review-1: `buildRecognizerHint`'s own 200-word cap (recognizerHint.ts
+  // `capAtWords`) counts whitespace-separated TOKENS, not characters -- a
+  // single board entry with no internal space (a cell/part/station code,
+  // common in manufacturing: "LINE-3-CELL-07-STATION") counts as ONE word
+  // no matter how long it is. A plant with ~150 such codes around 20-25
+  // characters each -- entirely ordinary, not adversarial -- produces a
+  // legitimate 200-word hint whose URL-encoded form exceeds the OLD
+  // 4096-char header cap, so `handleClipRequest` used to 400 a real clip
+  // from a real board over it. This reproduces the break through the real
+  // production hint builder and the real server handler, not a synthetic
+  // string -- kept as the regression pin, expectation flipped to the fix:
+  // the raised 16384-char cap comfortably covers this realistic worst case
+  // (encoded well under 16384, still over the old 4096), so it now round-
+  // trips intact, hint present, nothing dropped, and -- per "the hint must
+  // never cost the clip" -- even a hint that DID exceed the new cap would
+  // still answer 204 with the clip written (CS-10 covers that shape).
+  it("review-1: a realistic 200-word hint (single-token 20-25 char plant codes) round-trips intact under the raised 16384 cap", async () => {
+    const { buildRecognizerHint } = await import("@/lib/voice/recognizerHint");
+    const cells = Array.from(
+      { length: 200 },
+      (_, i) => `LINE-${(i % 9) + 1}-CELL-${String(i).padStart(2, "0")}-STATION`,
+    );
+    const hint = buildRecognizerHint({ cells, places: [], parts: [], people: [] });
+    const wordCount = hint.split(/\s+/).filter(Boolean).length;
+    expect(wordCount).toBeLessThanOrEqual(200); // the app's own documented cap held
+
+    const encoded = encodeURIComponent(hint);
+    // Still the realistic worst case the review found: past the OLD 4096
+    // cap, comfortably under the NEW 16384 one.
+    expect(encoded.length).toBeGreaterThan(4096);
+    expect(encoded.length).toBeLessThanOrEqual(16384);
+
+    const wav = Buffer.from([9]);
+    const { req, res } = fakeClipReqRes("POST", clipUrl("2026-09-23T00:00:09.000Z"), wav, {
+      "x-clip-hint": encoded,
+    });
+    await handleClipRequest(req, res, clipsDir, manifestPath);
+    // The clip is written, and the app's own real hint survives intact.
+    expect(res.statusCode).toBe(204);
+    const lines = fs
+      .readFileSync(manifestPath, "utf8")
+      .split("\n")
+      .filter((l) => l !== "");
+    const entry = JSON.parse(lines[lines.length - 1]);
+    expect(entry.hint).toBe(hint);
+    expect(entry.hintDropped).toBeUndefined();
   });
 });

@@ -19,7 +19,7 @@ The matrix, one whisper restart per row: `base.en`/greedy/words-53 (today),
 `recognizerHint.ts` vocabulary plus Plant A's names; `words-34.txt` is the
 vocabulary from before F-195; `sentences.txt` is example sentences, no name list.
 
-## Re-scoring a live walk (S71-f, R-453)
+## Re-scoring a live walk (S71-f, S71-h, R-453)
 
 Every clip the bar actually posts to Whisper is kept on its own, separately
 from the deliberately-recorded set above (`localRecognizer.ts`'s `onClip`,
@@ -31,8 +31,15 @@ running -- read the words yourself, not just the WER.
 
 Say sentences to the board, then:
 
-    npm run voice:clips:score -- --whisper http://127.0.0.1:8090 \
-      --prompt-file scripts/voice/clips/prompts/words-53.txt --from-trace 5
+    npm run voice:clips:score -- --whisper http://127.0.0.1:8090 --from-trace 5
 
-`--from-trace` alone scores the newest 20; `--from-trace N` scores the
-newest N. `--no-prompt` works here too, same as the recorded-set mode above.
+No prompt flag needed: a replay is fair only when it uses the SAME prompt the
+app actually sent, so each clip is scored against its own manifest `hint`
+(the vocabulary `buildRecognizerHint` built for it, kept from the live
+request) by default -- the row prints `prompt=hint` (or `prompt=none` when
+the app sent none). `--from-trace` alone scores the newest 20; `--from-trace
+N` scores the newest N. Pass `--prompt-file <path>` or `--no-prompt` to
+override every clip's own hint with the SAME prompt for the whole run instead
+(printed as `prompt=override`) -- useful for asking "how would a different
+prompt have done against what actually got said," not for the ordinary
+replay.

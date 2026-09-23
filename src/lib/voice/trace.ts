@@ -120,11 +120,22 @@ export function renderLine(entry: TraceEntry): string {
  *  holds, so `score.mjs --from-trace` can join a clip to what the bar heard
  *  for it. Fire-and-forget, errors swallowed, a no-op outside dev -- the
  *  same three rules `commandConversation.ts`'s own `postTrace` follows for
- *  `/__trace` (R-421: "a build without it changes nothing in the bar"). */
+ *  `/__trace` (R-421: "a build without it changes nothing in the bar").
+ *
+ *  S71-h (R-453, brief docs/agent-briefs/s71-h-replay-uses-the-apps-hint-
+ *  brief.md §1): `hint` is the exact prompt the recogniser sent Whisper for
+ *  this clip (`ClipInfo.hint`), carried as the `x-clip-hint` header,
+ *  URL-encoded (headers are Latin-1; the hint is free text with names and
+ *  punctuation). `null` omits the header entirely -- `clipServer.ts` then
+ *  writes `hint: null` into the manifest line, exactly as an absent value
+ *  reads today. A multipart body was the other option; a header keeps
+ *  `clipServer.ts` dependency-free (no multipart parser in the repo) while
+ *  the WAV stays the raw POST body, unchanged. */
 export function postClip(
   at: string,
   wav: ArrayBuffer,
   clip: NonNullable<TraceEntry["clip"]>,
+  hint: string | null,
 ): void {
   if (!import.meta.env.DEV) return;
   const params = new URLSearchParams({
@@ -137,10 +148,12 @@ export function postClip(
     meanRms: String(clip.meanRms),
     framesAboveFloor: String(clip.framesAboveFloor),
   });
+  const headers: Record<string, string> = { "Content-Type": "audio/wav" };
+  if (hint !== null) headers["x-clip-hint"] = encodeURIComponent(hint);
   try {
     fetch(`/__clip?${params.toString()}`, {
       method: "POST",
-      headers: { "Content-Type": "audio/wav" },
+      headers,
       body: wav,
     }).catch(() => {});
   } catch {

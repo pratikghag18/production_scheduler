@@ -40,6 +40,11 @@ export const MAX_CLIPS = 500;
 export interface ClipRequestLike {
   method?: string;
   url?: string;
+  /** S71-h (R-453): Node's own `http.IncomingMessage` lower-cases header
+   *  names and may hand back an array for a repeated header -- both read
+   *  the same way a test's fake does. Optional so nothing before this
+   *  change (a fake request with no `headers` at all) stops compiling. */
+  headers?: Record<string, string | string[] | undefined>;
   on(event: "data", listener: (chunk: Buffer) => void): void;
   on(event: "end", listener: () => void): void;
 }
@@ -66,6 +71,22 @@ export interface ClipManifestEntry {
   meanRms: number;
   framesAboveFloor: number;
   heard: null;
+  /** S71-h (R-453): the prompt the recogniser sent Whisper for this clip
+   *  (`postClip`'s own `hint` argument, decoded from the `x-clip-hint`
+   *  header), or `null` when none was sent (a typed sentence never reaches
+   *  here at all; this is `null` only when the recogniser itself had no
+   *  hint to send) OR when it was dropped -- see `hintDropped`.
+   *  `score.mjs --from-trace` reads it back as the default prompt for a
+   *  fair replay. */
+  hint: string | null;
+  /** S71-h review (R-453): "the hint must never cost the clip" -- an
+   *  over-cap or undecodable `x-clip-hint` header no longer 400s the whole
+   *  request (which would also refuse the WAV bytes that arrived fine); the
+   *  clip is written exactly as normal, only the hint is lost, and this
+   *  says so. `true` only on such a line; omitted (never an explicit
+   *  `false`) on every ordinary one, the same convention `TraceEntry.clip`
+   *  already follows for "nothing to say here". */
+  hintDropped?: true;
 }
 
 function readBody(req: ClipRequestLike): Promise<Buffer> {
@@ -107,6 +128,26 @@ function num(params: URLSearchParams, key: string): number {
 }
 
 /**
+ * S71-h review (R-453): the app's own cap on the hint is 200 WORDS
+ * (`recognizerHint.ts`'s `MAX_WORDS`), not characters -- a plant whose cell
+ * codes have no internal space (`LINE-3-CELL-07-STATION`, entirely ordinary
+ * manufacturing naming) counts each code as ONE word no matter how long, so
+ * 200 of them can legitimately encode past several KB with nothing
+ * adversarial about it (`review-1` below, reproduced through the real
+ * `buildRecognizerHint`). 4096 chars 400'd a real clip from a real board.
+ * 16384 is headroom over that realistic worst case; a header past even this
+ * is the pathological case the rule below drops rather than refuses. */
+const MAX_HINT_HEADER_CHARS = 16384;
+
+/** Reads a single-valued header off `req.headers`, lower-cased name, the
+ *  first entry when Node handed back an array (a header this handler never
+ *  sends twice, but the type allows it). `undefined` when absent. */
+function getHeader(req: ClipRequestLike, name: string): string | undefined {
+  const raw = req.headers?.[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
+/**
  * POST writes `data/voice/trace/clips/<at-with-colons-replaced>.wav` (the
  * raw request body -- `postClip`'s own `wav` bytes, untouched) and appends
  * one manifest line, then evicts the oldest clip(s) beyond `MAX_CLIPS`.
@@ -117,6 +158,12 @@ function num(params: URLSearchParams, key: string): number {
  * runs only after a successful write and touches clips already safely on
  * disk, stays best-effort and never fails the request that triggered it,
  * the same courtesy `traceServer.ts`'s own handler gives its own write.
+ *
+ * S71-h review (R-453): an `x-clip-hint` header past `MAX_HINT_HEADER_CHARS`
+ * or one that fails to decode does NOT join `at` in refusing the request --
+ * the hint is never worth losing the clip over. It is dropped instead
+ * (`hint: null`, `hintDropped: true`) and the write proceeds exactly as if
+ * no hint had ever been sent.
  */
 export async function handleClipRequest(
   req: ClipRequestLike,
@@ -136,6 +183,25 @@ export async function handleClipRequest(
     res.end();
     return;
   }
+  // S71-h review (R-453): the hint travels as a header (the body is the raw
+  // WAV), URL-encoded since headers are Latin-1. Unlike `at`, a bad hint
+  // header never refuses the request -- the clip and its trace are worth
+  // keeping even when the hint is not; it is simply dropped (`hintDropped`)
+  // and the clip is written exactly as if no hint had been sent at all.
+  const hintHeader = getHeader(req, "x-clip-hint");
+  let hint: string | null = null;
+  let hintDropped = false;
+  if (hintHeader !== undefined) {
+    if (hintHeader.length > MAX_HINT_HEADER_CHARS) {
+      hintDropped = true;
+    } else {
+      try {
+        hint = decodeURIComponent(hintHeader);
+      } catch {
+        hintDropped = true;
+      }
+    }
+  }
   try {
     const body = await readBody(req);
     await mkdir(dir, { recursive: true });
@@ -153,6 +219,8 @@ export async function handleClipRequest(
       meanRms: num(params, "meanRms"),
       framesAboveFloor: num(params, "framesAboveFloor"),
       heard: null,
+      hint,
+      ...(hintDropped ? { hintDropped: true as const } : {}),
     };
     await mkdir(dirname(manifestPath), { recursive: true });
     await appendFile(manifestPath, `${JSON.stringify(entry)}\n`, "utf8");
