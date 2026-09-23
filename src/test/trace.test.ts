@@ -222,4 +222,22 @@ describe("trace: postClip (S71-f, R-453, R-434)", () => {
     const headersNoHint = initNoHint.headers as Record<string, string>;
     expect("x-clip-hint" in headersNoHint).toBe(false);
   });
+
+  // S71-k (F-209, R-453): `clipServer.ts` now names the FILE from `postedAt`
+  // -- this call's own instant -- never from `at`, so an answer's clip
+  // (posted under the same entry `at` as the sentence that asked its
+  // question) can no longer overwrite the sentence's own clip on disk.
+  it("PC-6: sends postedAt as this POST's own ISO instant, alongside (not instead of) at", () => {
+    const fetchMock = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", fetchMock);
+
+    postClip("2026-09-23T20:41:41.045Z", new ArrayBuffer(4), clip, null);
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const parsed = new URL(url, "http://localhost");
+    expect(parsed.searchParams.get("at")).toBe("2026-09-23T20:41:41.045Z");
+    expect(parsed.searchParams.get("postedAt")).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+    );
+  });
 });

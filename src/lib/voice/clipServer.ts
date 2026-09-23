@@ -18,6 +18,7 @@
  * client bundle.
  */
 import { mkdir, appendFile, readFile, writeFile, unlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Buffer } from "node:buffer";
 
@@ -62,6 +63,14 @@ export interface ClipResponseLike {
  *  itself, joined on `at` (brief §1.D), never from here. */
 export interface ClipManifestEntry {
   at: string;
+  /** S71-k (F-209, R-453): the POST's own instant (`postClip`'s own
+   *  `Date.now()` at post time, ISO) -- `file` is named from THIS, not from
+   *  `at`, so an answer's clip (which shares its entry's `at` with the
+   *  sentence that asked the question) never overwrites the sentence's own
+   *  clip on disk. `at` still joins this line back to the entry in
+   *  `bar.jsonl`; `postedAt` only ever tells two clips of the same entry
+   *  apart. */
+  postedAt: string;
   file: string;
   durationMs: number;
   recordedMs: number;
@@ -110,6 +119,12 @@ function readBody(req: ClipRequestLike): Promise<Buffer> {
  * `safeStem` or `join` in the first place. A request whose `at` does not
  * match this exactly (missing, malformed, oversized, or a traversal
  * attempt) is refused with 400 before any write is attempted.
+ *
+ * S71-k (F-209, R-453): `postedAt` (`postClip`'s own `Date.now()` at POST
+ * time, the same `new Date().toISOString()` shape) is checked against this
+ * exact same regexp before it becomes the FILE name (`safeStem(postedAt)`)
+ * -- the traversal risk and the fix are identical to `at`'s; a request whose
+ * `postedAt` does not match is refused with 400, same as a bad `at`.
  */
 const ISO_AT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -119,6 +134,25 @@ const ISO_AT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
  *  called, so no other character survives to be a concern. */
 function safeStem(at: string): string {
   return at.replace(/:/g, "-");
+}
+
+/** Reviewer finding (S71-k): two POSTs can carry the SAME `postedAt` (a fast
+ *  answer landing in the same millisecond as its sentence's own clip, or two
+ *  truly concurrent posts) -- `postedAt` alone moved the collision from
+ *  `at`, it did not remove it. If `<stem>.wav` already exists, this tries
+ *  `<stem>-2.wav`, `<stem>-3.wav`, ... until it finds a name nothing has
+ *  claimed, so a same-millisecond collision gets a second file instead of
+ *  overwriting the first. The check and the write below it run with no
+ *  `await` between them, so two requests already inside this function
+ *  cannot both observe the same candidate as free. */
+function uniqueFileName(dir: string, stem: string): string {
+  let candidate = `${stem}.wav`;
+  let n = 2;
+  while (existsSync(join(dir, candidate))) {
+    candidate = `${stem}-${n}.wav`;
+    n++;
+  }
+  return candidate;
 }
 
 function num(params: URLSearchParams, key: string): number {
@@ -148,11 +182,17 @@ function getHeader(req: ClipRequestLike, name: string): string | undefined {
 }
 
 /**
- * POST writes `data/voice/trace/clips/<at-with-colons-replaced>.wav` (the
- * raw request body -- `postClip`'s own `wav` bytes, untouched) and appends
- * one manifest line, then evicts the oldest clip(s) beyond `MAX_CLIPS`.
- * Anything but POST answers 405; a request with no `at`, or an `at` that
- * does not match `ISO_AT_RE`, answers 400 -- both write nothing. Review fix:
+ * POST writes `data/voice/trace/clips/<postedAt-with-colons-replaced>.wav`
+ * (the raw request body -- `postClip`'s own `wav` bytes, untouched) and
+ * appends one manifest line, then evicts the oldest clip(s) beyond
+ * `MAX_CLIPS`. S71-k (F-209): the file is named from `postedAt` -- THIS
+ * POST's own instant -- not from `at`, so an answer's clip (posted under the
+ * same entry `at` as the sentence that asked its question) never overwrites
+ * the sentence's own clip; `at` is still kept as its own manifest field, so
+ * `score.mjs --from-trace` can still join every clip of one entry back to
+ * what the bar heard for it. Anything but POST answers 405; a request with
+ * no `at`/`postedAt`, or either one not matching `ISO_AT_RE`, answers 400 --
+ * both write nothing. Review fix:
  * a genuine failure writing the clip or the manifest line now answers 500
  * (never a false 204 for a write that did not happen) -- eviction, which
  * runs only after a successful write and touches clips already safely on
@@ -178,7 +218,8 @@ export async function handleClipRequest(
   }
   const params = new URL(req.url ?? "", "http://localhost").searchParams;
   const at = params.get("at");
-  if (!at || !ISO_AT_RE.test(at)) {
+  const postedAt = params.get("postedAt");
+  if (!at || !ISO_AT_RE.test(at) || !postedAt || !ISO_AT_RE.test(postedAt)) {
     res.statusCode = 400;
     res.end();
     return;
@@ -205,11 +246,18 @@ export async function handleClipRequest(
   try {
     const body = await readBody(req);
     await mkdir(dir, { recursive: true });
-    const file = `${safeStem(at)}.wav`;
+    // S71-k (F-209): named from `postedAt` -- THIS POST's own instant --
+    // not from `at`, so two clips sharing one entry's `at` (a sentence and
+    // the answer that continued it) never collide on the same file.
+    // Reviewer finding: `postedAt` itself can still collide (same
+    // millisecond) -- `uniqueFileName` disambiguates with a `-2`, `-3`, ...
+    // suffix rather than overwrite.
+    const file = uniqueFileName(dir, safeStem(postedAt));
     await writeFile(join(dir, file), body);
 
     const entry: ClipManifestEntry = {
       at,
+      postedAt,
       file,
       durationMs: num(params, "durationMs"),
       recordedMs: num(params, "recordedMs"),

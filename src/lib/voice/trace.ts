@@ -130,7 +130,19 @@ export function renderLine(entry: TraceEntry): string {
  *  writes `hint: null` into the manifest line, exactly as an absent value
  *  reads today. A multipart body was the other option; a header keeps
  *  `clipServer.ts` dependency-free (no multipart parser in the repo) while
- *  the WAV stays the raw POST body, unchanged. */
+ *  the WAV stays the raw POST body, unchanged.
+ *
+ *  S71-k (F-209, R-453): also sends `postedAt`, THIS CALL's own instant --
+ *  `clipServer.ts` names the file from it, not from `at`. An answer
+ *  continues the same trace entry as the sentence that asked its question
+ *  (`CommandBar.tsx` never opens a second entry for an answer), so the
+ *  sentence's own clip and the "yes"/"no" that answered it can share one
+ *  `at` -- naming the file from `at` let the second POST silently overwrite
+ *  the first's .wav on disk (two manifest lines, one file, F-209). `at` is
+ *  still sent too: `clipServer.ts`'s manifest line keeps both, and
+ *  `score.mjs --from-trace` still joins a clip back to what the bar heard
+ *  for its entry on `at` -- `postedAt` only ever tells two clips of the same
+ *  entry apart on disk. */
 export function postClip(
   at: string,
   wav: ArrayBuffer,
@@ -138,8 +150,10 @@ export function postClip(
   hint: string | null,
 ): void {
   if (!import.meta.env.DEV) return;
+  const postedAt = new Date().toISOString();
   const params = new URLSearchParams({
     at,
+    postedAt,
     durationMs: String(Math.round(clip.durationMs)),
     recordedMs: String(Math.round(clip.recordedMs)),
     endedBy: clip.endedBy,
