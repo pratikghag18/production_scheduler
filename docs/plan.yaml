@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-23'
-  tip: 'dce9e7a'
+  tip: '0488068'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12877,6 +12877,81 @@ requirements:
     printing what Whisper wrote then and now --- so a sentence said to the board is a measurement too, and a
     clip cut short by the recorder's rules shows as such before the model is blamed.
 findings:
+- id: F-208
+  title: The board's clips were never kept, because the fallback wrapper around the local recogniser forwarded only the four events it knew and dropped the clip event
+  tag: A wrapper that enumerates events by hand
+  status: fixed
+  found_by: agent
+  stage: S57
+  refs:
+  - R-453
+  - R-434
+  story: >-
+    23 Sept (session 190): after S71-f the maintainer said seven sentences and data/voice/trace/clips stayed
+    empty; a headless-browser probe against the running dev server (a synthetic tone as the microphone) posted a
+    clip to Whisper and nothing to /__clip. withFallback in localRecognizer.ts rebuilds the events object it hands
+    the inner recogniser with onInterim, onFinal, onError and onEnd by name, so the optional onClip never reached
+    the bar on the real board, while every unit pin passed because the pins hand the bar a bare recogniser.
+  fix: >-
+    Session 190 (30128bb): the wrapper forwards onClip on both legs, and a shape guard in the test
+    (satisfies Record<keyof RecognizerEvents, true>) fails tsc the next time an event is added and not forwarded;
+    LREC-31a to 31c. The probe is now e2e/clipCapture.spec.ts (0488068), skipped without Whisper behind the
+    proxy: CC-1 read a 4.6 s clip on disk ended by the silence rule at peak 0.21.
+- id: F-207
+  title: A spoken or typed answer to the board's question shows nowhere in the thread, so the person answers again and is told there is nothing to say yes to
+  tag: An answer folded into the question with no bubble of its own
+  status: fixed
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-427
+  - R-434
+  - R-435
+  story: >-
+    23 Sept (session 190), the third spoken pass: "if I verbally say yes as opposed to selecting the option given
+    by the board, the selection is not retained in the chat." A button press ticks its chip in the turn; a spoken
+    or typed answer is folded into the question's turn as answered and paints nothing, and a yes-or-no question
+    has no chips at all, so nothing changes on screen until the result lands. The trace shows the first spoken yes
+    at 20:01:17 taken and written, and a second "Yes" thirty seconds later answered "Nothing to say yes to."
+  fix: >-
+    Session 190 (30128bb): a turn whose answer is a real answer (not the auto or escape sentinels) renders it
+    as the person's own bubble between the question and the result, for voice, typing and buttons alike; the
+    chip tick stays. CH-answer-1 to 5.
+- id: F-206
+  title: '"Listening…" is left in the input after the microphone is stopped, as if it were still on'
+  tag: A status word kept as if typed
+  status: fixed
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-434
+  story: >-
+    23 Sept (session 190), the maintainer's screenshot: the mic pressed a second time to stop it, the input reading
+    "Listening…". The recogniser's first interim is that literal word and the bar writes every interim into the
+    input as text; stopping keeps the text on purpose for a half-typed sentence, which is wrong for a word the
+    person never typed.
+  fix: >-
+    Session 190 (30128bb): the bar remembers when the input's text came from an interim and clears it on stop
+    only then; a typed edit or a submission forgets the mark. CB-mic-13 to 15.
+- id: F-205
+  title: A block the bar writes for you flashes the create form for a frame before it vanishes
+  tag: A form mounted only to press its own button
+  status: fixed
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-384
+  - R-431
+  story: >-
+    23 Sept (session 190): "when the board asks me a question, there is a pop up which appears before vanishing.
+    It happened now with selecting Housing A for #4." R-384 opens the same create form a drag would and presses
+    Create on mount so the form's own checks are the gate, then closes on the answer; the form was painted for that
+    frame and the write's round trip.
+  fix: >-
+    Session 190 (2566f4e): the shared pop-up shell takes a concealed flag (visibility hidden, so it still measures
+    itself), set by the create form while the automatic press is pending and clean, lifted the moment the write
+    answers; the reviewer added two guards --- no focus into a concealed box, and no outside-click or Escape
+    cancel while concealed, which could otherwise drop a write already in flight. CP-flash-1 to 6, PS-1 to 4.
 - id: F-204
   title: The thread's scroll pin went red on its own the day after it was written, because it seeded turns with fixed timestamps and the store prunes against the real clock
   tag: A test that depends on the machine's clock
@@ -17864,19 +17939,19 @@ sessions:
   date: 2026-09-23
   title: "The second spoken walk answered: the two bugs that stopped it fixed, a Ctrl+M mic shortcut, the demo seeded inside each person's shift, and a clip harness so the recogniser is measured instead of walked"
   shipped: []
-  commits: ['170b851', '481d20e', '1d8d82c', 'c0578a6', '1f5836e', '845bf39', 'dce9e7a']
+  commits: ['170b851', '481d20e', '1d8d82c', 'c0578a6', '1f5836e', '845bf39', 'dce9e7a', '01ca2b1', '66ae6b3', '2566f4e', '30128bb', '0488068']
   numbers:
-    app_tests: 4267
+    app_tests: 4296
     app_test_files: 168
     tsc: 0
     eslint: 0
     db_checks: 893
     migrations: 84
-    e2e: 50
+    e2e: 51
   confirmed: true
   numbers_note: >-
-    npm run test copied from the runner; tsc and eslint clean; dev_demo_test.sql gained D14 (15 in that file on
-    the scratch database), so db_checks carries 893; no migration; no e2e spec touched.
+    npm run test copied from the runner; tsc -b and eslint clean; dev_demo_test.sql gained D14 (15 in that file on
+    the scratch database), so db_checks carries 893; no migration; one e2e spec added (clipCapture, CC-1).
   summary: >-
     The maintainer gave up on the second spoken walk ("so much worse than yesterday") and asked what we were doing
     wrong; the answer was the setup, not the voice: ggml-base.en, the second-smallest model, greedy, no non-speech
@@ -17899,8 +17974,18 @@ sessions:
     audio to tell. A fifth lane (S71-f, dce9e7a): the bar keeps every clip it posts with its length, the rule
     that ended it and its loudness, on the trace entry and on disk, and the scorer replays the newest through
     any container; the reviewer found a superseded session's clip attaching to the next sentence and a file
-    name built from the request with no check, both fixed. 4267 tests after it. The next spoken sentences are
-    the first measurement.
+    name built from the request with no check, both fixed. Then the maintainer's third pass: all four sentences
+    heard right on small.en with beam search (the earlier garbage was clips cut short, not the model), and three
+    things seen --- the create form flashing when the bar writes for you (F-205), "Listening…" left in the input
+    after the mic was stopped (F-206), a spoken yes shown nowhere so it was said twice (F-207) --- and one thing
+    not seen: no clip on disk. A headless-browser probe proved the capture dead on the real board: the fallback
+    wrapper enumerated the recogniser's events by hand and dropped the new one (F-208), while every pin passed on
+    a bare recogniser. Four more lanes, each reviewed: the replay scores with the app's own hint and never loses
+    a clip over it (66ae6b3); the pop-up conceals itself while its automatic press is pending (2566f4e); the
+    wrapper forwards every event with a guard that fails tsc on the next omission, the interim word is cleared on
+    stop, and an answer is the person's own bubble (30128bb); the probe stays as e2e/clipCapture.spec.ts
+    (0488068). The probe also timed Whisper at 32 s for a 4.6 s clip while tests ran beside it; idle, the
+    11 s sample takes 6.1 s twice over, so the wait was contention, and the matrix prints the wall time anyway.
 - id: 189
   date: 2026-09-22
   title: "After the restart: the clear lists the job, the spoken yes never reached Whisper, and the recogniser's onset rule is rebuilt against real audio (F-198)"
@@ -26048,7 +26133,10 @@ next:
     23 Sept (session 190): the model was the smallest English one, decoded greedily, prompted with a word list,
     never measured. Nothing about the recogniser changes again on a feeling; the clips are the instrument. The
     container swap itself (stop scheduler-whisper, then npm run voice:serve -- --whisper-only --whisper-model
-    small.en) is the maintainer's hand: the session's permission rules refuse to stop a running container.
+    small.en) is the maintainer's hand: the session's permission rules refuse to stop a running container. Also
+    print the wall time per clip on an idle machine: the browser probe saw 32 s for a 4.6 s clip under load with
+    small.en, beam 5 and 8 threads, and a half-minute "Transcribing…" is its own defect; greedy or fewer beams may
+    be the right trade for the live bar even if beam wins on accuracy.
 - kind: task
   text: "S71-b: a heard-text replay spec --- every sentence Whisper actually wrote in the two spoken walks (the trace's heard strings, misheard ones included) typed through the bar on the walk day, asserting what the bar may do with a misheard sentence: ask, refuse, or write only what the words say, never invent an end (F-200), never take a command as a reason (F-202), never read a bracketed tag (F-201)"
   why: >-
