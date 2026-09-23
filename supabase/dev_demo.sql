@@ -466,6 +466,7 @@ DECLARE
   v_zone text := 'America/Chicago';
   v_letter text; v_day timestamp; v_cell uuid; v_run uuid; v_prod uuid;
   v_i int; v_d int; v_from timestamptz; v_to timestamptz;
+  v_op uuid; v_start int; v_end int;
 BEGIN
   -- Monday 00:00 of the current week, on the plant's own calendar.
   v_day := date_trunc('week', now() AT TIME ZONE v_zone);
@@ -484,22 +485,45 @@ BEGIN
            AND p.sku = 'PN-' || (ascii(v_letter) - ascii('A') + 1)
                        || (CASE WHEN v_i <= 2 AND v_d = 1 THEN '003' ELSE '001' END);
 
+        -- ⭐ R-452 (23 Sept; the maintainer: "why is each and every assignment
+        -- tagged as OT?"). The fixed 06:00-14:00 window below used to be
+        -- Shift 1's hours for every cell, but R-441 hashes each person onto
+        -- Shift 1, 2 or 3 of the plant's pattern -- Plant A's six people all
+        -- landed on Shift 2 or 3, so every seeded block sat entirely outside
+        -- its own operator's home band and `overtimeMinutes()` (read by
+        -- AssignmentChip/DirectBlock) tagged all of it OT. The board was
+        -- reading the seed correctly; the seed was contradicting itself. Each
+        -- block now runs in the SEEDED OPERATOR's own home band instead.
+        SELECT o.id, s.start_min, s.end_min INTO v_op, v_start, v_end
+          FROM operators o
+          JOIN shifts s ON s.id = o.home_shift_id
+         WHERE o.org_id = v_org AND o.display_name = 'Operator ' || v_letter || v_i;
+
+        -- §5's UPDATE (above, ~419-445) runs before this block and already
+        -- RAISEs if any operator is left shiftless (~716); this is a second,
+        -- local guard so a future reorder of §5 after §6 fails loudly here
+        -- too, instead of silently seeding a NULL-band block that would read
+        -- as all-day OT again.
+        IF v_start IS NULL THEN
+          RAISE EXCEPTION 'dev_demo: Operator % has no home shift while seeding its schedule (R-452)', v_letter || v_i;
+        END IF;
+
         -- ⚠️ NO `status` COLUMN. Migration 0044 dropped `runs.status` (R-324);
         -- this line still named it for one session and the demo world stopped
         -- building here (DEF-0006). `dev_demo_test.sql` now applies this file
         -- on a runner, so the next dropped column fails loudly instead.
-        -- 06:00 to 14:00 on day v_d, as Chicago wall-clock instants.
-        v_from := (v_day + (v_d || ' days')::interval + interval '6 hours') AT TIME ZONE v_zone;
-        v_to   := (v_day + (v_d || ' days')::interval + interval '14 hours') AT TIME ZONE v_zone;
+        -- The seeded operator's own home band on day v_d, as Chicago
+        -- wall-clock instants (R-452) -- Shift 3 (1320-1800 minutes) crosses
+        -- midnight into the next day, which is still one valid tstzrange.
+        v_from := (v_day + (v_d || ' days')::interval + (v_start || ' minutes')::interval) AT TIME ZONE v_zone;
+        v_to   := (v_day + (v_d || ' days')::interval + (v_end   || ' minutes')::interval) AT TIME ZONE v_zone;
 
         INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
         VALUES (v_org, v_cell, v_prod, tstzrange(v_from, v_to), 1)
         RETURNING id INTO v_run;
 
         INSERT INTO assignments (org_id, node_id, operator_id, run_id, timerange, efficiency)
-        SELECT v_org, v_cell, o.id, v_run, tstzrange(v_from, v_to), 1.000
-          FROM operators o
-         WHERE o.org_id = v_org AND o.display_name = 'Operator ' || v_letter || v_i;
+        VALUES (v_org, v_cell, v_op, v_run, tstzrange(v_from, v_to), 1.000);
       END LOOP;
     END LOOP;
   END LOOP;

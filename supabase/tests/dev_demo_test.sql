@@ -308,21 +308,71 @@ BEGIN
                     v_shiftless, v_line_owned; END IF;
 END $$;
 
-\echo 'D13: the demo plant is in Chicago and its seeded hours are Chicago hours (R-450, F-190)'
+\echo 'D13: the demo plant is in Chicago and each seeded block starts at its own operator''s home-shift minute (R-450, R-452, F-190)'
 DO $$
-DECLARE v_zone text; v_plant uuid; v_rows int; v_at_six int;
+DECLARE v_zone text; v_plant uuid; v_rows int; v_at_band int;
 BEGIN
-  -- Both halves, together: the zone every plant resolves to after a reset, and
-  -- the seeded Shift 1 rows reading 06:00 IN THAT ZONE. Either alone is the
-  -- bug F-190 found -- a zone with UTC hours reads 01:00; UTC with no zone
-  -- reads 06:00 until someone sets the zone by hand.
+  -- The zone half is unchanged from F-190: the zone every plant resolves to
+  -- after a reset. The hour half is now R-452's promise, not a fixed 06:00 --
+  -- each seeded block starts at its OWN OPERATOR'S home-shift start_min, in
+  -- that zone. A fixed Shift-1 window (the old seed) would fail the band half
+  -- for anyone hashed onto Shift 2 or 3 (R-441) even though the zone half
+  -- still passed.
+  --
+  -- The length half that used to live here (elapsed minutes = end_min -
+  -- start_min) is DROPPED, not fixed in place: `extract(epoch FROM (upper -
+  -- lower))` counts real elapsed minutes, which is wrong on a DST-changeover
+  -- Saturday -- Shift 3 (22:00-06:00 Chicago) is 420 elapsed minutes in
+  -- March and 540 in November while the seed is correct either way, so this
+  -- case would FAIL a seed that had nothing wrong with it. D14 below already
+  -- pins the band's upper edge too, by reconstructing it wall-clock (the same
+  -- naive-then-AT-TIME-ZONE arithmetic the seed itself uses, not elapsed
+  -- time), so the length check belongs there and only there.
   SELECT n.id INTO v_plant FROM nodes n
    WHERE n.org_id = '10000000-0000-0000-0000-000000000001' AND n.parent_id IS NULL AND n.name LIKE 'Plant A%';
   v_zone := app_resolve_node_setting(v_plant, 'timezone');
-  SELECT count(*), count(*) FILTER (WHERE to_char(lower(timerange) AT TIME ZONE 'America/Chicago', 'HH24:MI') = '06:00')
-    INTO v_rows, v_at_six
-    FROM assignments WHERE org_id = '10000000-0000-0000-0000-000000000001';
-  IF v_zone = 'America/Chicago' AND v_rows > 0 AND v_at_six = v_rows THEN RAISE NOTICE 'PASS D13';
-  ELSE RAISE NOTICE 'FAIL D13: Plant A resolves to % (want America/Chicago); % of % seeded blocks start at 06:00 Chicago',
-                    coalesce(v_zone, '(none)'), v_at_six, v_rows; END IF;
+  SELECT count(*),
+         count(*) FILTER (
+           WHERE (extract(hour   FROM lower(a.timerange) AT TIME ZONE 'America/Chicago') * 60
+                + extract(minute FROM lower(a.timerange) AT TIME ZONE 'America/Chicago'))::int = s.start_min
+         )
+    INTO v_rows, v_at_band
+    FROM assignments a
+    JOIN operators o ON o.id = a.operator_id
+    JOIN shifts s ON s.id = o.home_shift_id
+   WHERE a.org_id = '10000000-0000-0000-0000-000000000001';
+  IF v_zone = 'America/Chicago' AND v_rows > 0 AND v_at_band = v_rows THEN RAISE NOTICE 'PASS D13';
+  ELSE RAISE NOTICE 'FAIL D13: Plant A resolves to % (want America/Chicago); % of % seeded blocks start at their operator''s home-shift minute',
+                    coalesce(v_zone, '(none)'), v_at_band, v_rows; END IF;
+END $$;
+
+\echo 'D14: no seeded assignment carries a minute of overtime outside its own operator''s home band (R-452)'
+DO $$
+DECLARE v_rows int; v_ot int;
+BEGIN
+  -- Recomputes, from the same assignment/operator/shift rows D13 reads but by
+  -- a different route (rebuilding the band's own tstzrange from the
+  -- assignment's local start day, rather than comparing minute-of-day), how
+  -- much of each seeded range falls outside its operator's home band -- the
+  -- same shape of question `overtimeMinutes()` asks on the board. Zero here
+  -- is what R-452 promises; the old fixed 06:00-14:00 seed would show
+  -- overtime on every block for a person hashed onto Shift 2 or 3.
+  WITH bands AS (
+    SELECT a.id, a.timerange,
+           (date_trunc('day', lower(a.timerange) AT TIME ZONE 'America/Chicago')
+             + (s.start_min || ' minutes')::interval) AT TIME ZONE 'America/Chicago' AS band_from,
+           (date_trunc('day', lower(a.timerange) AT TIME ZONE 'America/Chicago')
+             + (s.end_min   || ' minutes')::interval) AT TIME ZONE 'America/Chicago' AS band_to
+      FROM assignments a
+      JOIN operators o ON o.id = a.operator_id
+      JOIN shifts s ON s.id = o.home_shift_id
+     WHERE a.org_id = '10000000-0000-0000-0000-000000000001'
+  )
+  SELECT count(*),
+         count(*) FILTER (WHERE lower(timerange) < band_from OR upper(timerange) > band_to)
+    INTO v_rows, v_ot
+    FROM bands;
+  IF v_rows > 0 AND v_ot = 0 THEN RAISE NOTICE 'PASS D14';
+  ELSE RAISE NOTICE 'FAIL D14: % of % seeded blocks have a minute outside their operator''s home band (want 0)',
+                    v_ot, v_rows; END IF;
 END $$;
