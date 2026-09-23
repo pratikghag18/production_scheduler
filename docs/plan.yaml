@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-22'
-  tip: '7fdb578'
+  updated: '2026-09-23'
+  tip: '1f5836e'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12802,7 +12802,95 @@ requirements:
     as UTC and set no zone, so the plant was a UTC plant after every reset while the design (F-159, the
     walk's brief) treated it as a Chicago one. BUILT the same session (69318e7): the zone named once in the
     schedule block, each hour an AT TIME ZONE instant, the company-wide fallback set in a new section 6b.
+- id: R-451
+  title: A keyboard shortcut starts the microphone --- Ctrl+M from anywhere on the board, the input included, opens the bar if it is closed and presses the mic
+  source:
+  - 'session 190 conversation (the maintainer, 23 Sept: "I also want a shortcut to start the mic icon like we have / to enter the chatbot")'
+  stated_by: maintainer
+  claim: >-
+    Ctrl+M does what a click on the bar's microphone button does: with the panel closed it opens the panel and
+    starts listening; with the panel open it starts listening, and while listening it stops. It works while the
+    bar's own input has focus, because the ordinary flow is slash, then speak; a plain letter would be typed, so
+    the key carries a modifier. Ctrl+M is unbound in Chrome and Edge. Ctrl+Shift+M and a bare m do nothing. The
+    mic button's title names the key.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandLauncher.test.tsx
+    cases: "CL-a to CL-g: closed opens and listens; open with the input focused listens and types nothing; listening stops; Shift, Alt and a bare m ignored; no recogniser opens without throwing; a close by the header or by the button and a reopen by slash does not start the mic again"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-mic-11, CB-mic-12: the counter prop toggles the mic on every change and a bar mounted with the default does nothing"
+  status: covered
+  note: >-
+    STATED 23 Sept (session 190). The key was the developer's choice, said in the same turn: M for microphone,
+    with Ctrl because the input has focus after a slash. Built by lane S71-d
+    (docs/agent-briefs/s71-d-mic-shortcut-brief.md).
+- id: R-452
+  title: The demo's seeded blocks fall inside each person's own shift --- a reset shows no overtime that the seed itself invented
+  source:
+  - 'session 190 conversation (the maintainer, 23 Sept: "And why is each and every assignment tagged as OT?", and yes to seeding each block in the person''s own band)'
+  stated_by: maintainer
+  claim: >-
+    dev_demo.sql writes every seeded run and assignment from the operator's home shift's start minute to its
+    end minute on that day, in the plant's zone (R-450), instead of a fixed 06:00 to 14:00. R-441's hash homes
+    Plant A's six people on Shift 2 and Shift 3, so under the fixed hours every block on the board was all
+    overtime by the OT rule (minutes outside the home band); the rule was right and the demo contradicted
+    itself. A seeded person with no home shift fails the seed loudly.
+  verified_by:
+  - kind: sql
+    file: supabase/tests/dev_demo_test.sql
+    cases: "D13 (every seeded block starts at its operator's own band start in Chicago) and D14 (the band rebuilt as a range with the seed's own wall-clock arithmetic; no seeded minute outside it); both fail against the old fixed hours, 14 of 84 and 70 of 84"
+  - kind: manual
+    steps: "23 Sept (session 190): proved on the scratch demo database, 15 passed; the daylight-saving night of 7 March 2026 checked by hand against the container (420 elapsed minutes, wall-clock equal); the local database not reset --- the maintainer's app was on it"
+  status: covered
+  note: >-
+    STATED 23 Sept (session 190). Built by lane S71-e (docs/agent-briefs/s71-e-demo-bands-brief.md); proved on
+    the scratch demo database, the local database reset only with the maintainer's word.
+- id: R-453
+  title: The recogniser is measured on recorded clips, never on the maintainer's afternoons --- the sentence list is recorded once and every model, flag and prompt change is a score from a script
+  source:
+  - 'session 190 conversation (the maintainer, 23 Sept: "I give up, that was so much worse than yesterday", "There has to be something we are doing wrong"; yes to the plan)'
+  stated_by: maintainer
+  claim: >-
+    A recording page (npm run voice:clips:record) saves the maintainer's reading of the walk's sentence list as
+    16 kHz WAV clips under data/voice/clips (never committed), and a scorer (npm run voice:clips:score) posts
+    every clip to the running whisper-server with a given prompt file and prints word error rate, board names
+    heard right and exact matches per clip and in total, writing a results file. A change to the Whisper model,
+    its decoding flags or the hint is accepted or rejected on that table. The server runs beam search with
+    non-speech suppression by default (serve.mjs --whisper-decode, always -sns), and small.en is the first
+    model measured against base.en.
+  verified_by:
+  - kind: vitest
+    file: src/test/voiceClips.test.ts
+    cases: "VCLIP-1 onward: the scorer's normaliser (am and pm glued, dotted and spaced; spelled numbers; ordinals; apostrophes), word error rate exact, empty and partial, name hits with one misheard name"
+  - kind: manual
+    steps: "23 Sept (session 190): the scorer against whisper.cpp's own jfk.wav on the running base.en container, with and without a prompt --- word error rate 0, exact, about 2 to 3 s a clip; the recording page served and took a posted clip into the manifest; the maintainer's 22 clips and the six-cell matrix are the next step"
+  status: covered
+  note: >-
+    STATED 23 Sept (session 190). Why the spoken walks read worse than television subtitles: the container ran
+    ggml-base.en (74M parameters, the second-smallest model) with greedy decoding, no non-speech suppression and
+    a word list as its prompt, chosen at S57 and never measured; subtitles come from the large model with beam
+    search. Built by lane S71-c (docs/agent-briefs/s71-c-clip-harness-brief.md). The old S71-c queue item (the
+    34- versus 53-word hint) is one row of this matrix now.
 findings:
+- id: F-204
+  title: The thread's scroll pin went red on its own the day after it was written, because it seeded turns with fixed timestamps and the store prunes against the real clock
+  tag: A test that depends on the machine's clock
+  status: fixed
+  found_by: agent
+  stage: S57
+  refs:
+  - R-426
+  - F-192
+  story: >-
+    23 Sept (session 190): CH-scroll (commandBar.test.tsx) seeded twenty turns stamped 22 Sept 17:30 to 17:49Z;
+    the conversation store keeps a day of history against Date.now(), so once the afternoon of the 23rd came the
+    oldest fifteen were pruned before the render and the pin failed, "expected ... to contain Turn number 0". The
+    lane that saw it first blamed the baseline. R-426's own lesson, on a test this time: a clock-dependent
+    assertion needs a frozen clock.
+  fix: >-
+    Session 190 (481d20e): the test freezes Date at 22 Sept 18:00Z and restores it after; the file reads 249
+    passed.
 - id: F-203
   title: '"Clear Area 1 and Area 2" resolves Area 1 as a cell and refuses, while "clear Area 1" alone works'
   tag: A lot that resolves a place by a narrower rule than the single sentence
@@ -12836,7 +12924,7 @@ findings:
 - id: F-201
   title: A Whisper non-speech tag ("[Music]") was read as a sentence and became "unassign everyone on today"
   tag: A hallucinated token treated as words
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S57
   refs:
@@ -12848,6 +12936,10 @@ findings:
     F-199 stopped it. On a day without that other bug, a cough would have cleared the board. whisper.cpp writes
     such tags in brackets ("[Music]", "[BLANK_AUDIO]", "(clippers buzzing)"); a transcript that is only such a
     tag is nothing heard, and one that contains it drops it before the words go anywhere.
+  fix: >-
+    Session 190 (c0578a6): the recogniser strips every bracketed or parenthesised run from the transcript before
+    anything else sees it; a transcript that was only tags takes the same path as silence. LREC-29a to 29e. An
+    unbalanced tag still passes as words; not a shape whisper.cpp writes.
 - id: F-200
   title: A misheard "end Sam Patel's block at 2pm" was written by the model as a move to 23:59, with no question
   tag: A model guess written as a fact
@@ -12866,7 +12958,7 @@ findings:
 - id: F-199
   title: A block that ends at midnight breaks every clear on that day ("That is -840 minutes; a block is at least 15 minutes"), so the board cannot be emptied
   tag: A day's end read as zero
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S64
   refs:
@@ -12879,6 +12971,13 @@ findings:
     before its start. The maintainer could not empty the board by any sentence and gave up: "that was so much
     worse than yesterday that I want to just stop working on it." A block may legitimately end at midnight (a
     night band ends there); its removal must read its real end.
+  fix: >-
+    Session 190 (c0578a6): the clear of everyone builds one removal per block and hands each a span read from the
+    block's own hours; the span builder read the end instant through the wall-clock helper, which answers 0..1439,
+    so an end at the next day's midnight came back as 00:00 of the same day and the removal re-resolved a negative
+    block. The copy and split paths already carried the rule for this shape (DAY_END); the span builder reads the
+    end edge through the same condition now. RS-midnight-1 to 3 and the reviewer's two cases (the removal is by
+    assignment id, never a trim; a block starting at that midnight is left alone).
 - id: F-198
   title: A one-word spoken answer ("yes") is never sent to Whisper, because a clip's speech only starts after half a second of steady loudness
   tag: A silence rule that swallows short answers
@@ -17757,6 +17856,39 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 190
+  date: 2026-09-23
+  title: "The second spoken walk answered: the two bugs that stopped it fixed, a Ctrl+M mic shortcut, the demo seeded inside each person's shift, and a clip harness so the recogniser is measured instead of walked"
+  shipped: []
+  commits: ['170b851', '481d20e', '1d8d82c', 'c0578a6', '1f5836e']
+  numbers:
+    app_tests: 4247
+    app_test_files: 168
+    tsc: 0
+    eslint: 0
+    db_checks: 893
+    migrations: 84
+    e2e: 50
+  confirmed: true
+  numbers_note: >-
+    npm run test copied from the runner; tsc and eslint clean; dev_demo_test.sql gained D14 (15 in that file on
+    the scratch database), so db_checks carries 893; no migration; no e2e spec touched.
+  summary: >-
+    The maintainer gave up on the second spoken walk ("so much worse than yesterday") and asked what we were doing
+    wrong; the answer was the setup, not the voice: ggml-base.en, the second-smallest model, greedy, no non-speech
+    suppression, a word list as the prompt, chosen at S57 and never measured, against the large model with beam
+    search that subtitles use. Four Sonnet lanes from four briefs, each reviewed by a second Sonnet agent that was
+    told to break it: F-199 and F-201 (the midnight block and the "[Music]" tag; the reviewer proved the removal
+    is by id and never a trim); Ctrl+M starts the mic from anywhere, the input included (R-451; the reviewer found
+    the counter surviving a close and a later slash starting the mic unasked --- fixed with two pins); the seed
+    writes each block inside its person's own shift (R-452, the answer to "why is every assignment tagged OT" ---
+    the reviewer found the first D13 measured elapsed minutes, wrong by an hour on the daylight-saving weekends,
+    so D14 carries the end edge by wall clock); and the clip harness (R-453: a recording page, a scorer with a
+    pure normaliser, the three prompt files, beam search and -sns as the server's default; the reviewer found
+    "8am" and "8 a.m." scored as different words and a missing declaration file). small.en is fetched; the
+    container swap is the maintainer's hand (the session may not stop a running container). F-204 found on the
+    way: a test pinned to yesterday's clock. The Docker VM also carries the tester's whole second stack, about
+    1.3 GB, which is the room a larger model would need.
 - id: 189
   date: 2026-09-22
   title: "After the restart: the clear lists the job, the spoken yes never reached Whisper, and the recogniser's onset rule is rebuilt against real audio (F-198)"
@@ -25899,24 +26031,18 @@ next:
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
 - kind: task
-  text: "S71-a, first: a block ending at midnight is removable (F-199) and a Whisper non-speech tag is never a sentence (F-201) --- the two that stopped the 23 Sept walk"
+  text: "The Whisper matrix (R-453): the maintainer records the 22 sentences once (npm run voice:clips:record), then the six cells in scripts/voice/clips/README.md are scored --- base.en greedy (yesterday's setting) against small.en beam, and the 34-word hint against the 53-word one against two example sentences; the winning model, flags and hint become the defaults, and the hint's shape in recognizerHint.ts follows the table"
   why: >-
-    23 Sept (session 190): the board could not be emptied and a "[Music]" became a clear-everything. Both are
-    small and both are pinned from the trace's own text. Nothing spoken is asked of the maintainer until these
-    two are in.
+    23 Sept (session 190): the model was the smallest English one, decoded greedily, prompted with a word list,
+    never measured. Nothing about the recogniser changes again on a feeling; the clips are the instrument. The
+    container swap itself (stop scheduler-whisper, then npm run voice:serve -- --whisper-only --whisper-model
+    small.en) is the maintainer's hand: the session's permission rules refuse to stop a running container.
 - kind: task
   text: "S71-b: a heard-text replay spec --- every sentence Whisper actually wrote in the two spoken walks (the trace's heard strings, misheard ones included) typed through the bar on the walk day, asserting what the bar may do with a misheard sentence: ask, refuse, or write only what the words say, never invent an end (F-200), never take a command as a reason (F-202), never read a bracketed tag (F-201)"
   why: >-
     R-433 for the spoken half: the maintainer's voice is not a test instrument, and two walks cost two afternoons.
     The trace already holds what Whisper wrote; the bar's behaviour on those strings is the thing to pin, and
     the model's readings of them are what the sixth run's data must fix. Runs before any third spoken pass.
-- kind: task
-  text: "S71-c: the hint's 19 new words, kept or dropped by measurement --- the same recorded clips through Whisper with the 34-word hint and the 53-word one, counting the board names heard right"
-  why: >-
-    23 Sept: "on Cell" came back as "Common Cell" and "oneself", "in Line" as "Inline", "to" as "2", more often than
-    the day before; the hint grew from 34 to 53 words between the two walks (F-195, F-198) and whisper.cpp biases
-    toward the prompt. Whether the words helped or hurt is a measurement, not a guess: record the list once, run
-    both prompts, count.
 - kind: task
   text: "F-202 and F-203: a command is not an answer to a free-text question, and the lot resolves a place the way the single sentence does"
   why: >-
