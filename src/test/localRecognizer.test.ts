@@ -12,7 +12,7 @@ import {
   withFallback,
   type LocalRecognizerDeps,
 } from "@/lib/voice/localRecognizer";
-import type { Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
+import type { ClipInfo, Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 
 describe("LREC: whisperServiceUrl (S57-a brief §4)", () => {
   afterEach(() => {
@@ -1415,5 +1415,104 @@ describe("LREC: withFallback (S57-a brief §4, design-plan D131 §3)", () => {
     // BoardPage.tsx keeps already reads "browser" -- the whole point: a
     // trace entry tagged from this value, not from static config, is right.
     expect(engineAtFinal).toBe("browser");
+  });
+
+  // F-208: `withFallback` rebuilt the events object it handed each leg with
+  // exactly onInterim/onFinal/onError/onEnd, so the optional `onClip` added
+  // by S71-f (LREC-30) never reached the bar on either leg -- the bar's
+  // clips were never kept. LREC-31 pins both forwarding sites; LREC-31c is
+  // a shape guard so a future `RecognizerEvents` key silently dropped here
+  // fails tsc, not just a runtime pin.
+  it("LREC-31a: withFallback forwards onClip on the local (primary) leg -- the outer onClip receives the same object", () => {
+    let localEvents!: RecognizerEvents;
+    const local: Recognizer = (events) => {
+      localEvents = events;
+      return { stop: vi.fn() };
+    };
+    const { recognizer: browser } = fakeBrowserRecognizer();
+    const wrapped = withFallback(local, browser);
+    const barEvents = {
+      onInterim: vi.fn(),
+      onFinal: vi.fn(),
+      onError: vi.fn(),
+      onEnd: vi.fn(),
+      onClip: vi.fn(),
+    };
+    wrapped(barEvents as unknown as RecognizerEvents);
+
+    const clip: ClipInfo = {
+      wav: new ArrayBuffer(0),
+      durationMs: 1200,
+      recordedMs: 1200,
+      endedBy: "stop",
+      speechStarted: true,
+      peakRms: 0.2,
+      meanRms: 0.1,
+      framesAboveFloor: 5,
+      hint: null,
+    };
+    localEvents.onClip?.(clip);
+
+    expect(barEvents.onClip).toHaveBeenCalledTimes(1);
+    expect(barEvents.onClip).toHaveBeenCalledWith(clip);
+  });
+
+  it("LREC-31b: withFallback forwards onClip on the browser (fallback) leg too, after a local onError(other) fallback", () => {
+    let localEvents!: RecognizerEvents;
+    const local: Recognizer = (events) => {
+      localEvents = events;
+      return { stop: vi.fn() };
+    };
+    const { recognizer: browser, started } = fakeBrowserRecognizer();
+    const wrapped = withFallback(local, browser);
+    const barEvents = {
+      onInterim: vi.fn(),
+      onFinal: vi.fn(),
+      onError: vi.fn(),
+      onEnd: vi.fn(),
+      onClip: vi.fn(),
+    };
+    wrapped(barEvents as unknown as RecognizerEvents);
+
+    localEvents.onError("other", "local recogniser not answering");
+    localEvents.onEnd();
+    expect(started).toHaveLength(1);
+
+    const clip: ClipInfo = {
+      wav: new ArrayBuffer(0),
+      durationMs: 900,
+      recordedMs: 900,
+      endedBy: "silence",
+      speechStarted: true,
+      peakRms: 0.3,
+      meanRms: 0.15,
+      framesAboveFloor: 8,
+      hint: "clear cell 3",
+    };
+    started[0].onClip?.(clip);
+
+    expect(barEvents.onClip).toHaveBeenCalledTimes(1);
+    expect(barEvents.onClip).toHaveBeenCalledWith(clip);
+  });
+
+  // A future key added to `RecognizerEvents` (like `onClip` itself once was)
+  // must be forwarded by `withFallback` on both legs or it is silently
+  // dropped exactly as F-208 was. This object's type only satisfies
+  // `Record<keyof RecognizerEvents, true>` while every key in
+  // `RecognizerEvents` is listed here -- add a key to the interface without
+  // adding it below and tsc fails on this file, forcing whoever adds the
+  // key to come update `withFallback`'s two forwarding sites too.
+  const ALL_RECOGNIZER_EVENT_KEYS = {
+    onInterim: true,
+    onFinal: true,
+    onError: true,
+    onEnd: true,
+    onClip: true,
+  } satisfies Record<keyof RecognizerEvents, true>;
+
+  it("LREC-31c: shape guard -- every RecognizerEvents key is accounted for (tsc fails here if one is added and not forwarded)", () => {
+    expect(Object.keys(ALL_RECOGNIZER_EVENT_KEYS).sort()).toEqual(
+      ["onClip", "onEnd", "onError", "onFinal", "onInterim"].sort(),
+    );
   });
 });

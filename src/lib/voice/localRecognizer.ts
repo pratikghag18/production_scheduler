@@ -805,6 +805,7 @@ export function withFallback(
             onFinal: events.onFinal,
             onError: events.onError,
             onEnd: events.onEnd,
+            onClip: events.onClip,
           });
           return;
         }
@@ -814,6 +815,7 @@ export function withFallback(
         if (fellBack) return; // the browser leg above owns ending this session now
         events.onEnd();
       },
+      onClip: events.onClip,
     });
 
     return {

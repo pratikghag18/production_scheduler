@@ -756,6 +756,22 @@ function turnResultLine(turn: HistoryTurn): string {
 }
 
 /**
+ * F-207 review fix (the maintainer, 23 Sept): `HistoryTurn.answered` is not
+ * always a genuine answer -- `commandConversation.ts` has no single shared
+ * list of its own sentinels, so this file keeps the two it renders around in
+ * one place rather than repeating the literals. `"auto"` is set by
+ * `traceQuestionStatus`'s "readout" branch and by `settleWrite` for a single
+ * that ran straight off its own readout, "never asked anything and never
+ * answered by a word or a button" (both functions' own comments). `"escape"`
+ * is set by every Escape branch in `handleKeyDown` that closes a trace entry
+ * (a reading aborted, a listen stopped, a standing question dropped) --
+ * a CANCEL, not a word the person said, so it reads just as wrong in a "you"
+ * bubble as "auto" would. Anything else non-null is a real answer (a chip's
+ * own label or a spoken/typed word) and gets the bubble.
+ */
+const NON_ANSWER_SENTINELS = new Set(["auto", "escape"]);
+
+/**
  * F-162 (the maintainer, 17 Sept, two screenshots): THE ANSWER BOX.
  *
  * "Tom Baker is not certified for Cell 1: missing Welding. Say the reason to
@@ -1009,6 +1025,17 @@ export function CommandBar({
   // findings 1-3).
   const recognitionRef = useRef<RecognizerHandle | null>(null);
   const recognitionSeqRef = useRef(0);
+  // F-206: the last INTERIM text `onInterim` put in the box (the literal
+  // "Listening…" the very first one always is, `localRecognizer.ts` ~694,
+  // or a partial transcript after it) -- `null` whenever the box's current
+  // text did not come from an interim, or came from one but has since been
+  // superseded by a typed edit (`handleChange`) or an actual submission
+  // (`submitText`), both of which clear this. `stopListening()` below reads
+  // it once, on a second mic press or Escape, to tell "a half-typed
+  // sentence, kept on purpose" (this function's own long-standing contract)
+  // apart from a bare status word never actually typed, left behind because
+  // the person stopped before saying anything else.
+  const lastInterimTextRef = useRef<string | null>(null);
   // S59-e (R-421, brief §3): one trace entry in progress for the CURRENT
   // sentence, `null` whenever none is open. A ref, not state, same reason as
   // `heldRef`/`lotRef` above: read and written from event handlers and one
@@ -2805,6 +2832,10 @@ export function CommandBar({
     // untouched either way -- "Working…" stands until `runLotNow`'s own
     // `.then()` replaces it.
     if (runningLotRef.current) return;
+    // F-206: a typed keystroke is never an interim, whatever the box held
+    // before it (kept text or an interim word) -- `stopListening()` must not
+    // later mistake this typed text for the interim it followed.
+    lastInterimTextRef.current = null;
     setText(e.target.value);
     // Brief 6: "Any edit to the input clears the held command and its
     // attach (a new sentence is a new question)." Clearing the held command
@@ -2944,6 +2975,10 @@ export function CommandBar({
     // for every TYPED call (nothing else runs between the keystroke and this
     // line), and the fix for a LATE spoken one.
     const status = store.getState().status;
+    // F-206: a submission -- typed Enter or a spoken final transcript -- is
+    // never an interim either, whatever ref value the box's last interim
+    // left behind.
+    lastInterimTextRef.current = null;
     // S51 review fix: a lot writing in the background cannot be cancelled
     // or re-confirmed out from under itself -- Enter on ANY word (a cancel
     // word, a stray "yes", an ordinary sentence) is a no-op while
@@ -3359,6 +3394,21 @@ export function CommandBar({
    *  kept and the status line is left untouched (brief §2.2). */
   function stopListening(): void {
     recognitionRef.current?.stop();
+    // F-206 (the maintainer's screenshot, 23 Sept): the box's text is kept
+    // on a stop, on purpose, for a half-typed sentence -- but the FIRST
+    // interim a session ever fires is the literal "Listening…" status word,
+    // never something the person said or typed, and a later interim is a
+    // partial transcript, not a finished sentence either. If the box still
+    // reads exactly the last interim `onInterim` put there -- nothing typed
+    // over it, nothing submitted since -- that text is a status word, not a
+    // kept sentence, and is cleared; a typed edit or an actual submission
+    // already cleared `lastInterimTextRef` above, so this never touches
+    // genuinely typed text (CB-mic-14: the interim overwrote it first, same
+    // as `onInterim`'s own long-standing, unconditional `setText`).
+    if (lastInterimTextRef.current !== null && text === lastInterimTextRef.current) {
+      setText("");
+    }
+    lastInterimTextRef.current = null;
     endSession();
   }
 
@@ -3431,6 +3481,10 @@ export function CommandBar({
         // re-derived.
         if (answerTakes(status) === null) heldRef.current = null;
         setText(interimText);
+        // F-206: remember this exact text came from an interim, so a
+        // `stopListening()` that follows before anything else changes the
+        // box can tell it apart from a genuinely typed sentence.
+        lastInterimTextRef.current = interimText;
       },
       // S71-f (brief §1.B): fires once, before `onFinal`/`onError`, with
       // the clip `localRecognizer.ts` is about to post -- stashed here,
@@ -3706,6 +3760,23 @@ export function CommandBar({
                         ))}
                       </p>
                     )}
+                  </div>
+                )}
+                {/* F-207: a button press already reads back through the chip
+                    tick above, but a VOICE or TYPED answer folds straight
+                    into `turn.answered` with no bubble at all -- a "say or
+                    type yes" question has no chips to tick in the first
+                    place, so nothing on screen changed until the result
+                    line landed and the person said "yes" again, to
+                    "Nothing to say yes to." `NON_ANSWER_SENTINELS` (above)
+                    names the two values that are not a genuine answer --
+                    every other non-null value is one, whether it is a
+                    chip's own label (the tick stays; showing it here too is
+                    what makes voice and button read the same) or the
+                    literal spoken/typed word. */}
+                {turn.answered !== null && !NON_ANSWER_SENTINELS.has(turn.answered) && (
+                  <div className={styles.bubble} data-side="you">
+                    {turn.answered}
                   </div>
                 )}
                 {result !== "" && (

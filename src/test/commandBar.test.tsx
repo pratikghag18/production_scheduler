@@ -3955,6 +3955,70 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     // `handleMicClick` against a null recogniser either.
     expect(screen.queryByRole("button", { name: "Speak a sentence" })).toBeNull();
   });
+
+  // F-206 (the maintainer's screenshot, 23 Sept): `onInterim`'s very first
+  // call is the literal status word "Listening…" (`localRecognizer.ts` ~694)
+  // -- `stopListening()`'s own long-standing contract keeps the box's text
+  // on a second mic press (or Escape) "for a half-typed sentence", right for
+  // real typed text but wrong for a status word the person never typed or
+  // said. CB-mic-13..15 pin the fix: a ref remembers the box's text came
+  // from an interim, cleared by a typed edit or a real submission, and
+  // `stopListening()` clears the box only when it STILL reads exactly that
+  // last interim.
+  it("CB-mic-13: mic on, interim 'Listening…', mic off -- the box is empty, not left reading the status word", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+
+    fire.interim("Listening…");
+    expect(input.value).toBe("Listening…");
+
+    fireEvent.click(micButton); // stop
+
+    expect(input.value).toBe("");
+  });
+
+  it("CB-mic-14: typed text, THEN mic pressed and an interim arrives (overwriting it, today's existing behaviour) -- mic off leaves the box empty, the typed text is NOT restored", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    fireEvent.change(input, { target: { value: "clear cell 3" } });
+
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+    // `onInterim` unconditionally calls `setText` (its own long-standing
+    // contract, unchanged by this fix) -- the typed text is already gone
+    // the moment the first interim arrives, before `stopListening` is ever
+    // reached.
+    fire.interim("Listening…");
+    expect(input.value).toBe("Listening…");
+
+    fireEvent.click(micButton); // stop
+
+    // The interim is gone (F-206's own fix); nothing puts "clear cell 3"
+    // back -- it was overwritten, not saved, by the press.
+    expect(input.value).toBe("");
+  });
+
+  it("CB-mic-15: a real final transcript is unaffected -- the interim-clearing fix never touches a box a final result already filled", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({ runs: [] }, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+
+    fire.interim("Listening…");
+    fire.final(P1_SENTENCE);
+    // R-437: a final result already empties the box on arrival
+    // (`submitText`'s own contract, CB-mic-4) -- unrelated to this fix, but
+    // the session is still "listening" until `onEnd` (CB-mic-8's own doc),
+    // so a stop press after a final is exactly the case this fix must leave
+    // alone.
+    expect(input.value).toBe("");
+
+    fireEvent.click(micButton); // stop, same button, still listening
+
+    expect(input.value).toBe("");
+  });
 });
 
 /**
@@ -6559,8 +6623,15 @@ describe("CP: a finished turn is bubbles, not prefixed lines (R-428)", () => {
     });
     expect(bs[1].side).toBe("board");
     expect(bs[1].text).toContain('Which person? "Sam" matches 2:');
-    expect(bs[2].side).toBe("board");
-    expect(bs[2].text).toContain("Written:");
+    // F-207 (CONTRACT CHANGED, CLAUDE.md §4): a button press now draws its
+    // own answer bubble too, the same one a spoken/typed answer draws (the
+    // chip tick alone, on the bubble above, was not enough to read voice
+    // and button the same way -- CH-answer-2, below, is this fix's own
+    // pin). It sits between the question and the result, so the result is
+    // now bs[3], not bs[2].
+    expect(bs[2]).toEqual({ side: "you", text: "Sam Patel" });
+    expect(bs[3].side).toBe("board");
+    expect(bs[3].text).toContain("Written:");
   });
 
   it("CP-2: the offered chips sit inside the board's own bubble, the chosen one marked", () => {
@@ -6609,6 +6680,136 @@ describe("CP: a finished turn is bubbles, not prefixed lines (R-428)", () => {
     for (const el of Array.from(turn.querySelectorAll("[data-side]"))) {
       expect(el.tagName).toBe("DIV");
     }
+  });
+
+  // F-207 (the maintainer's spoken walk, 23 Sept, trace 20:01:17 -> 20:01:49):
+  // a button press already reads back through the chip tick (CP-2, above),
+  // but a VOICE or TYPED answer folded straight into `turn.answered` with no
+  // bubble at all -- a "say or type yes" question has no chips to tick in
+  // the first place, so nothing on screen changed until the result line
+  // landed, and the person said "yes" again and got "Nothing to say yes
+  // to." CH-answer-1..3 pin the fix (`turn.answered !== null &&
+  // turn.answered !== "auto"` draws a "you" bubble reading the literal
+  // answer); CH-answer-4 is CH-scroll, above -- every one of its 20 turns is
+  // built with `answered: "auto"` and empty `offered`, so this fix must
+  // (and does, per that pin's own still-green run) draw exactly as many
+  // bubbles as it always did.
+  it("CH-answer-1: a typed 'yes' to a confirm question (no chips at all) shows a 'you' bubble reading 'yes', between the question and the result", () => {
+    const { input } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const [turn] = threadTurns();
+    const bs = bubbles(turn);
+    expect(bs[0]).toEqual({ side: "you", text: UNASSIGN_SENTENCE });
+    expect(bs[1].side).toBe("board");
+    expect(bs[1].text).toContain("say or type yes to do it, no to leave it.");
+    // The one chip-less question kind F-207's own trace named: nothing
+    // above this bubble could have ticked, so this is the ONLY place the
+    // answer shows at all.
+    expect(bs[2]).toEqual({ side: "you", text: "yes" });
+    expect(bs[3].side).toBe("board");
+    expect(bs[3].text).toContain("Written:");
+  });
+
+  it("CH-answer-1b: a SPOKEN final 'yes' (CB-yes-5's own setup) shows the identical bubble a typed 'yes' does", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({ assignments: [BLK1] }, null, recognizer);
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    fire.final("yes");
+
+    const [turn] = threadTurns();
+    const bs = bubbles(turn);
+    expect(bs[2]).toEqual({ side: "you", text: "yes" });
+    expect(bs[3].side).toBe("board");
+    expect(bs[3].text).toContain("Written:");
+  });
+
+  it("CH-answer-2: a button-picked candidate draws the same answer bubble a spoken/typed answer would, and keeps its own chip tick too", () => {
+    stubFetch();
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, {
+      target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+
+    const [turn] = threadTurns();
+    const bs = bubbles(turn);
+    // The tick stays on the chip inside the question's own bubble (CP-2) --
+    // this is the SAME turn's new bubble alongside it, not a replacement.
+    expect(bs[1].side).toBe("board");
+    expect(bs[1].text).toContain("Sam Patel ✓");
+    expect(bs[2]).toEqual({ side: "you", text: "Sam Patel" });
+    expect(bs[3].side).toBe("board");
+    expect(bs[3].text).toContain("Written:");
+  });
+
+  it('CH-answer-3: a turn with no real question (an unambiguous single that ran straight off its own readout, `answered: "auto"`) shows no answer bubble', () => {
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const [turn] = threadTurns();
+    const bs = bubbles(turn);
+    // Exactly the "you" (heard) bubble and the board side's own two
+    // (the readout `asked`, then the "Written:" result) -- no third "you"
+    // bubble for the "auto" sentinel `settleWrite`'s own doc names ("never
+    // asked anything and never answered by a word or a button").
+    expect(bs.filter((b) => b.side === "you")).toHaveLength(1);
+    expect(bs).toHaveLength(3);
+  });
+
+  // F-207 review fix (the maintainer, 23 Sept): "escape" is `handleKeyDown`'s
+  // own sentinel for a CANCEL, not a word the person said -- `NON_ANSWER_
+  // SENTINELS` (`CommandBar.tsx`, above `turnResultLine`) excludes it
+  // alongside "auto" for exactly that reason.
+  it("CH-answer-5: a question cancelled by Escape shows no answer bubble", () => {
+    const { input } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    const [turn] = threadTurns();
+    const bs = bubbles(turn);
+    // Only the heard bubble is "you" -- no second one reading "escape".
+    expect(bs.filter((b) => b.side === "you")).toHaveLength(1);
+    expect(bs.some((b) => b.text === "escape")).toBe(false);
+  });
+
+  describe("S71-i review", () => {
+    it("a spoken override REASON (F-197's path) shows as its own 'you' bubble, and the trace is unaffected", () => {
+      const fetchMock = stubFetch();
+      const { input } = renderBar({
+        certificateGaps: (operatorId: string, nodeId: string) =>
+          operatorId === "op1" && nodeId === "c1a"
+            ? [{ skill: "Welding", state: "never-trained" as const }]
+            : [],
+        eligibilityPolicy: () => "warn",
+      });
+      fireEvent.change(input, { target: { value: P1_SENTENCE } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.change(input, { target: { value: "Covering an absence" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      const [turn] = threadTurns();
+      const bs = bubbles(turn);
+      expect(bs[0]).toEqual({ side: "you", text: P1_SENTENCE });
+      expect(bs[1].side).toBe("board");
+      expect(bs[1].text).toContain("not certified");
+      expect(bs[2]).toEqual({ side: "you", text: "Covering an absence" });
+      expect(bs[3].side).toBe("board");
+      expect(bs[3].text).toContain("Written:");
+
+      const entry = postedEntry(fetchMock);
+      expect(entry.answered).toBe("Covering an absence");
+      expect(entry.outcome).toBe("written");
+    });
   });
 
   // CP-5 (S63-a review fix, the maintainer looking at the panel: "assign Sam
