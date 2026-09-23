@@ -318,6 +318,35 @@ export function whisperServiceUrl(): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+/**
+ * F-201: whisper.cpp's server hallucinates a non-speech TAG for a clip with
+ * no words in it, never an empty string -- F-198's own review measured
+ * `" (clippers buzzing)\n"` for a long quiet clip and `" [BLANK_AUDIO]\n"`
+ * for literal digital silence (see `QUIET_SEND_FACTOR`'s note above); the
+ * maintainer's 23 Sept walk hit a THIRD shape live, `"[Music]"`, between two
+ * spoken sentences -- the bar read it as a heard sentence and the model
+ * answered "unassign everyone on today", which ran as far as F-199's own
+ * `-840` bug before that stopped it. whisper.cpp writes such tags in square
+ * brackets or parentheses -- `[Music]`, `[BLANK_AUDIO]`, `(clippers
+ * buzzing)`, `[inaudible]`, `(applause)` are the ones seen so far, but the
+ * shape (a bracketed or parenthesised run with no real words in it) is the
+ * rule, not this list. Every such run is stripped, whitespace is collapsed
+ * and trimmed, and what is left is the words only -- a transcript that is
+ * ONLY tags comes back `""`, exactly like whisper.cpp's own genuine empty
+ * answer, so the caller's existing `text === ""` -> `no-speech` check
+ * catches it with no second path to keep in sync. A transcript with real
+ * words AND a tag (`"[Music] clear Cell 3 today"`) keeps the words. A
+ * sentence with real brackets a person could actually say ("say the number
+ * (2) twice") is not a concern this strips for -- nobody speaks a bracket.
+ */
+export function stripNonSpeechTags(text: string): string {
+  return text
+    .replace(/\[[^[\]]*\]/g, " ")
+    .replace(/\([^()]*\)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function isNotAllowedError(err: unknown): boolean {
   return typeof err === "object" && err !== null && "name" in err && err.name === "NotAllowedError";
 }
@@ -467,12 +496,16 @@ export function localRecognizer(
         return;
       }
 
-      const text =
+      const rawText =
         typeof payload === "object" &&
         payload !== null &&
         typeof (payload as { text?: unknown }).text === "string"
           ? (payload as { text: string }).text.trim()
           : "";
+      // F-201: strip a hallucinated non-speech tag ("[Music]",
+      // "[BLANK_AUDIO]", "(clippers buzzing)") before it ever reaches the
+      // bar -- see `stripNonSpeechTags`'s own doc above.
+      const text = stripNonSpeechTags(rawText);
       if (text === "") {
         events.onError("no-speech");
         events.onEnd();

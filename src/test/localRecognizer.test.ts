@@ -929,6 +929,105 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
     expect(h.events.onFinal).toHaveBeenCalledWith("yes");
     expect(h.events.onError).not.toHaveBeenCalled();
   });
+
+  // ---------------------------------------------------------------------
+  // LREC-29 (F-201): whisper.cpp answers a clip with no real words in it
+  // with a bracketed or parenthesised TAG, never an empty string -- see
+  // `stripNonSpeechTags`'s own doc in `localRecognizer.ts`. The maintainer's
+  // 23 Sept walk hit "[Music]" live, between two sentences; the bar read it
+  // as heard speech and the model answered an unassign of everyone, which
+  // ran into F-199's own `-840` bug before it stopped. Each case here still
+  // drives real ABOVE_FLOOR frames (unlike LREC-6's genuine no-speech,
+  // which never reaches the network at all) -- the mic DID hear something,
+  // Whisper is the one that answered nothing but a tag.
+  // ---------------------------------------------------------------------
+
+  it("LREC-29a: a whisper.cpp '[Music]' tag alone is no-speech, never a heard sentence (F-201)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "[Music]" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.events.onFinal).not.toHaveBeenCalled();
+    expect(h.events.onError).toHaveBeenCalledWith("no-speech");
+    expect(h.events.onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("LREC-29b: '[BLANK_AUDIO]' alone is the same -- no-speech, onFinal never called (F-201)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: " [BLANK_AUDIO]\n" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onFinal).not.toHaveBeenCalled();
+    expect(h.events.onError).toHaveBeenCalledWith("no-speech");
+  });
+
+  it("LREC-29c: '(clippers buzzing)' alone is the same -- no-speech, onFinal never called (F-201, the F-198 review's own measured hallucination)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: " (clippers buzzing)\n" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onFinal).not.toHaveBeenCalled();
+    expect(h.events.onError).toHaveBeenCalledWith("no-speech");
+  });
+
+  it("LREC-29d: '[Music] clear Cell 3 today' sends the words only, tag dropped (F-201)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "[Music] clear Cell 3 today" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onFinal).toHaveBeenCalledWith("clear Cell 3 today");
+    expect(h.events.onError).not.toHaveBeenCalled();
+  });
+
+  it("LREC-29e: a plain sentence with no tag at all is unchanged (F-201, no regression)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: " put ana on cell one " }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onFinal).toHaveBeenCalledWith("put ana on cell one");
+    expect(h.events.onError).not.toHaveBeenCalled();
+  });
 });
 
 describe("LREC: withFallback (S57-a brief §4, design-plan D131 §3)", () => {

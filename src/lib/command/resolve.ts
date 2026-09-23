@@ -3191,12 +3191,34 @@ function clockOfOffset(offsetMin: number, ctx: ResolveContext): ClockTime {
   return { hour: Math.floor(minuteOfDay / 60), minute: minuteOfDay % 60 };
 }
 
+/**
+ * F-199: a block's own END, read as a `ClockTime` -- `ctx.wallOf` returns
+ * `minuteOfDay` 0..1439 by contract, so a block ending exactly at midnight
+ * (the START of the NEXT calendar day) comes back `{hour:0,minute:0}`, the
+ * SAME day's own midnight, if read the plain `clockOfOffset` way. This is
+ * the same shape `copyableSpan` (~4830, `expandCopy`'s own DAY_END rule)
+ * already guards: when the end's wall day is exactly one past the start's
+ * and its minute-of-day is exactly 0, the end is the start day's DAY_END,
+ * never minute 0 of that day. Reused here, not reinvented, for
+ * `expandEveryoneUnassign`'s own removal readout (`hoursOfBlock` below) --
+ * the previous plain read is what turned Sam Patel's 14:00-00:00 block into
+ * a `too_short` "-840 minutes" question, four times, and emptied nothing.
+ */
+function clockOfBlockEnd(startMin: number, endMin: number, ctx: ResolveContext): ClockTime {
+  const startWall = ctx.wallOf(startMin);
+  const endWall = ctx.wallOf(endMin);
+  if (endWall.dayIndex === startWall.dayIndex + 1 && endWall.minuteOfDay === 0) {
+    return { hour: DAY_END_HOUR, minute: DAY_END_MINUTE };
+  }
+  return clockOfOffset(endMin, ctx);
+}
+
 function hoursOfBlock(
   startMin: number,
   endMin: number,
   ctx: ResolveContext,
 ): { start: ClockTime; end: ClockTime } {
-  return { start: clockOfOffset(startMin, ctx), end: clockOfOffset(endMin, ctx) };
+  return { start: clockOfOffset(startMin, ctx), end: clockOfBlockEnd(startMin, endMin, ctx) };
 }
 
 /**
