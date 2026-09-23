@@ -216,6 +216,10 @@ function makeHarness(opts?: {
     // is optional on `RecognizerEvents` -- every existing test's `events`
     // fake still satisfies the type with it simply unused.
     onClip: vi.fn(),
+    // S71-j (R-454): same reason as `onClip` above -- optional on
+    // `RecognizerEvents`, present on every harness so LREC-32a's fake can
+    // assert against it without every other existing test needing a change.
+    onStatus: vi.fn(),
   };
 
   return {
@@ -262,7 +266,11 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
     h.fetchMock.mockResolvedValue(okJsonResponse({ text: " put ana on cell one " }));
     const processor = await startAndRecord(h);
 
-    expect(h.events.onInterim).toHaveBeenCalledWith("Listening…");
+    // S71-j (R-454): the recogniser's own progress is `onStatus`, never a
+    // status word run through `onInterim` (`onInterim` carries only a
+    // partial transcript now -- LREC-32a below pins the "never a status
+    // word through onInterim" half of this on its own).
+    expect(h.events.onStatus).toHaveBeenCalledWith("listening");
 
     // F-198: ONE frame above the floor is now enough to start speech (was
     // two, LREC-19 pins the one-frame minimum on its own); this happy path
@@ -288,7 +296,7 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
     const file = form.get("file") as File;
     expect(file.name).toBe("clip.wav");
 
-    expect(h.events.onInterim).toHaveBeenCalledWith("Transcribing…");
+    expect(h.events.onStatus).toHaveBeenCalledWith("transcribing");
     expect(h.events.onFinal).toHaveBeenCalledWith("put ana on cell one");
     expect(h.events.onEnd).toHaveBeenCalledTimes(1);
     expect(h.events.onError).not.toHaveBeenCalled();
@@ -340,7 +348,7 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
     handle.stop();
     await flush();
 
-    expect(h.events.onInterim).toHaveBeenCalledWith("Transcribing…");
+    expect(h.events.onStatus).toHaveBeenCalledWith("transcribing");
     expect(h.events.onFinal).toHaveBeenCalledWith("stopped early");
     expect(h.events.onEnd).toHaveBeenCalledTimes(1);
   });
@@ -428,7 +436,7 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
 
     handle.stop(); // finalises: ended, fetch in flight
     await flush();
-    expect(h.events.onInterim).toHaveBeenCalledWith("Transcribing…");
+    expect(h.events.onStatus).toHaveBeenCalledWith("transcribing");
 
     handle.stop(); // a second press while "Transcribing..." shows -- a no-op
     expect(h.audioContext.closed).toBe(true);
@@ -1508,11 +1516,113 @@ describe("LREC: withFallback (S57-a brief §4, design-plan D131 §3)", () => {
     onError: true,
     onEnd: true,
     onClip: true,
+    onStatus: true,
   } satisfies Record<keyof RecognizerEvents, true>;
 
   it("LREC-31c: shape guard -- every RecognizerEvents key is accounted for (tsc fails here if one is added and not forwarded)", () => {
     expect(Object.keys(ALL_RECOGNIZER_EVENT_KEYS).sort()).toEqual(
-      ["onClip", "onEnd", "onError", "onFinal", "onInterim"].sort(),
+      ["onClip", "onEnd", "onError", "onFinal", "onInterim", "onStatus"].sort(),
     );
+  });
+
+  // S71-j (R-454, docs/agent-briefs/s71-j-progress-words-out-of-the-input-
+  // brief.md §2): `onStatus` is the recogniser's own progress, forwarded by
+  // `withFallback` on both legs exactly as `onClip` is (LREC-31a/b's own
+  // shape) -- LREC-32a pins the two call sites inside `localRecognizer`
+  // itself (never a status word through `onInterim` any more); LREC-32b
+  // pins `withFallback`'s forwarding.
+  it("LREC-32a: onStatus('listening') fires on start, onStatus('transcribing') when the clip is posted, and onInterim is never called with a status word", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "put ana on cell one" }));
+    const processor = await startAndRecord(h);
+
+    expect(h.events.onStatus).toHaveBeenNthCalledWith(1, "listening");
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+
+    expect(h.events.onStatus).toHaveBeenNthCalledWith(2, "transcribing");
+    expect(h.events.onFinal).toHaveBeenCalledWith("put ana on cell one");
+    for (const call of h.events.onInterim.mock.calls) {
+      expect(call[0]).not.toBe("Listening…");
+      expect(call[0]).not.toBe("Transcribing…");
+    }
+    expect(h.events.onInterim).not.toHaveBeenCalled();
+  });
+
+  it("LREC-32b: withFallback forwards onStatus on both the local and the browser (fallback) leg", () => {
+    let localEvents!: RecognizerEvents;
+    const local: Recognizer = (events) => {
+      localEvents = events;
+      return { stop: vi.fn() };
+    };
+    const { recognizer: browser, started } = fakeBrowserRecognizer();
+    const wrapped = withFallback(local, browser);
+    const barEvents = {
+      onInterim: vi.fn(),
+      onFinal: vi.fn(),
+      onError: vi.fn(),
+      onEnd: vi.fn(),
+      onClip: vi.fn(),
+      onStatus: vi.fn(),
+    };
+    wrapped(barEvents as unknown as RecognizerEvents);
+
+    localEvents.onStatus?.("listening");
+    expect(barEvents.onStatus).toHaveBeenCalledWith("listening");
+
+    localEvents.onError("other", "local recogniser not answering");
+    localEvents.onEnd();
+    expect(started).toHaveLength(1);
+
+    started[0].onStatus?.("transcribing");
+    expect(barEvents.onStatus).toHaveBeenCalledWith("transcribing");
+  });
+
+  // Reviewer fix: the local leg can report "transcribing" (a clip posted)
+  // and THEN error out (the fetch itself failing, kind "other") before any
+  // final text -- withFallback starts the browser leg in that case exactly
+  // as LREC-32b's own second half does, but the label was left reading the
+  // local leg's stale "transcribing" with nothing to say the browser leg
+  // actually starts back at "listening". LREC-32c pins that withFallback
+  // fires onStatus("listening") itself, before the browser leg's own first
+  // callback, whenever it hands off.
+  it("LREC-32c: the local leg fires 'transcribing' then errors 'other' -- withFallback reports 'listening' again before the browser leg's first callback", () => {
+    let localEvents!: RecognizerEvents;
+    const local: Recognizer = (events) => {
+      localEvents = events;
+      return { stop: vi.fn() };
+    };
+    const { recognizer: browser, started } = fakeBrowserRecognizer();
+    const wrapped = withFallback(local, browser);
+    const barEvents = {
+      onInterim: vi.fn(),
+      onFinal: vi.fn(),
+      onError: vi.fn(),
+      onEnd: vi.fn(),
+      onClip: vi.fn(),
+      onStatus: vi.fn(),
+    };
+    wrapped(barEvents as unknown as RecognizerEvents);
+
+    localEvents.onStatus?.("listening");
+    localEvents.onStatus?.("transcribing");
+    barEvents.onStatus.mockClear();
+
+    localEvents.onError("other", "local recogniser not answering");
+
+    expect(started).toHaveLength(1);
+    expect(barEvents.onStatus).toHaveBeenCalledWith("listening");
+    // The "listening" report reaches the bar BEFORE the browser leg's own
+    // first callback -- an interim it fires right after must not race a
+    // stale "transcribing" label.
+    started[0].onInterim("put ana");
+    expect(barEvents.onStatus).toHaveBeenLastCalledWith("listening");
   });
 });

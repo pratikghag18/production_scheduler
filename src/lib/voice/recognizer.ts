@@ -49,7 +49,9 @@ export interface ClipInfo {
 }
 
 export interface RecognizerEvents {
-  /** What has been heard so far; may be revised by a later call. */
+  /** What has been heard so far; may be revised by a later call. A PARTIAL
+   *  TRANSCRIPT ONLY -- never a status word. See `onStatus` (S71-j) for the
+   *  recogniser's own progress. */
   onInterim(text: string): void;
   /** The sentence is final; listening ends after this (an `onEnd` follows). */
   onFinal(text: string): void;
@@ -61,6 +63,17 @@ export interface RecognizerEvents {
    *  service, right before the request goes out. Optional so every existing
    *  caller and test needs no change. */
   onClip?(info: ClipInfo): void;
+  /** S71-j (R-454, docs/agent-briefs/s71-j-progress-words-out-of-the-input-
+   *  brief.md): the recogniser's own PROGRESS, never a transcript --
+   *  "listening" while the microphone is open waiting for speech to start,
+   *  "transcribing" once a clip has been posted to the service and an
+   *  answer is awaited. This is what `localRecognizer.ts` used to send as a
+   *  literal status word through `onInterim` ("Listening…"/"Transcribing…");
+   *  it no longer does. Optional so every existing caller and test needs no
+   *  change; only `localRecognizer.ts` fires it today (the browser leg
+   *  streams results directly and has no separate "posted, awaiting" phase
+   *  of its own to report). */
+  onStatus?(phase: "listening" | "transcribing"): void;
 }
 
 export interface RecognizerHandle {

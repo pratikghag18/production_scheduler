@@ -441,6 +441,13 @@ function makeFakeRecognizer() {
       clip(info: ClipInfo): void {
         act(() => captured?.onClip?.(info));
       },
+      // S71-j (R-454, brief docs/agent-briefs/s71-j-progress-words-out-of-
+      // the-input-brief.md §2): fires `onStatus`, the recogniser's own
+      // progress -- `localRecognizer.ts` sends "listening" on start and
+      // "transcribing" once a clip is posted, never through `onInterim`.
+      status(phase: "listening" | "transcribing"): void {
+        act(() => captured?.onStatus?.(phase));
+      },
     },
   };
 }
@@ -3768,17 +3775,23 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     expect(neverResolves).toHaveBeenCalledTimes(1);
     expect(captured.signal?.aborted).toBe(true);
     expect(micButton.getAttribute("aria-pressed")).toBe("true");
+    // S71-j (R-454): every session starts in the "listening" phase the
+    // instant it starts (`startListening`'s own `setMicPhase("listening")`),
+    // whether or not this recogniser itself ever reports `onStatus` -- the
+    // same reason `CL-8` (`commandLauncher.test.tsx`) still passes unchanged
+    // against a bare fake recogniser that fires nothing at all.
     expect(screen.getByText("Listening…")).toBeTruthy();
   });
 
-  it("CB-mic-3: an interim result puts the heard text in the input", () => {
+  it("CB-mic-3: an interim result shows the heard text as the input's placeholder, never its value", () => {
     const { recognizer, fire } = makeFakeRecognizer();
     const { input } = renderBar({}, null, recognizer);
     fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
 
     fire.interim("put ana");
 
-    expect(input.value).toBe("put ana");
+    expect(input.value).toBe("");
+    expect(input.getAttribute("placeholder")).toBe("put ana");
   });
 
   it("CB-mic-4: a final result submits exactly as Enter does", async () => {
@@ -3956,68 +3969,160 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     expect(screen.queryByRole("button", { name: "Speak a sentence" })).toBeNull();
   });
 
-  // F-206 (the maintainer's screenshot, 23 Sept): `onInterim`'s very first
-  // call is the literal status word "Listening…" (`localRecognizer.ts` ~694)
-  // -- `stopListening()`'s own long-standing contract keeps the box's text
-  // on a second mic press (or Escape) "for a half-typed sentence", right for
-  // real typed text but wrong for a status word the person never typed or
-  // said. CB-mic-13..15 pin the fix: a ref remembers the box's text came
-  // from an interim, cleared by a typed edit or a real submission, and
-  // `stopListening()` clears the box only when it STILL reads exactly that
-  // last interim.
-  it("CB-mic-13: mic on, interim 'Listening…', mic off -- the box is empty, not left reading the status word", () => {
+  // S71-j (R-454, docs/agent-briefs/s71-j-progress-words-out-of-the-input-
+  // brief.md): the maintainer's 23 Sept screenshot -- "Why is it writing the
+  // listening and transcribing in the chat box?" -- widened F-206's own fix
+  // into a rule with no ref to maintain at all: the recogniser's progress is
+  // a separate `onStatus` event now (never routed through `onInterim`), and
+  // `onInterim` itself no longer writes into the input's VALUE -- only its
+  // placeholder. So the box's value is simply "" or exactly what the person
+  // typed, at every point in a session, with nothing left for a second mic
+  // press to clean up. CB-mic-13..15 are rewritten to that contract (in
+  // place of F-206's now-unnecessary ref); CB-mic-16..19 pin the new
+  // `interimHint`/`micPhase` machinery directly.
+  it("CB-mic-13: mic on, a partial transcript arrives, mic off -- the box's value stays empty throughout (an interim is never written into the value)", () => {
     const { recognizer, fire } = makeFakeRecognizer();
     const { input } = renderBar({}, null, recognizer);
     const micButton = screen.getByRole("button", { name: "Speak a sentence" });
     fireEvent.click(micButton);
 
-    fire.interim("Listening…");
-    expect(input.value).toBe("Listening…");
+    fire.status("listening");
+    fire.interim("put ana");
+    expect(input.value).toBe("");
 
     fireEvent.click(micButton); // stop
 
     expect(input.value).toBe("");
   });
 
-  it("CB-mic-14: typed text, THEN mic pressed and an interim arrives (overwriting it, today's existing behaviour) -- mic off leaves the box empty, the typed text is NOT restored", () => {
+  it("CB-mic-14: typed text survives an interim arriving and the mic being pressed off -- nothing overwrites or restores it", () => {
     const { recognizer, fire } = makeFakeRecognizer();
     const { input } = renderBar({}, null, recognizer);
     fireEvent.change(input, { target: { value: "clear cell 3" } });
 
     const micButton = screen.getByRole("button", { name: "Speak a sentence" });
     fireEvent.click(micButton);
-    // `onInterim` unconditionally calls `setText` (its own long-standing
-    // contract, unchanged by this fix) -- the typed text is already gone
-    // the moment the first interim arrives, before `stopListening` is ever
-    // reached.
-    fire.interim("Listening…");
-    expect(input.value).toBe("Listening…");
+    // Under the new contract `onInterim` never touches the value (only the
+    // placeholder, CB-mic-17) -- the typed text is untouched the moment the
+    // interim arrives, unlike the old (F-206) behaviour this replaces.
+    fire.interim("put ana");
+    expect(input.value).toBe("clear cell 3");
 
     fireEvent.click(micButton); // stop
 
-    // The interim is gone (F-206's own fix); nothing puts "clear cell 3"
-    // back -- it was overwritten, not saved, by the press.
-    expect(input.value).toBe("");
+    expect(input.value).toBe("clear cell 3");
   });
 
-  it("CB-mic-15: a real final transcript is unaffected -- the interim-clearing fix never touches a box a final result already filled", () => {
+  it("CB-mic-15: a real final transcript is unaffected by the placeholder/phase rewrite -- it still empties the box on arrival and stays empty after a later stop", () => {
     const { recognizer, fire } = makeFakeRecognizer();
     const { input } = renderBar({ runs: [] }, null, recognizer);
     const micButton = screen.getByRole("button", { name: "Speak a sentence" });
     fireEvent.click(micButton);
 
-    fire.interim("Listening…");
+    fire.status("listening");
+    fire.interim("put ana");
     fire.final(P1_SENTENCE);
     // R-437: a final result already empties the box on arrival
-    // (`submitText`'s own contract, CB-mic-4) -- unrelated to this fix, but
-    // the session is still "listening" until `onEnd` (CB-mic-8's own doc),
-    // so a stop press after a final is exactly the case this fix must leave
+    // (`submitText`'s own contract, CB-mic-4) -- unrelated to this rewrite,
+    // but the session is still "listening" until `onEnd` (CB-mic-8's own
+    // doc), so a stop press after a final is exactly the case it must leave
     // alone.
     expect(input.value).toBe("");
 
     fireEvent.click(micButton); // stop, same button, still listening
 
     expect(input.value).toBe("");
+  });
+
+  it('CB-mic-16: while listening the input value stays "" and the mic label reads "Listening…"', () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+
+    fire.status("listening");
+
+    expect(input.value).toBe("");
+    expect(screen.getByText("Listening…")).toBeTruthy();
+  });
+
+  it('CB-mic-17: a partial transcript arrives -- the input value stays "" and its placeholder shows the partial', () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+
+    fire.status("listening");
+    fire.interim("put ana on cell");
+
+    expect(input.value).toBe("");
+    expect(input.getAttribute("placeholder")).toBe("put ana on cell");
+  });
+
+  it('CB-mic-18: phase "transcribing" shows "Transcribing…" beside the mic', () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+
+    fire.status("listening");
+    fire.status("transcribing");
+
+    expect(screen.getByText("Transcribing…")).toBeTruthy();
+    expect(screen.queryByText("Listening…")).toBeNull();
+  });
+
+  it('CB-mic-19: the person had typed "clear" and pressed the mic -- the typed text is untouched by an interim or a status', () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    fireEvent.change(input, { target: { value: "clear" } });
+
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+    fire.status("listening");
+    fire.interim("clear cell 3");
+
+    expect(input.value).toBe("clear");
+  });
+});
+
+// S71-j review: F-206's own two reproductions, re-run against the new
+// interimHint/micPhase contract rather than the retired lastInterimTextRef --
+// a stop must still leave the placeholder reading the ordinary default, not
+// a stale status word or a stale partial transcript.
+describe("S71-j review", () => {
+  it("mic on, stop before any transcript -- the input is empty and the placeholder is back to the default", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+
+    fire.status("listening");
+
+    fireEvent.click(micButton); // stop, before any interim or final
+
+    expect(input.value).toBe("");
+    expect(input.getAttribute("placeholder")).toBe(
+      "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2",
+    );
+  });
+
+  it("mic on, a partial transcript arrives, stop -- the placeholder is back to the default, not the stale partial", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    fireEvent.click(micButton);
+
+    fire.status("listening");
+    fire.interim("clear cel");
+    expect(input.getAttribute("placeholder")).toBe("clear cel");
+
+    fireEvent.click(micButton); // stop
+
+    expect(input.value).toBe("");
+    expect(input.getAttribute("placeholder")).toBe(
+      "Assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2",
+    );
   });
 });
 

@@ -586,7 +586,7 @@ export function localRecognizer(
       teardown();
       if (!speechStarted) {
         if (reason === "cap" && hadQuietSound) {
-          events.onInterim("Transcribing…");
+          events.onStatus?.("transcribing");
           const start = Math.max(0, (firstQuietFrameIndex ?? 0) - QUIET_CLIP_PAD_FRAMES);
           const end = Math.min(
             frames.length,
@@ -601,7 +601,7 @@ export function localRecognizer(
         events.onEnd();
         return;
       }
-      events.onInterim("Transcribing…");
+      events.onStatus?.("transcribing");
       void transcribe(frames, reason);
     }
 
@@ -691,7 +691,7 @@ export function localRecognizer(
       if (stopRequested) finalize("stop");
     }
 
-    events.onInterim("Listening…");
+    events.onStatus?.("listening");
 
     d.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }).then(
       (mediaStream) => {
@@ -800,12 +800,20 @@ export function withFallback(
         if (kind === "other" && !gotFinal && browser !== null) {
           fellBack = true;
           onEngine?.("browser");
+          // Reviewer fix (LREC-32c): the local leg may have already reported
+          // "transcribing" (a clip was posted, then the fetch itself failed)
+          // -- the browser leg it hands off to starts back at "listening",
+          // not mid-transcribe, so the label must say so again before its
+          // first callback, not sit on the stale phase the failed leg left
+          // behind.
+          events.onStatus?.("listening");
           currentHandle = browser({
             onInterim: events.onInterim,
             onFinal: events.onFinal,
             onError: events.onError,
             onEnd: events.onEnd,
             onClip: events.onClip,
+            onStatus: events.onStatus,
           });
           return;
         }
@@ -816,6 +824,10 @@ export function withFallback(
         events.onEnd();
       },
       onClip: events.onClip,
+      // S71-j (R-454): forwarded on this (local) leg the same way `onClip`
+      // is -- LREC-32b pins both legs, the same shape LREC-31a/b already
+      // pin for `onClip`.
+      onStatus: events.onStatus,
     });
 
     return {

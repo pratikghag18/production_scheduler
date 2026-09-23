@@ -1025,17 +1025,24 @@ export function CommandBar({
   // findings 1-3).
   const recognitionRef = useRef<RecognizerHandle | null>(null);
   const recognitionSeqRef = useRef(0);
-  // F-206: the last INTERIM text `onInterim` put in the box (the literal
-  // "Listening…" the very first one always is, `localRecognizer.ts` ~694,
-  // or a partial transcript after it) -- `null` whenever the box's current
-  // text did not come from an interim, or came from one but has since been
-  // superseded by a typed edit (`handleChange`) or an actual submission
-  // (`submitText`), both of which clear this. `stopListening()` below reads
-  // it once, on a second mic press or Escape, to tell "a half-typed
-  // sentence, kept on purpose" (this function's own long-standing contract)
-  // apart from a bare status word never actually typed, left behind because
-  // the person stopped before saying anything else.
-  const lastInterimTextRef = useRef<string | null>(null);
+  // S71-j (R-454, docs/agent-briefs/s71-j-progress-words-out-of-the-input-
+  // brief.md): the maintainer's 23 Sept screenshot -- "Why is it writing the
+  // listening and transcribing in the chat box? ... there is also a
+  // listening indicator right by the microphone" -- the input never shows a
+  // word the person did not type or say. `interimHint` is the recogniser's
+  // latest PARTIAL transcript (`onInterim`, below), shown only as the
+  // input's placeholder (`answerTakes(status) ?? PLACEHOLDER` still wins
+  // once this is empty again); `micPhase` is the recogniser's own progress
+  // (`onStatus`, "listening" or "transcribing"), shown beside the mic
+  // button, never in the box at all. Both are reset in `endSession()` below
+  // -- a fresh press starts with neither standing from the last session.
+  // This replaces F-206's own `lastInterimTextRef` (S71-i): that ref existed
+  // only to tell a genuinely typed sentence apart from a status word
+  // `onInterim` had written into the same box's VALUE; now that neither an
+  // interim nor a status word is ever written into the value at all, there
+  // is nothing left for a second mic press to clean up there.
+  const [interimHint, setInterimHint] = useState("");
+  const [micPhase, setMicPhase] = useState<"listening" | "transcribing" | null>(null);
   // S59-e (R-421, brief §3): one trace entry in progress for the CURRENT
   // sentence, `null` whenever none is open. A ref, not state, same reason as
   // `heldRef`/`lotRef` above: read and written from event handlers and one
@@ -2832,10 +2839,6 @@ export function CommandBar({
     // untouched either way -- "Working…" stands until `runLotNow`'s own
     // `.then()` replaces it.
     if (runningLotRef.current) return;
-    // F-206: a typed keystroke is never an interim, whatever the box held
-    // before it (kept text or an interim word) -- `stopListening()` must not
-    // later mistake this typed text for the interim it followed.
-    lastInterimTextRef.current = null;
     setText(e.target.value);
     // Brief 6: "Any edit to the input clears the held command and its
     // attach (a new sentence is a new question)." Clearing the held command
@@ -2898,16 +2901,16 @@ export function CommandBar({
     // question standing long enough to ask.
     //
     // This handler is the DOM input's own `onChange` -- `onInterim` (S46-a)
-    // calls `setText` directly and never reaches here, so `status` itself is
-    // untouched by an interim result. F-197 (22 Sept): that used to be only
-    // half true in effect -- `onInterim` still unconditionally cleared
-    // `heldRef.current`, the ref an override-reason answer is re-resolved
-    // against, so a spoken reason lost its held command even though the
-    // question stayed on screen. `onInterim` now carries the same
-    // `answerTakes`-gated guard this block does, so a speech result that is
-    // still interim (the person may be about to say "yes", or still
-    // speaking a reason) leaves both the question AND the command it will
-    // answer alone, on purpose.
+    // never reaches here at all (S71-j: it sets `interimHint`, the
+    // placeholder, not `text`), so `status` itself is untouched by an
+    // interim result. F-197 (22 Sept): that used to be only half true in
+    // effect -- `onInterim` still unconditionally cleared `heldRef.current`,
+    // the ref an override-reason answer is re-resolved against, so a spoken
+    // reason lost its held command even though the question stayed on
+    // screen. `onInterim` carries the same `answerTakes`-gated guard this
+    // block does, so a speech result that is still interim (the person may
+    // be about to say "yes", or still speaking a reason) leaves both the
+    // question AND the command it will answer alone, on purpose.
     //
     // S51 (brief §2 item 1): a typed edit drops a standing LOT entirely,
     // same as it drops a single block question -- computed off `status`
@@ -2975,10 +2978,6 @@ export function CommandBar({
     // for every TYPED call (nothing else runs between the keystroke and this
     // line), and the fix for a LATE spoken one.
     const status = store.getState().status;
-    // F-206: a submission -- typed Enter or a spoken final transcript -- is
-    // never an interim either, whatever ref value the box's last interim
-    // left behind.
-    lastInterimTextRef.current = null;
     // S51 review fix: a lot writing in the background cannot be cancelled
     // or re-confirmed out from under itself -- Enter on ANY word (a cancel
     // word, a stray "yes", an ordinary sentence) is a no-op while
@@ -3387,28 +3386,24 @@ export function CommandBar({
     // session starts next -- dropped here rather than left for
     // `attachPendingClip`'s own `seq` check to catch later.
     pendingClipRef.current = null;
+    // S71-j (R-454): a session's own progress and interim hint die with it
+    // -- neither carries into whatever the box shows next (a typed sentence,
+    // idle, or a fresh session's own first "listening").
+    setInterimHint("");
+    setMicPhase(null);
   }
 
   /** S46-a: stops the in-flight recognition session, if any -- shared by a
    *  second press of the mic button and by Escape while listening. Text is
-   *  kept and the status line is left untouched (brief §2.2). */
+   *  kept and the status line is left untouched (brief §2.2). S71-j: this
+   *  used to also decide (via F-206's `lastInterimTextRef`) whether the
+   *  box's TEXT was a half-typed sentence worth keeping or just the last
+   *  status word `onInterim` had written into it -- moot now that neither a
+   *  status word nor an interim transcript is ever written into the text at
+   *  all (`onInterim` only ever sets `interimHint`, the placeholder), so
+   *  there is nothing left here to clean up. */
   function stopListening(): void {
     recognitionRef.current?.stop();
-    // F-206 (the maintainer's screenshot, 23 Sept): the box's text is kept
-    // on a stop, on purpose, for a half-typed sentence -- but the FIRST
-    // interim a session ever fires is the literal "Listening…" status word,
-    // never something the person said or typed, and a later interim is a
-    // partial transcript, not a finished sentence either. If the box still
-    // reads exactly the last interim `onInterim` put there -- nothing typed
-    // over it, nothing submitted since -- that text is a status word, not a
-    // kept sentence, and is cleared; a typed edit or an actual submission
-    // already cleared `lastInterimTextRef` above, so this never touches
-    // genuinely typed text (CB-mic-14: the interim overwrote it first, same
-    // as `onInterim`'s own long-standing, unconditional `setText`).
-    if (lastInterimTextRef.current !== null && text === lastInterimTextRef.current) {
-      setText("");
-    }
-    lastInterimTextRef.current = null;
     endSession();
   }
 
@@ -3480,11 +3475,23 @@ export function CommandBar({
         // own mic-press guard above now uses, taken from there rather than
         // re-derived.
         if (answerTakes(status) === null) heldRef.current = null;
-        setText(interimText);
-        // F-206: remember this exact text came from an interim, so a
-        // `stopListening()` that follows before anything else changes the
-        // box can tell it apart from a genuinely typed sentence.
-        lastInterimTextRef.current = interimText;
+        // S71-j (R-454): a partial transcript is shown as the input's
+        // PLACEHOLDER only (`interimHint`, read in the JSX below) -- never
+        // written into the value the way `setText` used to. `heldRef`'s own
+        // guard above is untouched: it is about which COMMAND a spoken
+        // reason resolves against, not about what the box displays.
+        setInterimHint(interimText);
+      },
+      // S71-j (R-454): the recogniser's own progress -- "listening" while
+      // the microphone is open waiting for speech, "transcribing" once a
+      // clip has been posted and an answer is awaited. Shown beside the mic
+      // button (the JSX below), never in the box. `localRecognizer.ts` is
+      // the only caller today; a plain `browserRecognizer()` session never
+      // fires this, so `micPhase` simply stays `null` for it and the label
+      // shows nothing, unchanged from before this event existed.
+      onStatus(phase: "listening" | "transcribing"): void {
+        if (!isCurrent()) return;
+        setMicPhase(phase);
       },
       // S71-f (brief §1.B): fires once, before `onFinal`/`onError`, with
       // the clip `localRecognizer.ts` is about to post -- stashed here,
@@ -3546,6 +3553,16 @@ export function CommandBar({
     if (!isCurrent()) return;
     recognitionRef.current = handle;
     setListening(true);
+    // S71-j (R-454): every session starts in the "listening" phase, whether
+    // or not its own recogniser ever reports so itself -- `localRecognizer
+    // .ts` reports it too (synchronously, before this point, via its own
+    // `onStatus?.("listening")` above), but a plain `browserRecognizer()`
+    // session never fires `onStatus` at all and still needs the label to
+    // read "Listening…" the whole time it is open (unchanged from the
+    // pre-S71-j behaviour, which read this off `listening` alone). Only a
+    // LATER `onStatus("transcribing")` -- local only -- ever moves it past
+    // this.
+    setMicPhase("listening");
   }
 
   function handleMicClick(): void {
@@ -3887,7 +3904,11 @@ export function CommandBar({
           type="text"
           className={`${fieldStyles.field} ${styles.input}`}
           value={text}
-          placeholder={answerTakes(status) ?? PLACEHOLDER}
+          // S71-j (R-454): a recogniser's interim transcript (`interimHint`)
+          // is shown here, as the placeholder, never written into `value` --
+          // it wins over the ordinary `answerTakes(status) ?? PLACEHOLDER`
+          // placeholder only while it is non-empty.
+          placeholder={interimHint !== "" ? interimHint : (answerTakes(status) ?? PLACEHOLDER)}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
         />
@@ -3903,7 +3924,16 @@ export function CommandBar({
             >
               <Microphone size={18} filled={listening} />
             </button>
-            {listening && <span className={styles.listeningLabel}>Listening…</span>}
+            {/* S71-j (R-454): the recogniser's own progress, from
+                `onStatus` -- never a status word in the box above. `null`
+                (idle, or a plain browser session that never reports a
+                phase) renders nothing, same as `listening === false` did
+                before this event existed. */}
+            {micPhase !== null && (
+              <span className={styles.listeningLabel}>
+                {micPhase === "listening" ? "Listening…" : "Transcribing…"}
+              </span>
+            )}
           </>
         )}
       </div>
