@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-23'
-  tip: '1f5836e'
+  tip: 'dce9e7a'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12871,7 +12871,11 @@ requirements:
     ggml-base.en (74M parameters, the second-smallest model) with greedy decoding, no non-speech suppression and
     a word list as its prompt, chosen at S57 and never measured; subtitles come from the large model with beam
     search. Built by lane S71-c (docs/agent-briefs/s71-c-clip-harness-brief.md). The old S71-c queue item (the
-    34- versus 53-word hint) is one row of this matrix now.
+    34- versus 53-word hint) is one row of this matrix now. Second half the same day (S71-f, dce9e7a): every
+    clip the bar posts is kept under data/voice/trace/clips with its length, the rule that ended it and its
+    loudness, and npm run voice:clips:score -- --from-trace N replays the newest through the running container,
+    printing what Whisper wrote then and now --- so a sentence said to the board is a measurement too, and a
+    clip cut short by the recorder's rules shows as such before the model is blamed.
 findings:
 - id: F-204
   title: The thread's scroll pin went red on its own the day after it was written, because it seeded turns with fixed timestamps and the store prunes against the real clock
@@ -17860,9 +17864,9 @@ sessions:
   date: 2026-09-23
   title: "The second spoken walk answered: the two bugs that stopped it fixed, a Ctrl+M mic shortcut, the demo seeded inside each person's shift, and a clip harness so the recogniser is measured instead of walked"
   shipped: []
-  commits: ['170b851', '481d20e', '1d8d82c', 'c0578a6', '1f5836e']
+  commits: ['170b851', '481d20e', '1d8d82c', 'c0578a6', '1f5836e', '845bf39', 'dce9e7a']
   numbers:
-    app_tests: 4247
+    app_tests: 4267
     app_test_files: 168
     tsc: 0
     eslint: 0
@@ -17888,7 +17892,15 @@ sessions:
     "8am" and "8 a.m." scored as different words and a missing declaration file). small.en is fetched; the
     container swap is the maintainer's hand (the session may not stop a running container). F-204 found on the
     way: a test pinned to yesterday's clock. The Docker VM also carries the tester's whole second stack, about
-    1.3 GB, which is the room a larger model would need.
+    1.3 GB, which is the room a larger model would need. Then the maintainer swapped the container to small.en,
+    said three sentences and asked "are we sure we got a better model? this is even worse": the whisper-server
+    log showed clips of 3.6, 7.2, 6.4, 3.3 and 5.1 s for sentences that take about seven to say, and a 3.3 s
+    clip had come back as fifteen words --- the recorder's own end rules, or the model, and nothing had kept the
+    audio to tell. A fifth lane (S71-f, dce9e7a): the bar keeps every clip it posts with its length, the rule
+    that ended it and its loudness, on the trace entry and on disk, and the scorer replays the newest through
+    any container; the reviewer found a superseded session's clip attaching to the next sentence and a file
+    name built from the request with no check, both fixed. 4267 tests after it. The next spoken sentences are
+    the first measurement.
 - id: 189
   date: 2026-09-22
   title: "After the restart: the clear lists the job, the spoken yes never reached Whisper, and the recogniser's onset rule is rebuilt against real audio (F-198)"
