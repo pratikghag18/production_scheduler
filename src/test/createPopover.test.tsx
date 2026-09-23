@@ -10,8 +10,8 @@
  * handed down as props, so the popover itself holds no rule and needs no
  * mocking to mount.
  */
-import { StrictMode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { StrictMode, type ComponentProps } from "react";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   CreatePopover,
@@ -20,6 +20,11 @@ import {
 import type { PopupReporter } from "@/features/board/store/commandConversation";
 import type { Product, BoardOperator, Skill } from "@/lib/api";
 import type { AbsenceRow } from "@/lib/absence";
+
+/** F-205: the exact shape `CreatePopover` itself declares for the prop --
+ *  extracted, not retyped (CLAUDE.md §4), so `Mock<OnSubmitDirect>` below can
+ *  never drift from the real signature the way a hand-copied one could. */
+type OnSubmitDirect = NonNullable<ComponentProps<typeof CreatePopover>["onSubmitDirect"]>;
 
 const WINDOW_START = new Date("2026-08-24T00:00:00.000Z");
 
@@ -89,10 +94,21 @@ function renderPopover(
      *  opened this pop-up. Omitted everywhere else in this file, which is
      *  byte for byte the pre-F-167 behaviour. */
     onResult?: PopupReporter;
+    /**
+     * F-205: a PRE-CONFIGURED mock, for the one case the rest of this file
+     * never needed -- a rejection that must already be in place before an
+     * `autoCreate` mount fires the ONE press it ever makes (CP-flash-3). A
+     * click-driven case (CP-R1) can still call `.mockRejectedValue` on the
+     * fresh mock this returns, same as always; the mount-only auto-press
+     * cannot, because its one call happens synchronously inside `render()`,
+     * before a caller could ever reach the mock this function would
+     * otherwise have created.
+     */
+    onSubmitDirect?: Mock<OnSubmitDirect>;
   } = {},
 ) {
   const onSubmitRun = vi.fn();
-  const onSubmitDirect = vi.fn();
+  const onSubmitDirect = over.onSubmitDirect ?? vi.fn<OnSubmitDirect>();
   const onSubmitMove = vi.fn().mockResolvedValue(undefined);
   const onCancel = vi.fn();
   const ops = over.operators ?? [operator];
@@ -678,5 +694,137 @@ describe("CreatePopover — what it tells the command bar (F-167)", () => {
     // Still open: a terminal result from the pop-up that took it over lands.
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(handed).toEqual([{ kind: "handed_off", what: "split coverage" }, { kind: "cancelled" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-205 (the maintainer, 23 Sept: "when the board asks me a question, there
+// is a pop up which appears before vanishing. It happened now with selecting
+// Housing A for #4"). The pop-up already computed a clean auto-press (R-384)
+// before this -- it just PAINTED the form for one frame and the write's
+// round trip first. The hiding itself lives in the shared shell now
+// (`concealed` on `Popover`/`BoardPopover`, `popoverDrag.test.tsx`'s own
+// PS-1); this file only proves it PASSES that prop at the right moments --
+// by reading it off the shell's own `role="dialog"` root, the one element
+// both files agree on, rather than a second, local hook.
+// ---------------------------------------------------------------------------
+describe("CreatePopover — F-205: no flash while a clean auto-press is pending", () => {
+  it("CP-flash-1: autoCreate + clean -- the shell is concealed at first render, and Create was pressed exactly once", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(screen.getByRole("dialog").className).toMatch(/concealed/);
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+  });
+
+  it("CP-flash-2: autoCreate + a warning (not clean) -- the shell is not concealed, exactly as AC2, and no auto-press is taken", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(screen.getByRole("dialog").className).not.toMatch(/concealed/);
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Never trained");
+  });
+
+  it("CP-flash-3: autoCreate + clean + the server refuses -- the refusal reaches the bar through onResult, exactly as CP-R1's own refusal case asserts", async () => {
+    const refused: { kind: string; message?: string }[] = [];
+    // F-205: the mock must reject BEFORE it is ever called -- the
+    // auto-press's one call happens synchronously inside `render()`, so
+    // this is configured through `over.onSubmitDirect` (see its own note)
+    // rather than on the mock `renderPopover` would otherwise hand back
+    // afterward, which would already be too late.
+    const onSubmitDirect = vi
+      .fn<OnSubmitDirect>()
+      .mockRejectedValue(new Error("That person does not belong to this part of the structure."));
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      onSubmitDirect,
+      onResult: (r) => refused.push(r),
+    });
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+    await act(async () => {});
+    expect(refused).toHaveLength(1);
+    expect(refused[0].kind).toBe("refused");
+    expect(refused[0].message).toContain(
+      "That person does not belong to this part of the structure.",
+    );
+  });
+
+  it("CP-flash-4: a drag-opened pop-up (no autoCreate) is not concealed, as before", () => {
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      // autoCreate omitted -- a drag or a keyboard create, never a sentence.
+    });
+    expect(screen.getByRole("dialog").className).not.toMatch(/concealed/);
+  });
+
+  it("CP-flash-5: autoCreate + clean -- mounting concealed does not steal focus from whatever the person already had focused", () => {
+    const outside = document.createElement("input");
+    document.body.appendChild(outside);
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+
+    expect(screen.getByRole("dialog").className).toMatch(/concealed/);
+    // The command bar's own input (stood in for here by `outside`) keeps
+    // focus through the mount -- see the shell's own PS-3 for the un-hidden
+    // counterpart (focus moves in once concealment lifts).
+    expect(document.activeElement).toBe(outside);
+
+    outside.remove();
+  });
+
+  it("CP-flash-6: autoCreate + clean, a click elsewhere on the page during the write's round trip does not cancel it -- onResult reports written exactly once, never cancelled", async () => {
+    let resolveWrite!: (v: "written") => void;
+    const pending = new Promise<"written">((resolve) => {
+      resolveWrite = resolve;
+    });
+    const onSubmitDirect = vi.fn<OnSubmitDirect>().mockReturnValue(pending);
+    const results: { kind: string }[] = [];
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      onSubmitDirect,
+      onResult: (r) => results.push(r),
+    });
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+
+    // A click anywhere on the page while the write is still in flight --
+    // the shell's own concealed guard (PS-4) must swallow this, not read it
+    // as "outside this pop-up, cancel it".
+    fireEvent.pointerDown(document.body);
+    expect(results).toEqual([]);
+
+    await act(async () => {
+      resolveWrite("written");
+    });
+
+    expect(results).toEqual([{ kind: "written" }]);
   });
 });

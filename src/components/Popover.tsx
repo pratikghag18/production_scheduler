@@ -83,6 +83,7 @@ export function Popover({
   title,
   children,
   variant,
+  concealed,
 }: {
   anchor: { x: number; y: number };
   onClose: () => void;
@@ -90,16 +91,47 @@ export function Popover({
   children: React.ReactNode;
   /** `"wide"` for a dialog that sets two things side by side; default is the one 17rem shell. */
   variant?: "wide";
+  /**
+   * F-205: the shell stays mounted, measured and positioned -- nothing about
+   * placement, drag or the focus/Escape wiring changes -- but paints
+   * nothing. `visibility: hidden` on the shell's own outermost painted
+   * element (`.pop`, title bar included), never `display: none` and never
+   * the `hidden` attribute: this component measures ITSELF with
+   * `getBoundingClientRect` (above) to place itself, and `display: none`
+   * would report a 0x0 box, stranding the next placement once `concealed`
+   * clears (a refusal, or the caller's own answered state) rather than
+   * restoring it where the anchor actually says. A caller that opened a
+   * pop-up a sentence answered without the person deciding anything
+   * (`CreatePopover`'s own clean auto-press, R-384) is the one case this
+   * exists for; every other caller omits it and paints exactly as before.
+   */
+  concealed?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const first = el.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-    first?.focus();
+    // F-205 (reviewer): a concealed shell paints nothing, so it must not
+    // steal focus from whatever the person actually has focused -- typically
+    // the command bar's own input, mid-sentence. This re-runs whenever
+    // `concealed` changes (see the dep array below), so the SAME one-shot
+    // focus the unconcealed mount always did also fires the moment
+    // concealment LIFTS (a refusal that must now be shown, or a warning that
+    // was never concealed to begin with) -- once, on that transition, never
+    // repeated while it stays visible.
+    if (!concealed) {
+      const first = el.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      first?.focus();
+    }
 
     function onKeyDown(e: KeyboardEvent) {
+      // F-205 (reviewer): there is nothing to cancel -- the write this
+      // shell is hiding is already in flight, and closing an invisible
+      // pop-up out from under it would drop the real written/refused
+      // outcome on the floor the moment it lands (`report`'s latch only
+      // takes the FIRST result).
+      if (concealed) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         onClose();
@@ -120,6 +152,10 @@ export function Popover({
     }
 
     function onPointerDown(e: PointerEvent) {
+      // F-205 (reviewer): same reasoning as Escape above -- a click
+      // anywhere on the page while this shell is invisible must not read as
+      // "outside this pop-up, so close it".
+      if (concealed) return;
       if (el && !el.contains(e.target as Node)) onClose();
     }
 
@@ -129,7 +165,7 @@ export function Popover({
       document.removeEventListener("keydown", onKeyDown, true);
       document.removeEventListener("pointerdown", onPointerDown, true);
     };
-  }, [onClose]);
+  }, [onClose, concealed]);
 
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -268,7 +304,11 @@ export function Popover({
   const node = (
     <div
       ref={ref}
-      className={variant === "wide" ? `${styles.pop} ${styles.wide}` : styles.pop}
+      className={
+        variant === "wide"
+          ? `${styles.pop} ${styles.wide}${concealed ? ` ${styles.concealed}` : ""}`
+          : `${styles.pop}${concealed ? ` ${styles.concealed}` : ""}`
+      }
       style={{ left, top }}
       role="dialog"
       aria-modal="true"

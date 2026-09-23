@@ -602,6 +602,13 @@ export function CreatePopover({
     // close this latch, or the split pop-up's own written/cancelled would be
     // swallowed and the sentence would say "Waiting" for ever.
     if (result.kind !== "handed_off") reportedRef.current = true;
+    // F-205: whatever the auto-press's own outcome was (written, refused,
+    // handed off), it has now ANSWERED -- see `autoPending`/`autoAnswered`
+    // below, the one thing that keeps this pop-up unpainted. A manual
+    // Cancel/Create also routes through here, but by then `autoPending` was
+    // already false (a live pop-up is never one this flag would have hidden
+    // in the first place), so this is a no-op for every other opener.
+    setAutoAnswered(true);
     onResult?.(result);
   }
 
@@ -733,6 +740,44 @@ export function CreatePopover({
   const autoFiredRef = useRef(false);
 
   /**
+   * F-205 (the maintainer, 23 Sept: "when the board asks me a question,
+   * there is a pop up which appears before vanishing" -- it happened on an
+   * answered Did-you-mean, so a sentence the bar wrote FOR the person
+   * flashes the same as one it typed itself). `autoFiredRef` above decides
+   * whether the effect below presses Create; this decides whether that
+   * press is ever PAINTED. Both read the SAME `clean`, at the SAME instant
+   * -- the render before the mount effect runs -- which is exactly why this
+   * is a lazy `useState` initializer and not a value re-read every render:
+   * `clean` can change afterwards (R-395's own "starts dirty, becomes clean"
+   * pop-up, `submitIfClean` below), and a LIVE recomputation here would hide
+   * a pop-up the person is already looking at the moment they fix a warning
+   * -- a worse bug than the flash this fixes. Frozen once, it can only ever
+   * describe the ONE press `autoFiredRef` may ever make.
+   *
+   * `autoPending` alone is not enough: it says whether this pop-up EVER
+   * qualified for the auto-press, not whether that press is still in
+   * flight. `autoAnswered` is that second half, flipped exactly once by
+   * `report` above -- the one place every outcome of `submitDirect`/
+   * `submitRun` (written, refused, handed off) already lands, so there is
+   * no second copy of that switch to keep in sync.
+   */
+  const [autoPending] = useState<boolean>(() => autoCreate === true && clean);
+  const [autoAnswered, setAutoAnswered] = useState(false);
+  // While this is true the pop-up is mounted -- its effect, its checks and
+  // its `onResult` all run exactly as they would visible -- but paints
+  // nothing: passed straight to the shared shell's own `concealed` prop
+  // (`BoardPopover`/`Popover.tsx`), which hides ITSELF (title bar included)
+  // via `visibility: hidden` rather than this file hiding only its own
+  // `.body` div and leaving an empty titled box painted around it. The
+  // bar's own readout already said what is being written, so a form that
+  // would only flash open and shut adds nothing for a clean sentence. A
+  // warning the person must decide, or the server's refusal once it lands,
+  // un-freezes this the same way it always has -- by never setting
+  // `autoPending` (a warning was never clean at that same mount instant) or
+  // by `report` flipping `autoAnswered`.
+  const hideForAutoPress = autoPending && !autoAnswered;
+
+  /**
    * R-384: Enter on a typed sentence creates the block without a second
    * press when this pop-up would show no warning. `autoCreate` is set only
    * by `openCreateFromCommand`/`openCreateRunFromCommand` (a drag or a
@@ -787,7 +832,7 @@ export function CreatePopover({
   }));
 
   return (
-    <BoardPopover anchor={anchor} onClose={cancel} title="New">
+    <BoardPopover anchor={anchor} onClose={cancel} title="New" concealed={hideForAutoPress}>
       <div className={styles.body}>
         <div className={styles.seg}>
           <button

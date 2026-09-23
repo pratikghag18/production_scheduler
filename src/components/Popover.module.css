@@ -46,3 +46,14 @@
 .dragging {
   cursor: grabbing;
 }
+
+/* F-205: `visibility`, never `display: none` -- the shell still measures its
+   own rendered box (`getBoundingClientRect`, Popover.tsx) to place itself,
+   and a collapsed 0x0 box would strand the NEXT placement once this clears.
+   `visibility: hidden` keeps layout (and the measurement) intact while
+   painting nothing; it also removes the box from the tab order and from
+   hit-testing, so nothing behind an invisible dialog can be focused or
+   clicked through it by accident. */
+.concealed {
+  visibility: hidden;
+}

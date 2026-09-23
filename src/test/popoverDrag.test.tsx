@@ -231,3 +231,119 @@ describe("a pop-up can be dragged aside by its title (R-344)", () => {
     expect(positionOf(screen.getByRole("dialog"))).toEqual({ left: 300, top: 208 });
   });
 });
+
+/**
+ * F-205 (the maintainer, 23 Sept: a pop-up a sentence answered for the
+ * person flashes open and shut). `CreatePopover` needs the whole shell --
+ * title bar included -- to paint nothing while its own clean auto-press is
+ * in flight, without losing its measured position (the shell places itself
+ * from its OWN rendered box, `getBoundingClientRect` above, so a `display:
+ * none` swap would report a 0x0 box and strand the next placement once
+ * `concealed` clears). These pins live here, not in createPopover.test.tsx,
+ * because `concealed` is the shell's own contract -- every caller of
+ * `Popover`/`BoardPopover`/`AdminPopover` gets it "for free" once it is
+ * proven here; `createPopover.test.tsx`'s own CP-flash pins only prove
+ * CreatePopover passes the prop at the right moments.
+ */
+describe("Popover — `concealed` hides the shell without touching its layout (F-205)", () => {
+  it("PS-1: concealed adds a class to the shell's own root and nothing else -- same position, same title, same dialog", () => {
+    const { rerender } = open({ x: 100, y: 100 });
+    const shownDialog = screen.getByRole("dialog");
+    const shownPosition = positionOf(shownDialog);
+    expect(shownDialog.className).not.toMatch(/concealed/);
+    expect(screen.getByRole("heading", { name: "Set shift" })).toBeTruthy();
+
+    rerender(
+      <Popover anchor={{ x: 100, y: 100 }} onClose={() => {}} title="Set shift" concealed>
+        <button type="button">Save</button>
+      </Popover>,
+    );
+
+    const concealedDialog = screen.getByRole("dialog");
+    // The same node, re-rendered in place -- concealing is a class swap, not
+    // an unmount/remount (which would re-measure and could place it
+    // differently).
+    expect(concealedDialog).toBe(shownDialog);
+    expect(concealedDialog.className).toMatch(/concealed/);
+    expect(positionOf(concealedDialog)).toEqual(shownPosition);
+    // The title, the drag handle and the child content are all still THERE
+    // -- concealed is paint-only, never a conditional unmount of the form
+    // inside it.
+    expect(screen.getByRole("heading", { name: "Set shift" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+  });
+
+  it("PS-2: dropping concealed on a later render un-hides it again, still in place", () => {
+    const { rerender } = open({ x: 100, y: 100 });
+    rerender(
+      <Popover anchor={{ x: 100, y: 100 }} onClose={() => {}} title="Set shift" concealed>
+        <button type="button">Save</button>
+      </Popover>,
+    );
+    const position = positionOf(screen.getByRole("dialog"));
+    expect(screen.getByRole("dialog").className).toMatch(/concealed/);
+
+    rerender(
+      <Popover anchor={{ x: 100, y: 100 }} onClose={() => {}} title="Set shift">
+        <button type="button">Save</button>
+      </Popover>,
+    );
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.className).not.toMatch(/concealed/);
+    expect(positionOf(dialog)).toEqual(position);
+  });
+
+  it("PS-3: a shell mounted concealed does not take focus, and takes it once concealment lifts", () => {
+    const outside = document.createElement("input");
+    document.body.appendChild(outside);
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+
+    const { rerender } = render(
+      <Popover anchor={{ x: 100, y: 100 }} onClose={() => {}} title="Set shift" concealed>
+        <button type="button">Save</button>
+      </Popover>,
+    );
+    // Mounted concealed: whatever the person had focused (a command-bar
+    // input, typically) is undisturbed.
+    expect(document.activeElement).toBe(outside);
+
+    rerender(
+      <Popover anchor={{ x: 100, y: 100 }} onClose={() => {}} title="Set shift">
+        <button type="button">Save</button>
+      </Popover>,
+    );
+    // Concealment lifted: the shell's own first focusable control gets it,
+    // the same one-shot an unconcealed mount always gave it.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Save" }));
+
+    outside.remove();
+  });
+
+  it("PS-4: outside pointerdown and Escape do not reach onClose while concealed, and work again once it lifts", () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <Popover anchor={{ x: 100, y: 100 }} onClose={onClose} title="Set shift" concealed>
+        <button type="button">Save</button>
+      </Popover>,
+    );
+
+    fireEvent.pointerDown(document.body);
+    fireEvent.keyDown(document, { key: "Escape" });
+    // There is nothing to cancel -- the write this shell is hiding is
+    // already in flight (F-205, the reviewer's second finding).
+    expect(onClose).not.toHaveBeenCalled();
+
+    rerender(
+      <Popover anchor={{ x: 100, y: 100 }} onClose={onClose} title="Set shift">
+        <button type="button">Save</button>
+      </Popover>,
+    );
+
+    fireEvent.pointerDown(document.body);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
