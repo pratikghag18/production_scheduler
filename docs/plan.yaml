@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-23'
-  tip: '0488068'
+  tip: '8e05cba'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12876,7 +12876,70 @@ requirements:
     loudness, and npm run voice:clips:score -- --from-trace N replays the newest through the running container,
     printing what Whisper wrote then and now --- so a sentence said to the board is a measurement too, and a
     clip cut short by the recorder's rules shows as such before the model is blamed.
+- id: R-454
+  title: The bar's input holds only what the person typed or said --- a recogniser's progress shows beside the microphone, and a partial transcript is at most the placeholder
+  source:
+  - 'session 190 conversation (the maintainer, 23 Sept: "Why is it writing the listening and transcribing in the chat box? That doesn''t seem to be the correct place and is highly unprofessional that it is a text, there is also a listening indicator right by the microphone")'
+  stated_by: maintainer
+  claim: >-
+    No word the person did not type or say is ever the input's value. "Listening" and "Transcribing" are a phase
+    the recogniser reports through its own event, shown in the label beside the mic button; an interim transcript
+    from an engine that gives one is shown as the input's placeholder, greyed, never as its text. Stopping the mic
+    leaves the input exactly as the person left it.
+  verified_by:
+  - kind: vitest
+    file: src/test/localRecognizer.test.ts
+    cases: "LREC-32a to 32c: the status event fires listening on start and transcribing at the post, never through the transcript event; the wrapper forwards it on both legs and announces listening again on a fallback"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-mic-2, 3, 13 to 19 and the reviewer's two stop cases: the input's value is empty or the typed text throughout a session, the placeholder carries a partial, the label beside the mic carries the phase, a stop restores the default placeholder"
+  status: covered
+  note: >-
+    STATED 23 Sept (session 190) after the third spoken pass. Until then the local recogniser sent its two progress
+    words through the same event as a partial transcript and the bar wrote every interim into the input as text,
+    which F-206 papered over on stop. BUILT the same session by lane S71-j (5d8deb6,
+    docs/agent-briefs/s71-j-progress-words-out-of-the-input-brief.md); F-206's stop-time clean-up went with the cause.
+    Open question, noted by the reviewer and left as built: while an answer box stands, a partial transcript
+    replaces the question's prompt in the placeholder; the question itself is still on screen.
 findings:
+- id: F-210
+  title: The maintainer's microphone delivers a third to a tenth of the loudness the recogniser's rules were tuned on, so clips start late and end early
+  tag: Thresholds tuned on a sample, not on the room
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-453
+  - F-198
+  story: >-
+    23 Sept (session 190), the first three clips kept on disk: peak RMS 0.044, 0.065 and 0.037, mean 0.012 to
+    0.023, two to five frames above the 0.02 floor out of eight to twelve. whisper.cpp's own sample, on which
+    F-198's onset rules were measured, peaks at 0.12 to 0.39. The onset rule (one frame at 0.08 or two at 0.02)
+    therefore starts late and the silence rule ends early on this microphone, and the quietest of the three
+    ("PSL 3, today", peak 0.044) was the one misheard while the loudest heard "Clear, Cell 3, today" right.
+    Nothing is tuned on this: lane S71-k gives the scorer a gain flag so the same clips are measured normalised
+    and not; a rule change follows the table, and the microphone's own input level in Windows is the first thing
+    to raise. First table (S71-k, 8e05cba, the three clips on small.en with the app's hint): the quiet "PSL 3,
+    today" clip replays as "PSL 3, today" both as recorded and peak-normalised to 0.5 (a gain of 3.3), so loudness
+    alone does not recover that one; the sentence clip could not be replayed because the yes had overwritten it
+    (F-209). More clips, then the matrix.
+- id: F-209
+  title: A spoken answer's clip overwrote the sentence's clip, because both were filed under the trace entry's one timestamp
+  tag: A file named from a shared key
+  status: fixed
+  found_by: agent
+  stage: S57
+  refs:
+  - R-453
+  story: >-
+    23 Sept (session 190): "Clear, Cell 3, today." and the spoken "Yes" that answered its question share one trace
+    entry, so the bar posted both clips under the entry's at, the server named the file from at, and the manifest
+    holds two lines (2816 ms, then 2048 ms) pointing at one file that now holds only the yes. Lane S71-k names the
+    file from the post's own instant and keeps at as a field.
+  fix: >-
+    Session 190 (8e05cba): the file is named from the post's own instant, suffixed when that name is taken, and
+    the manifest keeps both instants; the replay sorts each entry's clips by their instant and labels the later
+    ones as answers. CS-12, CS-13, PC-6 and the reviewer's same-millisecond case.
 - id: F-208
   title: The board's clips were never kept, because the fallback wrapper around the local recogniser forwarded only the four events it knew and dropped the clip event
   tag: A wrapper that enumerates events by hand
@@ -17939,9 +18002,9 @@ sessions:
   date: 2026-09-23
   title: "The second spoken walk answered: the two bugs that stopped it fixed, a Ctrl+M mic shortcut, the demo seeded inside each person's shift, and a clip harness so the recogniser is measured instead of walked"
   shipped: []
-  commits: ['170b851', '481d20e', '1d8d82c', 'c0578a6', '1f5836e', '845bf39', 'dce9e7a', '01ca2b1', '66ae6b3', '2566f4e', '30128bb', '0488068']
+  commits: ['170b851', '481d20e', '1d8d82c', 'c0578a6', '1f5836e', '845bf39', 'dce9e7a', '01ca2b1', '66ae6b3', '2566f4e', '30128bb', '0488068', '3898e07', '5d8deb6', '8e05cba']
   numbers:
-    app_tests: 4296
+    app_tests: 4315
     app_test_files: 168
     tsc: 0
     eslint: 0
@@ -17986,6 +18049,14 @@ sessions:
     stop, and an answer is the person's own bubble (30128bb); the probe stays as e2e/clipCapture.spec.ts
     (0488068). The probe also timed Whisper at 32 s for a 4.6 s clip while tests ran beside it; idle, the
     11 s sample takes 6.1 s twice over, so the wait was contention, and the matrix prints the wall time anyway.
+    Evening: the maintainer's "clear cell 3 today" was the first sentence kept on disk, heard right on the second
+    try, and the three clips measured the room --- peaks of 0.04 to 0.065 against the 0.12 to 0.39 of the sample
+    the onset rules were tuned on (F-210, open, measured not tuned), and the spoken yes overwrote the sentence's
+    clip (F-209, fixed). The maintainer's other question, why "Listening" and "Transcribing" were written into the
+    chat box, became R-454 and lane S71-j (5d8deb6): the input holds only what the person typed or said, the phase
+    shows beside the mic. Lane S71-k (8e05cba) gave the scorer a gain switch so the same clips are measured
+    normalised and not. The Whisper models and what each takes were listed for the maintainer; large-v3-turbo
+    in its 5-bit form is the one to put in the matrix next, and the tester's idle stack is the memory for it.
 - id: 189
   date: 2026-09-22
   title: "After the restart: the clear lists the job, the spoken yes never reached Whisper, and the recogniser's onset rule is rebuilt against real audio (F-198)"
