@@ -153,6 +153,21 @@ scheduler-whisper-server:arm64-local` once instead.
    curl -F "file=@path/to/a/clip.wav" -F "response_format=json" -F "temperature=0" -F "language=en" http://127.0.0.1:8090/inference
    ```
 
+### S71-c: decoding flags
+
+`npm run voice:serve` prints the whole `whisper-server` command line once, before the
+container starts, so you can see exactly what ran. Two flags change it:
+
+```
+npm run voice:serve -- --whisper-decode greedy    # or beam (the default: -bs 5 -bo 5)
+npm run voice:serve -- --whisper-threads 4        # default 8 (-t 8)
+```
+
+`-sns` (suppress non-speech tokens) is always passed now. `scripts/voice/clips/` is the
+offline harness that turns a decoding change like this into a number (mean WER, names
+heard) against a recorded clip set instead of a walk through the app -- see its own
+README.
+
 ### Testing just the whisper half
 
 A second lane may already own `scheduler-voice` (e.g. mid-training-run). `npm run

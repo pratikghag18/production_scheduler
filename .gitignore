@@ -68,6 +68,11 @@ data/voice/whisper/
 # debugging output, never committed.
 data/voice/trace/
 
+# S71-c (R-453): the maintainer's own recorded voice, from
+# `npm run voice:clips:record` (scripts/voice/clips/README.md) -- the clips,
+# their manifest, and every scorer run under `results/`. Never committed.
+data/voice/clips/
+
 # The per-machine Claude Code resume file. It says "personal -- gitignored, not
 # shared" in its own first line, and it is written for whoever is sitting at
 # this checkout: it names local paths, what is running on the machine, and how

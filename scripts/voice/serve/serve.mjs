@@ -15,7 +15,15 @@
 // file, or its docker image) is missing on this machine, the OTHER service
 // still starts -- a machine mid-setup for one never loses the other.
 //
-// `npm run voice:serve [-- --model <path-to-gguf> | <path-to-gguf>] [--whisper-model <name>] [--stop]`
+// S71-c (brief docs/agent-briefs/s71-c-clip-harness-brief.md §1.E, R-453):
+// the whisper-server decoding is now a flag, not a fixed choice, so
+// `scripts/voice/clips/score.mjs` can measure greedy against beam search
+// offline instead of by feel. `--whisper-decode greedy|beam` (default
+// `beam`, `-bs 5 -bo 5`) and `--whisper-threads N` (default 8, `-t N`);
+// `-sns` (suppress non-speech tokens) is now always passed. The full
+// whisper-server command line is printed once, before the container starts.
+//
+// `npm run voice:serve [-- --model <path-to-gguf> | <path-to-gguf>] [--whisper-model <name>] [--whisper-decode greedy|beam] [--whisper-threads N] [--stop]`
 //
 // Model path, in order: `--model <path>` or the bare positional argument
 // (either form), else `VOICE_MODEL`, else `data/voice/model/scheduler-voice.gguf`
@@ -46,6 +54,12 @@ const WHISPER_HOST_PORT = 8090;
 const WHISPER_CONTAINER_PORT = 8080;
 const WHISPER_MODEL_DIR = fileURLToPath(new URL("../../../data/voice/whisper", import.meta.url));
 const DEFAULT_WHISPER_MODEL = "base.en";
+// S71-c (brief §1.E): the default flips from the old implicit greedy-only
+// behaviour to beam search (`-bs 5 -bo 5`) -- pass `--whisper-decode greedy`
+// to get the old behaviour back; `score.mjs`'s own matrix is what actually
+// compares the two against a recorded clip.
+const DEFAULT_WHISPER_DECODE = "beam";
+const DEFAULT_WHISPER_THREADS = 8;
 
 function parseArgs(argv) {
   const out = {
@@ -53,6 +67,8 @@ function parseArgs(argv) {
     stop: false,
     whisperModel: DEFAULT_WHISPER_MODEL,
     whisperOnly: false,
+    whisperDecode: DEFAULT_WHISPER_DECODE,
+    whisperThreads: DEFAULT_WHISPER_THREADS,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -64,8 +80,18 @@ function parseArgs(argv) {
     // owns `scheduler-voice`, e.g. while testing this file's whisper half
     // without disturbing it).
     else if (a === "--whisper-only") out.whisperOnly = true;
+    else if (a === "--whisper-decode") out.whisperDecode = argv[++i];
+    else if (a === "--whisper-threads") out.whisperThreads = Number(argv[++i]);
     else if (!out.modelPath && !a.startsWith("--")) out.modelPath = a;
     else throw new Error(`serve.mjs: unknown argument "${a}"`);
+  }
+  if (out.whisperDecode !== "greedy" && out.whisperDecode !== "beam") {
+    throw new Error(
+      `serve.mjs: --whisper-decode must be "greedy" or "beam", got "${out.whisperDecode}"`,
+    );
+  }
+  if (!Number.isInteger(out.whisperThreads) || out.whisperThreads < 1) {
+    throw new Error(`serve.mjs: --whisper-threads must be a positive integer`);
   }
   return out;
 }
@@ -136,7 +162,7 @@ async function waitForHealth(url, { timeoutMs = 120_000, intervalMs = 1000 } = {
  *  the image's own `/app/models`, not the mounted one -- while `--host`/
  *  `--port` stayed at their `127.0.0.1:8080` defaults, unreachable through
  *  the published port). Joining the whole command into one string avoids it. */
-function startWhisper(whisperModelName) {
+function startWhisper(whisperModelName, whisperDecode, whisperThreads) {
   const modelPath = resolve(WHISPER_MODEL_DIR, `ggml-${whisperModelName}.bin`);
   if (!existsSync(modelPath)) {
     console.log(
@@ -165,12 +191,21 @@ function startWhisper(whisperModelName) {
     String(WHISPER_CONTAINER_PORT),
     "-l",
     "en",
+    "-t",
+    String(whisperThreads),
+    // S71-c (brief §1.E): always suppress non-speech tokens.
+    "-sns",
+    // S71-c: "beam" adds `-bs 5 -bo 5`; "greedy" leaves whisper-server's own
+    // defaults in place (beam size -1, i.e. no beam search).
+    ...(whisperDecode === "beam" ? ["-bs", "5", "-bo", "5"] : []),
   ].join(" ");
 
   console.log(`model: ${modelPath} (${(statSync(modelPath).size / 1e6).toFixed(1)} MB)`);
   console.log(
     `starting "${WHISPER_CONTAINER_NAME}" -- ${whisperUrl} -> container :${WHISPER_CONTAINER_PORT}`,
   );
+  // S71-c (brief §1.E): "print the whole command line once at start".
+  console.log(`whisper-server command: ${command}`);
 
   const dockerArgs = [
     "run",
@@ -209,7 +244,7 @@ function main() {
   }
 
   if (args.whisperOnly) {
-    const whisperChild = startWhisper(args.whisperModel);
+    const whisperChild = startWhisper(args.whisperModel, args.whisperDecode, args.whisperThreads);
     if (!whisperChild) process.exit(1);
     whisperChild.on("exit", (code) => process.exit(code ?? 0));
     process.on("SIGINT", () => {
@@ -293,7 +328,7 @@ function main() {
     });
   }
 
-  const whisperChild = startWhisper(args.whisperModel);
+  const whisperChild = startWhisper(args.whisperModel, args.whisperDecode, args.whisperThreads);
 
   if (!child && !whisperChild) {
     console.log("Neither service could be started. Docker was not started.");
