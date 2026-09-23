@@ -414,6 +414,118 @@ describe("CommandLauncher (S48-a, R-396)", () => {
   });
 });
 
+/** S71-d: a `Recognizer` that counts how many sessions were started, on top
+ *  of CL-8's own `() => ({ stop })` shape -- CL-a/CL-b need to prove the
+ *  shortcut actually started a session (not merely that the button now
+ *  reads `aria-pressed="true"`, which a stray render could also produce). */
+function makeCountingRecognizer() {
+  const stop = vi.fn();
+  let starts = 0;
+  const recognizer: Recognizer = () => {
+    starts++;
+    return { stop };
+  };
+  return { recognizer, stop, starts: () => starts };
+}
+
+describe("CommandLauncher: the Ctrl+M mic shortcut (S71-d, R-451)", () => {
+  it("CL-a: panel closed, Ctrl+M opens it and starts listening", () => {
+    const { recognizer, starts } = makeCountingRecognizer();
+    renderLauncher({}, recognizer);
+
+    fireEvent.keyDown(document, { key: "m", ctrlKey: true });
+
+    expect(screen.getByRole("dialog", { name: "Tell the board" })).toBeTruthy();
+    expect(starts()).toBe(1);
+    const mic = screen.getByRole("button", { name: "Speak a sentence" });
+    expect(mic.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("CL-b: panel open, the bar's input focused, Ctrl+M starts listening without typing into it", () => {
+    const { recognizer, starts } = makeCountingRecognizer();
+    renderLauncher({}, recognizer);
+    fireEvent.click(launcherButton());
+    const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
+    input.focus();
+
+    fireEvent.keyDown(document, { key: "m", ctrlKey: true });
+
+    expect(starts()).toBe(1);
+    const mic = screen.getByRole("button", { name: "Speak a sentence" });
+    expect(mic.getAttribute("aria-pressed")).toBe("true");
+    expect(input.value).toBe("");
+  });
+
+  it("CL-c: panel open, listening, Ctrl+M stops it", () => {
+    const { recognizer, stop } = makeCountingRecognizer();
+    renderLauncher({}, recognizer);
+    fireEvent.keyDown(document, { key: "m", ctrlKey: true }); // opens + starts
+    const mic = screen.getByRole("button", { name: "Speak a sentence" });
+    expect(mic.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.keyDown(document, { key: "m", ctrlKey: true });
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(mic.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it('CL-d: Ctrl+Shift+M and a plain "m" do nothing', () => {
+    const { recognizer, starts } = makeCountingRecognizer();
+    renderLauncher({}, recognizer);
+
+    fireEvent.keyDown(document, { key: "m", ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(document, { key: "M", ctrlKey: true, altKey: true });
+    fireEvent.keyDown(document, { key: "m" });
+
+    expect(screen.queryByRole("dialog", { name: "Tell the board" })).toBeNull();
+    expect(starts()).toBe(0);
+  });
+
+  it("CL-e: with recognizer={null}, Ctrl+M opens the panel and nothing throws", () => {
+    renderLauncher({}, null);
+
+    expect(() => fireEvent.keyDown(document, { key: "m", ctrlKey: true })).not.toThrow();
+
+    expect(screen.getByRole("dialog", { name: "Tell the board" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Speak a sentence" })).toBeNull();
+  });
+
+  // Reviewer fix: `micRequest` used to survive a close, so the NEXT open
+  // (whichever way it happened) mounted a fresh `CommandBar` whose own
+  // mount-value guard (`micRequest === 0`) still saw the stale count from
+  // before, and started a session nobody asked for. CL-f/CL-g each close by
+  // one of the two paths `CommandLauncher.tsx`'s reset effect covers.
+  it('CL-f: closing with the header\'s Close button resets the count, so reopening with "/" does not start a session on its own', () => {
+    const { recognizer, starts } = makeCountingRecognizer();
+    renderLauncher({}, recognizer);
+    fireEvent.keyDown(document, { key: "m", ctrlKey: true }); // opens + starts
+    expect(starts()).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.keyDown(document, { key: "/" });
+
+    expect(screen.getByRole("dialog", { name: "Tell the board" })).toBeTruthy();
+    const mic = screen.getByRole("button", { name: "Speak a sentence" });
+    expect(mic.getAttribute("aria-pressed")).toBe("false");
+    expect(starts()).toBe(1);
+  });
+
+  it("CL-g: closing with the round launcher button resets the count, so reopening with it does not start a session on its own", () => {
+    const { recognizer, starts } = makeCountingRecognizer();
+    renderLauncher({}, recognizer);
+    fireEvent.keyDown(document, { key: "m", ctrlKey: true }); // opens + starts
+    expect(starts()).toBe(1);
+
+    fireEvent.click(launcherButton()); // close
+    fireEvent.click(launcherButton()); // reopen
+
+    expect(screen.getByRole("dialog", { name: "Tell the board" })).toBeTruthy();
+    const mic = screen.getByRole("button", { name: "Speak a sentence" });
+    expect(mic.getAttribute("aria-pressed")).toBe("false");
+    expect(starts()).toBe(1);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // F-163 (the maintainer, 17 Sept): "The chatbot also vanished when I moved the
 // slider something which you claimed would not happen." R-424 stopped

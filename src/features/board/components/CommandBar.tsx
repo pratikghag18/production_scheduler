@@ -471,6 +471,16 @@ export interface CommandBarProps {
    * IN-FLIGHT clip is traced as.
    */
   recognizerName?: () => "browser" | "local";
+  /**
+   * S71-d (R-451, brief docs/agent-briefs/s71-d-mic-shortcut-brief.md): the
+   * launcher's own Ctrl+M count -- this component does not listen for the
+   * key itself (it is rendered only while the panel is open, so it can
+   * never see a press that OPENS the panel), it just acts once per
+   * increment as though the mic button had been clicked. `0` (the default,
+   * and every caller that is not the launcher) never acts -- a mount is not
+   * a request.
+   */
+  micRequest?: number;
   /** S47 / R-395: told what is in question -- the ids to outline and which
    *  colour -- whenever a remove/move/retime question stands, and `null`
    *  whenever it is answered, cleared or this component unmounts. S51: a
@@ -880,6 +890,7 @@ export function CommandBar({
   reader = null,
   recognizer = null,
   recognizerName,
+  micRequest = 0,
   onHighlight,
   onShowDay,
   onConfirmWord,
@@ -3413,6 +3424,28 @@ export function CommandBar({
     }
   }
 
+  // S71-d (R-451): the launcher's Ctrl+M reaches this component only through
+  // `micRequest`, a counter it cannot act on itself (it does not own the
+  // recogniser). This fires once per increment and does exactly what a mic
+  // click does -- `handleMicClick` above already reads `listening`/
+  // `recognizer` live, so there is nothing stale to guard here (unlike
+  // `submitText`'s own `store.getState()` read, CB-stale-1's fix: that one
+  // guards an ASYNC callback created long before it runs, while this effect
+  // body is the CURRENT render's closure, run synchronously once React
+  // commits the very render that changed `micRequest`).
+  //
+  // `micRequest === 0` never fires, which covers two cases at once: a bar
+  // with no launcher above it (every caller that never sets the prop), and
+  // this bar's OWN first mount with the default -- so a fresh mount is only
+  // ever mistaken for a request when the launcher deliberately opened the
+  // panel WITH a non-zero count already on it (brief §0 case 1: Ctrl+M on a
+  // closed panel opens it AND starts listening, in that same press).
+  useEffect(() => {
+    if (micRequest === 0) return;
+    handleMicClick();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [micRequest]);
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -3714,7 +3747,7 @@ export function CommandBar({
               className={`${fieldStyles.btn} ${styles.micButton}`}
               aria-label="Speak a sentence"
               aria-pressed={listening}
-              title="Uses the browser's speech recogniser; audio is sent to the browser maker's service"
+              title="Uses the browser's speech recogniser; audio is sent to the browser maker's service (Ctrl+M)"
               onClick={handleMicClick}
             >
               <Microphone size={18} filled={listening} />

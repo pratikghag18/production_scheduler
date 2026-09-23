@@ -325,6 +325,13 @@ function renderBar(
   // prop -- a caller that wants to change what it reports mid-test (CB-t-8)
   // mutates whatever the getter closes over, never re-renders.
   s59trace: { recognizerName?: () => "browser" | "local" } = {},
+  // S71-d (R-451): the launcher's own Ctrl+M counter. Defaults to `0` --
+  // every pre-S71-d call site (up to six positional arguments) renders
+  // exactly as before; `CB-mic-11` below is the only caller that passes it,
+  // and then only reads it back through `rerenderMicRequest`, never this
+  // initial value directly (a mount with a non-zero count is CL-a/CL-b's
+  // own scenario, already pinned end to end in `commandLauncher.test.tsx`).
+  s71: { micRequest?: number } = {},
 ) {
   const onOpen = vi.fn().mockReturnValue(WRITTEN);
   const onRetime = vi.fn().mockReturnValue(WRITTEN);
@@ -342,7 +349,10 @@ function renderBar(
   // R-424: `null` simulates the gap CommandBar's own `ctx` prop must now
   // survive (CB-keep's own describe block) -- every pre-R-424 caller only
   // ever passes a `Partial<ResolveContext>`, so this is additive.
-  const element = (ctxOver: Partial<ResolveContext> | null) => (
+  const element = (
+    ctxOver: Partial<ResolveContext> | null,
+    micRequest: number = s71.micRequest ?? 0,
+  ) => (
     <CommandBar
       ctx={ctxOver === null ? null : buildCtx(ctxOver)}
       dateFormat="d_mon_yyyy"
@@ -350,6 +360,7 @@ function renderBar(
       reader={reader}
       recognizer={recognizer}
       recognizerName={s59trace.recognizerName}
+      micRequest={micRequest}
       onOpen={onOpen}
       onRetime={onRetime}
       onBook={onBook}
@@ -391,6 +402,11 @@ function renderBar(
     // `BoardPage`'s own fix should prevent in practice, but this component
     // must survive on its own regardless -- CB-keep's own describe block).
     rerenderCtx: (nextOver: Partial<ResolveContext> | null) => rerender(element(nextOver)),
+    // S71-d (R-451): re-renders the SAME `CommandBar` against `over`
+    // unchanged, with a NEW `micRequest` -- the shortcut's own counter prop
+    // going up exactly as the launcher's `setMicRequest(n => n + 1)` would
+    // (CB-mic-11, below).
+    rerenderMicRequest: (next: number) => rerender(element(over, next)),
   };
 }
 
@@ -3904,6 +3920,36 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     expect(input.value).toBe("");
     expect(onOpen).not.toHaveBeenCalled();
   });
+
+  // S71-d (R-451, brief docs/agent-briefs/s71-d-mic-shortcut-brief.md §2):
+  // the launcher's Ctrl+M reaches this component only through `micRequest`
+  // (`CommandLauncher.tsx`'s own counter); `commandLauncher.test.tsx`'s
+  // CL-a..CL-e already pin the key itself end to end, so this is the
+  // counter prop's own wiring alone -- a mount already carrying a non-zero
+  // count acts once (case 1), and each later increment toggles listening
+  // the same way a click does (cases 2/3), with a mount at the default `0`
+  // doing nothing.
+  it("CB-mic-11: a non-zero micRequest at mount starts listening once; further increments toggle it like a click", () => {
+    const { recognizer, stop } = makeFakeRecognizer();
+    const { rerenderMicRequest } = renderBar({}, null, recognizer, {}, {}, {}, { micRequest: 1 });
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+    expect(micButton.getAttribute("aria-pressed")).toBe("true");
+
+    rerenderMicRequest(2); // stop, same as CB-mic-5's own click
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(micButton.getAttribute("aria-pressed")).toBe("false");
+
+    rerenderMicRequest(3); // start again
+    expect(micButton.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("CB-mic-12: micRequest left at its default (0) never starts listening on its own", () => {
+    renderBar({}, null, null);
+    // No recognizer at all (default prop), so no button -- proves the
+    // effect's own `micRequest === 0` guard did not throw calling
+    // `handleMicClick` against a null recogniser either.
+    expect(screen.queryByRole("button", { name: "Speak a sentence" })).toBeNull();
+  });
 });
 
 /**
@@ -6210,63 +6256,75 @@ describe("CH: the conversation thread (R-427)", () => {
   // `flex-end` back.
   it("CH-scroll: many turns all render inside the one scrolling threadBody, and the stylesheet no longer bottom-anchors it with flex-end", () => {
     stubFetch();
-    const conversation = createConversationStore();
-    for (let i = 0; i < 20; i++) {
-      conversation.getState().appendTurn({
-        at: `2026-09-22T17:${String(30 + i).padStart(2, "0")}:00.000Z`,
-        heard: `Turn number ${i}`,
-        by: "typed",
-        read: `read ${i}`,
-        asked: `asked ${i}`,
-        offered: [],
-        answered: "auto",
-        ran: [`ran ${i}`],
-        outcome: "written",
-      });
-    }
-    render(
-      <CommandBar
-        ctx={buildCtx({ runs: [] })}
-        dateFormat="d_mon_yyyy"
-        zone="UTC"
-        reader={null}
-        recognizer={null}
-        onOpen={vi.fn().mockReturnValue(WRITTEN)}
-        onRetime={vi.fn().mockReturnValue(WRITTEN)}
-        onBook={vi.fn().mockReturnValue(WRITTEN)}
-        onRetimeRun={vi.fn().mockReturnValue(WRITTEN)}
-        onUnassign={vi.fn().mockReturnValue(WRITTEN)}
-        onMove={vi.fn().mockReturnValue(WRITTEN)}
-        onSetHeadcount={vi.fn().mockReturnValue(WRITTEN)}
-        onRunLot={vi.fn()}
-        onHighlight={vi.fn()}
-        onShowDay={vi.fn()}
-        conversation={conversation}
-      />,
-    );
+    // F-204: the store prunes turns older than HISTORY_MAX_AGE_MS against the
+    // REAL clock, so fixed "at" stamps went stale the day after this pin was
+    // written and the oldest fifteen turns vanished before the render. The
+    // clock is frozen just after the newest stamp; restored in the finally.
+    vi.setSystemTime(new Date("2026-09-22T18:00:00.000Z"));
+    try {
+      const conversation = createConversationStore();
+      for (let i = 0; i < 20; i++) {
+        conversation.getState().appendTurn({
+          at: `2026-09-22T17:${String(30 + i).padStart(2, "0")}:00.000Z`,
+          heard: `Turn number ${i}`,
+          by: "typed",
+          read: `read ${i}`,
+          asked: `asked ${i}`,
+          offered: [],
+          answered: "auto",
+          ran: [`ran ${i}`],
+          outcome: "written",
+        });
+      }
+      render(
+        <CommandBar
+          ctx={buildCtx({ runs: [] })}
+          dateFormat="d_mon_yyyy"
+          zone="UTC"
+          reader={null}
+          recognizer={null}
+          onOpen={vi.fn().mockReturnValue(WRITTEN)}
+          onRetime={vi.fn().mockReturnValue(WRITTEN)}
+          onBook={vi.fn().mockReturnValue(WRITTEN)}
+          onRetimeRun={vi.fn().mockReturnValue(WRITTEN)}
+          onUnassign={vi.fn().mockReturnValue(WRITTEN)}
+          onMove={vi.fn().mockReturnValue(WRITTEN)}
+          onSetHeadcount={vi.fn().mockReturnValue(WRITTEN)}
+          onRunLot={vi.fn()}
+          onHighlight={vi.fn()}
+          onShowDay={vi.fn()}
+          conversation={conversation}
+        />,
+      );
 
-    const threadBody = document.querySelector('[class*="threadBody"]') as HTMLElement;
-    expect(threadBody).toBeTruthy();
-    // Every turn, oldest first, is actually in the DOM inside it -- nothing
-    // above the newest one is dropped or lazily windowed.
-    for (let i = 0; i < 20; i++) {
-      expect(threadBody.textContent).toContain(`Turn number ${i}`);
-    }
-    expect(threadBody.getAttribute("role")).toBe("log");
+      const threadBody = document.querySelector('[class*="threadBody"]') as HTMLElement;
+      expect(threadBody).toBeTruthy();
+      // Every turn, oldest first, is actually in the DOM inside it -- nothing
+      // above the newest one is dropped or lazily windowed.
+      for (let i = 0; i < 20; i++) {
+        expect(threadBody.textContent).toContain(`Turn number ${i}`);
+      }
+      expect(threadBody.getAttribute("role")).toBe("log");
 
-    // The stylesheet itself: `.threadBody` no longer carries `flex-end`, and
-    // `.turn:first-child` carries the replacement. Comments stripped first
-    // (`fieldStandard.test.ts`'s own warning: a matcher that read comments
-    // would flag this file's OWN prose about the fix, which names the very
-    // declaration being matched).
-    const cssPath = path.join(process.cwd(), "src/features/board/components/CommandBar.module.css");
-    const raw = fs.readFileSync(cssPath, "utf8");
-    const withoutComments = raw.replace(/\/\*[\s\S]*?\*\//g, "");
-    const threadBodyRule = /\.threadBody\s*\{[^}]*\}/.exec(withoutComments)?.[0] ?? "";
-    expect(threadBodyRule).not.toBe("");
-    expect(threadBodyRule).not.toMatch(/flex-end/);
-    const firstChildRule = /\.turn:first-child\s*\{[^}]*\}/.exec(withoutComments)?.[0] ?? "";
-    expect(firstChildRule).toMatch(/margin-top:\s*auto/);
+      // The stylesheet itself: `.threadBody` no longer carries `flex-end`, and
+      // `.turn:first-child` carries the replacement. Comments stripped first
+      // (`fieldStandard.test.ts`'s own warning: a matcher that read comments
+      // would flag this file's OWN prose about the fix, which names the very
+      // declaration being matched).
+      const cssPath = path.join(
+        process.cwd(),
+        "src/features/board/components/CommandBar.module.css",
+      );
+      const raw = fs.readFileSync(cssPath, "utf8");
+      const withoutComments = raw.replace(/\/\*[\s\S]*?\*\//g, "");
+      const threadBodyRule = /\.threadBody\s*\{[^}]*\}/.exec(withoutComments)?.[0] ?? "";
+      expect(threadBodyRule).not.toBe("");
+      expect(threadBodyRule).not.toMatch(/flex-end/);
+      const firstChildRule = /\.turn:first-child\s*\{[^}]*\}/.exec(withoutComments)?.[0] ?? "";
+      expect(firstChildRule).toMatch(/margin-top:\s*auto/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("CH-2: a refused write shows Refused with the writer's own message", async () => {

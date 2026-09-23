@@ -156,6 +156,17 @@ type ResizeAxis = "both" | "width" | "height";
 export function CommandLauncher({ historyKey = null, ...props }: CommandLauncherProps) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+  // S71-d (R-451): Ctrl+M's own count -- the launcher does not own the
+  // recogniser (the bar does), so it cannot start listening itself; it
+  // bumps this counter and hands it down as `CommandBar`'s `micRequest`
+  // prop, which the bar's own effect reads as "act like a mic-button click
+  // just happened" (see `CommandBar.tsx`'s own doc on that effect). Plain
+  // `useState`, not a ref: the bar mounts fresh whenever the panel opens (it
+  // is inside `{open && ...}`, below), so a fresh mount already carrying a
+  // non-zero `micRequest` (case 1 in the brief: panel closed, Ctrl+M opens
+  // it AND starts listening in one press) needs the CURRENT count at mount,
+  // not zero.
+  const [micRequest, setMicRequest] = useState(0);
   // F-163: ONE conversation per board mount. `useState`'s initialiser form,
   // never `createConversationStore()` inline -- a fresh store per render
   // would be a fresh conversation per render.
@@ -242,6 +253,41 @@ export function CommandLauncher({ historyKey = null, ...props }: CommandLauncher
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  // S71-d (R-451, brief docs/agent-briefs/s71-d-mic-shortcut-brief.md §0):
+  // Ctrl+M, unlike "/", must work with the bar's own input focused too --
+  // that is the normal flow ("/" opens the panel and focuses the input,
+  // then the shortcut speaks) -- so this does NOT guard on
+  // `isEditableTarget`. Ctrl+Shift+M / Ctrl+Alt+M / Cmd+M are left to the
+  // browser (brief §0 item 4). Opening (`setOpen(true)`) is a no-op when
+  // already open; bumping `micRequest` is the actual signal, read by the
+  // bar's own effect below.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key !== "m" && e.key !== "M") return;
+      if (!e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
+      e.preventDefault();
+      setOpen(true);
+      setMicRequest((n) => n + 1);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Reviewer fix (S71-d): `micRequest` must not survive a close. `CommandBar`
+  // unmounts and remounts fresh on every close/reopen (it lives inside
+  // `{open && ...}`, below), and its own effect only guards against the
+  // MOUNT value being the pre-S71-d default (`micRequest === 0`) -- a count
+  // left over from a press before this close is a non-zero mount value too,
+  // and would start a session nobody asked for the moment the panel opens
+  // again, whether that reopen is "/" or the round button (repro: Ctrl+M,
+  // Close, "/" -> listening starts on its own). Reset it back to 0 whenever
+  // `open` goes false, covering both close paths (`close()`, above, and the
+  // round button's own `setOpen` toggle) the same way, since neither is
+  // this effect's business to know about individually.
+  useEffect(() => {
+    if (!open) setMicRequest(0);
   }, [open]);
 
   // Focus the bar's input once the panel has mounted. The bar already has an
@@ -420,7 +466,12 @@ export function CommandLauncher({ historyKey = null, ...props }: CommandLauncher
               Close
             </button>
           </div>
-          <CommandBar {...props} onEscapeIdle={close} conversation={conversation} />
+          <CommandBar
+            {...props}
+            onEscapeIdle={close}
+            conversation={conversation}
+            micRequest={micRequest}
+          />
         </div>
       )}
     </>
