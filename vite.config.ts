@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
 import { handleTraceRequest } from "./src/lib/voice/traceServer";
+import { handleClipRequest } from "./src/lib/voice/clipServer";
 
 /**
  * S59-e (R-421, brief docs/agent-briefs/s59-e-trace-brief.md §3): the bar
@@ -18,6 +19,13 @@ function voiceTracePlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use("/__trace", (req, res) => {
         void handleTraceRequest(req, res);
+      });
+      // S71-f (R-453, R-434, brief docs/agent-briefs/s71-f-clip-capture-
+      // brief.md §1.C): the bar's own clip bytes, alongside the trace --
+      // same mount pattern, dev-only, the handler itself in a plain module
+      // (`clipServer.ts`) so it is testable with no Vite and no real HTTP.
+      server.middlewares.use("/__clip", (req, res) => {
+        void handleClipRequest(req, res);
       });
     },
   };

@@ -14,7 +14,7 @@
  * .test.ts`) that never opens a real microphone.
  */
 import { encodeWav16k, rmsOf } from "./wav";
-import type { Recognizer, RecognizerEvents, RecognizerHandle } from "./recognizer";
+import type { ClipInfo, Recognizer, RecognizerEvents, RecognizerHandle } from "./recognizer";
 
 // ---- the DOM surface used here, typed just enough to use it (recognizer.ts
 // does the same for the Web Speech API: "just enough of it to read results
@@ -410,6 +410,15 @@ export function localRecognizer(
     // that rate, in which case this is whatever default rate it gave us and
     // `transcribe()` resamples before encoding.
     let recordedSampleRate = TARGET_SAMPLE_RATE;
+    // S71-f (brief §1.A): `ClipInfo`'s own numbers, accumulated over the
+    // WHOLE recording (every frame, whatever finally gets posted) -- never
+    // reset by windowing, which only trims what `transcribe()` sends, not
+    // what happened. NaN frames (LREC-14) are excluded from `peakRms`/
+    // `meanRms` the same way they already fail `above` below, but still
+    // count toward `frames.length`, the `meanRms` denominator.
+    let peakRms = 0;
+    let rmsSum = 0;
+    let framesAboveFloorCount = 0;
 
     function teardown(): void {
       if (stream) {
@@ -443,7 +452,10 @@ export function localRecognizer(
       }
     }
 
-    async function transcribe(sourceFrames: Float32Array[] = frames): Promise<void> {
+    async function transcribe(
+      sourceFrames: Float32Array[],
+      endedBy: ClipInfo["endedBy"],
+    ): Promise<void> {
       let totalLength = 0;
       for (const frame of sourceFrames) totalLength += frame.length;
       const merged = new Float32Array(totalLength);
@@ -472,6 +484,30 @@ export function localRecognizer(
       if (hintText !== undefined && hintText !== "") {
         form.append("prompt", hintText);
       }
+
+      // S71-f (brief §1.A): `sourceFrames` is a total-samples count at
+      // `recordedSampleRate` (the actual audio hardware rate this session
+      // captured at, whatever it is) -- dividing by that rate, not counting
+      // clock ticks, gives the real duration of the audio regardless of how
+      // large or small a caller's frames happen to be. `durationMs` is the
+      // bytes actually posted (`sourceFrames`, windowed or not);
+      // `recordedMs` is always the WHOLE recording (`frames`), per
+      // `ClipInfo`'s own doc. Fired once, right before the fetch below, so
+      // it fires whether or not that fetch ever succeeds -- "posted" means
+      // sent, not answered.
+      let recordedSamples = 0;
+      for (const frame of frames) recordedSamples += frame.length;
+      events.onClip?.({
+        wav,
+        durationMs: recordedSampleRate > 0 ? (totalLength / recordedSampleRate) * 1000 : 0,
+        recordedMs: recordedSampleRate > 0 ? (recordedSamples / recordedSampleRate) * 1000 : 0,
+        endedBy,
+        speechStarted,
+        peakRms,
+        meanRms: frames.length > 0 ? rmsSum / frames.length : 0,
+        framesAboveFloor: framesAboveFloorCount,
+        hint: hintText !== undefined && hintText !== "" ? hintText : null,
+      });
 
       let response: Response;
       try {
@@ -532,13 +568,24 @@ export function localRecognizer(
      *  `QUIET_CLIP_PAD_FRAMES` and capped at `QUIET_CLIP_MAX_FRAMES` frames
      *  total -- never the full clip -- see `QUIET_SEND_FACTOR`'s own note
      *  for why (a full-length quiet clip measurably makes whisper.cpp
-     *  invent text). */
-    function finalize(capReached = false): void {
+     *  invent text).
+     *
+     *  S71-f (brief §1.A): `reason` is which rule called this -- `"stop"`
+     *  (the button, or a `stop()` that arrived while `getUserMedia` was
+     *  still pending), `"silence"` (1500ms after speech), or `"cap"` (the
+     *  twelve-second cap, whether or not speech had started) -- the caller
+     *  always knows which, so this takes it rather than the boolean
+     *  `capReached` used to guess from. Behaviour is unchanged: `reason ===
+     *  "cap"` is exactly the old `capReached === true`. `ClipInfo.endedBy`
+     *  is `reason` itself for a whole-clip send, and the fourth value,
+     *  `"cap-window"`, only for the windowed quiet-send branch below --
+     *  never a fifth kind of `finalize` call. */
+    function finalize(reason: "stop" | "silence" | "cap"): void {
       if (ended) return;
       ended = true;
       teardown();
       if (!speechStarted) {
-        if (capReached && hadQuietSound) {
+        if (reason === "cap" && hadQuietSound) {
           events.onInterim("Transcribing…");
           const start = Math.max(0, (firstQuietFrameIndex ?? 0) - QUIET_CLIP_PAD_FRAMES);
           const end = Math.min(
@@ -547,7 +594,7 @@ export function localRecognizer(
             (lastQuietFrameIndex ?? 0) + QUIET_CLIP_PAD_FRAMES + 1,
           );
           const windowed = frames.slice(start, Math.max(end, start + 1));
-          void transcribe(windowed);
+          void transcribe(windowed, "cap-window");
           return;
         }
         events.onError("no-speech");
@@ -555,7 +602,7 @@ export function localRecognizer(
         return;
       }
       events.onInterim("Transcribing…");
-      void transcribe();
+      void transcribe(frames, reason);
     }
 
     function handleFrame(frame: Float32Array): void {
@@ -565,6 +612,13 @@ export function localRecognizer(
       const now = d.now();
       const rms = rmsOf(frame);
       const above = rms > RMS_FLOOR;
+      // S71-f: over the WHOLE recording, whatever ends up posted -- a NaN
+      // frame (LREC-14) never satisfies `> peakRms` and is excluded here the
+      // same way it already fails `above`, but still counts toward
+      // `frames.length` (the `meanRms` denominator in `transcribe()`).
+      if (rms > peakRms) peakRms = rms;
+      if (!Number.isNaN(rms)) rmsSum += rms;
+      if (above) framesAboveFloorCount++;
       if (rms >= RMS_FLOOR * QUIET_SEND_FACTOR) {
         hadQuietSound = true;
         if (firstQuietFrameIndex === null) firstQuietFrameIndex = frameIndex;
@@ -591,11 +645,11 @@ export function localRecognizer(
       }
 
       if (speechStarted && lastAboveFloorAt !== null && now - lastAboveFloorAt >= SILENCE_END_MS) {
-        finalize();
+        finalize("silence");
         return;
       }
       if (recordingStartedAt !== null && now - recordingStartedAt >= MAX_CLIP_MS) {
-        finalize(true);
+        finalize("cap");
       }
     }
 
@@ -634,7 +688,7 @@ export function localRecognizer(
       silence.connect(audioContext.destination);
 
       recordingStartedAt = d.now();
-      if (stopRequested) finalize();
+      if (stopRequested) finalize("stop");
     }
 
     events.onInterim("Listening…");
@@ -681,7 +735,7 @@ export function localRecognizer(
           stopRequested = true;
           return;
         }
-        finalize();
+        finalize("stop");
       },
     };
   };

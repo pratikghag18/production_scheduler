@@ -18,3 +18,21 @@ The matrix, one whisper restart per row: `base.en`/greedy/words-53 (today),
 `small.en`/beam/sentences, `small.en`/beam/none. `words-53.txt` is today's
 `recognizerHint.ts` vocabulary plus Plant A's names; `words-34.txt` is the
 vocabulary from before F-195; `sentences.txt` is example sentences, no name list.
+
+## Re-scoring a live walk (S71-f, R-453)
+
+Every clip the bar actually posts to Whisper is kept on its own, separately
+from the deliberately-recorded set above (`localRecognizer.ts`'s `onClip`,
+via `POST /__clip`, `data/voice/trace/clips/`, capped at the newest 500).
+There is no ground truth for a live sentence, so this mode compares what
+Whisper wrote THEN (the bar's own trace, `data/voice/trace/bar.jsonl`) against
+what it writes NOW, against whichever `scheduler-whisper` container is
+running -- read the words yourself, not just the WER.
+
+Say sentences to the board, then:
+
+    npm run voice:clips:score -- --whisper http://127.0.0.1:8090 \
+      --prompt-file scripts/voice/clips/prompts/words-53.txt --from-trace 5
+
+`--from-trace` alone scores the newest 20; `--from-trace N` scores the
+newest N. `--no-prompt` works here too, same as the recorded-set mode above.

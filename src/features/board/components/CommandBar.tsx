@@ -6,8 +6,9 @@ import { formatDayLabel, zonedTimeToInstant } from "../lib/time";
 import fieldStyles from "@/components/Field.module.css";
 import styles from "./CommandBar.module.css";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
-import type { Recognizer, RecognizerHandle } from "@/lib/voice/recognizer";
+import type { ClipInfo, Recognizer, RecognizerHandle } from "@/lib/voice/recognizer";
 import type { TraceEntry } from "@/lib/voice/trace";
+import { postClip } from "@/lib/voice/trace";
 import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
 import type {
   AssignCommand,
@@ -1013,6 +1014,31 @@ export function CommandBar({
   // `heldRef`/`lotRef` above: read and written from event handlers and one
   // `.then()`, never rendered.
   const traceRef = storeRef(store, "trace");
+  // S71-f (R-453, R-434, brief docs/agent-briefs/s71-f-clip-capture-brief
+  // .md §1.B): the local recogniser's `onClip` fires strictly BEFORE the
+  // `onFinal`/`onError` that answers it (`localRecognizer.ts`'s own doc:
+  // posted right before the fetch) -- so there is no trace entry open yet
+  // to carry its numbers when it arrives. This stashes them; `startTrace`
+  // in listening's `onFinal`/`onError` below reads it via
+  // `attachPendingClip` once the fresh entry for THIS clip's outcome
+  // actually exists.
+  //
+  // Review fix (session leak): `seq` is the STASHING session's own `mySeq`
+  // (`startListening`'s local constant, captured once per session, never
+  // mutated by a later session ending) -- not the shared, mutable
+  // `recognitionSeqRef.current`. A session A can fire `onClip` (stashing
+  // here) and then be superseded (stop, then a fresh press starts session
+  // B) before A's own `onFinal`/`onError` ever arrives; A's callbacks are
+  // then no-ops (`isCurrent()`), so nothing ever consumes or clears A's
+  // stash on its own path. Without a stamp, B's `attachPendingClip` would
+  // find A's stale clip still sitting here and attach A's numbers (and
+  // repost A's WAV) onto B's unrelated entry. `attachPendingClip` compares
+  // the stash's `seq` against the CALLING session's own `mySeq` (a stable
+  // closure constant, immune to any session's `endSession()` bumping the
+  // shared ref), so a stash from any other session is always ignored;
+  // `endSession()` also clears this outright, so a superseded session's
+  // stash cannot outlive it even before a next session ever starts.
+  const pendingClipRef = useRef<{ seq: number; info: ClipInfo } | null>(null);
   // R-424: the last real (non-null) `ctx` this component has ever seen --
   // initialised from whatever `ctx` the FIRST render carried (every real
   // caller's contract: `ctx` is only ever null before the board has EVER
@@ -1062,6 +1088,38 @@ export function CommandBar({
     };
     // R-427: a new sentence offers nothing yet.
     store.getState().set({ offered: [] });
+  }
+
+  /** S71-f (brief §1.B): call once the fresh trace entry for a clip's
+   *  outcome actually exists (right after `startTrace` ran, whether that
+   *  was `onFinal`'s `submitText` or `onError`'s own direct call) -- attaches
+   *  `pendingClipRef`'s numbers to it and posts the WAV to `/__clip` under
+   *  that entry's own `at`, then clears the ref so a later, unrelated
+   *  trace entry never picks up a stale clip. A no-op when no clip is
+   *  pending (a typed sentence, a confirm word, a session that never
+   *  reached `onClip` at all) or when the session went stale before this
+   *  ran (`isCurrent()` already guards every caller).
+   *
+   *  Review fix (session leak): `callerSeq` is the CALLING session's own
+   *  `mySeq` -- when the stashed clip's `seq` disagrees, it belongs to an
+   *  earlier, superseded session (stop, then a fresh press, before that
+   *  session's own `onFinal`/`onError` ever arrived) and is dropped rather
+   *  than attached to this unrelated entry. See `pendingClipRef`'s own doc. */
+  function attachPendingClip(callerSeq: number): void {
+    const pending = pendingClipRef.current;
+    pendingClipRef.current = null;
+    if (!pending || pending.seq !== callerSeq || !traceRef.current) return;
+    const info = pending.info;
+    traceRef.current.clip = {
+      durationMs: info.durationMs,
+      recordedMs: info.recordedMs,
+      endedBy: info.endedBy,
+      speechStarted: info.speechStarted,
+      peakRms: info.peakRms,
+      meanRms: info.meanRms,
+      framesAboveFloor: info.framesAboveFloor,
+    };
+    postClip(traceRef.current.at, info.wav, traceRef.current.clip);
   }
 
   /**
@@ -3288,6 +3346,12 @@ export function CommandBar({
     recognitionRef.current = null;
     recognitionSeqRef.current++;
     setListening(false);
+    // S71-f review fix (session leak): a clip this session stashed via
+    // `onClip` but never itself consumed (no `onFinal`/`onError` reached it
+    // before this session ended) can never legitimately attach to whatever
+    // session starts next -- dropped here rather than left for
+    // `attachPendingClip`'s own `seq` check to catch later.
+    pendingClipRef.current = null;
   }
 
   /** S46-a: stops the in-flight recognition session, if any -- shared by a
@@ -3368,6 +3432,14 @@ export function CommandBar({
         if (answerTakes(status) === null) heldRef.current = null;
         setText(interimText);
       },
+      // S71-f (brief §1.B): fires once, before `onFinal`/`onError`, with
+      // the clip `localRecognizer.ts` is about to post -- stashed here,
+      // attached once `onFinal`/`onError` below has actually opened the
+      // fresh trace entry for it (`attachPendingClip`'s own doc).
+      onClip(info: ClipInfo): void {
+        if (!isCurrent()) return;
+        pendingClipRef.current = { seq: mySeq, info };
+      },
       onFinal(finalText: string): void {
         if (!isCurrent()) return;
         setText(finalText);
@@ -3376,10 +3448,16 @@ export function CommandBar({
         // called HERE, not read as a plain value, so a clip that fell back
         // mid-session is traced by what actually ran for THIS clip.
         submitText(finalText, recognizerName?.() ?? "browser");
+        attachPendingClip(mySeq);
       },
       onError(kind, detail): void {
         if (!isCurrent()) return;
-        endSession();
+        // S71-f review fix (session leak): `attachPendingClip` below must
+        // run BEFORE `endSession()` -- `endSession()` now clears
+        // `pendingClipRef` outright (`pendingClipRef`'s own doc), and a
+        // clip THIS session posted just before erroring out (e.g. Whisper
+        // answered a non-speech tag only, `no-speech`) must still attach to
+        // THIS session's own entry, not be wiped by its own session ending.
         const message =
           kind === "not-allowed"
             ? "The microphone was refused. Allow it in the browser's address bar and try again."
@@ -3399,7 +3477,9 @@ export function CommandBar({
         // two racing to set `status` last.
         startTrace("", recognizerName?.() ?? "browser");
         if (traceRef.current) traceRef.current.outcome = `refused: ${message}`;
+        attachPendingClip(mySeq);
         finishTrace();
+        endSession();
         setStatus({ kind: "shape", message });
       },
       onEnd(): void {

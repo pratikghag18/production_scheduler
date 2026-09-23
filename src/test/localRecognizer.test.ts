@@ -165,7 +165,9 @@ class FakeOfflineAudioContext {
 
 interface Harness {
   deps: Partial<LocalRecognizerDeps>;
-  events: { [K in keyof RecognizerEvents]: ReturnType<typeof vi.fn> };
+  // S71-f: `-?` since the harness always provides `onClip` (optional only
+  // on `RecognizerEvents` itself, for callers that never fire it).
+  events: { [K in keyof RecognizerEvents]-?: ReturnType<typeof vi.fn> };
   stream: FakeMediaStream;
   audioContext: FakeAudioContext;
   clock: { t: number };
@@ -209,6 +211,11 @@ function makeHarness(opts?: {
     onFinal: vi.fn(),
     onError: vi.fn(),
     onEnd: vi.fn(),
+    // S71-f (brief docs/agent-briefs/s71-f-clip-capture-brief.md §1.E):
+    // present on every harness (not just the LREC-30 pins) since `onClip`
+    // is optional on `RecognizerEvents` -- every existing test's `events`
+    // fake still satisfies the type with it simply unused.
+    onClip: vi.fn(),
   };
 
   return {
@@ -1027,6 +1034,134 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
     await flush();
     expect(h.events.onFinal).toHaveBeenCalledWith("put ana on cell one");
     expect(h.events.onError).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------
+  // LREC-30 (S71-f, brief docs/agent-briefs/s71-f-clip-capture-brief.md
+  // §1.A/§1.E, R-453/R-434): `onClip` fires once per clip actually posted,
+  // carrying exactly the bytes sent and which rule ended the recording --
+  // the maintainer's 23 Sept walk had no record of either, only a
+  // whisper-server log of clip lengths and a guess at what caused them.
+  // ---------------------------------------------------------------------
+
+  it("LREC-30a: onClip fires once with endedBy 'silence' after speech then 1.5s of quiet -- peakRms/framesAboveFloor over the whole recording, wav bytes equal what fetch received (S71-f)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "yes" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 50;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1551; // 1501ms of silence after the last above-floor frame
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onClip).toHaveBeenCalledTimes(1);
+    const info = h.events.onClip.mock.calls[0][0];
+    expect(info.endedBy).toBe("silence");
+    expect(info.speechStarted).toBe(true);
+    expect(info.peakRms).toBeCloseTo(0.5); // ABOVE_FLOOR is filled with 0.5
+    expect(info.framesAboveFloor).toBe(2); // the two ABOVE_FLOOR frames only
+    expect(info.hint).toBeNull(); // startAndRecord passes no hint function
+
+    const [, init] = h.fetchMock.mock.calls[0];
+    const form = init.body as FormData;
+    const file = form.get("file") as File;
+    // jsdom's `File`/`Blob` has no `arrayBuffer()` -- `FileReader` is the
+    // one it does implement.
+    const posted = await new Promise<Uint8Array>((resolvePosted, rejectPosted) => {
+      const reader = new FileReader();
+      reader.onload = () => resolvePosted(new Uint8Array(reader.result as ArrayBuffer));
+      reader.onerror = () => rejectPosted(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+    expect(new Uint8Array(info.wav)).toEqual(posted);
+  });
+
+  it("LREC-30b: onClip fires once with endedBy 'cap' when the twelve-second cap ends a clip mid-speech (S71-f)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "still talking" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 50;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 12000; // still above the floor, but the cap is absolute
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+
+    await flush();
+    expect(h.events.onClip).toHaveBeenCalledTimes(1);
+    const info = h.events.onClip.mock.calls[0][0];
+    expect(info.endedBy).toBe("cap");
+    expect(info.speechStarted).toBe(true);
+    expect(info.framesAboveFloor).toBe(3);
+  });
+
+  it("LREC-30c: onClip fires once with endedBy 'cap-window' -- durationMs the ~3s window actually posted, recordedMs the ~12s whole recording before windowing (S71-f)", async () => {
+    const h = makeHarness();
+    // Empty text -- the observable outcome is still no-speech (F-198's own
+    // rule); `onClip` still fires because a windowed clip WAS posted.
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "" }));
+    const processor = await startAndRecord(h);
+
+    // Real-sized frames (BUFFER_SIZE at TARGET_SAMPLE_RATE, 256ms each) so
+    // duration-from-sample-count math lands on round numbers: 48 frames
+    // (0..47) all within QUIET_SEND_FACTOR of the floor but never crossing
+    // it -- speech never starts, and every frame sets `hadQuietSound`, so
+    // the window at the cap spans the full QUIET_CLIP_MAX_FRAMES (12
+    // frames = 3072ms); the whole recording is 48 frames = 12288ms.
+    const QUIET_BIG = new Float32Array(4096).fill(0.016);
+    for (let i = 0; i < 48; i++) {
+      h.clock.t = i * 256;
+      processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => QUIET_BIG } });
+    }
+
+    await flush();
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.events.onClip).toHaveBeenCalledTimes(1);
+    const info = h.events.onClip.mock.calls[0][0];
+    expect(info.endedBy).toBe("cap-window");
+    expect(info.speechStarted).toBe(false);
+    expect(info.framesAboveFloor).toBe(0);
+    expect(info.durationMs).toBeCloseTo(3072);
+    expect(info.recordedMs).toBeCloseTo(12288);
+
+    // S71-f review (brief item 3): the cap-window branch posts a WINDOWED
+    // slice, not the whole recording -- `info.wav` must equal that windowed
+    // slice's bytes, same as LREC-30a proves for the whole-clip branch.
+    const [, init] = h.fetchMock.mock.calls[0];
+    const form = init.body as FormData;
+    const file = form.get("file") as File;
+    const posted = await new Promise<Uint8Array>((resolvePosted, rejectPosted) => {
+      const reader = new FileReader();
+      reader.onload = () => resolvePosted(new Uint8Array(reader.result as ArrayBuffer));
+      reader.onerror = () => rejectPosted(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+    expect(new Uint8Array(info.wav)).toEqual(posted);
+  });
+
+  it("LREC-30d: onClip fires once with endedBy 'stop' when stop() ends the clip (S71-f)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "stopped early" }));
+    const processor = await startAndRecord(h);
+    const handle = (processor as unknown as { __handle: ReturnType<Recognizer> }).__handle;
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 50;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+
+    handle.stop();
+    await flush();
+
+    expect(h.events.onClip).toHaveBeenCalledTimes(1);
+    const info = h.events.onClip.mock.calls[0][0];
+    expect(info.endedBy).toBe("stop");
+    expect(info.speechStarted).toBe(true);
+    expect(info.framesAboveFloor).toBe(2);
   });
 });
 

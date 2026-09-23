@@ -13,6 +13,41 @@
  * and errors and to start/stop a session.
  */
 
+/**
+ * S71-f (R-453, R-434, brief docs/agent-briefs/s71-f-clip-capture-brief.md
+ * §1.A) -- exactly the bytes and the numbers a recogniser sent to its
+ * service for one clip, so the bar can keep and score every clip Whisper
+ * ever saw instead of trusting a feeling about what got cut off. Only
+ * `localRecognizer.ts` fires this today (the browser's Web Speech API
+ * streams; it never "posts a clip" at all).
+ */
+export interface ClipInfo {
+  /** Exactly the bytes posted -- the WAV `transcribe()` built, unmodified. */
+  wav: ArrayBuffer;
+  /** Duration, in ms, of the bytes actually posted (the window, when one was
+   *  sent instead of the whole clip -- see `endedBy: "cap-window"`). */
+  durationMs: number;
+  /** Duration, in ms, of the WHOLE recording before any windowing. */
+  recordedMs: number;
+  /** Which rule ended the clip: the stop button, 1500ms of silence after
+   *  speech, the twelve-second cap reached mid-speech, or the cap reached
+   *  with no speech ever started but a quiet sound worth sending (the
+   *  windowed send). */
+  endedBy: "stop" | "silence" | "cap" | "cap-window";
+  /** Whether speech ever "started" under the onset rules, over the whole
+   *  recording. */
+  speechStarted: boolean;
+  /** Max frame RMS over the whole recording. */
+  peakRms: number;
+  /** Mean frame RMS over the whole recording. */
+  meanRms: number;
+  /** Count of frames whose RMS was above the floor, over the whole
+   *  recording. */
+  framesAboveFloor: number;
+  /** The prompt sent with the clip, or `null` when none was. */
+  hint: string | null;
+}
+
 export interface RecognizerEvents {
   /** What has been heard so far; may be revised by a later call. */
   onInterim(text: string): void;
@@ -22,6 +57,10 @@ export interface RecognizerEvents {
   /** The recogniser stopped, for any reason (a final result, an error, or a
    *  caller's `stop()`). */
   onEnd(): void;
+  /** S71-f: fired once per clip actually posted to the recogniser's own
+   *  service, right before the request goes out. Optional so every existing
+   *  caller and test needs no change. */
+  onClip?(info: ClipInfo): void;
 }
 
 export interface RecognizerHandle {

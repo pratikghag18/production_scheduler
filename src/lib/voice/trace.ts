@@ -9,8 +9,13 @@
  * that side).
  *
  * Pure and browser-safe on purpose: `CommandBar.tsx` imports this straight
- * into the client bundle, so it holds no `node:fs` and makes no request --
- * only the shape, and how to render one line of it.
+ * into the client bundle, so it holds no `node:fs` -- only the shape, how to
+ * render one line of it, and (S71-f, R-453/R-434, brief
+ * docs/agent-briefs/s71-f-clip-capture-brief.md §1.B) `postClip`, the one
+ * request this file does make: the exact bytes a clip's own `onClip` event
+ * carried, fire-and-forget, in the same style `commandConversation.ts`'s own
+ * `postTrace` uses for `/__trace` (kept here, not there, since only this
+ * lane's files touch clip capture).
  */
 
 export interface TraceEntry {
@@ -71,6 +76,24 @@ export interface TraceEntry {
    * answered. Omitted (undefined) on every ordinary line.
    */
   revises?: true;
+  /**
+   * S71-f (R-453, R-434): the numbers `ClipInfo` carried for this sentence's
+   * clip -- `undefined` on a typed sentence, a bare confirm/cancel word, or
+   * any turn no clip was ever posted for (a refused mic before a frame was
+   * even captured, a genuine no-speech skip that never reached the
+   * network). `wav`/`hint` are not repeated here: the bytes go to `/__clip`
+   * via `postClip`, and `hint` is already implied by the reader's own
+   * request the trace elsewhere never carries either.
+   */
+  clip?: {
+    durationMs: number;
+    recordedMs: number;
+    endedBy: "stop" | "silence" | "cap" | "cap-window";
+    speechStarted: boolean;
+    peakRms: number;
+    meanRms: number;
+    framesAboveFloor: number;
+  };
 }
 
 /** Long enough to read a form or a garbled answer back, short enough that
@@ -87,4 +110,40 @@ function trimRaw(raw: string): string {
 export function renderLine(entry: TraceEntry): string {
   const model = "raw" in entry.model ? { raw: trimRaw(entry.model.raw) } : entry.model;
   return JSON.stringify({ ...entry, model });
+}
+
+/** S71-f (brief §1.B): posts `wav` (exactly the bytes `ClipInfo.wav` held)
+ *  to the dev server's `POST /__clip`, `at` and `clip`'s own numbers carried
+ *  as query parameters (`clipServer.ts`'s own handler reads them back to
+ *  write the manifest line -- there is no other channel for them on a raw
+ *  binary POST). `at` is the SAME string the matching `TraceEntry.at`
+ *  holds, so `score.mjs --from-trace` can join a clip to what the bar heard
+ *  for it. Fire-and-forget, errors swallowed, a no-op outside dev -- the
+ *  same three rules `commandConversation.ts`'s own `postTrace` follows for
+ *  `/__trace` (R-421: "a build without it changes nothing in the bar"). */
+export function postClip(
+  at: string,
+  wav: ArrayBuffer,
+  clip: NonNullable<TraceEntry["clip"]>,
+): void {
+  if (!import.meta.env.DEV) return;
+  const params = new URLSearchParams({
+    at,
+    durationMs: String(Math.round(clip.durationMs)),
+    recordedMs: String(Math.round(clip.recordedMs)),
+    endedBy: clip.endedBy,
+    speechStarted: String(clip.speechStarted),
+    peakRms: String(clip.peakRms),
+    meanRms: String(clip.meanRms),
+    framesAboveFloor: String(clip.framesAboveFloor),
+  });
+  try {
+    fetch(`/__clip?${params.toString()}`, {
+      method: "POST",
+      headers: { "Content-Type": "audio/wav" },
+      body: wav,
+    }).catch(() => {});
+  } catch {
+    // Never throws -- see above.
+  }
 }

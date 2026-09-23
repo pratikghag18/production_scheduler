@@ -2,8 +2,8 @@
  * S59-e (R-421, brief docs/agent-briefs/s59-e-trace-brief.md §1) --
  * `src/lib/voice/trace.ts`'s own tests: pure, no DOM, no network.
  */
-import { describe, expect, it } from "vitest";
-import { renderLine, type TraceEntry } from "@/lib/voice/trace";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderLine, postClip, type TraceEntry } from "@/lib/voice/trace";
 
 function baseEntry(over: Partial<TraceEntry> = {}): TraceEntry {
   return {
@@ -98,5 +98,93 @@ describe("trace: renderLine (S59-e, R-421)", () => {
       "second readout",
       "third readout",
     ]);
+  });
+
+  // S71-f (R-453, R-434, brief docs/agent-briefs/s71-f-clip-capture-brief.md
+  // §1.E): a clip's numbers round-trip through the same JSON line as every
+  // other field, and are absent (never `null`) on an entry no clip was ever
+  // posted for -- a typed sentence, or a bare confirm/cancel word.
+  it("T-9: clip numbers serialise and round-trip; absent on an entry with no clip", () => {
+    const withClip = baseEntry({
+      by: "local",
+      clip: {
+        durationMs: 1512,
+        recordedMs: 1512,
+        endedBy: "silence",
+        speechStarted: true,
+        peakRms: 0.31,
+        meanRms: 0.09,
+        framesAboveFloor: 4,
+      },
+    });
+    expect(JSON.parse(renderLine(withClip))).toEqual(withClip);
+
+    const noClip = baseEntry();
+    const parsedNoClip = JSON.parse(renderLine(noClip)) as TraceEntry;
+    expect(parsedNoClip.clip).toBeUndefined();
+    expect("clip" in JSON.parse(renderLine(noClip))).toBe(false);
+  });
+});
+
+describe("trace: postClip (S71-f, R-453, R-434)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const clip: NonNullable<TraceEntry["clip"]> = {
+    durationMs: 1500.4,
+    recordedMs: 1500.4,
+    endedBy: "silence",
+    speechStarted: true,
+    peakRms: 0.31,
+    meanRms: 0.09,
+    framesAboveFloor: 4,
+  };
+
+  it("PC-1: posts the exact wav bytes to /__clip, at and the numbers as query params, rounded ms", () => {
+    const fetchMock = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    const wav = new ArrayBuffer(48);
+
+    postClip("2026-09-23T00:00:00.000Z", wav, clip);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(wav);
+    const parsed = new URL(url, "http://localhost");
+    expect(parsed.pathname).toBe("/__clip");
+    expect(parsed.searchParams.get("at")).toBe("2026-09-23T00:00:00.000Z");
+    expect(parsed.searchParams.get("durationMs")).toBe("1500");
+    expect(parsed.searchParams.get("endedBy")).toBe("silence");
+    expect(parsed.searchParams.get("speechStarted")).toBe("true");
+    expect(parsed.searchParams.get("framesAboveFloor")).toBe("4");
+  });
+
+  it("PC-2: a synchronous throw from fetch is swallowed, never escapes", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        throw new Error("boom");
+      }),
+    );
+    expect(() => postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip)).not.toThrow();
+  });
+
+  it("PC-3: a rejected fetch promise is swallowed, never an unhandled rejection", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(() => postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip)).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  it("PC-4: a no-op outside dev -- fetch is never called", () => {
+    vi.stubEnv("DEV", false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    postClip("2026-09-23T00:00:00.000Z", new ArrayBuffer(4), clip);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -65,7 +65,7 @@ import {
   type WriteOutcome,
 } from "@/features/board/components/CommandBar";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
-import type { Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
+import type { ClipInfo, Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 import type { TraceEntry } from "@/lib/voice/trace";
 
 /**
@@ -435,6 +435,11 @@ function makeFakeRecognizer() {
       },
       end(): void {
         act(() => captured?.onEnd());
+      },
+      // S71-f (brief §1.E): fires `onClip`, same as the real recogniser
+      // does strictly before `onFinal`/`onError` for the same clip.
+      clip(info: ClipInfo): void {
+        act(() => captured?.onClip?.(info));
       },
     },
   };
@@ -4757,6 +4762,135 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     expect(entry.heard).toBe(P1_SENTENCE);
     expect(entry.by).toBe("local");
     expect(entry.model).toEqual({ raw });
+  });
+
+  // S71-f (R-453, R-434, brief docs/agent-briefs/s71-f-clip-capture-brief.md
+  // §1.E): `onClip` fires strictly before `onFinal` for the same clip
+  // (`localRecognizer.ts`'s own doc), same as the real recogniser --
+  // `makeFakeRecognizer`'s `fire.clip` mirrors that ordering. The numbers
+  // land on the sentence's own trace entry, and the WAV bytes post to
+  // `/__clip` under that entry's own `at`.
+  it("CB-clip-1: onClip's numbers land on the sentence's trace entry, and the WAV posts to /__clip under the entry's own at (S71-f)", async () => {
+    const fetchMock = stubFetch();
+    const parsed = parseCommand(P1_SENTENCE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const raw = '{"intent":"assign","operator":"Operator 1"}';
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsed.command,
+      by: "model",
+      raw,
+    }));
+    const { recognizer, fire } = makeFakeRecognizer();
+    renderBar({ runs: [] }, fakeReader, recognizer, {}, {}, { recognizerName: () => "local" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    const wav = new ArrayBuffer(48);
+    const clip: ClipInfo = {
+      wav,
+      durationMs: 1500,
+      recordedMs: 1500,
+      endedBy: "silence",
+      speechStarted: true,
+      peakRms: 0.35,
+      meanRms: 0.12,
+      framesAboveFloor: 5,
+      hint: null,
+    };
+    fire.clip(clip);
+    fire.final(P1_SENTENCE);
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => url === "/__trace")).toBe(true),
+    );
+
+    const clipCall = fetchMock.mock.calls.find(
+      ([url]) => typeof url === "string" && url.startsWith("/__clip"),
+    ) as [string, RequestInit] | undefined;
+    expect(clipCall).toBeDefined();
+    const [clipUrl, clipInit] = clipCall!;
+    expect(clipInit.method).toBe("POST");
+    expect(clipInit.body).toBe(wav);
+    expect(clipUrl).toMatch(/^\/__clip\?at=/);
+
+    const traceCall = fetchMock.mock.calls.find(([url]) => url === "/__trace") as
+      [string, RequestInit] | undefined;
+    expect(traceCall).toBeDefined();
+    const entry = JSON.parse(traceCall![1].body as string) as TraceEntry;
+    expect(entry.clip).toEqual({
+      durationMs: 1500,
+      recordedMs: 1500,
+      endedBy: "silence",
+      speechStarted: true,
+      peakRms: 0.35,
+      meanRms: 0.12,
+      framesAboveFloor: 5,
+    });
+    // The `/__clip` post's own `at` is the SAME string as the trace entry's
+    // `at` -- the join key `score.mjs --from-trace` uses.
+    const atParam = new URL(clipUrl, "http://localhost").searchParams.get("at");
+    expect(atParam).toBe(entry.at);
+  });
+
+  // S71-f review fix (session leak): a clip stashed by session A must never
+  // attach to session B's unrelated entry when A is superseded (stop, then
+  // a fresh press) before A's own onFinal/onError ever arrives -- the
+  // reviewer's exact repro (B's "Nothing was heard" entry used to carry A's
+  // durationMs 900 / silence). Custom recognizer here (not
+  // `makeFakeRecognizer`) since each session needs its OWN captured
+  // `RecognizerEvents` -- that helper only ever keeps the latest.
+  it("CB-clip-2: a clip from a superseded session never attaches to a later session's trace entry, and its WAV is never posted (S71-f review fix)", () => {
+    const fetchMock = stubFetch();
+    const sessions: RecognizerEvents[] = [];
+    const recognizer: Recognizer = (events) => {
+      sessions.push(events);
+      return { stop: vi.fn() };
+    };
+    renderBar({ runs: [] }, null, recognizer);
+    const micButton = screen.getByRole("button", { name: "Speak a sentence" });
+
+    // Session A starts.
+    fireEvent.click(micButton);
+    expect(sessions).toHaveLength(1);
+    const a = sessions[0];
+
+    // A's onClip fires -- a clip WAS captured.
+    const clipA: ClipInfo = {
+      wav: new ArrayBuffer(16),
+      durationMs: 900,
+      recordedMs: 900,
+      endedBy: "silence",
+      speechStarted: true,
+      peakRms: 0.2,
+      meanRms: 0.1,
+      framesAboveFloor: 3,
+      hint: null,
+    };
+    act(() => a.onClip?.(clipA));
+
+    // A is superseded: stop (still listening -- a second click stops it),
+    // then a fresh press starts session B -- A's own onFinal/onError never
+    // arrives.
+    fireEvent.click(micButton); // stop
+    fireEvent.click(micButton); // fresh press -- session B
+    expect(sessions).toHaveLength(2);
+    const b = sessions[1];
+
+    // B ends with no speech heard -- a real onError, no clip ever fired
+    // for B itself.
+    act(() => b.onError("no-speech"));
+
+    expect(
+      fetchMock.mock.calls.some(([url]) => typeof url === "string" && url.startsWith("/__clip")),
+    ).toBe(false);
+
+    const traceCall = fetchMock.mock.calls.find(([url]) => url === "/__trace") as
+      [string, RequestInit] | undefined;
+    expect(traceCall).toBeDefined();
+    const entry = JSON.parse(traceCall![1].body as string) as TraceEntry;
+    expect(entry.clip).toBeUndefined();
   });
 
   it("CB-t-3: a question answered by a button -- asked and answered, posted once (not while the question stands)", () => {
