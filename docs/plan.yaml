@@ -12803,6 +12803,82 @@ requirements:
     walk's brief) treated it as a Chicago one. BUILT the same session (69318e7): the zone named once in the
     schedule block, each hour an AT TIME ZONE instant, the company-wide fallback set in a new section 6b.
 findings:
+- id: F-203
+  title: '"Clear Area 1 and Area 2" resolves Area 1 as a cell and refuses, while "clear Area 1" alone works'
+  tag: A lot that resolves a place by a narrower rule than the single sentence
+  status: open
+  found_by: maintainer
+  stage: S64
+  refs:
+  - R-407
+  - R-432
+  story: >-
+    Second spoken walk, 23 Sept (session 190): "Clear, Area 1 and Area 2" was read as two unassign commands and
+    the lot answered "1 of 2: No cell called Area 1 on this board"; a moment earlier "Clear, Area 1" alone had
+    listed and removed its blocks. The several path resolves a place as a cell where the single path resolves it
+    as any place above the cells (R-407).
+- id: F-202
+  title: A standing free-text question swallowed the NEXT sentence as its answer, so an override was written with a whole command as its reason
+  tag: An answer box that takes anything
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-425
+  - R-435
+  - F-197
+  story: >-
+    23 Sept (session 190): "Assign Tom Baker to Housing A on Cell 1 ..." asked for the override reason; the
+    maintainer said the next sentence of the list instead, "Assign Maria Lopez to bracket A on Cell 3 ... on 28th
+    of September", and the bar took those words as the reason and wrote Tom's block with them. F-197's fix made
+    a spoken answer reach the standing question; nothing asks whether the words are an answer at all. A sentence
+    that parses as a command is not a reason: it should replace the question, or ask which was meant (R-435).
+- id: F-201
+  title: A Whisper non-speech tag ("[Music]") was read as a sentence and became "unassign everyone on today"
+  tag: A hallucinated token treated as words
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-431
+  - R-435
+  story: >-
+    23 Sept (session 190): between two sentences Whisper returned "[Music]"; the bar handed it to the model, which
+    answered an unassign of everyone on today, and the lot went as far as "6 of 6: That is -840 minutes" before
+    F-199 stopped it. On a day without that other bug, a cough would have cleared the board. whisper.cpp writes
+    such tags in brackets ("[Music]", "[BLANK_AUDIO]", "(clippers buzzing)"); a transcript that is only such a
+    tag is nothing heard, and one that contains it drops it before the words go anywhere.
+- id: F-200
+  title: A misheard "end Sam Patel's block at 2pm" was written by the model as a move to 23:59, with no question
+  tag: A model guess written as a fact
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-435
+  - R-431
+  story: >-
+    23 Sept (session 190): after nine tries at "end Sam Patel's block at 2pm" (heard as "and Sam Patel's Blob /
+    Block at Tokyo / Lock / blog"), one came back "and Sam Patel's block at 2 p.m." and the model answered a MOVE
+    of the block to 14:00-23:59, read out and written at once. The sentence names one time; the model invented the
+    other end. The rules had refused every one of the earlier readings as no_time. That write left a block ending
+    at midnight on Cell 1, which then broke every clear (F-199).
+- id: F-199
+  title: A block that ends at midnight breaks every clear on that day ("That is -840 minutes; a block is at least 15 minutes"), so the board cannot be emptied
+  tag: A day's end read as zero
+  status: open
+  found_by: maintainer
+  stage: S64
+  refs:
+  - R-407
+  - R-436
+  story: >-
+    23 Sept (session 190): with Sam Patel's block at 14:00 to 00:00 (the next day's midnight, F-200's write),
+    "Clear, Area 1" answered "1 of 7: That is -840 minutes; a block is at least 15 minutes" four times and removed
+    nothing; the clear of everyone read the block's end at midnight as 00:00 of the same day, fourteen hours
+    before its start. The maintainer could not empty the board by any sentence and gave up: "that was so much
+    worse than yesterday that I want to just stop working on it." A block may legitimately end at midnight (a
+    night band ends there); its removal must read its real end.
 - id: F-198
   title: A one-word spoken answer ("yes") is never sent to Whisper, because a clip's speech only starts after half a second of steady loudness
   tag: A silence rule that swallows short answers
@@ -25822,6 +25898,30 @@ next:
   text: "The admin rail resizes and remembers (R-446), the side-panel standard's first hit --- lane running 18 Sept"
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
+- kind: task
+  text: "S71-a, first: a block ending at midnight is removable (F-199) and a Whisper non-speech tag is never a sentence (F-201) --- the two that stopped the 23 Sept walk"
+  why: >-
+    23 Sept (session 190): the board could not be emptied and a "[Music]" became a clear-everything. Both are
+    small and both are pinned from the trace's own text. Nothing spoken is asked of the maintainer until these
+    two are in.
+- kind: task
+  text: "S71-b: a heard-text replay spec --- every sentence Whisper actually wrote in the two spoken walks (the trace's heard strings, misheard ones included) typed through the bar on the walk day, asserting what the bar may do with a misheard sentence: ask, refuse, or write only what the words say, never invent an end (F-200), never take a command as a reason (F-202), never read a bracketed tag (F-201)"
+  why: >-
+    R-433 for the spoken half: the maintainer's voice is not a test instrument, and two walks cost two afternoons.
+    The trace already holds what Whisper wrote; the bar's behaviour on those strings is the thing to pin, and
+    the model's readings of them are what the sixth run's data must fix. Runs before any third spoken pass.
+- kind: task
+  text: "S71-c: the hint's 19 new words, kept or dropped by measurement --- the same recorded clips through Whisper with the 34-word hint and the 53-word one, counting the board names heard right"
+  why: >-
+    23 Sept: "on Cell" came back as "Common Cell" and "oneself", "in Line" as "Inline", "to" as "2", more often than
+    the day before; the hint grew from 34 to 53 words between the two walks (F-195, F-198) and whisper.cpp biases
+    toward the prompt. Whether the words helped or hurt is a measurement, not a guess: record the list once, run
+    both prompts, count.
+- kind: task
+  text: "F-202 and F-203: a command is not an answer to a free-text question, and the lot resolves a place the way the single sentence does"
+  why: >-
+    23 Sept (session 190), both from the second spoken walk. F-202 is F-197's other half; F-203 is R-407 in the
+    several path.
 - kind: task
   text: "F-193 and F-196: a date said in words, and a capitalised small word read as a place --- the sixth run's data (the generator) and, until then, a question instead of a silent write (R-435) and choices at the dead end (R-430)"
   why: >-
