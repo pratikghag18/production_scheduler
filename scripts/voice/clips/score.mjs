@@ -97,6 +97,9 @@ function parseArgs(argv) {
     fromTrace: null,
     // S71-k: `null` means "no --gain given, post the clip unchanged".
     gain: null,
+    // R-453 (24 Sept): a JSON file of what was actually said per clip, so a
+    // replay is scored against the truth, not against last time's transcript.
+    references: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -106,6 +109,7 @@ function parseArgs(argv) {
     else if (a === "--clips") out.clipsDir = argv[++i];
     else if (a === "--label") out.label = argv[++i];
     else if (a === "--gain") out.gain = parseGainArg(argv[++i]);
+    else if (a === "--references") out.references = argv[++i];
     else if (a === "--from-trace") {
       // The N is optional -- only consumed when the next argument is a bare
       // number, so `--from-trace` as the last flag (default N) never eats
@@ -315,6 +319,12 @@ async function runFromTrace(args, override) {
       `entr${order.length === 1 ? "y" : "ies"}, newest first)\n`,
   );
 
+  // R-453: references keyed by the entry's `at` (the sentence) and by the
+  // clip's `postedAt` (an answer); a clip with no reference falls back to the
+  // then-vs-now comparison and is marked so in its row.
+  const refs = args.references
+    ? JSON.parse(readFileSync(resolve(args.references), "utf8"))
+    : { references: {}, answers: {} };
   const rows = [];
   for (const at of order) {
     const clipsForEntry = groups.get(at);
@@ -337,12 +347,17 @@ async function runFromTrace(args, override) {
         override !== null ? "override" : clip.hintDropped ? "dropped" : clip.hint ? "hint" : "none";
       const rawBytes = readFileSync(wavPath);
       const { bytes, gainUsed } = applyGainIfRequested(rawBytes, args.gain);
-      const { text: now } = await scoreOne(args.whisper, bytes, promptText);
+      const { text: now, wallMs } = await scoreOne(args.whisper, bytes, promptText);
       // S71-k: `heard` (the sentence's own transcript) joins the FIRST clip
       // only; an answer's row compares against `answered` instead -- never
       // both, and never `heard` repeated on the answer's own row.
-      const reference = isAnswer ? (bar.answered ?? "") : bar.heard;
+      const said = isAnswer
+        ? (refs.answers?.[clip.postedAt ?? ""] ?? null)
+        : (refs.references?.[at] ?? refs.references?.[clip.postedAt ?? ""] ?? null);
+      const reference = said ?? (isAnswer ? (bar.answered ?? "") : bar.heard);
       const wer = wordErrorRate(reference, now);
+      const names = said !== null ? nameHits(reference, now) : null;
+      const exact = said !== null ? isExact(reference, now) : null;
       rows.push({
         at: clip.at,
         postedAt: clip.postedAt,
@@ -353,25 +368,65 @@ async function runFromTrace(args, override) {
         prompt: promptLabel,
         gain: gainUsed,
         reference,
+        referenceIs: said !== null ? "said" : "then",
         now,
         wer,
+        namesHit: names ? names.hits : null,
+        namesTotal: names ? names.total : null,
+        exact,
+        wallMs,
       });
       const gainTag = gainUsed !== null ? `  gain=${gainUsed.toFixed(3)}` : "";
       console.log(
         `${clip.at}  ${roleTag}${Math.round(clip.durationMs)}ms  ${clip.endedBy}  ` +
-          `peak=${clip.peakRms.toFixed(3)}  wer=${wer.toFixed(3)}  prompt=${promptLabel}${gainTag}`,
+          `peak=${clip.peakRms.toFixed(3)}  wer=${wer.toFixed(3)}` +
+          (names ? `  names=${names.hits}/${names.total}` : "") +
+          `  ${wallMs}ms  prompt=${promptLabel}${gainTag}`,
       );
-      console.log(`    ${isAnswer ? "answered" : "then    "}: "${reference}"`);
+      console.log(
+        `    ${said !== null ? "said    " : isAnswer ? "answered" : "then    "}: "${reference}"`,
+      );
       console.log(`    now     : "${now}"`);
     }
   }
 
   const n = rows.length;
   const meanWer = n ? rows.reduce((s, r) => s + r.wer, 0) / n : 0;
+  const scoredAgainstSaid = rows.filter((r) => r.referenceIs === "said");
+  const namesHit = scoredAgainstSaid.reduce((s, r) => s + (r.namesHit ?? 0), 0);
+  const namesTotal = scoredAgainstSaid.reduce((s, r) => s + (r.namesTotal ?? 0), 0);
+  const exactCount = scoredAgainstSaid.filter((r) => r.exact).length;
+  const meanWall = n ? Math.round(rows.reduce((s, r) => s + r.wallMs, 0) / n) : 0;
   console.log(
     `\n${n} clip(s) scored across ${order.length} entr${order.length === 1 ? "y" : "ies"}, ` +
-      `mean then-vs-now WER ${meanWer.toFixed(3)}`,
+      (scoredAgainstSaid.length
+        ? `${scoredAgainstSaid.length} against what was said: mean WER ${(
+            scoredAgainstSaid.reduce((s, r) => s + r.wer, 0) / scoredAgainstSaid.length
+          ).toFixed(3)}, names ${namesHit}/${namesTotal}, exact ${exactCount}; `
+        : `mean then-vs-now WER ${meanWer.toFixed(3)}; `) +
+      `mean wall ${meanWall} ms per clip`,
   );
+  if (args.label) {
+    const resultsDir = join(clipsDir, "results");
+    mkdirSync(resultsDir, { recursive: true });
+    const resultsPath = join(resultsDir, `${args.label}.json`);
+    writeFileSync(
+      resultsPath,
+      JSON.stringify(
+        {
+          label: args.label,
+          mode: "from-trace",
+          whisper: args.whisper,
+          gain: args.gain,
+          references: args.references,
+          rows,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    console.log(`wrote ${resultsPath}`);
+  }
 }
 
 async function main() {

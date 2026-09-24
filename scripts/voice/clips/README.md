@@ -75,3 +75,20 @@ selected lines by `at` before printing: the sentence's own clip prints first
 (`bar.jsonl`'s `heard` as its "then"), then any answer clip, labelled
 `answer`, `bar.jsonl`'s own `answered` printed as ITS "then" instead --
 `heard` never repeats on an answer's row.
+
+### Against what was actually said (24 Sept, R-453)
+
+Then-vs-now only says whether a setting changed the reading. To compare two
+models you need the truth. Write what was said per clip into a JSON file,
+keyed by the entry's `at` for sentences and by the clip's `postedAt` for
+answers (the walk list with the day's date; `data/voice/clips/references.json`
+holds the 23 Sept walk, gitignored with the clips), and pass it:
+
+    npm run voice:clips:score -- --whisper http://127.0.0.1:8090 --from-trace 36 --references data/voice/clips/references.json --label small-en-beam-hint
+
+Each row with a reference prints `said:` instead of `then:`, its WER against
+the truth, the board names heard (`names=hit/total`) and the wall time; the
+summary gives mean WER, names and exact matches over the referenced clips
+and the mean wall time per clip, and `--label` writes the rows to
+`results/<label>.json`. Run it once per container (swap the model, run the
+same command with a new label) and read the summaries side by side.
