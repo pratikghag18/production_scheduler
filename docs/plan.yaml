@@ -26508,6 +26508,14 @@ next:
 
 - kind: parked
   text: >-
+    Whisper model by available memory, three parts: (1) npm run voice:serve -- --whisper-model auto picks the largest model on disk that fits the free memory with headroom and logs which and why, a plain name still forcing one; (2) the serve program reports the running model and the Settings page shows it read-only; (3) choosing a model from the page, which needs a small local service that restarts the container --- only once Whisper lives on a server with an operator, never a restart button for a plant admin in a browser
+  why: >-
+    PARKED BY THE MAINTAINER, 24 Sept (session 191): "a nice to have feature not a must have", to discuss later and
+    not right after the matrix; whether it is worth doing at all depends on the turbo row --- if the bigger model
+    is the one to run and it only fits when memory is free, part (1) earns its place. The browser cannot see the
+    machine's memory or start a container; only the serve program on the machine can.
+- kind: parked
+  text: >-
     Phase 1 — Real-time: per-site channels, optimistic edits, conflict reconciliation, presence
   why: >-
     MOVED DOWN BY THE MAINTAINER, 4 Sept. The largest item on the list and it touches every screen;
