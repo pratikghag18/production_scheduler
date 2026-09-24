@@ -27,6 +27,9 @@ class FakeRecognition {
   onresult: ((e: { results: FakeResult[] }) => void) | null = null;
   onerror: ((e: { error: string }) => void) | null = null;
   onend: (() => void) | null = null;
+  // F-214 (S71-l, R-454): the engine's own report that it is actually
+  // listening -- VR-x below fires this and asserts `onStatus("listening")`.
+  onstart: (() => void) | null = null;
   aborted = false;
   stopped = false;
   static instances: FakeRecognition[] = [];
@@ -99,6 +102,24 @@ describe("VREC: browserRecognizer wraps the Web Speech API (S46-a review finding
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError).toHaveBeenCalledWith("no-speech");
     expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  // F-214 (S71-l, R-454): the browser engine announces its own "listening"
+  // phase from its own `onstart` handler -- `CommandBar.tsx` no longer sets
+  // it synchronously at the mic press for either engine, so a plain
+  // `browserRecognizer()` session needs its own report, exactly the way
+  // `localRecognizer.ts` now reports it from inside its own
+  // `startRecording` (LREC-33a/b).
+  it("VR-x: the browser engine's own onstart fires onStatus('listening'), before any result", () => {
+    const onStatus = vi.fn();
+    const instance = startSession({ onStatus });
+
+    expect(onStatus).not.toHaveBeenCalled();
+
+    instance.onstart?.();
+
+    expect(onStatus).toHaveBeenCalledTimes(1);
+    expect(onStatus).toHaveBeenCalledWith("listening");
   });
 
   it("VREC-4: the handle's stop() prefers abort() over stop()", () => {

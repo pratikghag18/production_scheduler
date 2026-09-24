@@ -1045,6 +1045,110 @@ describe("LREC: localRecognizer (S57-a brief §3)", () => {
   });
 
   // ---------------------------------------------------------------------
+  // F-211 (S71-l): whisper.cpp writes a dialogue dash on a clip that starts
+  // mid-utterance -- "-Assign Priya Shah...", "- Assign...", "-2, Area 2...",
+  // "-A, Sign Lena Novak..." -- and the parser then reads the dashed word as
+  // part of a name. `stripNonSpeechTags` strips a leading run of hyphens, en
+  // dashes or em dashes (and the whitespace after them) the same way it
+  // already strips a bracketed tag -- ONLY at the very start of the
+  // transcript; a dash inside the text (a hyphenated name, a range) stays.
+  // ---------------------------------------------------------------------
+
+  it("LREC-29f: '-Assign Sam' -> 'Assign Sam' (F-211)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "-Assign Sam" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onFinal).toHaveBeenCalledWith("Assign Sam");
+    expect(h.events.onError).not.toHaveBeenCalled();
+  });
+
+  it("LREC-29g: a dash with a space, an en dash, and a run of hyphens all strip the same way (F-211)", async () => {
+    const cases = ["- Assign Sam", "—Assign Sam", "-- Assign Sam"];
+    for (const text of cases) {
+      const h = makeHarness();
+      h.fetchMock.mockResolvedValue(okJsonResponse({ text }));
+      const processor = await startAndRecord(h);
+
+      h.clock.t = 0;
+      processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+      h.clock.t = 100;
+      processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+      h.clock.t = 1700;
+      processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+      await flush();
+      expect(h.events.onFinal).toHaveBeenCalledWith("Assign Sam");
+      expect(h.events.onError).not.toHaveBeenCalled();
+    }
+  });
+
+  it("LREC-29h: a dash INSIDE the text stays -- only a leading run is stripped (F-211)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "assign Sam-Patel to Cell 1" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onFinal).toHaveBeenCalledWith("assign Sam-Patel to Cell 1");
+    expect(h.events.onError).not.toHaveBeenCalled();
+  });
+
+  it("LREC-29i: a bracketed tag THEN a leading dash both strip -- '[Music] -clear Cell 3' -> 'clear Cell 3' (F-211)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "[Music] -clear Cell 3" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onFinal).toHaveBeenCalledWith("clear Cell 3");
+    expect(h.events.onError).not.toHaveBeenCalled();
+  });
+
+  // Reviewer fix (F-211 follow-up): "- -" is TWO separate dash runs with a
+  // real space between them, not one leading run -- the single anchored
+  // strip used to eat only the first hyphen and let "-" reach `onFinal` as
+  // if it were a heard word. The strip now repeats at the string's own
+  // start, so this comes back "" -- whisper.cpp's own genuine empty answer,
+  // the no-speech path, never a final transcript of punctuation alone.
+  it("LREC-29j: a transcript of only dashes with spaces ('- -') strips to '' and takes the no-speech path (F-211 follow-up)", async () => {
+    const h = makeHarness();
+    h.fetchMock.mockResolvedValue(okJsonResponse({ text: "- -" }));
+    const processor = await startAndRecord(h);
+
+    h.clock.t = 0;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 100;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => ABOVE_FLOOR } });
+    h.clock.t = 1700;
+    processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => SILENT } });
+
+    await flush();
+    expect(h.events.onFinal).not.toHaveBeenCalled();
+    expect(h.events.onError).toHaveBeenCalledWith("no-speech");
+  });
+
+  // ---------------------------------------------------------------------
   // LREC-30 (S71-f, brief docs/agent-briefs/s71-f-clip-capture-brief.md
   // §1.A/§1.E, R-453/R-434): `onClip` fires once per clip actually posted,
   // carrying exactly the bytes sent and which rule ended the recording --
@@ -1624,5 +1728,70 @@ describe("LREC: withFallback (S57-a brief §4, design-plan D131 §3)", () => {
     // stale "transcribing" label.
     started[0].onInterim("put ana");
     expect(barEvents.onStatus).toHaveBeenLastCalledWith("listening");
+  });
+
+  // F-214 (S71-l, R-454): `onStatus("listening")` used to fire BEFORE
+  // `d.getUserMedia(...)` was even called -- the bar announced "Listening…"
+  // while the microphone and the audio graph were still opening (a few
+  // hundred milliseconds), and the person, told the bar was already
+  // listening, began the sentence before capture was live. The 23 Sept
+  // walk's own evidence: three loud clips were mid-sentence in their first
+  // frame, fourteen transcripts opened with a dash (F-211), and the FIRST
+  // word came back wrong far more than any other. The fix moves the call to
+  // the point where the audio graph is actually connected and
+  // `recordingStartedAt` is set (inside `startRecording`, once
+  // `getUserMedia`'s own promise resolves) -- so the phase is announced
+  // exactly when the first frame can actually arrive.
+  it("LREC-33a: onStatus('listening') is NOT called before a delayed getUserMedia resolves, and IS called once after the processor is connected", async () => {
+    let resolveGetUserMedia!: (s: FakeMediaStream) => void;
+    const h = makeHarness({
+      getUserMediaImpl: () =>
+        new Promise((resolve) => {
+          resolveGetUserMedia = resolve;
+        }),
+    });
+    const recognizer = localRecognizer("http://127.0.0.1:8090", h.deps);
+    recognizer(h.events as unknown as RecognizerEvents);
+    await flush();
+
+    // Still waiting on the permission prompt/audio graph -- the bar must
+    // stay silent, never guess "listening" ahead of the mic actually being
+    // open (this is the exact shape F-214's fix closes).
+    expect(h.events.onStatus).not.toHaveBeenCalled();
+    expect(h.audioContext.lastProcessor).toBeNull();
+
+    resolveGetUserMedia(h.stream);
+    await flush();
+
+    // Now the processor is wired and `recordingStartedAt` is set -- exactly
+    // once, exactly "listening", never anything else beforehand.
+    expect(h.events.onStatus).toHaveBeenCalledTimes(1);
+    expect(h.events.onStatus).toHaveBeenCalledWith("listening");
+    expect(h.audioContext.lastProcessor).not.toBeNull();
+  });
+
+  it("LREC-33b: stop() before a delayed getUserMedia resolves never announces listening at all", async () => {
+    let resolveGetUserMedia!: (s: FakeMediaStream) => void;
+    const h = makeHarness({
+      getUserMediaImpl: () =>
+        new Promise((resolve) => {
+          resolveGetUserMedia = resolve;
+        }),
+    });
+    const recognizer = localRecognizer("http://127.0.0.1:8090", h.deps);
+    const handle = recognizer(h.events as unknown as RecognizerEvents);
+
+    handle.stop(); // brief §3 point 1: the permission prompt can be slow
+    expect(h.events.onStatus).not.toHaveBeenCalled();
+
+    resolveGetUserMedia(h.stream);
+    await flush();
+
+    // The pending stop() finalises straight to "no speech" (LREC-12's own
+    // shape) -- "listening" is never announced for a session that never
+    // actually got to record a frame.
+    expect(h.events.onStatus).not.toHaveBeenCalledWith("listening");
+    expect(h.events.onError).toHaveBeenCalledWith("no-speech");
+    expect(h.events.onEnd).toHaveBeenCalledTimes(1);
   });
 });

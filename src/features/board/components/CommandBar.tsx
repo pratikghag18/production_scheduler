@@ -9,7 +9,22 @@ import type { Reader, Reading } from "@/lib/voice/readSentence";
 import type { ClipInfo, Recognizer, RecognizerHandle } from "@/lib/voice/recognizer";
 import type { TraceEntry } from "@/lib/voice/trace";
 import { postClip } from "@/lib/voice/trace";
-import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
+import {
+  parseCommand,
+  formatCommand,
+  expectedShape,
+  ASSIGN_VERBS,
+  BOOK_VERBS,
+  UNASSIGN_VERBS,
+  MOVE_VERBS,
+  HEADCOUNT_VERBS,
+  REPLACE_VERBS,
+  SWAP_VERBS,
+  COPY_VERBS,
+  ABSENCE_WORDS,
+  ADJUST_VERBS,
+  SAME_AS_WORDS,
+} from "@/lib/command/parse";
 import type {
   AssignCommand,
   BookCommand,
@@ -22,6 +37,7 @@ import type {
   Existing,
   ParseFailure,
 } from "@/lib/command/parse";
+import { groundReading, type VerbLists } from "@/lib/command/grounded";
 import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
 import type {
   ResolveContext,
@@ -189,6 +205,41 @@ export interface LotResult {
  * `product: ""` itself -- this file needs no change either way, since it
  * already renders whatever `resolveCommand` answers.
  */
+
+/**
+ * S71-m (F-212/F-215, R-435/R-431, docs/agent-briefs/s71-m-grounded-reading-
+ * brief.md): `groundReading`'s own verb lists (`src/lib/command/
+ * grounded.ts`), extracted from `parse.ts`'s exports rather than retyped --
+ * `grounded.ts` cannot import them itself (`commandPurity.test.ts`'s U1
+ * audits every `.ts` file under `src/lib/command/`, not only `parse.ts`/
+ * `resolve.ts`, for a runtime import), so this file -- outside that
+ * directory, and already the door `formatCommand`/`parseCommand` come
+ * through -- builds the lists and hands them in.
+ *
+ * `unassign` unions `ABSENCE_WORDS` ("off", "on leave", ...), `move` unions
+ * `ADJUST_VERBS` ("extend", "shorten", ...), and `copy` unions
+ * `SAME_AS_WORDS` ("same as"): each is a SECOND accepted spelling for the
+ * same intent (R-409's absence grammar, R-412's `parseAdjustRest`, R-408's
+ * `SAME_AS_RE`, all still `intent: "unassign"`/`"move"`/`"copy"`), found
+ * live by running the existing `commandBar.test.tsx` model-reader cases red
+ * before this piece landed (CB-x-14, CB-y-15) or by the reviewer reading
+ * `parse.ts` directly (`SAME_AS_RE`) -- see this lane's own report.
+ * `split` joins no exported list in `parse.ts` on purpose (`SPLIT_RE`'s own
+ * comment: a single fixed first word, nothing to keep in sync) -- the one
+ * word here is not a second copy of a rule, since there is no rule, only a
+ * literal already inlined there.
+ */
+const GROUNDING_VERBS: VerbLists = {
+  assign: ASSIGN_VERBS,
+  book: BOOK_VERBS,
+  unassign: [...UNASSIGN_VERBS, ...ABSENCE_WORDS],
+  move: [...MOVE_VERBS, ...ADJUST_VERBS],
+  headcount: HEADCOUNT_VERBS,
+  replace: REPLACE_VERBS,
+  swap: SWAP_VERBS,
+  copy: [...COPY_VERBS, ...SAME_AS_WORDS],
+  split: ["split"],
+};
 
 /** S47: appended to a block question's message when it has exactly one
  *  candidate (brief §2 item 3) -- the ONLY place this string is written. */
@@ -801,6 +852,25 @@ const NON_ANSWER_SENTINELS = new Set(["auto", "escape"]);
  * no job named): the bar keeps no memory of "it", so the whole sentence has
  * to be said again and emptying the box is the help, not the harm.
  */
+/**
+ * S71-m review fix (F-212, R-435): "yes" must answer a one-button question,
+ * and `askUngrounded`'s own question is one -- but it carries no
+ * `blockHighlight` (there is no board block to outline: nothing has
+ * resolved yet). Rather than hand it a `blockHighlight` it does not mean
+ * (that shape also drives `confirmsQuestion`'s "remove it"/"move it" words
+ * and the kind-specific re-ask wording below, none of which apply to an
+ * ungrounded book/assign/move/headcount reading), this is the SAME
+ * "exactly one candidate that a bare yes actually answers" test
+ * `answerTakes` and `submitText`'s own floor each used to compute on their
+ * own (CLAUDE.md §7: the same predicate, one place), now also true for a
+ * question whose one candidate is `run_ungrounded`.
+ */
+function isYesShapedQuestion(status: Status): boolean {
+  if (status.kind !== "question" || status.candidates.length !== 1) return false;
+  if (status.blockHighlight !== undefined && !Array.isArray(status.blockHighlight)) return true;
+  return status.candidates[0].action.kind === "run_ungrounded";
+}
+
 function answerTakes(status: Status | null): string | null {
   if (status === null) return null;
   if (status.kind === "shape") {
@@ -820,13 +890,12 @@ function answerTakes(status: Status | null): string | null {
   // "yes" actually answers. `run_exists` ("Join it, or make a separate
   // block?"), `ambiguous` ("Which person?"), `job_gone`, `block_gone` all
   // take a NAME; offering "yes" there invited a word the question refuses.
-  const yesShaped =
-    status.blockHighlight !== undefined &&
-    !Array.isArray(status.blockHighlight) &&
-    status.candidates.length === 1;
+  // S71-m review fix: `isYesShapedQuestion` widens this by one more shape,
+  // `run_ungrounded`'s own one-button question -- see that function's own
+  // doc.
   // "or no" on every one of them: a cancel word now drops any standing
   // question (see `submitText`'s own floor), so it is always a true answer.
-  return yesShaped ? "yes or no" : "a name, or no";
+  return isYesShapedQuestion(status) ? "yes or no" : "a name, or no";
 }
 
 /** The one sentence shown when the bar cannot read the line (brief §6);
@@ -2066,10 +2135,75 @@ export function CommandBar({
     return { skipped: "garbled" };
   }
 
+  /**
+   * S71-m (F-215, R-435/R-431): a sweeping model reading -- an ungrounded
+   * unassign, or a lot of more than one command with no word in the heard
+   * text for ANY of them -- is refused outright, no button, the same shape
+   * a parse failure's own "shape" hint takes on screen. The trace entry
+   * ends right here (`cancelStanding`'s own order: the fields go on first,
+   * `finishTrace` files the turn -- which clears `status` back to null --
+   * and ONLY THEN does this sets the fresh status that is this instant's
+   * own last word, same as `cancelStanding`'s "Left it." does).
+   */
+  function refuseUngrounded(sentence: string, command: Command, versPhrase: string): void {
+    const message = `Did not run: nothing in "${sentence}" says ${versPhrase}. Say it again.`;
+    if (traceRef.current) {
+      traceRef.current.read = formatCommand(command);
+      traceRef.current.asked = message;
+      traceRef.current.answered = "auto";
+      traceRef.current.outcome = "refused: ungrounded";
+    }
+    finishTrace();
+    setStatus({ kind: "shape", message });
+    heldRef.current = null;
+  }
+
+  /**
+   * S71-m (F-212, R-435): a single ungrounded reading is ASKED, never run
+   * -- one candidate button, the model's own readout (`formatCommand`) as
+   * its label, through the ORDINARY question machinery (`Status.kind:
+   * "question"`, `CandidateButton`, `traceQuestionStatus`) rather than a
+   * second question shape (brief §1: "do not build a second question
+   * shape"). Pressing it is `run_ungrounded` (`runCandidateAction`, above),
+   * which calls `runCommand` exactly as an ordinary grounded model reading
+   * would; "no" or Escape drop it through the same generic floor every
+   * other single-candidate, no-`blockHighlight` question already falls to
+   * (`submitText`'s own "F-166 WIDENED" section -- untouched by this piece).
+   */
+  function askUngrounded(sentence: string, command: Command): void {
+    const readout = formatCommand(command);
+    const message = `I heard "${sentence}". Did you mean: ${readout}?`;
+    const next: Status = {
+      kind: "question",
+      message,
+      candidates: [
+        { key: "run_ungrounded", label: readout, action: { kind: "run_ungrounded", command } },
+      ],
+    };
+    if (traceRef.current) traceRef.current.read = readout;
+    setStatus(next);
+    traceQuestionStatus(next);
+  }
+
   /** S44-b: settles a reading that is still current (brief §3.3). */
   function applyReading(sentence: string, result: Reading): void {
     if (traceRef.current) traceRef.current.model = traceModelField(result);
     if (result.ok) {
+      // S71-m (F-212/F-215, R-435/R-431): the model's own reading runs
+      // unchanged only when it is GROUNDED -- the heard text names its own
+      // intent, in some spelling `parse.ts` itself accepts. Checked here,
+      // before `runCommand` ever sees it, so neither a write nor a lot's
+      // own "N commands ready" can stand on a reading nothing in the
+      // sentence actually said.
+      const grounding = groundReading(sentence, result.command, GROUNDING_VERBS);
+      if (!grounding.ok) {
+        if (grounding.reason === "sweeping") {
+          refuseUngrounded(sentence, result.command, grounding.intent);
+        } else {
+          askUngrounded(sentence, result.command);
+        }
+        return;
+      }
       runCommand(result.command, " · read by the model");
       return;
     }
@@ -2824,6 +2958,9 @@ export function CommandBar({
         pendingRerunRef.current = { command: action.command, target: action.target };
         onShowDay?.(action.target);
         return;
+      case "run_ungrounded":
+        runCommand(action.command, " · read by the model");
+        return;
       case "run_lot":
         runLotNow();
         return;
@@ -3292,6 +3429,15 @@ export function CommandBar({
         cancelStanding(value);
         return;
       }
+      // S71-m review fix (F-212, R-435): the one shape below the block/lot
+      // branches above that a bare "yes" DOES answer -- `askUngrounded`'s
+      // own one-button question (`isYesShapedQuestion`, above). Pressing it
+      // is the same call the button's own `onClick` makes.
+      if (isConfirmCandidate && isYesShapedQuestion(status)) {
+        if (traceRef.current) traceRef.current.answered = value;
+        runCandidateAction(status.candidates[0].action);
+        return;
+      }
       setStatus(
         status.candidates.length > 0 ? { ...status, message: "Say which one." } : { ...status },
       );
@@ -3553,16 +3699,6 @@ export function CommandBar({
     if (!isCurrent()) return;
     recognitionRef.current = handle;
     setListening(true);
-    // S71-j (R-454): every session starts in the "listening" phase, whether
-    // or not its own recogniser ever reports so itself -- `localRecognizer
-    // .ts` reports it too (synchronously, before this point, via its own
-    // `onStatus?.("listening")` above), but a plain `browserRecognizer()`
-    // session never fires `onStatus` at all and still needs the label to
-    // read "Listening…" the whole time it is open (unchanged from the
-    // pre-S71-j behaviour, which read this off `listening` alone). Only a
-    // LATER `onStatus("transcribing")` -- local only -- ever moves it past
-    // this.
-    setMicPhase("listening");
   }
 
   function handleMicClick(): void {

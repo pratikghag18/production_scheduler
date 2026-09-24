@@ -531,6 +531,12 @@ export const SWAP_VERBS = ["swap", "exchange"] as const;
 /** R-408 (S55): "copy"/"repeat" as leading verbs, plus the "same as" opener
  *  (not itself a verb word -- checked separately, brief §3 CP1/CP2). */
 export const COPY_VERBS = ["copy", "repeat"] as const;
+/** S71-m review fix (R-435): "same as yesterday"/"same as Monday" is a
+ *  second accepted spelling for a `copy` reading, same as `COPY_VERBS`'
+ *  own two words -- `SAME_AS_RE` below checks it inline; exported here,
+ *  beside `COPY_VERBS`, so `groundReading` (`src/lib/command/grounded.ts`)
+ *  can extract it rather than retype it (CLAUDE.md §4). */
+export const SAME_AS_WORDS = ["same as"] as const;
 
 /** R-407 (S55): the reserved operator word on a removal or a move -- "clear
  *  Cell 1", "unassign everyone from Cell 3", "move everyone on Line 1".
@@ -599,8 +605,14 @@ const MOVE_VERB_RE = new RegExp(`^(${MOVE_VERBS.join("|")})\\b\\s*`, "i");
 const ADJUST_VERB_RE = new RegExp(`^(${ADJUST_VERBS.join("|")})\\b\\s*`, "i");
 /** R-413: "split" is its own first word -- it joins no verb list (it names
  *  no other intent), so the first-word dispatch tries it directly rather
- *  than building it from an exported array of one. */
-const SPLIT_RE = /^split\b\s*/i;
+ *  than building it from an exported array of one.
+ *
+ *  F-216: an optional comma right after the word -- whisper.cpp's own pause
+ *  punctuation after a leading verb ("Split, Sam Patel...") -- is consumed
+ *  here too, the same as the whitespace beside it, so the rest of the
+ *  sentence `parseSplitRest` sees never carries it as a leading artifact on
+ *  the operator segment. */
+const SPLIT_RE = /^split\b,?\s*/i;
 const HEADCOUNT_VERB_RE = new RegExp(`^(${HEADCOUNT_VERBS.join("|")})\\b\\s*`, "i");
 
 const WEEKDAY_ALTS =
@@ -896,13 +908,37 @@ function extractShiftOrBoundaryClause(text: string, quotes: string[]): ShiftOrBo
  *  apply to any name -- there the intent is unambiguous. */
 const POSSESSIVE_TIMING_TAIL_RE = /\s*(?:'s|’s|(?<=\d)s)\s+(?:timing|hours|time|schedule|slot)$/i;
 
-/** S58 (R-412, brief §2 AJ1/AJ5): "Sam's block" on the `ADJUST_VERBS`
- *  grammar reads as the person, exactly the way the move grammar's own
- *  possessive TIMING tail does -- same apostrophe/dropped-apostrophe shapes,
- *  a different trailing word. Anchored at the end of the OPERATOR segment
- *  only (the adjust clause itself is already stripped by the time this
+/** F-216: the words the ADJUST and SPLIT grammars both read as "the thing
+ *  being cut/timed" on their operator's own trailing tail -- "block" (the
+ *  board's own word) and "assignment" (the maintainer's own word for it,
+ *  heard in the 23 Sept walk, "split Sam Patel's assignment"). "shift" is
+ *  NOT one of these: it already names a different thing throughout this app
+ *  (a shift PATTERN -- `shift: string | null` on every command above, "the
+ *  night shift", `ctx.shiftsAt`), never the scheduled block itself, so
+ *  adding it here would make "shift Sam's shift" ambiguous with nothing to
+ *  gain. Extracted so `POSSESSIVE_BLOCK_TAIL_RE` below is built from this
+ *  one list rather than retyped at its own two call sites (`parseAdjustRest`
+ *  and `parseSplitRest`). */
+const BLOCK_TAIL_WORDS = ["block", "assignment"] as const;
+
+/** S58 (R-412, brief §2 AJ1/AJ5); widened F-216 (R-430): "Sam's block"/
+ *  "Sam's assignment" on the `ADJUST_VERBS` grammar, and the SAME tail on
+ *  the SPLIT grammar (`parseSplitRest`, which shares this regex rather than
+ *  holding its own copy), reads as the person, exactly the way the move
+ *  grammar's own possessive TIMING tail does -- same apostrophe/dropped-
+ *  apostrophe shapes, `BLOCK_TAIL_WORDS` in place of a single trailing word.
+ *  F-216 also widens the CONNECTOR: a bare comma ("Sam Patel, Block") is
+ *  whisper.cpp's own dialogue-pause spelling of the same possessive it
+ *  drops the apostrophe from elsewhere (`POSSESSIVE_TIMING_TAIL_RE`'s own
+ *  digit-`s` case) -- confirmed against the walk's own transcripts, never a
+ *  guess -- so it is accepted here on the same footing as `'s`/`’s`/a
+ *  dropped-apostrophe `s`. Anchored at the end of the OPERATOR segment only
+ *  (the adjust/split clause itself is already stripped by the time this
  *  runs). */
-const POSSESSIVE_BLOCK_TAIL_RE = /\s*(?:'s|’s|(?<=\d)s)\s+block$/i;
+const POSSESSIVE_BLOCK_TAIL_RE = new RegExp(
+  `\\s*(?:'s|’s|(?<=\\d)s|,)\\s+(?:${BLOCK_TAIL_WORDS.join("|")})$`,
+  "i",
+);
 
 /** S58 (R-412, brief §1): a trailing possessive EDGE tail on the move
  *  grammar's operator segment -- "Sam's start", "Sam's end", "Sam's finish"

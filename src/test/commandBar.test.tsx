@@ -2067,7 +2067,19 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
       { onRunLot },
     );
 
-    fireEvent.change(input, { target: { value: "anything" } });
+    // S71-m (F-212/F-215, R-435/R-431): "anything" used to stand in here --
+    // it worked only because nothing checked whether the heard text said
+    // ANY of this, which is exactly the F-215 shape (a several read with no
+    // textual basis at all is now refused, `groundReading`'s own
+    // "sweeping" case). The heard text below names both real intents
+    // (`unassign`, `move`) this test is actually about, so the fake `several`
+    // it decodes into stays grounded and this stays a lot test, not a
+    // grounding one.
+    fireEvent.change(input, {
+      target: {
+        value: "unassign Operator 1 from Cell 1 in Line 1 and move Sam Patel on Cell 1 in Line 1",
+      },
+    });
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
@@ -3733,6 +3745,169 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
   });
 });
 
+describe("CB-ground: the model's reading must be grounded in what was heard (S71-m, F-212/F-215, R-435/R-431)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("CB-ground-1: 'EF76.' read as an unassign of everyone is refused outright -- nothing ran, no buttons, the trace's outcome is the refused shape", async () => {
+    const fetchMock = stubFetch();
+    const command: UnassignCommand = {
+      intent: "unassign",
+      operator: "everyone",
+      place: [],
+      day: null,
+      span: null,
+      existing: null,
+      shift: null,
+      until: null,
+    };
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command,
+      by: "model",
+    }));
+    const { onUnassign, onRunLot, input } = renderBar({}, fakeReader);
+
+    fireEvent.change(input, { target: { value: "EF76." } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(statusText()).toContain('Did not run: nothing in "EF76." says');
+    expect(statusText()).toContain("Say it again.");
+    expect(candidateButtons()).toHaveLength(0);
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(onRunLot).not.toHaveBeenCalled();
+
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("refused: ungrounded");
+  });
+
+  it("CB-ground-2: the F-212 shape (a book with the leading 'Assign Tom Baker to' lost) asks, one button, its readout the label; pressing it writes", async () => {
+    const parsedBook = parseCommand(BOOK_SENTENCE);
+    expect(parsedBook.ok).toBe(true);
+    if (!parsedBook.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsedBook.command,
+      by: "model",
+    }));
+    const { onBook, input } = renderBar({ runs: [] }, fakeReader);
+    const heard = "Housing A on Cell 1 in Line 1 from 6 to 2";
+
+    fireEvent.change(input, { target: { value: heard } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(candidateButtons()).toHaveLength(1));
+    expect(statusText()).toContain(`I heard "${heard}"`);
+    expect(statusText()).toContain(formatCommand(parsedBook.command));
+    expect(candidateButtons()[0].textContent).toBe(formatCommand(parsedBook.command));
+    expect(onBook).not.toHaveBeenCalled();
+
+    fireEvent.click(candidateButtons()[0]);
+    await waitFor(() => expect(onBook).toHaveBeenCalledTimes(1));
+  });
+
+  it("CB-ground-3: the same ungrounded book, answered 'no' -- nothing written, answered 'no'", async () => {
+    const fetchMock = stubFetch();
+    const parsedBook = parseCommand(BOOK_SENTENCE);
+    expect(parsedBook.ok).toBe(true);
+    if (!parsedBook.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsedBook.command,
+      by: "model",
+    }));
+    const { onBook, input } = renderBar({ runs: [] }, fakeReader);
+    const heard = "Housing A on Cell 1 in Line 1 from 6 to 2";
+
+    fireEvent.change(input, { target: { value: heard } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(candidateButtons()).toHaveLength(1));
+
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onBook).not.toHaveBeenCalled();
+    expect(statusText()).toBe("Left it.");
+    const entry = postedEntry(fetchMock);
+    expect(entry.answered).toBe("no");
+  });
+
+  it("CB-ground-4: a grounded reading runs unchanged (an existing case's shape, CB-model-1)", async () => {
+    const parsed = parseCommand(P1_SENTENCE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsed.command,
+      by: "model",
+    }));
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+    onOpen.mockReturnValue(new Promise(() => {}));
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+    expect(statusText().endsWith(" · read by the model")).toBe(true);
+    expect(candidateButtons()).toHaveLength(0);
+  });
+
+  // S71-m review fix (F-212, R-435): "yes" must answer a one-button question
+  // -- `askUngrounded`'s own question carries no `blockHighlight` (nothing
+  // has resolved yet to outline), so it needs `isYesShapedQuestion`'s own
+  // widened test, not the block-question shape, to be yes-shaped at all.
+  it("CB-ground-5: typed 'yes' answers the one-button ungrounded question (onBook once, answered 'yes')", async () => {
+    const fetchMock = stubFetch();
+    const parsedBook = parseCommand(BOOK_SENTENCE);
+    expect(parsedBook.ok).toBe(true);
+    if (!parsedBook.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsedBook.command,
+      by: "model",
+    }));
+    const { onBook, input } = renderBar({ runs: [] }, fakeReader);
+    const heard = "Housing A on Cell 1 in Line 1 from 6 to 2";
+
+    fireEvent.change(input, { target: { value: heard } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(candidateButtons()).toHaveLength(1));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onBook).toHaveBeenCalledTimes(1));
+    const entry = postedEntry(fetchMock);
+    expect(entry.answered).toBe("yes");
+  });
+
+  it("CB-ground-6: the same ungrounded book, confirmed by a spoken 'yes' through the recogniser (a second press, same as CB-yes-5)", async () => {
+    const parsedBook = parseCommand(BOOK_SENTENCE);
+    expect(parsedBook.ok).toBe(true);
+    if (!parsedBook.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsedBook.command,
+      by: "model",
+    }));
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { onBook, input } = renderBar({ runs: [] }, fakeReader, recognizer);
+    const heard = "Housing A on Cell 1 in Line 1 from 6 to 2";
+
+    fireEvent.change(input, { target: { value: heard } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(candidateButtons()).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    fire.final("yes");
+
+    await waitFor(() => expect(onBook).toHaveBeenCalledTimes(1));
+  });
+});
+
 // -----------------------------------------------------------------------
 // S46-a: the microphone -- the browser's recogniser types the sentence
 // (brief docs/agent-briefs/s46-a-microphone-brief.md §2, CB-mic-1..7). A
@@ -3754,8 +3929,8 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     expect(screen.getByRole("button", { name: "Speak a sentence" })).toBeTruthy();
   });
 
-  it("CB-mic-2: pressing starts a session, shows Listening… and aria-pressed, and aborts an in-flight reading", () => {
-    const { recognizer } = makeFakeRecognizer();
+  it("CB-mic-2: pressing starts a session and sets aria-pressed, aborts an in-flight reading, and shows Listening… only once the recogniser announces the phase", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
     const captured: { signal: AbortSignal | null } = { signal: null };
     const neverResolves: Reader = vi.fn((_text: string, signal: AbortSignal) => {
       captured.signal = signal;
@@ -3775,11 +3950,17 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     expect(neverResolves).toHaveBeenCalledTimes(1);
     expect(captured.signal?.aborted).toBe(true);
     expect(micButton.getAttribute("aria-pressed")).toBe("true");
-    // S71-j (R-454): every session starts in the "listening" phase the
-    // instant it starts (`startListening`'s own `setMicPhase("listening")`),
-    // whether or not this recogniser itself ever reports `onStatus` -- the
-    // same reason `CL-8` (`commandLauncher.test.tsx`) still passes unchanged
-    // against a bare fake recogniser that fires nothing at all.
+    // F-214 (CONTRACT CHANGED, CLAUDE.md §4): `startListening` no longer sets
+    // the "listening" phase itself the instant a session starts -- the
+    // synchronous `setMicPhase("listening")` this pin used to name is gone.
+    // The label now shows only once the recogniser ITSELF announces the
+    // phase through `onStatus("listening")` (the local engine fires it once
+    // its audio graph is connected; the browser engine from its own
+    // `onstart`), so a bare fake recogniser that fires nothing yet shows
+    // nothing yet.
+    expect(screen.queryByText("Listening…")).toBeNull();
+
+    fire.status("listening");
     expect(screen.getByText("Listening…")).toBeTruthy();
   });
 

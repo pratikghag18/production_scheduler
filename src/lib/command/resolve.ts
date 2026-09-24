@@ -954,6 +954,23 @@ function placeLabel(cell: Node, byPath: Map<string, Node>): string {
   return `${cell.name} — ${names.join(" › ")}`;
 }
 
+/** F-213 (R-430): the `place_mismatch` question's own `elsewhere` list --
+ *  each candidate's PARENT, never the candidate again ("Cell 5 is in Cell
+ *  5"). Shared by `resolveCellStep` and `resolveEveryonePlaceCells`, which
+ *  used to build this identically inline in two places (CLAUDE.md §4: "a
+ *  list that appears twice is a bug with a delay on it" -- it was, F-213's
+ *  second site was found only once this was extracted and reused). A
+ *  candidate with no parent node at all (none in this app's own plant
+ *  hierarchy, but never assumed) is left out rather than naming itself. */
+function elsewhereParents(candidates: readonly Node[], byPath: Map<string, Node>): Candidate[] {
+  return candidates.flatMap((c) => {
+    const ancestors = ancestorsOf(c, byPath);
+    const parent = ancestors[ancestors.length - 1];
+    if (parent === undefined) return [];
+    return [{ id: parent.id, label: placeLabel(parent, byPath), word: parent.name }];
+  });
+}
+
 /** Filters a set of cell candidates by one qualifier word, using the same
  *  three-tier rule as `matchName`, applied to each candidate's ancestor
  *  names as a group (first tier with ANY hit, across all candidates, wins). */
@@ -1475,11 +1492,13 @@ function resolveCellStep(
   for (const qualifier of place.slice(1)) {
     const filtered = filterByQualifier(cellCandidates, qualifier, byPath);
     if (filtered.length === 0) {
-      const elsewhere = cellCandidates.map((c) => ({
-        id: c.id,
-        label: placeLabel(c, byPath),
-        word: c.name,
-      }));
+      // F-213 (R-430): `elsewhere` names each candidate's own PARENT, never
+      // the candidate again -- "Cell 5 is in Cell 5" (the cell's own label,
+      // the pre-fix shape) told the person nothing they had not already
+      // said; "Cell 5 is in Line 3" is a real answer, and a real choice the
+      // bar can offer as a button. Shared with `resolveEveryonePlaceCells`'s
+      // own identical dead end via `elsewhereParents`.
+      const elsewhere = elsewhereParents(cellCandidates, byPath);
       return {
         ok: false,
         question: { kind: "place_mismatch", cell: firstPlaceWord, qualifier, elsewhere },
@@ -3518,11 +3537,9 @@ function resolveEveryonePlaceCells(
   for (const qualifier of place.slice(1)) {
     const filtered = filterByQualifier(candidates, qualifier, byPath);
     if (filtered.length === 0) {
-      const elsewhere = candidates.map((c) => ({
-        id: c.id,
-        label: placeLabel(c, byPath),
-        word: c.name,
-      }));
+      // F-213 (R-430): the same fix as `resolveCellStep`'s identical dead
+      // end -- `elsewhereParents` (shared, not retyped).
+      const elsewhere = elsewhereParents(candidates, byPath);
       return {
         ok: false,
         question: { kind: "place_mismatch", cell: firstWord, qualifier, elsewhere },
@@ -5038,10 +5055,16 @@ export function describeQuestion(q: Question): string {
       return `No ${fieldWord(q.field)} called "${q.text}" on this board.`;
     case "not_offered":
       return `${q.product} is not made at ${q.cell}, so it cannot be scheduled there.`;
-    case "place_mismatch":
-      return `There is no ${q.cell} in ${q.qualifier}. ${q.cell} is in ${q.elsewhere
-        .map((c) => c.label)
-        .join(" / ")}.`;
+    case "place_mismatch": {
+      // Reviewer fix (F-213 follow-up, R-430): `elsewhere` can come back
+      // empty -- every matched cell had no parent NODE at all
+      // (`elsewhereParents` excludes rather than names the cell itself) --
+      // and the second sentence has nothing left to say. Stop after the
+      // first one rather than print "... is in ." with nothing after it.
+      const first = `There is no ${q.cell} in ${q.qualifier}.`;
+      if (q.elsewhere.length === 0) return first;
+      return `${first} ${q.cell} is in ${q.elsewhere.map((c) => c.label).join(" / ")}.`;
+    }
     // S61-b (R-425, F-155): the wording here is a baseline only -- the bar
     // (`CommandBar.tsx`, another lane) is the one that reads this string,
     // and may refine it further; the shape (`missing`/`policy`/`inLot`) is

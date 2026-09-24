@@ -31,9 +31,9 @@
  * real standing block question, not a mock.
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ResolveContext, ContextRun, ContextAssignment } from "@/lib/command/resolve";
-import type { Recognizer } from "@/lib/voice/recognizer";
+import type { Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 import { CommandLauncher } from "@/features/board/components/CommandLauncher";
 
 function findRunOverlap(
@@ -266,7 +266,16 @@ describe("CommandLauncher (S48-a, R-396)", () => {
 
   it("CL-8: Escape whose target is not the bar's input still closes the panel (the panel's own rule), and unmounting the bar stops a listening session in flight", () => {
     const stop = vi.fn();
-    const recognizer: Recognizer = () => ({ stop });
+    // F-214 (S71-l, R-454): the fake captures its own `events` object, the
+    // way `commandBar.test.tsx`'s own `makeFakeRecognizer` does, so this
+    // case can fire `onStatus` itself rather than assume the bar sets the
+    // label synchronously at the press -- it no longer does either engine's
+    // job for it.
+    let capturedEvents: RecognizerEvents | undefined;
+    const recognizer: Recognizer = (events) => {
+      capturedEvents = events;
+      return { stop };
+    };
     renderLauncher({}, recognizer);
     fireEvent.click(launcherButton());
     const input = screen.getByRole("textbox", { name: "Tell the board" });
@@ -280,6 +289,14 @@ describe("CommandLauncher (S48-a, R-396)", () => {
     const mic = screen.getByRole("button", { name: "Speak a sentence" });
     fireEvent.click(mic);
     mic.focus();
+
+    // F-214: the press alone announces nothing -- neither engine has
+    // reported "listening" yet, so the label stays off until one does.
+    expect(screen.queryByText("Listening…")).toBeNull();
+
+    act(() => {
+      capturedEvents?.onStatus?.("listening");
+    });
     expect(screen.getByText("Listening…")).toBeTruthy();
 
     fireEvent.keyDown(mic, { key: "Escape" });

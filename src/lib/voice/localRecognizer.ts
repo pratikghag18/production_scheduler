@@ -338,13 +338,34 @@ export function whisperServiceUrl(): string | null {
  * words AND a tag (`"[Music] clear Cell 3 today"`) keeps the words. A
  * sentence with real brackets a person could actually say ("say the number
  * (2) twice") is not a concern this strips for -- nobody speaks a bracket.
+ *
+ * F-211: whisper.cpp also writes a dialogue dash on a clip that starts
+ * mid-utterance -- the person had already begun speaking when the audio
+ * graph actually opened (F-214) -- "-Assign Priya Shah...", "- Assign...",
+ * "-2, Area 2...", "-A, Sign Lena Novak..." from the 23 Sept walk. A run of
+ * leading hyphens, en dashes or em dashes, plus the whitespace after them,
+ * is stripped the same way a bracketed tag is -- but ONLY at the very START
+ * of what is left once the tags are gone (so `"[Music] -clear Cell 3"`
+ * strips the tag first, leaving `"-clear Cell 3"`, and this second pass then
+ * strips the dash too). A dash INSIDE the text ("Sam-Patel", a spoken range)
+ * is never touched -- the pattern is anchored at the string's own start.
+ *
+ * Reviewer fix (F-211 follow-up): a transcript of only dashes with spaces
+ * between them ("- -") is not ONE leading run -- there is a real space
+ * between the two hyphens, so a single anchored strip only ate the first one
+ * and left "-" to reach `onFinal` as if it were a heard word (LREC-29j). The
+ * pattern now repeats `(?:[-–—]+\s*)+` at the string's own start, so every
+ * such run, however many spaces separate its dashes, strips down to "" --
+ * whisper.cpp's own genuine empty answer, caught by the caller's existing
+ * `text === ""` -> `no-speech` check with no second path to keep in sync.
  */
 export function stripNonSpeechTags(text: string): string {
   return text
     .replace(/\[[^[\]]*\]/g, " ")
     .replace(/\([^()]*\)/g, " ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(/^(?:[-–—]+\s*)+/, "");
 }
 
 function isNotAllowedError(err: unknown): boolean {
@@ -688,10 +709,19 @@ export function localRecognizer(
       silence.connect(audioContext.destination);
 
       recordingStartedAt = d.now();
-      if (stopRequested) finalize("stop");
+      // F-214: announced HERE, not at the very top of `recognize()` -- the
+      // audio graph is now actually connected and a real frame can arrive,
+      // so this is the first moment "listening" is true. A `stop()` that
+      // arrived while `getUserMedia` was still pending (`stopRequested`,
+      // above) finalises straight to `no-speech`/`stop` with no frame ever
+      // captured -- LREC-33b's own case -- so the phase is never announced
+      // for a session that never got to record at all.
+      if (stopRequested) {
+        finalize("stop");
+        return;
+      }
+      events.onStatus?.("listening");
     }
-
-    events.onStatus?.("listening");
 
     d.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }).then(
       (mediaStream) => {

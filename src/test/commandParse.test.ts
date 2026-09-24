@@ -4004,6 +4004,32 @@ describe("commandParse: S58 grammar widening, group 2 (R-412 to R-416, D132)", (
     expect(parseCommand("split Sam's block at noon")).toEqual(splitOk());
   });
 
+  // F-216 (S71-l, R-430/R-435): 23 Sept walk, sentence 11 -- "Split, Sam
+  // Patel, Block at 1 p.m." and "Split, Sam Patel's Block at 1 p.m." both
+  // came back "No cell called \"Block\"" (whisper.cpp's own comma after the
+  // leading verb, and "block" itself, both unread); "split Sam Patel's
+  // assignment at 1 p.m." is the maintainer's own worked baseline. All three
+  // now parse to the SAME clean split, operator "Sam Patel", no leftover
+  // punctuation or noun word on it.
+  it('SP1b: "Split, Sam Patel, Block at 1 p.m." -- the comma after the verb AND the comma before "Block" both read as Whisper punctuation, not words', () => {
+    expect(parseCommand("Split, Sam Patel, Block at 1 p.m.")).toEqual(
+      splitOk({ operator: "Sam Patel", at: { hour: 13, minute: 0 } }),
+    );
+  });
+
+  it('SP1c: "Split, Sam Patel\'s Block at 1 p.m." -- the possessive tail reads the same as the comma form (SP1b), same clean operator', () => {
+    expect(parseCommand("Split, Sam Patel's Block at 1 p.m.")).toEqual(
+      splitOk({ operator: "Sam Patel", at: { hour: 13, minute: 0 } }),
+    );
+  });
+
+  it('SP1d: "split Sam Patel\'s assignment at 1 p.m." -- the maintainer\'s own baseline word, "assignment", parses identically to "block" (SP1b/SP1c)', () => {
+    const assignment = parseCommand("split Sam Patel's assignment at 1 p.m.");
+    expect(assignment).toEqual(splitOk({ operator: "Sam Patel", at: { hour: 13, minute: 0 } }));
+    expect(assignment).toEqual(parseCommand("Split, Sam Patel, Block at 1 p.m."));
+    expect(assignment).toEqual(parseCommand("Split, Sam Patel's Block at 1 p.m."));
+  });
+
   it("SP2: split Sam on Cell 1 at 12 today -- place, day", () => {
     expect(parseCommand("split Sam on Cell 1 at 12 today")).toEqual(
       splitOk({ place: ["Cell 1"], day: { kind: "today" } }),

@@ -115,6 +115,13 @@ interface SpeechRecognitionLike {
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
   onend: (() => void) | null;
+  // F-214 (S71-l, R-454): fired by the engine itself once it is actually
+  // listening -- the browser leg's own moment to report `onStatus`
+  // ("listening"), same as `localRecognizer.ts` reports it from inside its
+  // own `startRecording`, so neither engine leaves the bar to guess the
+  // phase on its own (`CommandBar.tsx`'s `startListening` no longer sets it
+  // synchronously at all).
+  onstart: (() => void) | null;
   start(): void;
   stop(): void;
   abort?(): void;
@@ -179,6 +186,13 @@ export function browserRecognizer(): Recognizer | null {
 
     recognition.onend = () => {
       events.onEnd();
+    };
+
+    // F-214: the engine's own report that it is actually listening -- fired
+    // once the microphone is open and speech detection is live, never a
+    // guess made ahead of that by the caller.
+    recognition.onstart = () => {
+      events.onStatus?.("listening");
     };
 
     try {
