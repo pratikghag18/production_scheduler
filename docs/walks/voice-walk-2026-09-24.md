@@ -103,3 +103,33 @@ recorded in `data/voice/trace/bar.jsonl`), not guessed from reading the grammar 
   right person, part, cell and hours before pressing anything.
 - Anything the bar did wrong once it had heard correctly is a bar finding, not a voice one, and
   goes to the typed spec first.
+
+## Results (S72-c, R-453)
+
+The 41 trace entries this round left (44 raw clips: four entries carry a spoken answer clip
+alongside the sentence's own; one occurrence of sentence 16 was typed, so it has no clip),
+scored against `data/voice/clips/references-2026-09-24.json` (what the maintainer actually
+said, decided entry by entry from the walk's own order and `bar.jsonl`'s `heard`).
+
+| Model | Decode | Hint | WER | Names | Exact | s/clip |
+|---|---|---|---|---|---|---|
+| small.en | beam | yes | 0.164 | 83/88 | 17 | 6.7 |
+| small.en | beam | no | 0.258 | 55/88 | 11 | 4.8 |
+| small.en (23 Sept, different clip set) | beam | yes | 0.191 | 69/78 | 11 | 5.7 |
+| tiny.en | — | — | waiting for the swap | — | — | — |
+| base.en | — | — | waiting for the swap | — | — | — |
+| medium.en-q5_0 | — | — | waiting for the swap | — | — | — |
+| large-v3-turbo-q5_0 | — | — | waiting for the swap | — | — | — |
+
+The ten worst clips by WER (small.en, beam, hint on), `heard` beside what was said:
+
+1. WER 1.500 — said "clear Cell 6 today" — heard "See you at the next one."
+2. WER 1.111 (answer) — said "Lena is covering for the Line 1 shortfall today" — heard "Lena is governing for line 1, shot 1, 2, 3, 4, 5, 6, 7"
+3. WER 0.375 — said "split Tom Baker's block at 10am today" — heard "Split, Tom Baker's block, that they named, today,"
+4. WER 0.375 — said "split Tom Baker's block at 10am today" — heard "Split Tom Baker's Block at N.A.M.P.D."
+5. WER 0.316 — said "Assign John Kim to Housing A on Cell 6 in Line 3 from 4 until end of shift today" — heard "Sign John Kim to Housing A on Cell 6, online 3, from 4, and then end up shift today."
+6. WER 0.286 — said "swap Lena Novak and Priya Shah today" — heard "Show up Lena Novak and Priya Shah today."
+7. WER 0.250 — said "extend Sam Patel's assignment by an hour today" — heard "Extend Sam Patel's assignment by an R2D."
+8. WER 0.250 — said "shorten Lena Novak's block by 30 minutes today" — heard "Shorten Lena Novak's Vlog by 30 minutes, please."
+9. WER 0.250 — said "end John Kim's block at 10am today" — heard "and John Kim's vlog at 10 a.m. today"
+10. WER 0.250 — said "end John Kim's block at 10am today" — heard "and John Kim's love at 10 a.m. today"

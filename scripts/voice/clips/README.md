@@ -82,7 +82,8 @@ Then-vs-now only says whether a setting changed the reading. To compare two
 models you need the truth. Write what was said per clip into a JSON file,
 keyed by the entry's `at` for sentences and by the clip's `postedAt` for
 answers (the walk list with the day's date; `data/voice/clips/references.json`
-holds the 23 Sept walk, gitignored with the clips), and pass it:
+holds the 23 Sept walk, `data/voice/clips/references-2026-09-24.json` the 24
+Sept walk's second list, gitignored with the clips), and pass it:
 
     npm run voice:clips:score -- --whisper http://127.0.0.1:8090 --from-trace 36 --references data/voice/clips/references.json --label small-en-beam-hint
 
