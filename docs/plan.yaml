@@ -13009,7 +13009,26 @@ requirements:
     walk finds the first still stiff. R-426's duty: the wording lane (S72-d) inventories every string the
     bar shows and rewrites each, one pin per sentence shape.
 findings:
-- id: F-223
+- id: F-224
+  title: '"Clear Cell 5 for the remainder of the week" clears today only, or nothing --- the week phrase is dropped by the model and kept inside the place name by the rules, and neither reader says so'
+  tag: A silent drop
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-435
+  - R-409
+  - F-215
+  story: >-
+    24 Sept (session 191), after the fixes landed: "clear Area 1 for whole week" removed three blocks, all of
+    them today, and said Done; "clear Cell 5 for the remainder of the week" answered "Cell 5 has nobody on it
+    Thu Sep 24" while Maria Lopez sat on Cell 5 on Friday in plain view. The trace shows why. The model's
+    unassign form has no week kind, so it answered day null and the phrase vanished; the rules have no week
+    grammar on unassign either, so the tail became part of the place ("Cell 5 for the whole week"), the
+    resolver asked which cell, the maintainer pressed Cell 5, and the week was gone. The verb guess built an
+    hour earlier did its job ("Clean" became a clear button) and then handed the sentence to a grammar that
+    lost the half that mattered. "remainder of the week did not do the job as the whole week." A phrase the
+    person said and the board did not read must be asked about, never dropped (R-435).
   title: A dotted "a.m." before a trailing day word leaves the dot inside the person's name --- "end John Kim's block at 10 a.m. today" ends nobody
   tag: A grammar gap read as a name
   status: fixed
