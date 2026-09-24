@@ -18170,8 +18170,13 @@ sessions:
     extracted into the copy words --- all fixed. The scorer's replay takes a references file of what was said
     (bb7237a), and the first table is in: small.en, beam, the app's hint, on last night's 35 clips --- mean word
     error rate 0.191, names 69 of 78, 11 exact, 5.7 s a clip with tests beside it; the errors sit at the first
-    word and the dash. The maintainer resumes at sentence 17; base.en and the turbo model are the next two
-    tables, the container swap being the maintainer's hand.
+    word and the dash. The turbo row (large-v3-turbo, 5-bit, beam, the app's hint, the maintainer's swap): mean
+    word error rate 0.218, names 67 of 78, 11 exact, 20.8 s a clip --- it heard "EF76" as "Clear Cell 6" and
+    invented more elsewhere ("Dog by One Art", "Close time for this clock", "Piniar"), four times slower; the
+    developer's suspicion that the bigger ear would win was wrong and the table said so. small.en stays; the
+    remaining rows (base.en as reference, the 34-word hint, two example sentences, greedy against beam) all run
+    on it. The memory-based model choice the maintainer asked about is parked below the queue as a nice to have.
+    The maintainer resumes at sentence 17.
 - id: 190
   date: 2026-09-23
   title: "The second spoken walk answered: the two bugs that stopped it fixed, a Ctrl+M mic shortcut, the demo seeded inside each person's shift, and a clip harness so the recogniser is measured instead of walked"
@@ -26382,7 +26387,7 @@ next:
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
 - kind: task
-  text: "The matrix on the 36 clips on disk (R-453): small.en beam with the app's hint is scored against what was said (mean WER 0.191, names 69/78, 11 exact of 35); the maintainer swaps the container to base.en and to large-v3-turbo-q5_0 (fetched) and the same command runs against each --- npm run voice:clips:score -- --whisper http://127.0.0.1:8090 --from-trace 36 --references data/voice/clips/references.json --label <model> --- plus the gain row; the winner becomes the default"
+  text: "The matrix on the 36 clips on disk (R-453): small.en beam with the app's hint scored 0.191 WER, names 69/78, 11 exact, 5.7 s a clip; the turbo 5-bit model 0.218, 67/78, 11 exact, 20.8 s --- small.en stays. Remaining rows, all on small.en: base.en as the reference (a swap), then with the container on small.en the 34-word hint (--prompt-file scripts/voice/clips/prompts/words-34.txt), the two example sentences (prompts/sentences.txt), --gain peak:0.5, and greedy against beam (a serve restart with --whisper-decode greedy) for the wait; the same command each time with a new --label"
   why: >-
     The clips are the instrument: nobody speaks for this table. The container swap is the maintainer's hand.
 - kind: task
