@@ -13029,6 +13029,7 @@ findings:
     hour earlier did its job ("Clean" became a clear button) and then handed the sentence to a grammar that
     lost the half that mattered. "remainder of the week did not do the job as the whole week." A phrase the
     person said and the board did not read must be asked about, never dropped (R-435).
+- id: F-223
   title: A dotted "a.m." before a trailing day word leaves the dot inside the person's name --- "end John Kim's block at 10 a.m. today" ends nobody
   tag: A grammar gap read as a name
   status: fixed
