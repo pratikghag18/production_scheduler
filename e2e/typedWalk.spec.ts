@@ -3,6 +3,7 @@ import path from "node:path";
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import { hasRealBackend, NO_BACKEND_REASON } from "./env";
 import { buildSentences, type Sentence } from "./walk/sentences";
+import { buildSentences2 } from "./walk/sentences2";
 import {
   signedInClient,
   loadPlantANodes,
@@ -36,6 +37,15 @@ const isoPlusDays = addDaysToIso;
 test.skip(!hasRealBackend, NO_BACKEND_REASON);
 
 const ADMIN = PLANT_A_ADMIN;
+
+/**
+ * S71-n (docs/agent-briefs/s71-n-second-walk-list-brief.md): a SECOND
+ * sentence list, `e2e/walk/sentences2.ts`, proved by this SAME spec rather
+ * than a copy of it. Read once at module top, default 1 (the first list,
+ * unchanged). `WALK_SET=2 npx playwright test e2e/typedWalk.spec.ts`
+ * (PowerShell: `$env:WALK_SET="2";` first) selects the second.
+ */
+const WALK_SET = process.env.WALK_SET === "2" ? 2 : 1;
 
 // F-182: the walk runs on a day of its own -- the Monday of NEXT week on
 // Plant A's clock -- never on the day the board opens on. Its last two
@@ -80,7 +90,10 @@ function initWalkDays(zone: string): void {
   CLEAN_TO_MS = wallMs(isoPlusDays(WALK_DAY, 9), 0, 0);
   WALK_DAY_START_MS = wallMs(WALK_DAY, 0, 0);
   WALK_DAY_END_MS = wallMs(TOMORROW, 0, 0);
-  SENTENCES = buildSentences({ day: WALK_DAY, tomorrow: TOMORROW, far: FAR });
+  SENTENCES =
+    WALK_SET === 2
+      ? buildSentences2({ day: WALK_DAY, tomorrow: TOMORROW, far: FAR })
+      : buildSentences({ day: WALK_DAY, tomorrow: TOMORROW, far: FAR });
 }
 
 async function signIn(page: Page, email: string, path_ = "/"): Promise<void> {
@@ -511,30 +524,6 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
     // The plant's zone first (F-190): every day and instant below hangs off it.
     initWalkDays(await plantZone(dana, nodes.plantId));
     console.log(`walk day ${WALK_DAY} in ${ZONE} (today's board is never touched: F-182)`);
-    const [
-      clearEmptyCell,
-      assignWithPart,
-      pluralNearMiss,
-      realNearMiss,
-      noPart,
-      bookingHeadcount,
-      endOfShiftAmbiguous,
-      tomSetup,
-      adjustEnd,
-      swapRefused,
-      split,
-      adjustExtend,
-      headcountForm,
-      lenaSetup,
-      swapSuccess,
-      copyToTomorrow,
-      everyWeekdayNo,
-      tomOverride,
-      dayOffBoardFar,
-      dayLessToday,
-      clearArea1,
-      clearArea2,
-    ] = SENTENCES;
     const cellId = (name: string): string => {
       const id = nodes.cellIdByName.get(name);
       if (!id) throw new Error(`no such cell in Plant A: ${name}`);
@@ -563,381 +552,793 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
 
     const table: EntryResult[] = [];
     const surprises: string[] = [];
+    // S71-n: entries whose trace line is EXPECTED to carry a null
+    // `answered` -- the first list's `dayLessToday` (F-182: declined by
+    // silence, never a button, never a typed answer) and, discovered live
+    // on the second list's own first green run (24 Sept), a swap's
+    // `inLot: true` certificate refusal (entry 13 here: "swap Lena Novak
+    // and Priya Shah"), which offers NO candidate and NO yes/no of its own
+    // to answer at all -- unlike a plain `nothing_to_do` refusal (entry 1,
+    // both lists), whose own single turn is filed as its own answer. Set
+    // inside whichever WALK_SET branch below applies; the trace loop at the
+    // end reads this set instead of a single block-scoped name so it works
+    // for either list.
+    const answerlessEntries = new Set<Sentence>();
 
     try {
       // ------------------------------------------------------------------
       await openBoard(page);
 
-      // 1. Clear of an empty cell.
-      table.push(await runEntry(page, clearEmptyCell));
+      if (WALK_SET === 1) {
+        const [
+          clearEmptyCell,
+          assignWithPart,
+          pluralNearMiss,
+          realNearMiss,
+          noPart,
+          bookingHeadcount,
+          endOfShiftAmbiguous,
+          tomSetup,
+          adjustEnd,
+          swapRefused,
+          split,
+          adjustExtend,
+          headcountForm,
+          lenaSetup,
+          swapSuccess,
+          copyToTomorrow,
+          everyWeekdayNo,
+          tomOverride,
+          dayOffBoardFar,
+          dayLessToday,
+          clearArea1,
+          clearArea2,
+        ] = SENTENCES;
+        answerlessEntries.add(dayLessToday);
 
-      // 2. Assign with a part.
-      table.push(await runEntry(page, assignWithPart));
-      await waitForAssignment(dana, {
-        operatorId: opId.john,
-        nodeId: cellId("Cell 3"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 12, 0),
-      });
+        // 1. Clear of an empty cell.
+        table.push(await runEntry(page, clearEmptyCell));
 
-      // 3. Plural near-miss.
-      table.push(await runEntry(page, pluralNearMiss));
-      await waitForAssignment(dana, {
-        operatorId: opId.priya,
-        nodeId: cellId("Cell 4"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 12, 0),
-      });
-
-      // 4. Real near-miss ("Housing Pay" -> Housing A).
-      table.push(await runEntry(page, realNearMiss));
-      await waitForAssignment(dana, {
-        operatorId: opId.maria,
-        nodeId: cellId("Cell 4"),
-        startMs: wallMs(WALK_DAY, 13, 0),
-        endMs: wallMs(WALK_DAY, 15, 0),
-      });
-
-      // 5. No part named ("Which part?").
-      table.push(await runEntry(page, noPart));
-      await waitForAssignment(dana, {
-        operatorId: opId.sam,
-        nodeId: cellId("Cell 1"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 16, 0),
-      });
-
-      // 6. A booking with headcount -- a run, not an assignment.
-      table.push(await runEntry(page, bookingHeadcount));
-      {
-        const { data, error } = await dana
-          .from("runs")
-          .select("id, planned_headcount, timerange")
-          .eq("node_id", cellId("Cell 3"));
-        expect(error, error?.message).toBeNull();
-        const rows = (data ?? []) as {
-          id: string;
-          planned_headcount: number | null;
-          timerange: string;
-        }[];
-        const hit = rows.find((r) => {
-          const { startMs, endMs } = parseTimerange(r.timerange);
-          return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
+        // 2. Assign with a part.
+        table.push(await runEntry(page, assignWithPart));
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
         });
-        expect(hit, "the booked Bracket A run on Cell 3, 13:00-17:00, should exist").toBeTruthy();
-        expect(hit!.planned_headcount).toBe(3);
-      }
 
-      // 7. "from 2 until end of shift" -- the model-gap case.
-      const shiftResult = await runEntry(page, endOfShiftAmbiguous);
-      table.push(shiftResult);
-      {
-        const literalReading = /02:00–06:00/.test(shiftResult.written);
-        const branch = literalReading
-          ? "02:00-06:00 (literal)"
-          : "14:00-22:00 (the rules' own reading)";
-        if (literalReading) {
-          surprises.push(
-            `"${endOfShiftAmbiguous.say}" was read literally as 02:00, not the rules' 14:00 -- ${branch}.`,
-          );
-        }
-        const [startH, endH] = literalReading ? [2, 6] : [14, 22];
+        // 3. Plural near-miss.
+        table.push(await runEntry(page, pluralNearMiss));
         await waitForAssignment(dana, {
           operatorId: opId.priya,
-          nodeId: cellId("Cell 2"),
-          startMs: wallMs(WALK_DAY, startH, 0),
-          endMs: wallMs(WALK_DAY, endH, 0),
+          nodeId: cellId("Cell 4"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
         });
-      }
 
-      // 8. Tom Baker's own setup block (off Line 1 -- no certification
-      // needed), plumbing for the swap-refusal case.
-      table.push(await runEntry(page, tomSetup));
-      await waitForAssignment(dana, {
-        operatorId: opId.tom,
-        nodeId: cellId("Cell 6"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 14, 0),
-      });
+        // 4. Real near-miss ("Housing Pay" -> Housing A).
+        table.push(await runEntry(page, realNearMiss));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 4"),
+          startMs: wallMs(WALK_DAY, 13, 0),
+          endMs: wallMs(WALK_DAY, 15, 0),
+        });
 
-      // 9. Adjust: "end" shortens Sam's own Cell 1 block.
-      table.push(await runEntry(page, adjustEnd));
-      await waitForAssignment(dana, {
-        operatorId: opId.sam,
-        nodeId: cellId("Cell 1"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 14, 0),
-      });
+        // 5. No part named ("Which part?").
+        table.push(await runEntry(page, noPart));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 16, 0),
+        });
 
-      // 10. The uncertified swap -- refused before the yes; nothing changes.
-      table.push(await runEntry(page, swapRefused));
-      await waitForAssignment(dana, {
-        operatorId: opId.sam,
-        nodeId: cellId("Cell 1"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 14, 0),
-      });
-      await waitForAssignment(dana, {
-        operatorId: opId.tom,
-        nodeId: cellId("Cell 6"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 14, 0),
-      });
-
-      // 11. A split.
-      table.push(await runEntry(page, split));
-      await waitForAssignmentGone(dana, {
-        operatorId: opId.sam,
-        nodeId: cellId("Cell 1"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 14, 0),
-      });
-      await waitForAssignment(dana, {
-        operatorId: opId.sam,
-        nodeId: cellId("Cell 1"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 13, 0),
-      });
-      await waitForAssignment(dana, {
-        operatorId: opId.sam,
-        nodeId: cellId("Cell 1"),
-        startMs: wallMs(WALK_DAY, 13, 0),
-        endMs: wallMs(WALK_DAY, 14, 0),
-      });
-
-      // 12. Adjust: "extend" John Kim's own Cell 3 block.
-      table.push(await runEntry(page, adjustExtend));
-      await waitForAssignment(dana, {
-        operatorId: opId.john,
-        nodeId: cellId("Cell 3"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 13, 0),
-      });
-
-      // 13. The headcount form, on the run booked in entry 6.
-      table.push(await runEntry(page, headcountForm));
-      {
-        // Polled, like every other database check here: the readout lands
-        // before the row does (22 Sept: a single read right after it saw the
-        // old count once, on a run where the model timed out and the rules
-        // wrote late).
-        const readHeadcount = async (): Promise<number | null | undefined> => {
+        // 6. A booking with headcount -- a run, not an assignment.
+        table.push(await runEntry(page, bookingHeadcount));
+        {
           const { data, error } = await dana
             .from("runs")
-            .select("planned_headcount, timerange")
+            .select("id, planned_headcount, timerange")
             .eq("node_id", cellId("Cell 3"));
           expect(error, error?.message).toBeNull();
-          const rows = (data ?? []) as { planned_headcount: number | null; timerange: string }[];
+          const rows = (data ?? []) as {
+            id: string;
+            planned_headcount: number | null;
+            timerange: string;
+          }[];
           const hit = rows.find((r) => {
             const { startMs, endMs } = parseTimerange(r.timerange);
             return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
           });
-          expect(hit, "the Bracket A run on Cell 3 should still be there").toBeTruthy();
-          return hit!.planned_headcount;
-        };
-        const deadline = Date.now() + 45_000;
-        let headcount = await readHeadcount();
-        while (headcount !== 4 && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 300));
-          headcount = await readHeadcount();
+          expect(hit, "the booked Bracket A run on Cell 3, 13:00-17:00, should exist").toBeTruthy();
+          expect(hit!.planned_headcount).toBe(3);
         }
-        expect(headcount).toBe(4);
-      }
 
-      // 14. Lena Novak's own setup block, plumbing for the swap next.
-      table.push(await runEntry(page, lenaSetup));
-      await waitForAssignment(dana, {
-        operatorId: opId.lena,
-        nodeId: cellId("Cell 5"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 13, 0),
-      });
+        // 7. "from 2 until end of shift" -- the model-gap case.
+        const shiftResult = await runEntry(page, endOfShiftAmbiguous);
+        table.push(shiftResult);
+        {
+          const literalReading = /02:00–06:00/.test(shiftResult.written);
+          const branch = literalReading
+            ? "02:00-06:00 (literal)"
+            : "14:00-22:00 (the rules' own reading)";
+          if (literalReading) {
+            surprises.push(
+              `"${endOfShiftAmbiguous.say}" was read literally as 02:00, not the rules' 14:00 -- ${branch}.`,
+            );
+          }
+          const [startH, endH] = literalReading ? [2, 6] : [14, 22];
+          await waitForAssignment(dana, {
+            operatorId: opId.priya,
+            nodeId: cellId("Cell 2"),
+            startMs: wallMs(WALK_DAY, startH, 0),
+            endMs: wallMs(WALK_DAY, endH, 0),
+          });
+        }
 
-      // 15. A swap -- crosses Lena's and John Kim's own blocks.
-      table.push(await runEntry(page, swapSuccess));
-      await waitForAssignmentGone(dana, {
-        operatorId: opId.lena,
-        nodeId: cellId("Cell 5"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 13, 0),
-      });
-      await waitForAssignmentGone(dana, {
-        operatorId: opId.john,
-        nodeId: cellId("Cell 3"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 13, 0),
-      });
-      await waitForAssignment(dana, {
-        operatorId: opId.lena,
-        nodeId: cellId("Cell 3"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 13, 0),
-      });
-      await waitForAssignment(dana, {
-        operatorId: opId.john,
-        nodeId: cellId("Cell 5"),
-        startMs: wallMs(WALK_DAY, 8, 0),
-        endMs: wallMs(WALK_DAY, 13, 0),
-      });
+        // 8. Tom Baker's own setup block (off Line 1 -- no certification
+        // needed), plumbing for the swap-refusal case.
+        table.push(await runEntry(page, tomSetup));
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
 
-      // 16. A copy to tomorrow -- Cell 3's own blocks, one day forward.
-      table.push(await runEntry(page, copyToTomorrow));
-      await waitForAssignment(dana, {
-        operatorId: opId.lena,
-        nodeId: cellId("Cell 3"),
-        startMs: wallMs(TOMORROW, 8, 0),
-        endMs: wallMs(TOMORROW, 13, 0),
-      });
+        // 9. Adjust: "end" shortens Sam's own Cell 1 block.
+        table.push(await runEntry(page, adjustEnd));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
 
-      // 17. A repeat day answered no -- the listing counts five (Monday to
-      // Friday, `expandRepeatDay`'s own `slice(0, 5)`), and nothing is
-      // written anywhere in that week.
-      const weekdayResult = await runEntry(page, everyWeekdayNo);
-      table.push(weekdayResult);
-      {
-        // Only when the bar actually produced the listing: a status the
-        // catalogue did not predict is already recorded as the finding
-        // (`unpredicted`), and asserting its shape here as well would stop
-        // the walk on the spot and cost every sentence after it -- the very
-        // thing `recordMismatch` exists to prevent.
-        if (weekdayResult.unpredicted === undefined) {
-          const listing = weekdayResult.listing ?? "";
-          expect(
-            listing.match(/^(\d+) commands? ready/)?.[1],
-            `the repeat day's own listing should count five: "${listing}"`,
-          ).toBe("5");
-          // F-158: Monday to Friday of the walk day's own week -- the five
-          // days the repeat names, read off the sentence's own week, never
-          // hand-summed. Every readout in the listing carries its day label,
-          // so each of the five must appear by name.
+        // 10. The uncertified swap -- refused before the yes; nothing changes.
+        table.push(await runEntry(page, swapRefused));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 11. A split.
+        table.push(await runEntry(page, split));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 13, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 12. Adjust: "extend" John Kim's own Cell 3 block.
+        table.push(await runEntry(page, adjustExtend));
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+
+        // 13. The headcount form, on the run booked in entry 6.
+        table.push(await runEntry(page, headcountForm));
+        {
+          // Polled, like every other database check here: the readout lands
+          // before the row does (22 Sept: a single read right after it saw the
+          // old count once, on a run where the model timed out and the rules
+          // wrote late).
+          const readHeadcount = async (): Promise<number | null | undefined> => {
+            const { data, error } = await dana
+              .from("runs")
+              .select("planned_headcount, timerange")
+              .eq("node_id", cellId("Cell 3"));
+            expect(error, error?.message).toBeNull();
+            const rows = (data ?? []) as { planned_headcount: number | null; timerange: string }[];
+            const hit = rows.find((r) => {
+              const { startMs, endMs } = parseTimerange(r.timerange);
+              return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
+            });
+            expect(hit, "the Bracket A run on Cell 3 should still be there").toBeTruthy();
+            return hit!.planned_headcount;
+          };
+          const deadline = Date.now() + 45_000;
+          let headcount = await readHeadcount();
+          while (headcount !== 4 && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 300));
+            headcount = await readHeadcount();
+          }
+          expect(headcount).toBe(4);
+        }
+
+        // 14. Lena Novak's own setup block, plumbing for the swap next.
+        table.push(await runEntry(page, lenaSetup));
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+
+        // 15. A swap -- crosses Lena's and John Kim's own blocks.
+        table.push(await runEntry(page, swapSuccess));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+
+        // 16. A copy to tomorrow -- Cell 3's own blocks, one day forward.
+        table.push(await runEntry(page, copyToTomorrow));
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(TOMORROW, 8, 0),
+          endMs: wallMs(TOMORROW, 13, 0),
+        });
+
+        // 17. A repeat day answered no -- the listing counts five (Monday to
+        // Friday, `expandRepeatDay`'s own `slice(0, 5)`), and nothing is
+        // written anywhere in that week.
+        const weekdayResult = await runEntry(page, everyWeekdayNo);
+        table.push(weekdayResult);
+        {
+          // Only when the bar actually produced the listing: a status the
+          // catalogue did not predict is already recorded as the finding
+          // (`unpredicted`), and asserting its shape here as well would stop
+          // the walk on the spot and cost every sentence after it -- the very
+          // thing `recordMismatch` exists to prevent.
+          if (weekdayResult.unpredicted === undefined) {
+            const listing = weekdayResult.listing ?? "";
+            expect(
+              listing.match(/^(\d+) commands? ready/)?.[1],
+              `the repeat day's own listing should count five: "${listing}"`,
+            ).toBe("5");
+            // F-158: Monday to Friday of the walk day's own week -- the five
+            // days the repeat names, read off the sentence's own week, never
+            // hand-summed. Every readout in the listing carries its day label,
+            // so each of the five must appear by name.
+            const monday = isoPlusDays(
+              WALK_DAY,
+              -((new Date(`${WALK_DAY}T00:00:00Z`).getUTCDay() + 6) % 7),
+            );
+            for (let i = 0; i < 5; i++) {
+              const iso = isoPlusDays(monday, i);
+              // The board's own day label shape, "Wed Sep 16" -- some ICU
+              // builds put a comma after the weekday, the board's formatter
+              // does not, so the comma is stripped rather than depended on.
+              const label = new Intl.DateTimeFormat("en-US", {
+                timeZone: "UTC",
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+              })
+                .format(new Date(`${iso}T00:00:00Z`))
+                .replace(/,/g, "");
+              expect(listing, `the listing should name ${label}`).toContain(label);
+            }
+          }
+          // Monday of the week the walk day falls in, and the seven days after it --
+          // "no" must have left every one of them empty on that cell.
           const monday = isoPlusDays(
             WALK_DAY,
             -((new Date(`${WALK_DAY}T00:00:00Z`).getUTCDay() + 6) % 7),
           );
-          for (let i = 0; i < 5; i++) {
-            const iso = isoPlusDays(monday, i);
-            // The board's own day label shape, "Wed Sep 16" -- some ICU
-            // builds put a comma after the weekday, the board's formatter
-            // does not, so the comma is stripped rather than depended on.
-            const label = new Intl.DateTimeFormat("en-US", {
-              timeZone: "UTC",
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-            })
-              .format(new Date(`${iso}T00:00:00Z`))
-              .replace(/,/g, "");
-            expect(listing, `the listing should name ${label}`).toContain(label);
-          }
+          const rows = await assignmentsStartingInWindow(
+            dana,
+            [cellId("Cell 4")],
+            wallMs(monday, 0, 0),
+            wallMs(isoPlusDays(monday, 7), 0, 0),
+          );
+          const lenaRows = rows.filter((r) => r.operator_id === opId.lena);
+          expect(lenaRows, '"no" to the lot should have written nothing this week').toHaveLength(0);
         }
-        // Monday of the week the walk day falls in, and the seven days after it --
-        // "no" must have left every one of them empty on that cell.
-        const monday = isoPlusDays(
-          WALK_DAY,
-          -((new Date(`${WALK_DAY}T00:00:00Z`).getUTCDay() + 6) % 7),
-        );
-        const rows = await assignmentsStartingInWindow(
-          dana,
-          [cellId("Cell 4")],
-          wallMs(monday, 0, 0),
-          wallMs(isoPlusDays(monday, 7), 0, 0),
-        );
-        const lenaRows = rows.filter((r) => r.operator_id === opId.lena);
-        expect(lenaRows, '"no" to the lot should have written nothing this week').toHaveLength(0);
-      }
-      // The "Show that day" this entry went through widened the window to
-      // the walk day's week; entry 19 below moves it to the far Monday, entry
-      // 20 asks about today and stays put, and entry 21 brings it back to
-      // the walk day through its own "Show that day".
+        // The "Show that day" this entry went through widened the window to
+        // the walk day's week; entry 19 below moves it to the far Monday, entry
+        // 20 asks about today and stays put, and entry 21 brings it back to
+        // the walk day through its own "Show that day".
 
-      // 18. An uncertified person on Cell 1, under warn -- a typed reason
-      // runs it anyway.
-      table.push(await runEntry(page, tomOverride));
-      {
-        const row = await waitForAssignment(dana, {
-          operatorId: opId.tom,
-          nodeId: cellId("Cell 1"),
-          startMs: wallMs(WALK_DAY, 15, 0),
-          endMs: wallMs(WALK_DAY, 17, 0),
+        // 18. An uncertified person on Cell 1, under warn -- a typed reason
+        // runs it anyway.
+        table.push(await runEntry(page, tomOverride));
+        {
+          const row = await waitForAssignment(dana, {
+            operatorId: opId.tom,
+            nodeId: cellId("Cell 1"),
+            startMs: wallMs(WALK_DAY, 15, 0),
+            endMs: wallMs(WALK_DAY, 17, 0),
+          });
+          expect(row.eligibility_override, "eligibility_override should be true").toBe(true);
+          expect(row.override_reason).toBe(tomOverride.answer);
+        }
+
+        // 19. A day past the board's own window -- "Show that day" moves it.
+        table.push(await runEntry(page, dayOffBoardFar));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(FAR, 8, 0),
+          endMs: wallMs(FAR, 12, 0),
         });
-        expect(row.eligibility_override, "eligibility_override should be true").toBe(true);
-        expect(row.override_reason).toBe(tomOverride.answer);
-      }
 
-      // 19. A day past the board's own window -- "Show that day" moves it.
-      table.push(await runEntry(page, dayOffBoardFar));
-      await waitForAssignment(dana, {
-        operatorId: opId.maria,
-        nodeId: cellId("Cell 3"),
-        startMs: wallMs(FAR, 8, 0),
-        endMs: wallMs(FAR, 12, 0),
-      });
+        // 20. A day-less sentence -- today is off the board, and stays off it:
+        // the question is the proof and nothing is written (F-182).
+        table.push(await runEntry(page, dayLessToday));
 
-      // 20. A day-less sentence -- today is off the board, and stays off it:
-      // the question is the proof and nothing is written (F-182).
-      table.push(await runEntry(page, dayLessToday));
-
-      // 21 and 22. The clear of the walk day, one sentence per area (R-407: a
-      // place above the cells clears every cell under it). Between them the
-      // two listings must name EVERY block AND EVERY JOB this walk left on
-      // that day (R-436, S70-d: "clear means clearing everything" -- the job
-      // rows join the lot) -- counted against an independent database read
-      // taken before either runs, never a hand-summed number.
-      const beforeClearBlocks = await assignmentsStartingInWindow(
-        dana,
-        allCellIds,
-        WALK_DAY_START_MS,
-        WALK_DAY_END_MS,
-      );
-      const beforeClearJobs = await runsStartingInWindow(
-        dana,
-        allCellIds,
-        WALK_DAY_START_MS,
-        WALK_DAY_END_MS,
-      );
-      const beforeClear = beforeClearBlocks.length + beforeClearJobs.length;
-      const listedCount = (result: EntryResult): number => {
-        // Entry 21 reaches its listing through "Show that day", so the
-        // listing is what the bar showed AFTER the button, not `barSaid`.
-        const match = (result.listing ?? result.barSaid).match(/^(\d+) commands?/);
-        if (match === null) return Number.NaN; // already recorded as the finding
-        return Number(match[1]);
-      };
-      const area1Result = await runEntry(page, clearArea1);
-      table.push(area1Result);
-      const area1Listed = listedCount(area1Result);
-      const area2Result = await runEntry(page, clearArea2);
-      table.push(area2Result);
-      const area2Listed = listedCount(area2Result);
-      if (area1Result.unpredicted === undefined && area2Result.unpredicted === undefined) {
-        expect(
-          area1Listed + area2Listed,
-          "the two areas' listings together should name every block and every job the walk left on the walk day",
-        ).toBe(beforeClear);
-      }
-      const afterClear = await (async () => {
-        // waitForAssignmentGone needs one specific row; here we want ALL of
-        // them gone, so poll the whole-window count down to zero instead.
-        const deadline = Date.now() + 45_000;
-        for (;;) {
-          const rows = [
-            ...(await assignmentsStartingInWindow(
-              dana,
-              allCellIds,
-              WALK_DAY_START_MS,
-              WALK_DAY_END_MS,
-            )),
-            ...(await runsStartingInWindow(dana, allCellIds, WALK_DAY_START_MS, WALK_DAY_END_MS)),
-          ];
-          if (rows.length === 0) return rows;
-          if (Date.now() > deadline) return rows;
-          await new Promise((r) => setTimeout(r, 300));
+        // 21 and 22. The clear of the walk day, one sentence per area (R-407: a
+        // place above the cells clears every cell under it). Between them the
+        // two listings must name EVERY block AND EVERY JOB this walk left on
+        // that day (R-436, S70-d: "clear means clearing everything" -- the job
+        // rows join the lot) -- counted against an independent database read
+        // taken before either runs, never a hand-summed number.
+        const beforeClearBlocks = await assignmentsStartingInWindow(
+          dana,
+          allCellIds,
+          WALK_DAY_START_MS,
+          WALK_DAY_END_MS,
+        );
+        const beforeClearJobs = await runsStartingInWindow(
+          dana,
+          allCellIds,
+          WALK_DAY_START_MS,
+          WALK_DAY_END_MS,
+        );
+        const beforeClear = beforeClearBlocks.length + beforeClearJobs.length;
+        const listedCount = (result: EntryResult): number => {
+          // Entry 21 reaches its listing through "Show that day", so the
+          // listing is what the bar showed AFTER the button, not `barSaid`.
+          const match = (result.listing ?? result.barSaid).match(/^(\d+) commands?/);
+          if (match === null) return Number.NaN; // already recorded as the finding
+          return Number(match[1]);
+        };
+        const area1Result = await runEntry(page, clearArea1);
+        table.push(area1Result);
+        const area1Listed = listedCount(area1Result);
+        const area2Result = await runEntry(page, clearArea2);
+        table.push(area2Result);
+        const area2Listed = listedCount(area2Result);
+        if (area1Result.unpredicted === undefined && area2Result.unpredicted === undefined) {
+          expect(
+            area1Listed + area2Listed,
+            "the two areas' listings together should name every block and every job the walk left on the walk day",
+          ).toBe(beforeClear);
         }
-      })();
-      expect(
-        afterClear,
-        "every block and every job on the walk day should be gone after the two areas' own yeses",
-      ).toHaveLength(0);
+        const afterClear = await (async () => {
+          // waitForAssignmentGone needs one specific row; here we want ALL of
+          // them gone, so poll the whole-window count down to zero instead.
+          const deadline = Date.now() + 45_000;
+          for (;;) {
+            const rows = [
+              ...(await assignmentsStartingInWindow(
+                dana,
+                allCellIds,
+                WALK_DAY_START_MS,
+                WALK_DAY_END_MS,
+              )),
+              ...(await runsStartingInWindow(dana, allCellIds, WALK_DAY_START_MS, WALK_DAY_END_MS)),
+            ];
+            if (rows.length === 0) return rows;
+            if (Date.now() > deadline) return rows;
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        })();
+        expect(
+          afterClear,
+          "every block and every job on the walk day should be gone after the two areas' own yeses",
+        ).toHaveLength(0);
+      } else {
+        // ====================================================================
+        // WALK_SET 2 (S71-n, docs/agent-briefs/s71-n-second-walk-list-brief.md)
+        // -- `e2e/walk/sentences2.ts`'s own 22 entries, different people,
+        // cells, hours and days from the first list. Same door as above
+        // (`runEntry`, each entry's own `expect`), and the same standard
+        // CLAUDE.md §4 holds the first list to: a database read after every
+        // write, never trust the status line alone.
+        // ====================================================================
+        const [
+          clearEmptyCell2,
+          priyaAssign2,
+          mariaAssign2,
+          lenaOverride2,
+          johnAssign2,
+          samMisheard2,
+          tomNoPart2,
+          bookHeadcount2,
+          endJohn2,
+          shortenLena2,
+          extendSam2,
+          splitTom2,
+          swapRefused2,
+          swapWrites2,
+          headcountChange2,
+          endOfShiftJohn2,
+          copyToFriday2,
+          everyWeekdayNo2,
+          absenceMaria2,
+          coverSam2,
+          clearLine2_2,
+          clearArea2_2,
+        ] = SENTENCES;
+        // entry 13's own `inLot: true` certificate refusal offers no
+        // candidate and no yes/no -- see this file's own header doc on
+        // `answerlessEntries` above.
+        answerlessEntries.add(swapRefused2);
+
+        // 1. Clear of an empty cell.
+        table.push(await runEntry(page, clearEmptyCell2));
+
+        // 2. Priya Shah -> Cell 1 (certified, Welding).
+        table.push(await runEntry(page, priyaAssign2));
+        await waitForAssignment(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 6, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 3. Maria Lopez -> Cell 6.
+        table.push(await runEntry(page, mariaAssign2));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 4. Lena Novak -> Cell 2, NOT certified -- typed reason, override.
+        table.push(await runEntry(page, lenaOverride2));
+        {
+          const row = await waitForAssignment(dana, {
+            operatorId: opId.lena,
+            nodeId: cellId("Cell 2"),
+            startMs: wallMs(WALK_DAY, 8, 0),
+            endMs: wallMs(WALK_DAY, 12, 0),
+          });
+          expect(row.eligibility_override, "eligibility_override should be true").toBe(true);
+          expect(row.override_reason).toBe(lenaOverride2.answer);
+        }
+
+        // 5. John Kim -> Cell 5.
+        table.push(await runEntry(page, johnAssign2));
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 6. Sam Patel -> Cell 2 (Line 1 -- the area gate's own boundary),
+        // misheard part ("Bracket Pay" -> Bracket A).
+        table.push(await runEntry(page, samMisheard2));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 2"),
+          startMs: wallMs(WALK_DAY, 15, 0),
+          endMs: wallMs(WALK_DAY, 19, 0),
+        });
+
+        // 7. Tom Baker -> Cell 3, no part named ("Which part?").
+        table.push(await runEntry(page, tomNoPart2));
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 8. A booking with headcount -- a run, not an assignment.
+        table.push(await runEntry(page, bookHeadcount2));
+        {
+          const { data, error } = await dana
+            .from("runs")
+            .select("id, planned_headcount, timerange")
+            .eq("node_id", cellId("Cell 6"));
+          expect(error, error?.message).toBeNull();
+          const rows = (data ?? []) as {
+            id: string;
+            planned_headcount: number | null;
+            timerange: string;
+          }[];
+          const hit = rows.find((r) => {
+            const { startMs, endMs } = parseTimerange(r.timerange);
+            return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
+          });
+          expect(
+            hit,
+            "the booked Common Fastener run on Cell 6, 13:00-17:00, should exist",
+          ).toBeTruthy();
+          expect(hit!.planned_headcount).toBe(2);
+        }
+
+        // 9. "end" -- John Kim's own Cell 5 block shortens to 08:00-10:00.
+        table.push(await runEntry(page, endJohn2));
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+
+        // 10. "shorten" -- Lena Novak's own Cell 2 block, by 30 minutes.
+        table.push(await runEntry(page, shortenLena2));
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 2"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 11, 30),
+        });
+
+        // 11. "extend" -- Sam Patel's own Cell 2 block ("assignment" spelling).
+        table.push(await runEntry(page, extendSam2));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 2"),
+          startMs: wallMs(WALK_DAY, 15, 0),
+          endMs: wallMs(WALK_DAY, 20, 0),
+        });
+
+        // 12. "split" -- Tom Baker's own Cell 3 block.
+        table.push(await runEntry(page, splitTom2));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 10, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 13. The uncertified swap -- refused before the yes; nothing changes.
+        table.push(await runEntry(page, swapRefused2));
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 2"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 11, 30),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 6, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 14. A swap that writes -- crosses Maria's and John Kim's own blocks.
+        table.push(await runEntry(page, swapWrites2));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 15. The headcount form, on the run booked in entry 8 -- deliberately
+        // not run right after entry 8 (see sentences2.ts's own comment on this
+        // entry: a back-to-back book-then-headcount-change raced the client's
+        // own realtime sync on the first try here).
+        table.push(await runEntry(page, headcountChange2));
+        {
+          const readHeadcount = async (): Promise<number | null | undefined> => {
+            const { data, error } = await dana
+              .from("runs")
+              .select("planned_headcount, timerange")
+              .eq("node_id", cellId("Cell 6"));
+            expect(error, error?.message).toBeNull();
+            const rows = (data ?? []) as { planned_headcount: number | null; timerange: string }[];
+            const hit = rows.find((r) => {
+              const { startMs, endMs } = parseTimerange(r.timerange);
+              return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
+            });
+            expect(hit, "the Common Fastener run on Cell 6 should still be there").toBeTruthy();
+            return hit!.planned_headcount;
+          };
+          const deadline = Date.now() + 45_000;
+          let headcount = await readHeadcount();
+          while (headcount !== 5 && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 300));
+            headcount = await readHeadcount();
+          }
+          expect(headcount).toBe(5);
+        }
+
+        // 16. "from 4 until end of shift" -- the model-gap case, John Kim's
+        // second Cell 6 block.
+        const shiftResult2 = await runEntry(page, endOfShiftJohn2);
+        table.push(shiftResult2);
+        {
+          const literalReading = /04:00–06:00/.test(shiftResult2.written);
+          const branch = literalReading
+            ? "04:00-06:00 (literal)"
+            : "16:00-22:00 (the rules' own reading)";
+          if (literalReading) {
+            surprises.push(
+              `"${endOfShiftJohn2.say}" was read literally as 04:00, not the rules' 16:00 -- ${branch}.`,
+            );
+          }
+          const [startH, endH] = literalReading ? [4, 6] : [16, 22];
+          await waitForAssignment(dana, {
+            operatorId: opId.john,
+            nodeId: cellId("Cell 6"),
+            startMs: wallMs(WALK_DAY, startH, 0),
+            endMs: wallMs(WALK_DAY, endH, 0),
+          });
+        }
+
+        // 17. A copy to tomorrow -- Cell 5 currently holds Maria's own block
+        // (crossed to her by entry 14's swap). Copying exactly one block
+        // auto-runs (S47), so this is a plain single-write DB check, the same
+        // shape as an ordinary assign.
+        table.push(await runEntry(page, copyToFriday2));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(TOMORROW, 8, 0),
+          endMs: wallMs(TOMORROW, 10, 0),
+        });
+
+        // 18. A repeat day answered no -- next week, five commands, nothing
+        // written.
+        table.push(await runEntry(page, everyWeekdayNo2));
+
+        // 19. An absence -- Maria Lopez's own Cell 5 block is removed.
+        table.push(await runEntry(page, absenceMaria2));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+
+        // 20. A cover -- Priya Shah's own Cell 1 block becomes Sam Patel's.
+        table.push(await runEntry(page, coverSam2));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 6, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 6, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 21 and 22. Clear Line 2, then Area 2 -- a DIFFERENT pair of places
+        // than the first list's Area 1/Area 2 (brief §1 item 16). Cell 1 and
+        // Cell 2 (Line 1) are deliberately left for the walk's own teardown
+        // (sentences2.ts's own header doc) -- counted here over Cell 3-6 only.
+        const line2AndArea2CellIds = [
+          cellId("Cell 3"),
+          cellId("Cell 4"),
+          cellId("Cell 5"),
+          cellId("Cell 6"),
+        ];
+        const beforeClearBlocks2 = await assignmentsStartingInWindow(
+          dana,
+          line2AndArea2CellIds,
+          WALK_DAY_START_MS,
+          WALK_DAY_END_MS,
+        );
+        const beforeClearJobs2 = await runsStartingInWindow(
+          dana,
+          line2AndArea2CellIds,
+          WALK_DAY_START_MS,
+          WALK_DAY_END_MS,
+        );
+        const beforeClear2 = beforeClearBlocks2.length + beforeClearJobs2.length;
+        const listedCount2 = (result: EntryResult): number => {
+          const match = (result.listing ?? result.barSaid).match(/^(\d+) commands?/);
+          if (match === null) return Number.NaN;
+          return Number(match[1]);
+        };
+        const line2Result = await runEntry(page, clearLine2_2);
+        table.push(line2Result);
+        const line2Listed = listedCount2(line2Result);
+        const area2Result2 = await runEntry(page, clearArea2_2);
+        table.push(area2Result2);
+        const area2Listed2 = listedCount2(area2Result2);
+        if (line2Result.unpredicted === undefined && area2Result2.unpredicted === undefined) {
+          expect(
+            line2Listed + area2Listed2,
+            "Line 2's and Area 2's listings together should name every block and every job the walk left there",
+          ).toBe(beforeClear2);
+        }
+        const afterClear2 = await (async () => {
+          const deadline = Date.now() + 45_000;
+          for (;;) {
+            const rows = [
+              ...(await assignmentsStartingInWindow(
+                dana,
+                line2AndArea2CellIds,
+                WALK_DAY_START_MS,
+                WALK_DAY_END_MS,
+              )),
+              ...(await runsStartingInWindow(
+                dana,
+                line2AndArea2CellIds,
+                WALK_DAY_START_MS,
+                WALK_DAY_END_MS,
+              )),
+            ];
+            if (rows.length === 0) return rows;
+            if (Date.now() > deadline) return rows;
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        })();
+        expect(
+          afterClear2,
+          "every block and every job on Line 2/Area 2 should be gone after the two clears",
+        ).toHaveLength(0);
+      }
 
       // ------------------------------------------------------------------
       // The trace (brief §4).
@@ -990,7 +1391,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         // An entry that landed on its direct readout (orDirect) was never a
         // question either, so its line carries no answer.
         const landedDirect = table[i]?.note?.includes("[direct, no question]") ?? false;
-        if (nonVoice[i] !== dayLessToday && !landedDirect) {
+        if (!answerlessEntries.has(nonVoice[i]) && !landedDirect) {
           expect(entry.answered, `trace line ${i + 1}'s answered`).not.toBeNull();
         }
       }
