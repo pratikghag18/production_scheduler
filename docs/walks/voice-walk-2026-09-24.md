@@ -106,20 +106,35 @@ recorded in `data/voice/trace/bar.jsonl`), not guessed from reading the grammar 
 
 ## Results (S72-c, R-453)
 
-The 41 trace entries this round left (44 raw clips: four entries carry a spoken answer clip
-alongside the sentence's own; one occurrence of sentence 16 was typed, so it has no clip),
-scored against `data/voice/clips/references-2026-09-24.json` (what the maintainer actually
-said, decided entry by entry from the walk's own order and `bar.jsonl`'s `heard`).
+**How to read this.** Every clip you spoke this afternoon is on disk with the words you actually said
+beside it. The scorer plays each clip to a model and compares the model's words to yours. Four numbers
+per model:
 
-| Model | Decode | Hint | WER | Names | Exact | s/clip |
+- **Words wrong per 100** --- of every 100 words you said, how many the model got wrong (missed, added
+  or swapped). 0 is perfect. This is the number that decides.
+- **Names heard right** --- every person, part, cell, line and area you named (88 of them across the
+  round); how many came back exactly right. A wrong name is the mistake the board cannot recover from.
+- **Word-perfect clips** --- of the 44 clips, how many the model transcribed with not one word wrong.
+- **Seconds to answer** --- how long you wait after you stop talking, on this machine.
+
+"Hint" means the model is told the board's own words (the names, the verbs) before it listens; that is
+what the app does today.
+
+| Model | Hint | Words wrong per 100 | Names heard right | Word-perfect clips | Seconds to answer | In short |
 |---|---|---|---|---|---|---|
-| small.en | beam | yes | 0.164 | 83/88 | 17 | 6.7 |
-| small.en | beam | no | 0.258 | 55/88 | 11 | 4.8 |
-| small.en (23 Sept, different clip set) | beam | yes | 0.191 | 69/78 | 11 | 5.7 |
-| tiny.en | — | — | waiting for the swap | — | — | — |
-| base.en | — | — | waiting for the swap | — | — | — |
-| medium.en-q5_0 | — | — | waiting for the swap | — | — | — |
-| large-v3-turbo-q5_0 | — | — | waiting for the swap | — | — | — |
+| small.en (today's default) | yes | 16 | 83 of 88 | 17 of 44 | 6.7 | The one to beat |
+| small.en | no | 26 | 55 of 88 | 11 of 44 | 4.8 | The hint is worth a third of the errors and a third of the names |
+| small.en, yesterday's clips | yes | 19 | 69 of 78 | 11 of 36 | 5.7 | Yesterday's round, for comparison; the mic was quieter |
+| tiny.en | yes | waiting for the swap | | | | |
+| base.en | yes | waiting for the swap | | | | |
+| medium.en-q5_0 | yes | waiting for the swap | | | | |
+| large-v3-turbo-q5_0 | yes | waiting for the swap | | | | |
+
+**Where the 16 words per 100 went.** Nearly all of them are the first word of the sentence: "end" came
+back as "and" four times out of five, "swap" as "show up", "assign" as "sign" or "a sign", "split ...
+at 10am" twice as nonsense. The names, the cells and the hours in the middle of the sentence were
+almost always right. That is why the board is being taught to ask "did you mean end, move or split?"
+instead of printing grammar: the ear drops the verb, the board can offer it back.
 
 The ten worst clips by WER (small.en, beam, hint on), `heard` beside what was said:
 

@@ -201,3 +201,9 @@ Each is also a `requirements` row in `docs/plan.yaml`. Three duties come with th
   grant's role, a product's places --- is changed on the one screen where that thing is defined,
   and nowhere else; a second control for the same fact is a defect, and a new capability folds
   into the existing control rather than adding a parallel one.
+- **Every sentence the bar says is one a supervisor would say (R-459).** A readout, a question, a
+  refusal or a board move in the thread is one or two plain sentences --- "Done. John Kim is on Cell 6
+  today from 4 pm to 10 pm, making Housing A." --- never an arrow chain, a path, an ISO date, a
+  24-hour span, a grammar hint with angle brackets, or an internal word ("read by the model",
+  "ungrounded", "lot"). The facts are the board's own (R-431); the model never writes a sentence the
+  person reads. The maintainer chose this over having the model rephrase (24 Sept, session 191).

@@ -12969,7 +12969,45 @@ requirements:
   status: uncovered
   note: >-
     STATED 24 Sept (session 191).
+- id: R-459
+  title: Every sentence the bar says is one a supervisor would say --- a readout, a question, a refusal or a move is plain words, never a form, a path or a developer's hint
+  source:
+  - 'session 191 conversation (the maintainer, 24 Sept: "the model should return the form based output in a conversational sentence as what it returns right now is of no use to a non-technical user ... I thought people could have conversations with the board"; the choice of candidate A --- the board writes the sentences --- over B, the model rephrasing them)'
+  stated_by: maintainer
+  claim: >-
+    Everything the bar prints in the thread is a complete plain sentence in the register of a shift supervisor
+    talking to another: "Done. John Kim is on Cell 6 today from 4 pm to 10 pm, making Housing A." ---
+    never an arrow chain ("John Kim -> Housing A - Plant A > Area 2 > Line 3 > Cell 6 - 16:00-22:00"),
+    never a grammar hint ("Say it like: assign <person> ..."), never a path unless two cells share a name,
+    never an internal word ("read by the model", "ungrounded", "lot", "intent"). Hours read as a person
+    says them (4 pm, 10:30 am, noon), days as "today", "tomorrow", "Mon 28 Sep". A question ends with what
+    the buttons offer, in the same words the buttons carry. A refusal says what was not done and why in one
+    sentence, and what to say instead in a second. The facts in every sentence are the board's own, decided
+    by the same checks the server runs (R-431); the model is never the author of a sentence the person
+    reads. The trace keeps its own compact form; this rule is about the thread.
+  verified_by: []
+  status: uncovered
+  note: >-
+    STATED 24 Sept (session 191). Standard, CLAUDE.md section 7. The maintainer weighed two candidates ---
+    the board writes every sentence from templates with pins, or the model is asked a second time to
+    rephrase the board's facts --- and chose the first; the second is not parked, it is declined until a
+    walk finds the first still stiff. R-426's duty: the wording lane (S72-d) inventories every string the
+    bar shows and rewrites each, one pin per sentence shape.
 findings:
+- id: F-223
+  title: A dotted "a.m." before a trailing day word leaves the dot inside the person's name --- "end John Kim's block at 10 a.m. today" ends nobody
+  tag: A grammar gap read as a name
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - F-222
+  - F-216
+  story: >-
+    24 Sept (session 191), lane S72-a building the verb guess: "end John Kim's block at 10 a.m. today" parses
+    to an operator of "John Kim's block ." while "10 am today" and "10 a.m." with no day both parse clean.
+    Whisper writes the dots every time, so the best guess for the maintainer's own sentence 9 would have
+    carried a garbled name. Found by the lane's own pin, fixed in the same lane at the shared time token.
 - id: F-222
   title: A sentence with no command word, or a misheard one, gets the grammar hint or a refusal instead of a question with the verbs as buttons
   tag: A dead end without a choice

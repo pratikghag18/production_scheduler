@@ -121,7 +121,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">893</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">84</span><span class="l">database changes (migrations)</span></div>
   <a class="stat ok" href="#defects"><span class="n">0</span><span class="l">open defects — index</span></a>
-  <div class="stat "><span class="n">342 / 401</span><span class="l">requirements covered by a test</span></div>
+  <div class="stat "><span class="n">342 / 402</span><span class="l">requirements covered by a test</span></div>
 </div>
   <p class="fine">Measured at commit <code>2cc5265</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -2499,7 +2499,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="findings">
   <span class="eyebrow">What turned up</span>
-  <h2>222 things that weren't in the plan</h2>
+  <h2>223 things that weren't in the plan</h2>
   <div class="find fix" id="F-076">
   <span class="tag">The label named more than the button did · fixed · you found it · <a href="#S22">S22</a></span>
   <h3>&quot;Edit&quot; opened half of what it named, on two tabs</h3>
@@ -4398,6 +4398,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   
   <p class="fine">R-456 · R-435 · F-215</p>
 </div>
+<div class="find " id="F-223">
+  <span class="tag">A grammar gap read as a name · open · found while building · <a href="#S57">S57</a></span>
+  <h3>A dotted &quot;a.m.&quot; before a trailing day word leaves the dot inside the person's name --- &quot;end John Kim's block at 10 a.m. today&quot; ends nobody</h3>
+  <p>24 Sept (session 191), lane S72-a building the verb guess: &quot;end John Kim's block at 10 a.m. today&quot; parses to an operator of &quot;John Kim's block .&quot; while &quot;10 am today&quot; and &quot;10 a.m.&quot; with no day both parse clean. Whisper writes the dots every time, so the best guess for the maintainer's own sentence 9 would have carried a garbled name. Found by the lane's own pin, fixed in the same lane at the shared time token.</p>
+  
+  
+  <p class="fine">F-222 · F-216</p>
+</div>
 </section>
 
 <hr class="rule">
@@ -4406,7 +4414,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>401 requirements · 342 covered · 35 uncovered · 0 contradicted · 24 superseded</caption>
+<caption>402 requirements · 342 covered · 36 uncovered · 0 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -7211,6 +7219,13 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="g-n">R-458</td>
   <td class="reqmain"><b>The thread's last turn stays while the microphone listens --- a mic press never erases what the board last said</b><br><span class="fine">Pressing the microphone (the button or Ctrl+M) leaves the last readout, reading, refusal or question exactly where it was; it is replaced only by the next answer. The pre-S47 rule that a mic press clears anything but an answerable question (F-221) is retired.</span>
       <br><span class="fine">session 191 conversation (the maintainer, 24 Sept, after the third spoken round: &quot;when I'm talking the most recent response by the board is gone when the board is listening from the chat and it reappears once the board answers&quot;) · maintainer · STATED 24 Sept (session 191).</span></td>
+  <td class="fine">—</td>
+  <td class="chipcol"><span class="chip q">uncovered</span></td>
+</tr>
+<tr class="r-uncovered" id="R-459">
+  <td class="g-n">R-459</td>
+  <td class="reqmain"><b>Every sentence the bar says is one a supervisor would say --- a readout, a question, a refusal or a move is plain words, never a form, a path or a developer's hint</b><br><span class="fine">Everything the bar prints in the thread is a complete plain sentence in the register of a shift supervisor talking to another: &quot;Done. John Kim is on Cell 6 today from 4 pm to 10 pm, making Housing A.&quot; --- never an arrow chain (&quot;John Kim -&gt; Housing A - Plant A &gt; Area 2 &gt; Line 3 &gt; Cell 6 - 16:00-22:00&quot;), never a grammar hint (&quot;Say it like: assign &lt;person&gt; ...&quot;), never a path unless two cells share a name, never an internal word (&quot;read by the model&quot;, &quot;ungrounded&quot;, &quot;lot&quot;, &quot;intent&quot;). Hours read as a person says them (4 pm, 10:30 am, noon), days as &quot;today&quot;, &quot;tomorrow&quot;, &quot;Mon 28 Sep&quot;. A question ends with what the buttons offer, in the same words the buttons carry. A refusal says what was not done and why in one sentence, and what to say instead in a second. The facts in every sentence are the board's own, decided by the same checks the server runs (R-431); the model is never the author of a sentence the person reads. The trace keeps its own compact form; this rule is about the thread.</span>
+      <br><span class="fine">session 191 conversation (the maintainer, 24 Sept: &quot;the model should return the form based output in a conversational sentence as what it returns right now is of no use to a non-technical user ... I thought people could have conversations with the board&quot;; the choice of candidate A --- the board writes the sentences --- over B, the model rephrasing them) · maintainer · STATED 24 Sept (session 191). Standard, CLAUDE.md section 7. The maintainer weighed two candidates --- the board writes every sentence from templates with pins, or the model is asked a second time to rephrase the board's facts --- and chose the first; the second is not parked, it is declined until a walk finds the first still stiff. R-426's duty: the wording lane (S72-d) inventories every string the bar shows and rewrites each, one pin per sentence shape.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip q">uncovered</span></td>
 </tr></tbody></table></div>
