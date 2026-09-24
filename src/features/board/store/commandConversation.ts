@@ -118,6 +118,16 @@ export type CandidateAction =
   /** S59 / R-419: "Show that day" — moves the window, then re-runs
    *  `command` once a `ctx` carrying `target` arrives. */
   | { kind: "show_day"; command: Command; target: string }
+  /**
+   * S71-m (F-212/F-215, R-435/R-431, docs/agent-briefs/s71-m-grounded-
+   * reading-brief.md): the model's own reading, asked back rather than run
+   * outright, because `groundReading` (`src/lib/command/grounded.ts`) found
+   * no word in the heard text for its intent. Pressing this runs `command`
+   * exactly as an ordinary GROUNDED model reading would --
+   * `CommandBar.tsx`'s own `applyReading` success path, `runCommand(action.
+   * command, " · read by the model")`.
+   */
+  | { kind: "run_ungrounded"; command: Command }
   /** S51: the lot's own "Do all N". */
   | { kind: "run_lot" };
 
