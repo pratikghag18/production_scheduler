@@ -11927,6 +11927,7 @@ requirements:
   status: covered
   note: >-
     STATED 15 Sept (session 174): "I had to go back a day on the board for it to work" and "it said friday is not on the board, move the board to that day first"; design §19.104 (D133 item 3).
+    SUPERSEDED 24 Sept (session 191) by R-455: the maintainer, after the third spoken round --- "It said today is not on the board, why would it not go to it on its own?" --- the button becomes the board's own move; the rerun machinery this row built (the held command, the window move, the gate on a window that holds the day) is what R-455 runs without the press.
 - id: R-420
   title: The local recogniser is told the board's own words
   source:
@@ -12901,7 +12902,156 @@ requirements:
     docs/agent-briefs/s71-j-progress-words-out-of-the-input-brief.md); F-206's stop-time clean-up went with the cause.
     Open question, noted by the reviewer and left as built: while an answer box stands, a partial transcript
     replaces the question's prompt in the placeholder; the question itself is still on screen.
+- id: R-455
+  title: A day off the board is shown by the board itself --- the bar moves the window and runs the sentence, and says so; no button
+  source:
+  - 'session 191 conversation (the maintainer, 24 Sept, after the third spoken round: "It said today is not on the board, why would it not go to it on its own? It will be annoying for someone to use this if a simple thing like this is not done.")'
+  stated_by: maintainer
+  claim: >-
+    When a sentence names a day, a week or today that the board's window does not hold, the bar moves the window
+    so the day is on it (the window's own start-date and day-count controls, a week word widening to seven days,
+    exactly as R-419's button did), waits for the new window's data to land --- never a placeholder of the old
+    window --- and then runs the same sentence, with one line in the thread first: "Moved the board to <day>."
+    There is no question and no button. A cancel word, Escape or new typing while the move is in flight drops
+    the rerun as R-419's did.
+  verified_by: []
+  status: uncovered
+  note: >-
+    STATED 24 Sept (session 191). Supersedes R-419 (whose rerun machinery it reuses without the press). F-219 is
+    the placeholder race this row's "waits for the data" clause closes: on 24 Sept the rerun fired against the
+    previous window's blocks on the new window's day axis and told the maintainer Maria Lopez had no block when
+    she did.
+- id: R-456
+  title: A missing or misheard command word is asked as a choice of verbs, never answered with a grammar hint or a refusal
+  source:
+  - 'session 191 conversation (the maintainer, 24 Sept, after the third spoken round: "#7 ... even if it did not hear assign, it should have figured out that I was trying to assign someone and give me an option accordingly, what it has given as a response is not at all useful to an average non-technical user"; "#9 ... why is the model not asking me what I want to with the prompt with some options?"; "#12 ... why can''t the model anticipate what I''m trying to do here?")'
+  stated_by: maintainer
+  claim: >-
+    When a sentence has the shape of a command --- a person, a place, a part, an hour, or "<person>''s block at
+    <time>" --- but no command word the board knows, or a word that merely sounds like one ("and" for end,
+    "show up" or "so" for swap, "a sign" or "sign" for assign, "close" for end), the bar asks: "I heard "and".
+    Did you mean: end John Kim''s block at 10:00, move ..., or split ...?" with each candidate as a button (at
+    most three, ranked by how close the heard word sounds to the verb, each label the board''s own reading of
+    the sentence with that verb put in), and a press runs that reading. The grammar hint ("Say it like: ...")
+    is never the first answer to a sentence that names a person, a place, a part or an hour; it remains for
+    text that names none of them. R-435 (when in doubt, ask) applied to the verb.
+  verified_by: []
+  status: uncovered
+  note: >-
+    STATED 24 Sept (session 191). The trace of the third round: "Tom Baker to Cell 3 from 18 to 12 p.m. today"
+    got the grammar hint; "and John Kim''s block at 10 a.m. today" got the hint twice and then a "move" the
+    model invented; "Show up Lena Novak and Priya Shah today" was refused as ungrounded. Whisper hears "end" as
+    "and" every time; the board must meet it halfway.
+- id: R-457
+  title: A place the board cannot match against its line or area offers the lines it knows as buttons
+  source:
+  - 'session 191 conversation (the maintainer, 24 Sept, after the third spoken round: "#5 if it did not understand the line, shouldn''t it ask which line I mean and give me options to choose?"; "#16 It just lied to me about there being no cell 6 in line 3. If it did not understand the line, it never asked me to choose a line.")'
+  stated_by: maintainer
+  claim: >-
+    "There is no Cell 5 in Online 3" is followed by the parent the cell is actually in, as a button --- "Did
+    you mean Line 3?" --- and the press runs the sentence with that line in place of the misheard one. R-430
+    (a dead end offers the nearest choices) applied to the place-mismatch question, whose parents the resolver
+    already computes (F-213) and the bar threw away (F-220).
+  verified_by: []
+  status: uncovered
+  note: >-
+    STATED 24 Sept (session 191).
+- id: R-458
+  title: The thread's last turn stays while the microphone listens --- a mic press never erases what the board last said
+  source:
+  - 'session 191 conversation (the maintainer, 24 Sept, after the third spoken round: "when I''m talking the most recent response by the board is gone when the board is listening from the chat and it reappears once the board answers")'
+  stated_by: maintainer
+  claim: >-
+    Pressing the microphone (the button or Ctrl+M) leaves the last readout, reading, refusal or question exactly
+    where it was; it is replaced only by the next answer. The pre-S47 rule that a mic press clears anything but
+    an answerable question (F-221) is retired.
+  verified_by: []
+  status: uncovered
+  note: >-
+    STATED 24 Sept (session 191).
 findings:
+- id: F-222
+  title: A sentence with no command word, or a misheard one, gets the grammar hint or a refusal instead of a question with the verbs as buttons
+  tag: A dead end without a choice
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-456
+  - R-435
+  - F-215
+  story: >-
+    24 Sept (session 191), the third spoken round, small.en: "Tom Baker to Cell 3 from 18 to 12 p.m. today"
+    (the verb not heard) was answered with "Say it like: assign <person> to <part> ..."; "and John Kim's block
+    at 10 a.m. today" ("end" heard as "and", four times) got the same hint twice, then a "move" the model made
+    up, and only "Close John Kim's block" got through; "Show up Lena Novak and Priya Shah today" ("swap") was
+    refused as ungrounded. The maintainer: "it should have figured out that I was trying to assign someone and
+    give me an option accordingly ... am I expecting the impossible here?" No: the shape of the sentence says
+    what it is, and the verb is one of a short list.
+- id: F-221
+  title: A mic press erases the board's last answer --- the thread's newest turn vanishes while listening and a new one appears only when the next answer lands
+  tag: A screen that hides what it knows
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-458
+  - F-197
+  story: >-
+    24 Sept (session 191), the third spoken round: "when I'm talking the most recent response by the board is
+    gone when the board is listening from the chat and it reappears once the board answers." The cause is the
+    pre-S47 line at the top of startListening that clears any status that is not an answerable question
+    (F-197 widened the survivors to every question kind and left readouts and refusals to be wiped).
+- id: F-220
+  title: The place-mismatch refusal names the parent the cell is in and offers no button for it
+  tag: A dead end without a choice
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-457
+  - R-430
+  - F-213
+  story: >-
+    24 Sept (session 191), the third spoken round: "Assign John Kim to Common Fastener on Cell 5, Online 3 ..."
+    ("in Line 3" heard as "Online 3") was answered "There is no Cell 5 in Online 3. Cell 5 is in Line 3 ---
+    Plant A > Area 2." and nothing to press. F-213 built the parents for exactly this button and the bar
+    never rendered them; the maintainer had to say the whole sentence again.
+- id: F-219
+  title: A "Show that day" rerun fires against the previous window's blocks on the new window's days, and says a person has no block when she does
+  tag: A race between the window and its data
+  status: open
+  found_by: maintainer
+  stage: S59
+  refs:
+  - R-455
+  - R-419
+  - R-424
+  story: >-
+    24 Sept (session 191), the third spoken round: the board was on next week (sentence 18's "Show that day");
+    "Maria Lopez is off today" said today was off the board, the maintainer pressed Show that day, and the
+    rerun answered "Maria Lopez has no block Thu Sep 24." --- she had one on Cell 5, 08:00-10:00, and the same
+    sentence said again two minutes later found it. R-424's placeholderData keeps the OLD window's rows while
+    the new window fetches; buildBoardIndex is rebuilt from those old rows on the NEW from/to, so the ctx's
+    days hold the target (the rerun's gate passes) while its assignments are still the old window's. "It
+    straight up lied to me that Maria has no block today."
+- id: F-218
+  title: The comma Whisper writes before a line keeps the word "in" inside the place --- "on Cell 6, in Line 3" is refused as no Cell 6 in "in Line 3"
+  tag: A grammar gap read as a place
+  status: open
+  found_by: maintainer
+  stage: S57
+  refs:
+  - F-216
+  - F-213
+  story: >-
+    24 Sept (session 191), the third spoken round: "Assign John Kim to Housing A on Cell 6, in Line 3 from 4
+    until end of shift today." --- every word right --- was answered "There is no Cell 6 in in Line 3. Cell 6
+    is in Line 3" three times, and only the typed sentence (no comma) wrote. The model's form was refused
+    (a shift and a start together, R-402's invariant) so the rules parsed the heard text, and the rules split
+    the place on the comma and kept the "in" that followed it as part of the qualifier. F-216's own comma
+    fix covered split's "block" and not the place list. "It just lied to me about there being no cell 6 in
+    line 3."
 - id: F-217
   title: Two pins fail only when the whole suite runs on a busy machine --- the 501-clip eviction case and the live part-day absence pin --- and pass alone
   tag: A pin with a clock in it
@@ -26352,6 +26502,13 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
+- kind: task
+  stage: S57
+  text: "The third round's 41 clips (24 Sept, the second list) scored on every model on disk: small.en first (no swap), then tiny.en, base.en, medium.en-q5_0 and large-v3-turbo-q5_0 at the maintainer's swap; the references file maps each clip to the list's sentence; the winner becomes the default"
+  why: >-
+    The maintainer, 24 Sept: "I want to retest all whisper models, that is the goal." The clips are on disk
+    under data/voice/trace/clips with the round's hints; the scorer's --references row is the yardstick. Each
+    swap is the maintainer's hand (the session cannot stop a container); the scoring is the developer's.
 - kind: task
   text: "The board's bare pixels: BOARD_PX_LEGACY in src/test/scaleAudit.ts names sixteen board stylesheets with about two hundred px lengths outside calc(px * --ui-scale); shrink the list a file at a time, whenever a board piece is next touched"
   why: >-
