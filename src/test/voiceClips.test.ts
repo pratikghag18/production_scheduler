@@ -401,47 +401,54 @@ describe("clipServer: handleClipRequest (S71-f, R-453, R-434)", () => {
     expect(fs.existsSync(manifestPath)).toBe(false);
   });
 
-  it("CS-4: the 501st clip evicts the oldest -- the directory and the manifest agree at MAX_CLIPS", async () => {
-    expect(MAX_CLIPS).toBe(500);
-    for (let i = 0; i < MAX_CLIPS; i++) {
-      // S71-f review fix: `at` must be a valid ISO-8601 UTC instant now
-      // (`ISO_AT_RE`) -- minutes/seconds roll over properly rather than
-      // letting the seconds field run past two digits (i >= 100 used to
-      // produce a 3-digit seconds field, which the new validation, quite
-      // correctly, now refuses).
-      const minutes = Math.floor(i / 60);
-      const seconds = i % 60;
-      const at = `2026-01-01T00:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.000Z`;
-      const { req, res } = fakeClipReqRes("POST", clipUrl(at), Buffer.from([i % 256]));
+  // F-217 (24 Sept): five hundred and one file writes take 20 s on a busy machine,
+  // past the runner's default budget; this case carries its own minute.
+  it(
+    "CS-4: the 501st clip evicts the oldest -- the directory and the manifest agree at MAX_CLIPS",
+    { timeout: 60_000 },
+    async () => {
+      expect(MAX_CLIPS).toBe(500);
+      for (let i = 0; i < MAX_CLIPS; i++) {
+        // S71-f review fix: `at` must be a valid ISO-8601 UTC instant now
+        // (`ISO_AT_RE`) -- minutes/seconds roll over properly rather than
+        // letting the seconds field run past two digits (i >= 100 used to
+        // produce a 3-digit seconds field, which the new validation, quite
+        // correctly, now refuses).
+        const minutes = Math.floor(i / 60);
+        const seconds = i % 60;
+        const at = `2026-01-01T00:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.000Z`;
+        const { req, res } = fakeClipReqRes("POST", clipUrl(at), Buffer.from([i % 256]));
+        await handleClipRequest(req, res, clipsDir, manifestPath);
+        expect(res.statusCode).toBe(204);
+      }
+      let lines = fs
+        .readFileSync(manifestPath, "utf8")
+        .split("\n")
+        .filter((l) => l !== "");
+      expect(lines).toHaveLength(MAX_CLIPS);
+      const firstEntry = JSON.parse(lines[0]);
+      expect(firstEntry.at).toBe("2026-01-01T00:00:00.000Z");
+      expect(fs.existsSync(path.join(clipsDir, firstEntry.file))).toBe(true);
+
+      // The 501st clip: the oldest (index 0) is evicted -- both its manifest
+      // line and its .wav file.
+      const at501 = "2026-01-01T00:08:20.500Z";
+      const { req, res } = fakeClipReqRes("POST", clipUrl(at501), Buffer.from([9]));
       await handleClipRequest(req, res, clipsDir, manifestPath);
       expect(res.statusCode).toBe(204);
-    }
-    let lines = fs
-      .readFileSync(manifestPath, "utf8")
-      .split("\n")
-      .filter((l) => l !== "");
-    expect(lines).toHaveLength(MAX_CLIPS);
-    const firstEntry = JSON.parse(lines[0]);
-    expect(firstEntry.at).toBe("2026-01-01T00:00:00.000Z");
-    expect(fs.existsSync(path.join(clipsDir, firstEntry.file))).toBe(true);
 
-    // The 501st clip: the oldest (index 0) is evicted -- both its manifest
-    // line and its .wav file.
-    const at501 = "2026-01-01T00:08:20.500Z";
-    const { req, res } = fakeClipReqRes("POST", clipUrl(at501), Buffer.from([9]));
-    await handleClipRequest(req, res, clipsDir, manifestPath);
-    expect(res.statusCode).toBe(204);
-
-    lines = fs
-      .readFileSync(manifestPath, "utf8")
-      .split("\n")
-      .filter((l) => l !== "");
-    expect(lines).toHaveLength(MAX_CLIPS);
-    const ats = lines.map((l) => JSON.parse(l).at);
-    expect(ats).not.toContain("2026-01-01T00:00:00.000Z");
-    expect(ats).toContain(at501);
-    expect(fs.existsSync(path.join(clipsDir, firstEntry.file))).toBe(false);
-  }, 20000);
+      lines = fs
+        .readFileSync(manifestPath, "utf8")
+        .split("\n")
+        .filter((l) => l !== "");
+      expect(lines).toHaveLength(MAX_CLIPS);
+      const ats = lines.map((l) => JSON.parse(l).at);
+      expect(ats).not.toContain("2026-01-01T00:00:00.000Z");
+      expect(ats).toContain(at501);
+      expect(fs.existsSync(path.join(clipsDir, firstEntry.file))).toBe(false);
+    },
+    20000,
+  );
 
   // S71-f review fix (path traversal): `at` used to reach `join(dir, file)`
   // with only its colons replaced -- a traversal segment survived straight
