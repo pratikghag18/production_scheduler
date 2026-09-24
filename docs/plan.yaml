@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-23'
-  tip: '8e05cba'
+  updated: '2026-09-24'
+  tip: '2cc5265'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12902,10 +12902,27 @@ requirements:
     Open question, noted by the reviewer and left as built: while an answer box stands, a partial transcript
     replaces the question's prompt in the placeholder; the question itself is still on screen.
 findings:
+- id: F-217
+  title: Two pins fail only when the whole suite runs on a busy machine --- the 501-clip eviction case and the live part-day absence pin --- and pass alone
+  tag: A pin with a clock in it
+  status: fixed
+  found_by: agent
+  stage: S57
+  refs:
+  - F-204
+  story: >-
+    24 Sept (session 191): the first full run after the morning's lanes read 6 failed --- five in voiceClips
+    (CS-4 writes five hundred and one files, 20 s under load, past the runner's default) and DEF-0022, a live
+    pin against the database --- and every one passed alone and passed again in a second full run on an idle
+    machine (4349 green). Like DEF-0020's cold start (F-204's cousin), a pin that depends on the machine's speed
+    needs its own budget, not the default.
+  fix: >-
+    Session 191 (2cc5265): CS-4 carries a one-minute budget of its own with a comment saying why; DEF-0022
+    is noted beside DEF-0020 in the developer's own memory as a pin to run alone first after a busy stretch.
 - id: F-216
   title: '"Split Sam Patel''s block at 1pm" is refused with No cell called "Block", twice, and only "assignment" gets through'
   tag: A grammar gap read as a place
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S57
   refs:
@@ -12916,10 +12933,14 @@ findings:
     Patel's Block at 1 p.m." both came back No cell called "Block"; "split Sam Patel's assignment at 1 p.m." ran.
     The split grammar knows "assignment" and not "block", though the walk list, the readouts and the maintainer all
     say block; and a refusal that names a cell nobody said is not a choice (R-430).
+  fix: >-
+    Session 191 (fc98959): the split verb takes Whisper's comma, and the block-tail grammar shared by split and
+    the adjusts is built from one list, block and assignment, with the comma as Whisper's spelling of the
+    possessive. SP1b to SP1d.
 - id: F-215
   title: A garbage transcript ("EF76.") became a clear of every block on the day, offered with a Do all button
   tag: A model guess written as a command
-  status: open
+  status: fixed
   found_by: agent
   stage: S57
   refs:
@@ -12934,10 +12955,17 @@ findings:
     a reading whose intent word (clear, remove, unassign, book, assign, move, swap, split, extend, end, copy, make)
     does not appear in the heard text, in any spelling the parser accepts, is asked as "Did you mean ...?" with
     the reading as the one button, and a reading of everyone or a whole place from such a text is refused outright.
+  fix: >-
+    Session 191 (2b9828a): a pure helper grounds the model's reading against the heard text with the parser's own
+    verb lists, handed in from the bar; an unassign with no removal word, or a lot with no grounded member, is
+    refused outright ("Did not run: nothing in ... says clear, remove or unassign. Say it again."); a single
+    ungrounded reading, or a lot with some grounded members, is asked with one button that a typed or spoken yes
+    also presses. Every walk sentence still grounds for the command the parser itself produces. GR-1 to GR-15,
+    CB-ground-1 to 6, CB-lot-8 rewritten because it typed "anything" for a two-command lot.
 - id: F-214
   title: The bar says Listening before the microphone is open, so the first word of the sentence is lost
   tag: A cue that runs ahead of the thing it announces
-  status: open
+  status: fixed
   found_by: agent
   stage: S57
   refs:
@@ -12953,10 +12981,15 @@ findings:
     announced when the first frame actually arrives (after the processor is connected, where recordingStartedAt is
     set), the bar never sets it on its own, and the browser engine announces it from its own onstart. A pin feeds
     the frame after a delayed getUserMedia and asserts the label was silent until then.
+  fix: >-
+    Session 191 (fc98959): the recogniser announces the listening phase once the audio graph is connected, the
+    browser engine from its own start event, and the bar no longer sets it at the press; a stop while the
+    microphone is still opening never announces. LREC-33a and 33b, VR-x, CB-mic-2 and CL-8 rewritten to the
+    contract. Whether the first word now survives is the next spoken pass's own measurement.
 - id: F-213
   title: 'A place refusal reads "There is no Cell 5 in Main Line 3. Cell 5 is in Cell 5 --- Plant A > Area 2 > Line 3"'
   tag: A sentence that names the thing as its own container
-  status: open
+  status: fixed
   found_by: agent
   stage: S57
   refs:
@@ -12965,10 +12998,14 @@ findings:
     23 Sept (session 190), 21:23:22: a misheard sentence ("... on Cell 5, Main Line 3 ...") was refused with the
     cell named as its own container. The wording should read the path once ("Cell 5 is in Line 3 --- Plant A >
     Area 2 > Line 3. Did you mean Line 3?") and offer the container as the choice (R-430).
+  fix: >-
+    Session 191 (fc98959): both sites that build the refusal name each candidate's parent through one helper,
+    offer the parents as buttons, and stop after the first sentence when there is no parent to name. R5 rewritten
+    from pinning the bug, EX2b, R5b.
 - id: F-212
   title: '"-2, Area 2, Frame A on cell 6 ..." (the person lost to the microphone) was written as a job booking without a person, no question asked'
   tag: A model guess written as a fact
-  status: open
+  status: fixed
   found_by: agent
   stage: S57
   refs:
@@ -12981,10 +13018,14 @@ findings:
     word book was not said; an assign that lost its person is a question, "Who? ..." with the board's people as
     buttons, never a job booked in their place. The maintainer cleared it with "Clear, Cell 6" a moment later.
     Same family as F-200 and F-215; the rule in F-215 covers it (no booking word in the heard text).
+  fix: >-
+    Session 191 (2b9828a): a reading whose command word is absent from the heard text is asked as "I heard ...
+    Did you mean: ...?" with the reading as its one button; the personless booking is such a reading now. Covered
+    by the grounding rule of F-215; CB-ground-2, 3, 5 and 6.
 - id: F-211
   title: Whisper writes a leading dash ("-Assign", "- Assign", "-2,") on most sentences, and the parser reads the dashed word as part of a name
   tag: A transcript decoration read as words
-  status: open
+  status: fixed
   found_by: agent
   stage: S57
   refs:
@@ -12995,6 +13036,9 @@ findings:
     for an utterance already under way when the clip starts (F-214). "-assign Priya Shah to ..." asked No person
     called "-assign Priya Shah"; "-A, Sign Lena Novak" the same. The recogniser strips a leading dash or en dash
     (and any run of them) the way it strips a bracketed tag; a pin beside LREC-29.
+  fix: >-
+    Session 191 (fc98959): every run of leading dashes, with the whitespace after each, is stripped the way a
+    bracketed tag is, at the start only; a transcript of nothing but dashes is nothing heard. LREC-29f to 29j.
 - id: F-210
   title: The maintainer's microphone delivers a third to a tenth of the loudness the recogniser's rules were tuned on, so clips start late and end early
   tag: Thresholds tuned on a sample, not on the room
@@ -18096,6 +18140,38 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 191
+  date: 2026-09-24
+  title: "The evening's findings fixed before the walk resumes: Listening only when the microphone is live, the dash stripped, the model's reading grounded in what was heard; the scorer compares models against what was said"
+  shipped: []
+  commits: ['bb7237a', 'fc98959', '2b9828a', '2cc5265']
+  numbers:
+    app_tests: 4349
+    app_test_files: 169
+    tsc: 0
+    eslint: 0
+    db_checks: 893
+    migrations: 84
+    e2e: 51
+  confirmed: true
+  numbers_note: >-
+    npm run test copied from the runner on an idle machine (a first run under load read 6 failed, F-217); tsc -b
+    and eslint clean; no migration or SQL change, db_checks carries 893; no e2e spec touched.
+  summary: >-
+    Two Sonnet lanes from two briefs, each broken-tested by a second agent. The small fixes (fc98959): the bar
+    said Listening before the microphone was open, so the person began the sentence before capture was live
+    and the first word was lost --- the recogniser announces the phase itself now, once the audio graph is
+    connected; Whisper's leading dash is stripped; split takes block and Whisper's comma; a place refusal names
+    the parent at both sites and never dangles. The reviewer found a stale launcher pin, the second refusal site
+    and the dangling message. The guard (2b9828a): a pure helper grounds the model's reading against the heard
+    text with the parser's own verb lists, so "EF76." is refused instead of offered as a clear of seven blocks,
+    and a personless booking is asked with one button; the reviewer found that a spoken yes did not press that
+    button, that a lot with one ungrounded member was refused whole, and that "same as yesterday" was never
+    extracted into the copy words --- all fixed. The scorer's replay takes a references file of what was said
+    (bb7237a), and the first table is in: small.en, beam, the app's hint, on last night's 35 clips --- mean word
+    error rate 0.191, names 69 of 78, 11 exact, 5.7 s a clip with tests beside it; the errors sit at the first
+    word and the dash. The maintainer resumes at sentence 17; base.en and the turbo model are the next two
+    tables, the container swap being the maintainer's hand.
 - id: 190
   date: 2026-09-23
   title: "The second spoken walk answered: the two bugs that stopped it fixed, a Ctrl+M mic shortcut, the demo seeded inside each person's shift, and a clip harness so the recogniser is measured instead of walked"
@@ -26306,19 +26382,14 @@ next:
   why: >-
     The maintainer, 18 Sept: the board rail resizes and the admin rail does not; yes to the standard.
 - kind: task
-  text: "Tomorrow first, before the maintainer resumes at sentence 17: the evening's small fixes --- the leading dash stripped (F-211), Listening announced only when the first frame arrives (F-214), split takes block (F-216), the place refusal worded once (F-213) --- one Sonnet lane, reviewed"
-  why: >-
-    23 Sept (session 190): each is a few lines with a pin, and each cost the maintainer a retry or a wrong write
-    tonight. F-214 is the one that matters most: the first word of the sentence is where the walk went wrong.
-- kind: task
-  text: "Then the guard on the model's reading (F-215, F-212): a reading whose intent word does not appear in the heard text is a question, and a reading of everyone or a whole place from such a text is refused (R-435) --- a second lane, with a pin for EF76 and for the personless booking"
-  why: >-
-    23 Sept (session 190): "EF76." offered a clear of seven blocks with a Do all button; a sentence that lost its
-    person was written as a booking. The model will keep guessing; the bar decides what a guess may do.
-- kind: task
-  text: "Then the matrix on the 36 clips already on disk (R-453): npm run voice:clips:score -- --whisper http://127.0.0.1:8090 --from-trace 36 on small.en beam (running now), then the maintainer swaps to base.en and to large-v3-turbo-q5_0 (fetched tonight) and the same command runs against each; the gain row from --gain peak:0.5; the winner becomes the default"
+  text: "The matrix on the 36 clips on disk (R-453): small.en beam with the app's hint is scored against what was said (mean WER 0.191, names 69/78, 11 exact of 35); the maintainer swaps the container to base.en and to large-v3-turbo-q5_0 (fetched) and the same command runs against each --- npm run voice:clips:score -- --whisper http://127.0.0.1:8090 --from-trace 36 --references data/voice/clips/references.json --label <model> --- plus the gain row; the winner becomes the default"
   why: >-
     The clips are the instrument: nobody speaks for this table. The container swap is the maintainer's hand.
+- kind: task
+  text: "The maintainer resumes the walk at sentence 17 on the fixed bar (F-211, F-214, F-216, F-213, F-215, F-212 in), and the new clips are scored the same way --- the first word's survival is the number to read"
+  why: >-
+    24 Sept (session 191): F-214's fix is the one that cannot be proved from the clips already on disk, because
+    those clips were cut by the old timing; only a fresh sentence shows whether the first word survives now.
 - kind: task
   text: "The Whisper matrix (R-453): the maintainer records the 22 sentences once (npm run voice:clips:record), then the six cells in scripts/voice/clips/README.md are scored --- base.en greedy (yesterday's setting) against small.en beam, and the 34-word hint against the 53-word one against two example sentences; the winning model, flags and hint become the defaults, and the hint's shape in recognizerHint.ts follows the table"
   why: >-
