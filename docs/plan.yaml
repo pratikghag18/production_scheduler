@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-24'
-  tip: '37089e4'
+  tip: '4854fc3'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13000,14 +13000,26 @@ requirements:
     sentence, and what to say instead in a second. The facts in every sentence are the board's own, decided
     by the same checks the server runs (R-431); the model is never the author of a sentence the person
     reads. The trace keeps its own compact form; this rule is about the thread.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "the readout and question pins rewritten to the new sentences (one builder: spokenClock, the span formatter, describeQuestion); NC10 a certificate gap inside a lot keeps Nothing changed; AJ3b midnight reads as midnight; AJ3c a half-hour clock end to end"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "the lot wording (Ready to do N things / Done, N things), Not done on every refusal, the suffix gone, CB-unknown-3b a place suggestion button shows the name and never the path"
+  - kind: vitest
+    file: src/test/commandParse.test.ts
+    cases: "the grammar card is one worked example with no angle brackets"
+  - kind: e2e
+    file: e2e/typedWalk.spec.ts
+    cases: "both sentence lists green twice against the new wording (R-433), following the board's own move (R-455)"
+  status: covered
   note: >-
     STATED 24 Sept (session 191). Standard, CLAUDE.md section 7. The maintainer weighed two candidates ---
     the board writes every sentence from templates with pins, or the model is asked a second time to
     rephrase the board's facts --- and chose the first; the second is not parked, it is declined until a
     walk finds the first still stiff. R-426's duty: the wording lane (S72-d) inventories every string the
-    bar shows and rewrites each, one pin per sentence shape.
+    bar shows and rewrites each, one pin per sentence shape. BUILT the same session by lane S72-d (4854fc3) from the 104-row inventory the maintainer read first; the reviewer found four breaks and fixed them.
 findings:
 - id: F-224
   title: '"Clear Cell 5 for the remainder of the week" clears today only, or nothing --- the week phrase is dropped by the model and kept inside the place name by the rules, and neither reader says so'
@@ -18385,9 +18397,9 @@ sessions:
   date: 2026-09-24
   title: "The evening's findings fixed before the walk resumes: Listening only when the microphone is live, the dash stripped, the model's reading grounded in what was heard; the scorer compares models against what was said"
   shipped: []
-  commits: ['bb7237a', 'fc98959', '2b9828a', '2cc5265', 'ef7813e', '239b64d', 'a3edf3c', 'e5384f6', 'd5a8829', '37089e4']
+  commits: ['bb7237a', 'fc98959', '2b9828a', '2cc5265', 'ef7813e', '239b64d', 'a3edf3c', 'e5384f6', 'd5a8829', '37089e4', '4854fc3']
   numbers:
-    app_tests: 4451
+    app_tests: 4455
     app_test_files: 170
     tsc: 0
     eslint: 0
@@ -18396,7 +18408,7 @@ sessions:
     e2e: 51
   confirmed: true
   numbers_note: >-
-    npm run test copied from the runner after the night's week lane: 4451 in 170 files (three pins that fenced the old contract rewritten, VR18/VR23), with the live DEF-0020 pin
+    npm run test copied from the runner after the wording lane: 4455 in 170 files, all green on the first run; both typed walks green twice each (R-433), with the live DEF-0020 pin
     failing under load and passing alone as its note says; tsc -b and eslint clean; no migration or SQL change,
     db_checks carries 893; e2e untouched.
   summary: >-
@@ -18434,6 +18446,18 @@ sessions:
     Lane S72-d's inventory of every bar sentence (104 rows, docs/walks/bar-sentences.md) is in the
     maintainer's hands before any of it is rewritten. A newer base model exists since March (Qwen3.5 2B,
     Apache 2.0); the next Colab run trains both and the scorer picks.
+    THE NIGHT. "Clear Cell 5 for the remainder of the week" cleared today and swore nobody was on the cell
+    (F-224): a clear or an absence now takes the week words assign takes and becomes one removal per day
+    from today on, and a day phrase heard but not read is asked about (37089e4). The maintainer said go on
+    the inventory, and the wording lane rewrote every sentence the bar says through one builder --- Done,
+    Not done, hours as spoken, Ready to do N things, one worked example instead of the grammar card ---
+    with the reviewer's four breaks fixed and both typed walks green twice against the new words and the
+    board's own move (4854fc3). The Whisper matrix on the round's clips, all with the hint, on 49 clips:
+    tiny.en 38 words wrong per hundred at 1.1 s a clip, base.en 24 at 1.9 s, medium.en-q5_0 14 at 16.7 s,
+    large-v3-turbo-q5_0 20 at 25.1 s, small.en 16 at 6.7 s on its 44 (the rerun on 49 pending the swap
+    back). The hint is worth a third of the errors on every size. Medium is the only model more accurate
+    than small.en and it takes seventeen seconds a sentence; small.en stays. The developer told the
+    maintainer the tester's stack was running when it was not, from a day-old note, and was corrected.
 - id: 190
   date: 2026-09-23
   title: "The second spoken walk answered: the two bugs that stopped it fixed, a Ctrl+M mic shortcut, the demo seeded inside each person's shift, and a clip harness so the recogniser is measured instead of walked"
