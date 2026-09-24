@@ -32,12 +32,14 @@ import type {
   MoveCommand,
   HeadcountCommand,
   SingleCommand,
+  SeveralCommand,
   Command,
   Attach,
   Existing,
   ParseFailure,
 } from "@/lib/command/parse";
 import { groundReading, type VerbLists } from "@/lib/command/grounded";
+import { guessVerbs, misheardVerbWord, describeVerbGuess } from "@/lib/voice/verbGuess";
 import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
 import type {
   ResolveContext,
@@ -56,6 +58,7 @@ import { Microphone } from "@/components/icons";
 import {
   createConversationStore,
   fileOpenTurn,
+  fileMovingTurn,
   finishTrace as finishTraceIn,
   settleTurn,
   flushTraceOnTeardown,
@@ -822,6 +825,11 @@ function turnResultLine(turn: HistoryTurn): string {
  */
 const NON_ANSWER_SENTINELS = new Set(["auto", "escape"]);
 
+/** Reviewer fix (R-455 / F-219, 24 Sept session 191): how long a "Moved the
+ *  board to …" rerun waits for the new window's ctx before giving up rather
+ *  than hanging silently -- see `armPendingRerun`'s own doc. */
+const PENDING_RERUN_TIMEOUT_MS = 15000;
+
 /**
  * F-162 (the maintainer, 17 Sept, two screenshots): THE ANSWER BOX.
  *
@@ -864,11 +872,26 @@ const NON_ANSWER_SENTINELS = new Set(["auto", "escape"]);
  * `answerTakes` and `submitText`'s own floor each used to compute on their
  * own (CLAUDE.md §7: the same predicate, one place), now also true for a
  * question whose one candidate is `run_ungrounded`.
+ *
+ * R-456 / F-222 (24 Sept, session 191): widened the same way again for
+ * `run_sentence` -- a verb-guess question with exactly one candidate
+ * (`verbGuessStatus`, above) is answered by a bare "yes" the identical
+ * reason `run_ungrounded`'s single-button ask is: nothing to pick between,
+ * only to confirm. CB-ground-5/6 (this file) pin the case this widening
+ * keeps unbroken: the F-212 shape ("Housing A on Cell 1 ... from 6 to 2",
+ * no verb at all) used to ask through `askUngrounded` (`run_ungrounded`);
+ * `verbGuessStatus` now answers it FIRST (§4's own "before refuseUngrounded/
+ * askUngrounded"), with `guessVerbs`' own shape-candidate rule reconstructing
+ * the identical one sentence ("book " + the heard text) as its one
+ * candidate -- a `run_sentence` action, not `run_ungrounded`, so this
+ * predicate has to name it too or "yes" stops answering a question that
+ * still only ever offers one thing to agree to.
  */
 function isYesShapedQuestion(status: Status): boolean {
   if (status.kind !== "question" || status.candidates.length !== 1) return false;
   if (status.blockHighlight !== undefined && !Array.isArray(status.blockHighlight)) return true;
-  return status.candidates[0].action.kind === "run_ungrounded";
+  const kind = status.candidates[0].action.kind;
+  return kind === "run_ungrounded" || kind === "run_sentence";
 }
 
 function answerTakes(status: Status | null): string | null {
@@ -1078,6 +1101,10 @@ export function CommandBar({
   // of firing (and re-asking the same question) against a `ctx` that was
   // never going to answer differently.
   const pendingRerunRef = storeRef(store, "pendingRerun");
+  // Reviewer fix (R-455, 24 Sept session 191): a pending rerun's own bound --
+  // see `armPendingRerun`/`clearPendingRerun` below, near the effect that
+  // consumes it.
+  const pendingRerunTimeoutRef = useRef<number | null>(null);
   // S44-b: the in-flight reading's own abort controller (null when nothing
   // is pending) and a sequence number bumped by every Enter, Escape and edit
   // so a reading that settles after a newer one has started is discarded
@@ -1282,6 +1309,13 @@ export function CommandBar({
       recognitionRef.current = null;
       // eslint-disable-next-line react-hooks/exhaustive-deps
       recognitionSeqRef.current++;
+      // Reviewer fix (R-455): a pending rerun's own timeout (`armPendingRerun`)
+      // is exactly the same shape of leftover -- nothing left mounted for it
+      // to post a readout into once it fires.
+      if (pendingRerunTimeoutRef.current !== null) {
+        window.clearTimeout(pendingRerunTimeoutRef.current);
+        pendingRerunTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -1369,6 +1403,59 @@ export function CommandBar({
   // always did (CB-ans-1..4, unchanged) -- there is no separate "answer box"
   // moment left for an effect to catch.
 
+  /**
+   * Reviewer fix (R-455 / F-219, 24 Sept session 191): a pending rerun used
+   * to wait for a `ctx` that names its target FOREVER -- if the window's own
+   * fetch for the new day never lands (an error the board's own render gate
+   * treats as "no board data at all", or any other way the new window's ctx
+   * never actually arrives with the target on it), `pendingRerunRef` just
+   * sat there, the "Moved the board to …" turn never got a second word, and
+   * the rerun's own command silently never ran -- no readout, no refusal,
+   * nothing (R-434's own "every write is a trace entry" broken the same way
+   * the known hole was, just by a different door). This bounds it: arming a
+   * pending rerun also arms a timeout; if nothing has consumed the SAME
+   * rerun by the time it fires, it drops itself and closes the entry with a
+   * refusal rather than hanging silently.
+   */
+  function clearPendingRerunTimer(): void {
+    if (pendingRerunTimeoutRef.current !== null) {
+      window.clearTimeout(pendingRerunTimeoutRef.current);
+      pendingRerunTimeoutRef.current = null;
+    }
+  }
+
+  /** Drops whatever pending rerun stands, if any, and its timer -- the one
+   *  function every existing "a typed edit / a cancel word / Escape / a new
+   *  sentence drops the pending rerun" site now calls, so none of them can
+   *  leave a stale timer counting down toward a rerun that is already gone. */
+  function clearPendingRerun(): void {
+    clearPendingRerunTimer();
+    pendingRerunRef.current = null;
+  }
+
+  function armPendingRerun(command: Command, target: string): void {
+    clearPendingRerunTimer();
+    pendingRerunRef.current = { command, target };
+    pendingRerunTimeoutRef.current = window.setTimeout(() => {
+      pendingRerunTimeoutRef.current = null;
+      // A no-op unless THIS SAME rerun is still the one standing -- a later
+      // sentence, cancel, Escape or a successful rerun already cleared it
+      // (and its own timer with it) by the time this fires.
+      if (
+        pendingRerunRef.current === null ||
+        pendingRerunRef.current.command !== command ||
+        pendingRerunRef.current.target !== target
+      ) {
+        return;
+      }
+      pendingRerunRef.current = null;
+      if (traceRef.current) {
+        traceRef.current.outcome = `refused: Could not load ${target}.`;
+      }
+      finishTrace();
+    }, PENDING_RERUN_TIMEOUT_MS);
+  }
+
   // S59 (R-419): re-runs a "Show that day" press's held command once the
   // window has actually moved -- `ctx` is the SAME object from one render to
   // the next until `BoardPage`'s own `commandCtx` memo recomputes, which only
@@ -1393,9 +1480,26 @@ export function CommandBar({
     // to compare `isTargetOnBoard` against yet) -- `pendingRerunRef` simply
     // stays standing until a ctx that actually carries the target arrives.
     if (ctx !== null) lastCtxRef.current = ctx;
-    if (ctx !== null && pendingRerunRef.current && isTargetOnBoard(pendingRerunRef.current, ctx)) {
+    // R-455 / F-219 (24 Sept, session 191): `ctx.settled` gates this exactly
+    // like `isTargetOnBoard` does -- a ctx whose `days` axis already names
+    // the target but whose `assignments`/`runs` are still the PREVIOUS
+    // window's (`keepPreviousData`, `settled: false` while `BoardPage`'s own
+    // fetch is in flight) leaves `pendingRerunRef` standing rather than
+    // re-running `command` against data that has not caught up -- the same
+    // race `isTargetOnBoard` was already built to gate, one layer deeper
+    // (that one asks "is the target ON the axis"; this one asks "is
+    // EVERYTHING ELSE about this ctx actually the target's own window").
+    // `ctx !== null` already implies `ctx.settled` is a real boolean, not a
+    // guess -- `settled: false` is a flag on a full ctx, never a reason for
+    // this bar to go null (R-424).
+    if (
+      ctx !== null &&
+      ctx.settled &&
+      pendingRerunRef.current &&
+      isTargetOnBoard(pendingRerunRef.current, ctx)
+    ) {
       const command = pendingRerunRef.current.command;
-      pendingRerunRef.current = null;
+      clearPendingRerun();
       runCommand(command);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1457,7 +1561,22 @@ export function CommandBar({
    *     (CB-t-3's own case: a candidate button already set `answered` to
    *     its label, and this function already set `asked` to the question's
    *     own text) keeps that truer pair -- the readout that follows is
-   *     what RAN, already captured in `ran`, not a second "question". */
+   *     what RAN, already captured in `ran`, not a second "question".
+   *
+   *   - R-455 / F-219 review fix (24 Sept, session 191): `status.moving`
+   *     (the "Moved the board to …" readout, ONLY) still fills in `asked`/
+   *     `answered` exactly as any other readout, but does NOT `finishTrace`
+   *     -- that would post the entry and null `traceRef.current` before the
+   *     rerun this move triggers (`pendingRerunRef`) has said anything, which
+   *     is the hole F-219's own reproduction found: the move posted alone
+   *     and the rerun's write posted nothing at all, `traceRef.current`
+   *     already gone by the time `runCommand` ran it. `fileMovingTurn` files
+   *     the turn (so it appears in the thread this same tick, unchanged) and
+   *     leaves the entry open and unposted for the rerun's own
+   *     `settleWrite`/`finishTrace` to patch with `ran`/`outcome` and post
+   *     once, truthfully -- or, if a cancel/Escape/new sentence drops the
+   *     rerun first, THAT path's own `finishTrace`/`startTrace` flushes this
+   *     same still-open entry exactly as it always would. */
   function traceQuestionStatus(status: Status): void {
     if (!traceRef.current) return;
     if (status.kind === "question" || status.kind === "shape") {
@@ -1465,7 +1584,11 @@ export function CommandBar({
     } else if (status.kind === "readout") {
       if (traceRef.current.asked === null) traceRef.current.asked = status.message;
       if (traceRef.current.answered === null) traceRef.current.answered = "auto";
-      finishTrace();
+      if (status.moving) {
+        fileMovingTurn(store);
+      } else {
+        finishTrace();
+      }
     }
   }
 
@@ -1831,11 +1954,39 @@ export function CommandBar({
     }
     const base = questionToStatus(resolution.question, command);
     if (base.kind !== "question") {
-      // Every SingleCommand's own Resolution question is always a
-      // "question" status through questionToStatus -- this branch exists
-      // only so TypeScript sees the numbering below is safe, never because
-      // a several's inner command can reach a different Status kind.
-      setStatus(base);
+      // R-455 / F-219 reviewer fix (24 Sept, session 191): this branch's OWN
+      // pre-R-455 comment ("always a 'question' status ... this branch
+      // exists only so TypeScript sees the numbering below is safe") went
+      // stale the instant `day_off_board` started returning a "readout"
+      // (`moving: true`) instead -- a lot step landing off the board reaches
+      // HERE now, for real, every time. Numbered exactly as the "question"
+      // branch below numbers its own message (a supervisor reading the
+      // trace still needs to know WHICH step moved the board).
+      //
+      // Deliberately NOT `traceQuestionStatus`/`fileMovingTurn` (the
+      // top-level `runCommand` path's own treatment): a lot's trace entry is
+      // ONE entry for the WHOLE lot, filed only once the lot itself finishes
+      // (`showLotStatus`'s/`settleWrite`'s own terminal call) -- exactly why
+      // the "question" branch right below sets `asked` inline rather than
+      // through `traceQuestionStatus` too. A step landing off the board gets
+      // the SAME inline treatment: `asked`/`answered` recorded truthfully
+      // (this step ran on its own say-so, not a person's), nothing filed or
+      // closed early. Without this, the move ran silently inside a lot -- no
+      // `asked` at all, the exact hole the top-level path had before its own
+      // fix, one layer deeper.
+      //
+      // `nothing_to_do`'s own plain "readout" (pre-existing, not this
+      // lane's) is UNCHANGED: `moving` is unset for it, so this still skips
+      // straight to the bare `setStatus` it always took.
+      const moved =
+        base.kind === "readout" && base.moving
+          ? { ...base, message: `${lot.index + 1} of ${lot.commands.length}: ${base.message}` }
+          : base;
+      if (moved.kind === "readout" && moved.moving && traceRef.current) {
+        traceRef.current.asked = moved.message;
+        traceRef.current.answered = "auto";
+      }
+      setStatus(moved);
       return;
     }
     const next = {
@@ -2085,6 +2236,32 @@ export function CommandBar({
   }
 
   /**
+   * R-456 / F-222 (24 Sept, session 191): the verb question -- `guessVerbs`
+   * (`src/lib/voice/verbGuess.ts`, S72-a) against the RAW heard text,
+   * never the model's own structured reading (that reading is exactly what
+   * had no verb, or the wrong one, in the first place). `null` when there is
+   * nothing to guess (a real verb was already heard, or the sentence has no
+   * shape of a command at all) -- the caller keeps its old answer, unchanged
+   * (R-456: never the hint/refusal first for a sentence with a shape).
+   * `misheardVerbWord` is asked ONLY once `guessVerbs` has already answered
+   * non-empty (that function's own caller contract).
+   */
+  function verbGuessStatus(sentence: string): Status | null {
+    const guesses = guessVerbs(sentence, GROUNDING_VERBS);
+    if (guesses.length === 0) return null;
+    const heardWord = misheardVerbWord(sentence, GROUNDING_VERBS);
+    return {
+      kind: "question",
+      message: describeVerbGuess(heardWord, guesses),
+      candidates: guesses.map((g) => ({
+        key: g.verb,
+        label: g.label,
+        action: { kind: "run_sentence", sentence: g.sentence },
+      })),
+    };
+  }
+
+  /**
    * S44-b: the fallback path once the model reader has answered anything but
    * `ok` — re-parses `sentence` through the rules exactly as a null-reader
    * Enter would, then either runs it as-is (`reason` null, the `no-service`
@@ -2103,6 +2280,16 @@ export function CommandBar({
       // sentence -- and a bare shape hint is none of them): it stays open,
       // posted once one of those actually happens.
       if (traceRef.current) traceRef.current.read = parsed.failure.kind;
+      // R-456 / F-222: before the grammar hint, ask whether a VERB was heard
+      // differently -- a hint ("Say it like: assign <person> ...") is not an
+      // option; a guessed verb is. Only when there is nothing to guess does
+      // the hint show, unchanged.
+      const verbStatus = verbGuessStatus(sentence);
+      if (verbStatus !== null) {
+        setStatus(verbStatus);
+        traceQuestionStatus(verbStatus);
+        return;
+      }
       const base = failureToStatus(parsed.failure);
       const finalStatus: Status =
         reason === null
@@ -2197,6 +2384,17 @@ export function CommandBar({
       // sentence actually said.
       const grounding = groundReading(sentence, result.command, GROUNDING_VERBS);
       if (!grounding.ok) {
+        // R-456 / F-222: before refusing (the sweeping case) or asking to
+        // confirm the model's own ungrounded reading, ask whether a VERB was
+        // heard differently -- "Show up Lena Novak and Priya Shah today"
+        // (a sweeping ungrounded unassign, the model's own guess) becomes a
+        // swap question here, never a flat refusal.
+        const verbStatus = verbGuessStatus(sentence);
+        if (verbStatus !== null) {
+          setStatus(verbStatus);
+          traceQuestionStatus(verbStatus);
+          return;
+        }
         if (grounding.reason === "sweeping") {
           refuseUngrounded(sentence, result.command, grounding.intent);
         } else {
@@ -2351,6 +2549,42 @@ export function CommandBar({
     // R-437 (CB-ent-4): same as `pickCandidate`'s own identical fix -- the
     // completed sentence goes into the person's bubble, never back into the
     // box.
+    store.getState().set({ sentence: rendered, text: "" });
+    const parsed = parseCommand(rendered);
+    if (!parsed.ok) {
+      heldRef.current = null;
+      if (traceRef.current) traceRef.current.read = parsed.failure.kind;
+      const status = failureToStatus(parsed.failure);
+      setStatus(status);
+      traceQuestionStatus(status);
+      return;
+    }
+    runCommand(parsed.command);
+  }
+
+  /**
+   * R-457 / F-220 (24 Sept, session 191): the `place_mismatch` question's
+   * "elsewhere" button -- substitutes the candidate's PARENT name at the
+   * qualifier's OWN index in `command.place` (never index 1 -- see the
+   * `CandidateAction` doc, commandConversation.ts), leaving `place[0]` (the
+   * cell) and every other qualifier untouched, then re-runs exactly as
+   * `pickCandidate`'s own place branch does (formatted back to a sentence
+   * and reparsed, so the trace and the held command agree on what was
+   * actually said -- never a hand-built command the parser never saw).
+   * `place_mismatch` is never asked for a `SeveralCommand` (its only
+   * question is `several_unsupported`, with no candidates -- same
+   * invariant `pickCandidate`'s own place branch already relies on).
+   */
+  function pickPlaceParent(command: Command, qualifierIndex: number, candidate: Candidate): void {
+    const narrowed = command as Exclude<Command, SeveralCommand>;
+    const place = [...narrowed.place];
+    place[qualifierIndex] = candidate.word;
+    const next = { ...narrowed, place };
+    if (lotRef.current) {
+      updateLotCommand(next as SingleCommand);
+      return;
+    }
+    const rendered = formatCommand(next);
     store.getState().set({ sentence: rendered, text: "" });
     const parsed = parseCommand(rendered);
     if (!parsed.ok) {
@@ -2615,25 +2849,42 @@ export function CommandBar({
         })),
       };
     }
-    // S59 / R-419 (design §19.104/D133 item 3): "Show that day" -- moves the
-    // window through `onShowDay` (the caller's job, see that prop's own doc)
-    // and holds `command` (the exact command this question came from -- the
-    // ordinary sentence, or a lot's own current step, whichever
-    // `questionToStatus` was called with) until the effect above sees a new
-    // `ctx` and re-runs it. No candidate answers the question directly (a
-    // window move is asynchronous), so this is the button's whole job.
+    // R-455 / F-219 (24 Sept, session 191) -- CONTRACT CHANGED (CLAUDE.md
+    // §4): this used to ask a question with a "Show that day" button (S59 /
+    // R-419's own comment, kept below for the mechanism it still uses). The
+    // maintainer's word after the second spoken round: the board just goes
+    // there, no press needed. So this pushes a READOUT ("Moved the board to
+    // …") and dispatches the SAME move a press used to
+    // (`pendingRerunRef`/`onShowDay`) immediately, inline -- every guard
+    // R-419 built around that move (the rerun effect above, Escape dropping
+    // `pendingRerunRef`, new typing dropping it, the race fix (b) below) is
+    // untouched; only the button, and the wait for a press, are gone. The
+    // `show_day` action kind stays (`runCandidateAction`'s own case, and the
+    // `CandidateAction` union) -- nothing else in this file names it, but a
+    // later caller building its own candidates could still reach it the same
+    // way.
+    //
+    // Original S59 / R-419 doc: "Show that day" moves the window through
+    // `onShowDay` (the caller's job, see that prop's own doc) and holds
+    // `command` (the exact command this question came from -- the ordinary
+    // sentence, or a lot's own current step, whichever `questionToStatus`
+    // was called with) until the effect above sees a new `ctx` and re-runs
+    // it.
     if (question.kind === "day_off_board") {
       const day = question.text;
+      armPendingRerun(command, day);
+      onShowDay?.(day);
       return {
-        kind: "question",
-        message,
-        candidates: [
-          {
-            key: "__show_that_day__",
-            label: "Show that day",
-            action: { kind: "show_day", command, target: day },
-          },
-        ],
+        kind: "readout",
+        // Same day formatting every other readout gets (R-426) -- an ISO
+        // token in `day` becomes the plant's own day label; a word already
+        // in English ("today", "Thursday", …) passes through unchanged.
+        message: renderReadout(`Moved the board to ${day}.`),
+        // R-455 / F-219 review fix: this entry is not finished -- the rerun
+        // `pendingRerunRef` above just queued still owes an answer. See
+        // `Status`'s own `moving` doc (commandConversation.ts) and
+        // `traceQuestionStatus`'s own `moving` branch.
+        moving: true,
       };
     }
     // S59 / R-418's message (design §19.104/D133 item 1): a word that
@@ -2730,6 +2981,39 @@ export function CommandBar({
         };
       }
       return { kind: "question", message, candidates: [] };
+    }
+    // R-457 / F-220 (24 Sept, session 191): "There is no Cell 5 in Line 1"
+    // used to leave the person to retype the sentence with the right
+    // qualifier by hand. `elsewhere` (resolve.ts's `elsewhereParents`) names
+    // each matched cell's own PARENT -- offered here as a button, same shape
+    // `unknown`'s suggestions already use. `elsewhereParents` builds each
+    // candidate's `label` from `placeLabel` (a PATH: "Line 3 — Plant 1 ›
+    // Assembly", never a bare name), so the button shows `candidate.word`
+    // (the parent's bare name, what a person would actually say) and the key
+    // carries the path -- two different parents named the same thing stay
+    // distinct buttons. An empty `elsewhere` (every matched cell has no
+    // parent node at all -- F-213's own edge case, `describeQuestion` already
+    // stops after one sentence for it) shows no buttons, unchanged.
+    if (question.kind === "place_mismatch") {
+      if (question.elsewhere.length === 0) {
+        return { kind: "question", message, candidates: [] };
+      }
+      const narrowed = command as Exclude<Command, SeveralCommand>;
+      // Never assume index 1 (CLAUDE.md §4): the qualifier that mismatched
+      // is matched back against the command's own `place` array by word.
+      const qualifierIndex = narrowed.place.indexOf(question.qualifier);
+      if (qualifierIndex < 0) {
+        return { kind: "question", message, candidates: [] };
+      }
+      return {
+        kind: "question",
+        message,
+        candidates: question.elsewhere.map((c) => ({
+          key: c.label,
+          label: c.word,
+          action: { kind: "pick_place_parent", command, qualifierIndex, candidate: c },
+        })),
+      };
     }
     if (question.kind === "run_exists") {
       // Only ever asked from the assign path (brief §5/§9).
@@ -2951,15 +3235,26 @@ export function CommandBar({
       case "pick_attach":
         pickAttach(action.command, action.attach);
         return;
+      case "pick_place_parent":
+        pickPlaceParent(action.command, action.qualifierIndex, action.candidate);
+        return;
       case "pick_existing":
         pickExisting(action.command, action.existing);
         return;
       case "show_day":
-        pendingRerunRef.current = { command: action.command, target: action.target };
+        armPendingRerun(action.command, action.target);
         onShowDay?.(action.target);
         return;
       case "run_ungrounded":
         runCommand(action.command, " · read by the model");
+        return;
+      case "run_sentence":
+        // R-456 / F-222 (24 Sept, session 191): the generic candidate-button
+        // `onClick` (below) already set the entry this closes (`traceRef.
+        // current.answered`) to this button's own label before this ran --
+        // `submitText` starts a FRESH entry for `action.sentence`, finishing
+        // that one first, same as Enter on any typed sentence.
+        submitText(action.sentence);
         return;
       case "run_lot":
         runLotNow();
@@ -3010,7 +3305,7 @@ export function CommandBar({
     }
     // S59 (R-419): a typed edit drops a "Show that day" press's pending
     // rerun too -- the sentence it would have re-run is gone.
-    pendingRerunRef.current = null;
+    clearPendingRerun();
     // S44-b: any edit aborts an in-flight reading (brief §3.3) -- the bump
     // discards a response that settles after this point even if abort()
     // itself has no effect on an already-settled fetch. Review finding 1:
@@ -3186,7 +3481,7 @@ export function CommandBar({
     // S59 (R-419): a cancel word drops a "Show that day" press's pending
     // rerun, whichever context below actually claims the word (or none does
     // -- the sentence it would have re-run is gone either way).
-    if (isCancel) pendingRerunRef.current = null;
+    if (isCancel) clearPendingRerun();
     // "remove it"/"move it" are only ever confirm CANDIDATES -- whether they
     // actually confirm depends on the standing question's kind, decided
     // below by `confirmsQuestion`; the five universal words always are.
@@ -3348,6 +3643,19 @@ export function CommandBar({
         return;
       }
       if (status?.kind !== "question") {
+        // Reviewer fix (R-455 / F-219, 24 Sept session 191): a LOT can be
+        // standing (`lotRef.current`) even though the CURRENT status is not
+        // a "question" -- the current step's own `day_off_board` readout
+        // ("N of M: Moved the board to …", `resolveLotStep`'s own `moved`
+        // branch, still visible while its rerun is pending). Without this, a
+        // cancel word here fell straight to the "nothing standing" floor
+        // below -- "Nothing to cancel." -- while the lot itself sat there
+        // stuck, never actually cancelled, the exact lie R-434 exists to
+        // catch in the trace, now caught live instead.
+        if (isCancel && lotRef.current) {
+          cancelStanding(value);
+          return;
+        }
         if (isConfirmCandidate && onConfirmWord) {
           const result = onConfirmWord();
           if (result === "created") {
@@ -3491,7 +3799,7 @@ export function CommandBar({
     // window landed would let the effect that waits for the window run the
     // OLD command once it did, overwriting THIS sentence's `read`/`ran`/
     // `outcome` in the trace and the thread with the stale rerun's.
-    pendingRerunRef.current = null;
+    clearPendingRerun();
     heldOptionsRef.current = {};
     // Review finding 2: empty/whitespace-only text takes exactly the
     // null-reader path -- no network round trip (and no 20s wait) for a
@@ -3508,6 +3816,19 @@ export function CommandBar({
       // identical comment; the entry stays open, posted once one of the
       // three triggers actually happens.
       if (traceRef.current) traceRef.current.read = parsed.failure.kind;
+      // R-456 / F-222 (24 Sept, session 191): the SAME check `fallbackToRules`
+      // makes (CLAUDE.md §4, "extract, never retype" -- this branch is that
+      // one's own twin for the no-reader/empty-text path, not a second copy
+      // of the rule): before the grammar hint, ask whether a verb was heard
+      // differently. Without this, a typed sentence with no reader wired at
+      // all (this bar's own default) never reached R-456 -- the hint showed
+      // first every time.
+      const verbStatus = verbGuessStatus(value);
+      if (verbStatus !== null) {
+        setStatus(verbStatus);
+        traceQuestionStatus(verbStatus);
+        return;
+      }
       const status = failureToStatus(parsed.failure);
       setStatus(status);
       traceQuestionStatus(status);
@@ -3596,7 +3917,17 @@ export function CommandBar({
     // set to match `handleChange`'s, never narrows it (every `blockHighlight`
     // question `answerTakes` already answers "yes or no" for, so nothing
     // S47 protected stops being protected).
-    setStatus((prev) => (answerTakes(prev) !== null ? prev : null));
+    // R-458 / F-221 (24 Sept, session 191): a mic press used to clear
+    // `status` unless `answerTakes` recognised it as an answerable question
+    // (F-197's own widening, above) -- the maintainer's word after the
+    // second spoken round is that NOTHING standing is dropped by a mic
+    // press, not even a plain readout or a refusal: "Listening…" shows
+    // beside the button while whatever was last on the line stays put, and
+    // the NEXT answer (a final transcript, a pick, a new sentence) replaces
+    // it exactly as it always did. So this is now a pure no-op left for the
+    // history above; nothing here clears `status` on a mic START (a stop
+    // already left it alone -- `stopListening`/`endSession` never touched
+    // it either).
     const mySeq = ++recognitionSeqRef.current;
     function isCurrent(): boolean {
       return recognitionSeqRef.current === mySeq;
@@ -3742,7 +4073,7 @@ export function CommandBar({
     if (e.key === "Escape") {
       // S59 (R-419): Escape always drops a "Show that day" press's pending
       // rerun, whichever of the branches below actually fires.
-      pendingRerunRef.current = null;
+      clearPendingRerun();
       // S51 review fix: a lot writing in the background cannot be
       // cancelled by Escape either -- not even the launcher's own
       // "nothing left, close the panel" signal (`onEscapeIdle`) fires here,

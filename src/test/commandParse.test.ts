@@ -4675,3 +4675,196 @@ describe("commandParse: S60-b a place with no part (R-422)", () => {
     expect(parseCommand(formatCommand(expected.command))).toEqual(expected);
   });
 });
+
+describe("commandParse: F-218 a comma before a qualifier no longer keeps a preposition inside the place", () => {
+  it("FQ1: the maintainer's own sentence -- 'Cell 6, in Line 3' reads as two clean places, not 'in Line 3'", () => {
+    const expected = {
+      ok: true as const,
+      command: {
+        intent: "assign" as const,
+        operator: "John Kim",
+        product: "Housing A",
+        place: ["Cell 6", "Line 3"],
+        day: { kind: "today" as const },
+        start: { hour: 16, minute: 0 },
+        end: null,
+        attach: null,
+        existing: null,
+        shift: END_OF_SHIFT,
+      },
+    };
+    expect(
+      parseCommand(
+        "Assign John Kim to Housing A on Cell 6, in Line 3 from 4 until end of shift today.",
+      ),
+    ).toEqual(expected);
+    // The round trip prints "in Line 3" with no quotes -- a quoted "in Line
+    // 3" would mean the split left the preposition glued to the name.
+    const printed = formatCommand(expected.command);
+    expect(printed).not.toContain('"');
+    expect(parseCommand(printed)).toEqual(expected);
+  });
+
+  it("FQ2: same sentence, lowercase 'cell 6, in line 3'", () => {
+    const result = parseCommand(
+      "assign John Kim to Housing A on cell 6, in line 3 from 4 until end of shift today.",
+    );
+    if (!result.ok) throw new Error("expected ok");
+    if (result.command.intent === "several") throw new Error("expected one command");
+    expect(result.command.place).toEqual(["cell 6", "line 3"]);
+  });
+
+  it("FQ3: a comma before 'on' too -- 'Housing A, on Cell 6'", () => {
+    const result = parseCommand(
+      "assign John Kim to Housing A, on Cell 6 from 4 until end of shift today.",
+    );
+    if (!result.ok) throw new Error("expected ok");
+    // The comma here separates the PRODUCT from the place clause -- the
+    // leading "on " is still stripped off the one piece it produces.
+    if (result.command.intent === "several") throw new Error("expected one command");
+    expect(result.command.place).toEqual(["Cell 6"]);
+  });
+
+  it("FQ4: a comma before 'on Line 3' (the third qualifier form named in the brief)", () => {
+    const result = parseCommand(
+      "assign Priya Shah to Housing A on Cell 6, on Line 3 from 4 until end of shift today.",
+    );
+    if (!result.ok) throw new Error("expected ok");
+    if (result.command.intent === "several") throw new Error("expected one command");
+    expect(result.command.place).toEqual(["Cell 6", "Line 3"]);
+    expect(formatCommand(result.command)).not.toContain('"');
+  });
+
+  it("FQ5: P3 still holds -- three comma-separated places with no leading preposition are untouched", () => {
+    expect(
+      parseCommand("Sam Patel to Housing A on Cell 1, Line 1, Assembly from 6:30 to 14:30"),
+    ).toEqual(
+      ok({
+        intent: "assign",
+        operator: "Sam Patel",
+        product: "Housing A",
+        place: ["Cell 1", "Line 1", "Assembly"],
+        day: null,
+        start: { hour: 6, minute: 30 },
+        end: { hour: 14, minute: 30 },
+        attach: null,
+        shift: null,
+        existing: null,
+      }),
+    );
+  });
+
+  it("FQ6 (reviewer): a piece that is ONLY a preposition ('Cell 6, in, Line 3') is dropped, not kept as a literal invalid place named 'in'", () => {
+    const result = parseCommand(
+      "assign John Kim to Housing A on Cell 6, in, Line 3 from 4 until end of shift today.",
+    );
+    if (!result.ok) throw new Error("expected ok");
+    if (result.command.intent === "several") throw new Error("expected one command");
+    expect(result.command.place).toEqual(["Cell 6", "Line 3"]);
+    const onResult = parseCommand(
+      "assign John Kim to Housing A on Cell 6, on, Line 3 from 4 until end of shift today.",
+    );
+    if (!onResult.ok) throw new Error("expected ok");
+    if (onResult.command.intent === "several") throw new Error("expected one command");
+    expect(onResult.command.place).toEqual(["Cell 6", "Line 3"]);
+  });
+
+  // NOTE (S72-a report): `supabase/dev_demo.sql` has no cell/line/area name
+  // that legitimately starts with "in "/"on "/"at "/"of " (checked by grep
+  // over the demo's quoted literals), so there is no live round-trip case
+  // for "a place whose own NAME is a preposition word" to pin here. A place
+  // named e.g. "On Call" would need a quote in the sentence to survive this
+  // fix (`splitProductPlaces` strips an unquoted leading preposition word
+  // unconditionally, same as the comma-glued one) -- flagged for the
+  // maintainer in the report rather than guessed at with invented data.
+});
+
+describe("commandParse: F-223 a dotted a.m./p.m. followed by a day word no longer strands its own trailing dot", () => {
+  // "end John Kim's block at 10 a.m. today" used to parse to operator
+  // "John Kim's block ." -- the at-clause regex (`ADJUST_TIME_ALT`, built on
+  // `TIME_TOKEN_INLINE`) needs a `\b` right after the meridiem marker, and
+  // neither side of that boundary is a word character when the marker's own
+  // trailing dot is itself followed by a space before "today"/"tomorrow" --
+  // so the regex backs off the dot, `removeMatch` never removes it, and it
+  // stays glued to whatever came before once the possessive-block-tail
+  // strip runs on the now-stale text. Fixed once, at `parseCommand`'s own
+  // top-level normalisation (a dotted "a.m."/"p.m." becomes the bare
+  // "am"/"pm" before any grammar-specific regex ever runs), not per
+  // grammar -- these three pins are "end"'s own door (`parseAdjustRest`),
+  // "split"'s (`parseSplitRest`), and "move"'s edge-adjust door
+  // (`tryMoveEdgeAdjust`), each asserted equal to its undotted twin.
+  it("F223-1: end, dotted a.m. + today, equals its undotted twin", () => {
+    const dotted = parseCommand("end John Kim's block at 10 a.m. today");
+    const undotted = parseCommand("end John Kim's block at 10 am today");
+    expect(dotted).toEqual(undotted);
+    expect(dotted).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "John Kim",
+        place: [],
+        toPlace: null,
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        adjust: { edge: "end", at: { hour: 10, minute: 0 } },
+      },
+    });
+  });
+
+  it("F223-2: finish, dotted p.m. + tomorrow, equals its undotted twin", () => {
+    const dotted = parseCommand("finish Lena Novak's assignment at 3 p.m. tomorrow");
+    const undotted = parseCommand("finish Lena Novak's assignment at 3 pm tomorrow");
+    expect(dotted).toEqual(undotted);
+    expect(dotted.ok).toBe(true);
+    if (!dotted.ok) throw new Error("expected ok");
+    expect(dotted.command).toMatchObject({
+      operator: "Lena Novak",
+      adjust: { edge: "end", at: { hour: 15, minute: 0 } },
+    });
+  });
+
+  it("F223-3: split, dotted a.m. + today, equals its undotted twin", () => {
+    const dotted = parseCommand("split Tom Baker's block at 10 a.m. today");
+    const undotted = parseCommand("split Tom Baker's block at 10 am today");
+    expect(dotted).toEqual(undotted);
+    expect(dotted).toEqual({
+      ok: true,
+      command: {
+        intent: "split",
+        operator: "Tom Baker",
+        place: [],
+        day: { kind: "today" },
+        at: { hour: 10, minute: 0 },
+      },
+    });
+  });
+
+  it("F223-4: move's edge-adjust door ('start to <time>'), dotted a.m. + today, equals its undotted twin", () => {
+    const dotted = parseCommand("move Sam Patel's start to 9 a.m. today");
+    const undotted = parseCommand("move Sam Patel's start to 9 am today");
+    expect(dotted).toEqual(undotted);
+    expect(dotted).toEqual({
+      ok: true,
+      command: {
+        intent: "move",
+        operator: "Sam Patel",
+        place: [],
+        toPlace: null,
+        day: { kind: "today" },
+        span: null,
+        existing: null,
+        shift: null,
+        adjust: { edge: "start", at: { hour: 9, minute: 0 } },
+      },
+    });
+  });
+
+  it("F223-5: an ordinary move with a dotted from/to span, followed by a day word, equals its undotted twin", () => {
+    const dotted = parseCommand("move Tom Baker to Cell 1 from 8 a.m. to 12 p.m. today");
+    const undotted = parseCommand("move Tom Baker to Cell 1 from 8 am to 12 pm today");
+    expect(dotted).toEqual(undotted);
+    expect(dotted.ok).toBe(true);
+  });
+});

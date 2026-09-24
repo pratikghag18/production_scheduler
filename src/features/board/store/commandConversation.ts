@@ -109,6 +109,26 @@ export type CandidateAction =
       candidate: Candidate;
     }
   | { kind: "pick_attach"; command: AssignCommand; attach: Attach }
+  /**
+   * R-457 / F-220 (24 Sept, session 191): a `place_mismatch` question's
+   * "elsewhere" button -- the qualifier word that matched no cell is
+   * replaced by the candidate's PARENT name (`command.place[0]` is left
+   * untouched; only the qualifier at `qualifierIndex` changes), and the
+   * command re-runs. Never `pick_candidate` with `field: "place"`: that one
+   * replaces the WHOLE place array with one word (`place: [candidate.
+   * word]`), which is right for an `unknown`/`ambiguous` place question (no
+   * cell matched at all, or more than one did) but wrong here -- the first
+   * word (the cell) was fine; only the qualifier after it was not.
+   */
+  | {
+      kind: "pick_place_parent";
+      command: Command;
+      /** The index into `command.place` the candidate's name replaces --
+       *  found by matching the question's own `qualifier` word against
+       *  `command.place`, never assumed to be 1 (CLAUDE.md §4). */
+      qualifierIndex: number;
+      candidate: Candidate;
+    }
   | {
       kind: "pick_existing";
       command: Command;
@@ -128,6 +148,17 @@ export type CandidateAction =
    * command, " · read by the model")`.
    */
   | { kind: "run_ungrounded"; command: Command }
+  /**
+   * R-456 / F-222 (24 Sept, session 191): the verb question's own button
+   * (`guessVerbs`, `src/lib/voice/verbGuess.ts`) -- `sentence` is the
+   * guess's own text (the misheard/missing verb word put in), run through
+   * `submitText` exactly as Enter runs whatever is typed, so the model reads
+   * it again and the trace gets a fresh entry (`heard: sentence`); the
+   * generic candidate-button `onClick` (below) already set the PREVIOUS
+   * entry's `answered` to this button's own label before this action ran,
+   * same as any other pick.
+   */
+  | { kind: "run_sentence"; sentence: string }
   /** S51: the lot's own "Do all N". */
   | { kind: "run_lot" };
 
@@ -166,7 +197,26 @@ export type Status =
        */
       awaitingAreaReason?: boolean;
     }
-  | { kind: "readout"; message: string }
+  | {
+      kind: "readout";
+      message: string;
+      /**
+       * R-455 / F-219 review fix (24 Sept, session 191): set ONLY on the
+       * "Moved the board to …" readout `questionToStatus`'s `day_off_board`
+       * branch builds (CommandBar.tsx). Every other readout is the sentence's
+       * OWN last word -- `traceQuestionStatus` finishes the entry outright.
+       * This one is not: the move it announces is followed by a rerun
+       * (`pendingRerunRef`) that still owes an answer -- a write, a refusal,
+       * or nothing at all if a cancel/Escape/new sentence drops it first.
+       * `traceQuestionStatus` reads this to file the turn WITHOUT posting or
+       * closing the entry (`fileMovingTurn`, below), so the rerun's own
+       * `settleWrite`/`finishTrace` patches this SAME turn with `ran`/
+       * `outcome` and posts the one truthful line -- never a move that posts
+       * with nothing to say about what it moved for, and never a second,
+       * empty entry for the rerun's own write.
+       */
+      moving?: true;
+    }
   /** S44-b: shown while `reader(text, signal)` is pending. */
   | { kind: "reading"; message: string };
 
@@ -752,6 +802,48 @@ export function fileOpenTurn(store: ConversationStore): void {
     outcome: entry.outcome,
   });
   state.set({ filedTurnAt: entry.at });
+}
+
+/**
+ * R-455 / F-219 review fix (24 Sept, session 191): the move's OWN twin of
+ * `fileOpenTurn` -- files the turn (so "Moved the board to …" appears in the
+ * thread the instant it is set, CP-5, unchanged) and marks it `filedTurnAt`
+ * so a later `fileTurn`/`settleTurn` PATCHES this same turn rather than
+ * appending a second (exactly `fileOpenTurn`'s own trick for a pop-up's
+ * "Waiting: …"), but unlike `fileOpenTurn` this ALSO clears `sentence`/
+ * `status` back to idle the same tick: the move has nothing further to say
+ * right now (no live "Waiting…" line makes sense for it, unlike a pop-up
+ * genuinely still open on screen), so the live area empties exactly as an
+ * ordinary `fileTurn` empties it, while the entry itself stays open,
+ * unposted, for the rerun this move triggers to finish.
+ */
+export function fileMovingTurn(store: ConversationStore): void {
+  const state = store.getState();
+  const entry = state.trace;
+  if (!entry) return;
+  if (state.filedTurnAt === entry.at) {
+    state.updateTurn(entry.at, {
+      asked: entry.asked,
+      answered: entry.answered,
+      ran: [...entry.ran],
+      outcome: entry.outcome,
+      offered: state.offered,
+    });
+    state.set({ filedTurnAt: entry.at, sentence: null, status: null });
+    return;
+  }
+  state.appendTurn({
+    at: entry.at,
+    heard: entry.heard,
+    by: entry.by,
+    read: entry.read,
+    asked: entry.asked,
+    offered: state.offered,
+    answered: entry.answered,
+    ran: [...entry.ran],
+    outcome: entry.outcome,
+  });
+  state.set({ filedTurnAt: entry.at, sentence: null, status: null });
 }
 
 /** The teardown twin of `finishTrace` -- the board going away, or the page

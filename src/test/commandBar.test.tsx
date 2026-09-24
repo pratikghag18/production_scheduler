@@ -57,6 +57,14 @@ import type {
 // file still drives the REAL, unmocked `resolveCommand` (this file's own
 // header doc, unchanged).
 import * as resolveLib from "@/lib/command/resolve";
+// R-456 / F-222 (24 Sept, session 191): same reason as `resolveLib` above --
+// `CB-verb`'s own describe block spies on `guessVerbs` for the duration of
+// ONE call at a time (`vi.spyOn`, restored in a `finally`), so two controlled
+// guesses can be pinned without depending on `verbGuess.ts`'s own exact
+// heuristics; every other test in this file still drives the real,
+// unmocked `guessVerbs` (already exercised indirectly by CB-ground-2/5/6).
+import * as verbGuessLib from "@/lib/voice/verbGuess";
+import type { VerbGuess } from "@/lib/voice/verbGuess";
 import {
   CommandBar,
   type ConfirmWordResult,
@@ -199,6 +207,11 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     // pre-R-425 behaviour; a case that cares about a real gap overrides it.
     certificateGaps: () => [],
     eligibilityPolicy: () => "warn",
+    // R-455 / F-219 (24 Sept, session 191): every ctx this file builds is
+    // fully settled the instant it exists -- `CB-showday-7..`'s own describe
+    // block below is the one place that overrides this, to pin the race
+    // `settled: false` exists to gate.
+    settled: true,
     ...over,
   };
 }
@@ -1734,6 +1747,48 @@ describe("CB-else: a wrong or missing cell offers the person's blocks elsewhere 
 // -----------------------------------------------------------------------
 
 describe("CB-lot: a several runs one question at a time and writes on one yes (S51)", () => {
+  // Reviewer fix (R-455 / F-219, 24 Sept session 191): `day_off_board`
+  // changed from a "question" to a "readout" (`moving: true`) -- a lot step
+  // landing off the board used to reach `resolveLotStep`'s own dead-code
+  // branch (this file's OWN pre-fix comment said as much) with NO trace
+  // update at all: no `asked`, no numbering, nothing for a cancel word (or
+  // teardown) to post. `pendingRerunRef` still gets armed (that happens
+  // inside `questionToStatus` itself, unconditionally) -- only the trace/
+  // thread side of it was silent.
+  it("CB-lot-4: a lot step landing off the board is numbered and recorded -- 'N of M: Moved the board to …', asked/answered set", () => {
+    const fetchMock = stubFetch();
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP], todayIndex: 0 });
+    fireEvent.change(input, {
+      target: { value: `${LOT_REMOVE_SENTENCE} yesterday` },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // Numbered exactly as an ordinary lot question would be -- both live and
+    // filed into the thread's own current-turn bubble (S63-a: the thread
+    // shows the open turn too, not only finished ones).
+    expect(statusText()).toBe("1 of 2: Moved the board to yesterday.");
+    expect(threadText()).toContain("1 of 2: Moved the board to yesterday.");
+
+    // A cancel word ends the lot -- the SAME entry (never filed or closed
+    // early by the move itself) posts once, carrying the move's own
+    // `asked`/`answered`, proving they were recorded rather than silently
+    // dropped.
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Reviewer fix, second half: the cancel word must actually END the lot
+    // (not just leave `lotRef.current` stuck while claiming "Nothing to
+    // cancel.") -- proven here by a SINGLE posted entry carrying the move's
+    // own `asked`/`answered` AND the cancel's own `outcome`, never a second,
+    // unrelated "no" entry.
+    expect(statusText()).toBe("Left it.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = postedEntry(fetchMock);
+    expect(entry.heard).toBe(`${LOT_REMOVE_SENTENCE} yesterday`);
+    expect(entry.asked).toBe("1 of 2: Moved the board to yesterday.");
+    expect(entry.answered).toBe("no");
+    expect(entry.outcome).toBe("cancelled");
+  });
+
   it("CB-lot-1: a several of two removals from one cell, both people with one block, walks both questions to the lot status", () => {
     const { input, onHighlight } = renderBar({ assignments: [BLK1, BLK_SP] });
 
@@ -3784,7 +3839,19 @@ describe("CB-ground: the model's reading must be grounded in what was heard (S71
     expect(entry.outcome).toBe("refused: ungrounded");
   });
 
-  it("CB-ground-2: the F-212 shape (a book with the leading 'Assign Tom Baker to' lost) asks, one button, its readout the label; pressing it writes", async () => {
+  // R-456 / F-222 (24 Sept, session 191) -- CONTRACT CHANGED (CLAUDE.md §4):
+  // this pinned `askUngrounded`'s own one-button "I heard ... Did you mean:
+  // ..." ask for exactly this shape. `verbGuessStatus` now runs FIRST
+  // (`applyReading`'s own ungrounded branch, before `refuseUngrounded`/
+  // `askUngrounded`) -- `guessVerbs`' shape-candidate rule (no verb heard at
+  // all, but the sentence has a part and a place) reconstructs the identical
+  // "book Housing A on Cell 1 in Line 1 from 6 to 2" as its one candidate,
+  // so the SAME one-button ask/write still happens, through `run_sentence`
+  // (re-submitted through the reader) rather than `run_ungrounded` (the
+  // model's already-parsed command run directly) -- `isYesShapedQuestion`'s
+  // own widening (above) is what keeps CB-ground-5/6's "yes" still working.
+  // Rewritten to assert the new question's own wording.
+  it("CB-ground-2: the F-212 shape (a book with the leading 'Assign Tom Baker to' lost) is now a verb-guess question, one button, its readout the label; pressing it re-reads and writes", async () => {
     const parsedBook = parseCommand(BOOK_SENTENCE);
     expect(parsedBook.ok).toBe(true);
     if (!parsedBook.ok) return;
@@ -3800,8 +3867,7 @@ describe("CB-ground: the model's reading must be grounded in what was heard (S71
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => expect(candidateButtons()).toHaveLength(1));
-    expect(statusText()).toContain(`I heard "${heard}"`);
-    expect(statusText()).toContain(formatCommand(parsedBook.command));
+    expect(statusText()).toBe("Did you mean:");
     expect(candidateButtons()[0].textContent).toBe(formatCommand(parsedBook.command));
     expect(onBook).not.toHaveBeenCalled();
 
@@ -3859,7 +3925,11 @@ describe("CB-ground: the model's reading must be grounded in what was heard (S71
   // -- `askUngrounded`'s own question carries no `blockHighlight` (nothing
   // has resolved yet to outline), so it needs `isYesShapedQuestion`'s own
   // widened test, not the block-question shape, to be yes-shaped at all.
-  it("CB-ground-5: typed 'yes' answers the one-button ungrounded question (onBook once, answered 'yes')", async () => {
+  // R-456 / F-222 (24 Sept, session 191): this question is now the
+  // verb-guess one (CB-ground-2's own note, above), a `run_sentence`
+  // one-button ask rather than `run_ungrounded` -- `isYesShapedQuestion`'s
+  // matching widening keeps this behaviour unchanged; still pinned here.
+  it("CB-ground-5: typed 'yes' answers the one-button verb-guess question (onBook once, answered 'yes')", async () => {
     const fetchMock = stubFetch();
     const parsedBook = parseCommand(BOOK_SENTENCE);
     expect(parsedBook.ok).toBe(true);
@@ -3905,6 +3975,325 @@ describe("CB-ground: the model's reading must be grounded in what was heard (S71
     fire.final("yes");
 
     await waitFor(() => expect(onBook).toHaveBeenCalledTimes(1));
+  });
+});
+
+// -----------------------------------------------------------------------
+// R-457 / F-220 (24 Sept, session 191): a `place_mismatch` question offers
+// the parent as a button -- CB-pm-1..3. The fixture's two "Cell 1"s (c1a in
+// Line 1, c1b in Line 3, `buildCtx`'s own comment) are exactly R5's own
+// shape in commandResolve.test.ts (`elsewhere`: Line 1, Line 3), reused here
+// as text through the whole bar rather than a bare `resolveCommand` call.
+// -----------------------------------------------------------------------
+describe("CB-pm: place_mismatch offers the parent (R-457, F-220)", () => {
+  // "Cover" (not "Housing A"): `buildCtx`'s own `offeredAt` only offers
+  // Cover at c1b (the Line 3 "Cell 1") -- picking "Line 3" below must reach
+  // a real write, not a second question (`not_offered`) about the part.
+  const PM_SENTENCE = "Assign Operator 1 to Cover on Cell 1 in Line 2 from 10 to 2";
+
+  it("CB-pm-1: 'Cell 1 in Line 2' shows a 'Line 1' and a 'Line 3' button; pressing 'Line 3' writes on c1b", async () => {
+    const { onOpen, input } = renderBar({ runs: [] });
+    fireEvent.change(input, { target: { value: PM_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "There is no Cell 1 in Line 2. Cell 1 is in Line 1 — Plant 1 › Assembly / Line 3 — Plant 1 › Assembly.",
+    );
+    expect(screen.getByRole("button", { name: "Line 1" })).toBeTruthy();
+    const line3 = screen.getByRole("button", { name: "Line 3" });
+    expect(line3).toBeTruthy();
+
+    fireEvent.click(line3);
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.nodeId).toBe("c1b");
+  });
+
+  it("CB-pm-2: the readout and the trace both carry the pick -- answered: 'Line 3'", async () => {
+    const fetchMock = stubFetch();
+    const { input } = renderBar({ runs: [] });
+    fireEvent.change(input, { target: { value: PM_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Line 3" }));
+
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toBe(
+      "There is no Cell 1 in Line 2. Cell 1 is in Line 1 — Plant 1 › Assembly / Line 3 — Plant 1 › Assembly.",
+    );
+    expect(entry.answered).toBe("Line 3");
+  });
+
+  it("CB-pm-3: a place_mismatch with empty elsewhere shows no button (unchanged)", () => {
+    // Both matched cells have no parent node at all -- `elsewhereParents`
+    // excludes them rather than naming the cell itself (F-213's own edge
+    // case, R5b in commandResolve.test.ts). A minimal ctx with a single
+    // top-level cell and no line above it reproduces the same shape through
+    // the bar: the cell matches, the qualifier does not, and there is no
+    // ancestor to offer.
+    const { input } = renderBar({
+      cells: [{ id: "lone", name: "Cell 9", path: "cell_9" }],
+      nodeById: new Map([["lone", { id: "lone", name: "Cell 9", path: "cell_9" }]]),
+      offeredAt: () => [{ id: "ha" }, { id: "hb" }],
+    });
+    fireEvent.change(input, {
+      target: { value: "Assign Operator 1 to Housing A on Cell 9 in Line 2 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("There is no Cell 9 in Line 2.");
+    expect(candidateButtons()).toHaveLength(0);
+  });
+
+  // Reviewer fix (R-457, 24 Sept session 191): CB-pm-1/2 both name the
+  // mismatched qualifier at `place[1]` -- never assume that (CLAUDE.md §4).
+  // A THREE-word place ("Cell 1 in Line 1 in Zone 9") puts the mismatch at
+  // `place[2]`: "Line 1" (index 1) matches fine, narrowing to one cell;
+  // "Zone 9" (index 2) does not. `elsewhereParents` always names the
+  // matched cell's own IMMEDIATE parent (here, "Line 1" itself -- the same
+  // node the FIRST qualifier already named, `resolve.ts`'s own unchanged
+  // behaviour) -- pressing it must substitute `place[2]`, never `place[1]`.
+  it("CB-pm-4: a place_mismatch whose qualifier is at index 2 of a three-word place substitutes index 2, not index 1", () => {
+    const nodes = [
+      { id: "p1", name: "Plant 1", path: "plant_1" },
+      { id: "z1", name: "Zone 1", path: "plant_1.zone_1" },
+      { id: "l1", name: "Line 1", path: "plant_1.zone_1.line_1" },
+      { id: "c1", name: "Cell 1", path: "plant_1.zone_1.line_1.cell_1" },
+    ];
+    const { onOpen, input } = renderBar({
+      cells: [nodes[3]],
+      nodeById: new Map(nodes.map((n) => [n.id, n] as const)),
+      offeredAt: () => [{ id: "ha" }, { id: "hb" }],
+    });
+    fireEvent.change(input, {
+      target: {
+        value: "Assign Operator 1 to Housing A on Cell 1 in Line 1 in Zone 9 from 10 to 2",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "There is no Cell 1 in Zone 9. Cell 1 is in Line 1 — Plant 1 › Zone 1.",
+    );
+    const line1Button = screen.getByRole("button", { name: "Line 1" });
+
+    fireEvent.click(line1Button);
+
+    // A wrong `qualifierIndex` (1, the first "Line 1") would have replaced
+    // the ALREADY-CORRECT middle qualifier instead of the mismatched third
+    // one, and the re-parsed sentence would still carry "Zone 9" -- refused
+    // or re-asked again, never a write.
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.nodeId).toBe("c1");
+  });
+
+  // Reviewer fix (R-457): `pickPlaceParent` takes a LOT branch
+  // (`updateLotCommand`, never the sentence-level reparse) when a lot is
+  // standing -- a place_mismatch on a LOT'S OWN CURRENT STEP (a per-step
+  // `SingleCommand`, not the `SeveralCommand` itself -- that one's only
+  // question is `several_unsupported`, with no candidates, so the button
+  // path this test drives can never reach it) must still substitute the
+  // right index and resolve the step, not the whole several sentence.
+  it("CB-pm-5: a place_mismatch on a lot's own current step substitutes through updateLotCommand and resolves that step", () => {
+    const { onOpen } = renderBar({ runs: [] });
+    const input = screen.getByRole("textbox", { name: "Tell the board" });
+    fireEvent.change(input, {
+      target: {
+        value: "Assign Operator 1 and Sam Patel to Cover on Cell 1 in Line 2 from 10 to 2",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(
+      "1 of 2: There is no Cell 1 in Line 2. Cell 1 is in Line 1 — Plant 1 › Assembly / Line 3 — Plant 1 › Assembly.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Line 3" }));
+
+    // The lot advances to its SECOND person on the SAME (now corrected)
+    // place -- never a write yet (this several has two steps, so a write
+    // only happens once both have resolved and "yes" runs the lot).
+    expect(statusText()).toBe(
+      "2 of 2: There is no Cell 1 in Line 2. Cell 1 is in Line 1 — Plant 1 › Assembly / Line 3 — Plant 1 › Assembly.",
+    );
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+});
+
+// -----------------------------------------------------------------------
+// R-456 / F-222 (24 Sept, session 191): the verb question -- CB-verb-1..4.
+// `guessVerbs` is spied per test (restored in `afterEach`) so these pin the
+// BAR's own wiring against two controlled guesses, not `verbGuess.ts`'s own
+// heuristics (already exercised for real by CB-ground-2/5/6, above, and by
+// `verbGuess.test.ts`).
+// -----------------------------------------------------------------------
+describe("CB-verb: the verb question (R-456, F-222)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A guess whose `sentence` genuinely parses -- `label` built the same way
+   *  `guessVerbs` itself builds one (`formatCommand` of the parse), never
+   *  hand-typed, so a press's own re-parse (`run_sentence`) has something
+   *  real to run. */
+  function guessFrom(verb: string, sentence: string): VerbGuess {
+    const parsed = parseCommand(sentence);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error(`CB-verb fixture sentence must parse: ${sentence}`);
+    return { verb, sentence, label: formatCommand(parsed.command) };
+  }
+
+  it("CB-verb-1: two guesses render as two buttons -- never the grammar hint", () => {
+    const guessA = guessFrom("assign", P1_SENTENCE);
+    const guessB = guessFrom("book", BOOK_SENTENCE);
+    vi.spyOn(verbGuessLib, "guessVerbs").mockReturnValue([guessA, guessB]);
+    const { input } = renderBar({ runs: [] });
+
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe("Did you mean:");
+    expect(statusText()).not.toBe(SHAPE);
+    const buttons = candidateButtons();
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0].textContent).toBe(guessA.label);
+    expect(buttons[1].textContent).toBe(guessB.label);
+  });
+
+  it("CB-verb-2: pressing a guess re-reads its own sentence and writes -- the trace shows the pressed button as the FIRST entry's answered and the guess's sentence as the SECOND entry's heard", () => {
+    const fetchMock = stubFetch();
+    const guessA = guessFrom("assign", P1_SENTENCE);
+    const guessB = guessFrom("book", BOOK_SENTENCE);
+    vi.spyOn(verbGuessLib, "guessVerbs").mockReturnValue([guessA, guessB]);
+    const { onOpen, input } = renderBar({ runs: [] });
+
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: guessA.label }));
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const entries = fetchMock.mock.calls.map((call: unknown[]) => {
+      const [, init] = call as [string, RequestInit];
+      return JSON.parse(init.body as string) as TraceEntry;
+    });
+    const firstEntry = entries.find((e) => e.heard === "gibberish");
+    expect(firstEntry?.asked).toBe("Did you mean:");
+    expect(firstEntry?.answered).toBe(guessA.label);
+    const secondEntry = entries.find((e) => e.heard === guessA.sentence);
+    expect(secondEntry).toBeTruthy();
+    expect(secondEntry?.outcome).toBe("written");
+  });
+
+  it("CB-verb-3: guessVerbs returns [] -- the grammar hint shows, unchanged", () => {
+    vi.spyOn(verbGuessLib, "guessVerbs").mockReturnValue([]);
+    const { input } = renderBar();
+
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(SHAPE);
+    expect(candidateButtons()).toHaveLength(0);
+  });
+
+  it('CB-verb-4: applyReading\'s SWEEPING ungrounded branch asks the verb question instead of refusing ("Show up Lena Novak and Priya Shah today")', async () => {
+    const guessA = guessFrom("swap", "swap Lena Novak and Priya Shah today");
+    vi.spyOn(verbGuessLib, "guessVerbs").mockReturnValue([guessA]);
+    // The same sweeping shape CB-ground-1 uses (an unassign of "everyone",
+    // no word in the heard text for it) -- the model's own guess when it
+    // mishears "show up" (R-456's own worked example, verbGuess.ts's table).
+    const command: UnassignCommand = {
+      intent: "unassign",
+      operator: "everyone",
+      place: [],
+      day: null,
+      span: null,
+      existing: null,
+      shift: null,
+      until: null,
+    };
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command,
+      by: "model",
+    }));
+    const { input } = renderBar({}, fakeReader);
+
+    fireEvent.change(input, {
+      target: { value: "Show up Lena Novak and Priya Shah today" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // `misheardVerbWord` (real, not mocked) names "Show up" itself --
+    // `describeVerbGuess`'s own wording for a table hit, never the bare
+    // "Did you mean:" a shape-only guess (no word replaced) gets.
+    await waitFor(() => expect(statusText()).toBe('I heard "Show up". Did you mean:'));
+    expect(statusText()).not.toContain("Did not run:");
+    const buttons = candidateButtons();
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toBe(guessA.label);
+  });
+
+  // Reviewer fix (R-456): a guess's own `sentence` is built by `guessVerbs`
+  // to parse (`guessFrom`'s own assertion above holds for every OTHER case
+  // in this file) -- but a re-submission is an ordinary sentence like any
+  // other once pressed, so if it somehow still fails to parse (or grounds to
+  // nothing), the SAME `verbGuessStatus` call `fallbackToRules`/
+  // `applyReading` already makes runs again on the RETRIED text -- never a
+  // crash, and never stuck re-asking the identical question forever with no
+  // way out (`guessVerbs` mocked to answer EMPTY the second time, the same
+  // as the real function would for text it has nothing left to guess about,
+  // falls through to the ordinary grammar hint).
+  it("CB-verb-5: a guess whose own sentence fails to parse on re-submission falls through to the grammar hint, not a crash or a repeated question", () => {
+    const badGuess: VerbGuess = { verb: "assign", sentence: "zzz not a sentence", label: "zzz" };
+    vi.spyOn(verbGuessLib, "guessVerbs").mockReturnValueOnce([badGuess]).mockReturnValueOnce([]);
+    const { input } = renderBar();
+
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Did you mean:");
+
+    fireEvent.click(screen.getByRole("button", { name: "zzz" }));
+
+    expect(statusText()).toBe(SHAPE);
+    expect(candidateButtons()).toHaveLength(0);
+  });
+
+  // Reviewer fix (R-456): `isYesShapedQuestion` widened to `run_sentence`
+  // covers a ONE-candidate verb question -- but a bare "yes" must never
+  // press one of TWO (the person has to say which), same as every other
+  // multi-candidate question in this file.
+  it('CB-verb-6: spoken/typed "yes" presses a ONE-candidate verb question but does NOT take a TWO-candidate one', () => {
+    const guessA = guessFrom("assign", P1_SENTENCE);
+    vi.spyOn(verbGuessLib, "guessVerbs").mockReturnValue([guessA]);
+    const { onOpen, input } = renderBar({ runs: [] });
+
+    fireEvent.change(input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(candidateButtons()).toHaveLength(1);
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    const guessB = guessFrom("book", BOOK_SENTENCE);
+    vi.spyOn(verbGuessLib, "guessVerbs").mockReturnValue([guessA, guessB]);
+    const two = renderBar({ runs: [] });
+
+    fireEvent.change(two.input, { target: { value: "gibberish" } });
+    fireEvent.keyDown(two.input, { key: "Enter" });
+    expect(candidateButtons()).toHaveLength(2);
+
+    fireEvent.change(two.input, { target: { value: "yes" } });
+    fireEvent.keyDown(two.input, { key: "Enter" });
+
+    // Neither candidate ran -- a bare "yes" against two choices re-asks
+    // which one, same as any other multi-candidate question that is not
+    // itself yes-shaped.
+    expect(two.onOpen).not.toHaveBeenCalled();
+    expect(statusText()).toBe("Say which one.");
   });
 });
 
@@ -4265,6 +4654,173 @@ describe("CB-mic: the microphone button (S46-a)", () => {
 
     expect(input.value).toBe("clear");
   });
+
+  // R-458 / F-221 (24 Sept, session 191): a mic press no longer clears
+  // `status`, whatever it is -- CB-mic-20..22 pin the three shapes the
+  // maintainer named: a readout, a refusal, and a one-button question.
+  // "Listening…" renders beside the mic button (CB-mic-2's own contract);
+  // the readout/refusal/question line stays exactly where it was until the
+  // next answer replaces it.
+  it("CB-mic-20: a readout stands, mic pressed -- the readout is still rendered while Listening… shows beside the button; a fresh final replaces it", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { onOpen, input } = renderBar({ runs: [] }, null, recognizer);
+    onOpen.mockReturnValue(new Promise(() => {})); // held pending -- readout stays live
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const readout = statusText();
+    expect(readout).toContain("Operator 1");
+    expect(screen.queryByText("Listening…")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    // The readout is untouched by the press itself.
+    expect(statusText()).toBe(readout);
+    fire.status("listening");
+    // "Listening…" renders beside the button; the readout line is still
+    // there too -- neither replaces the other.
+    expect(screen.getByText("Listening…")).toBeTruthy();
+    expect(statusText()).toBe(readout);
+
+    // The next answer (a spoken final) replaces it, same as it always did.
+    fire.final(P1_SENTENCE);
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it('CB-mic-21: a refusal ("Did not run: …") stands, mic pressed -- the refusal is still rendered while Listening… shows', async () => {
+    const fetchMock = stubFetch();
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "everyone",
+        place: [],
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
+      by: "model",
+    }));
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, fakeReader, recognizer);
+
+    fireEvent.change(input, { target: { value: "EF76." } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(statusText()).toContain("Did not run:");
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    expect(statusText()).toContain("Did not run:");
+    fire.status("listening");
+    expect(screen.getByText("Listening…")).toBeTruthy();
+    expect(statusText()).toContain("Did not run:");
+  });
+
+  it("CB-mic-22: a one-button question stands, mic pressed -- the question and its button are still rendered while Listening… shows; the press still writes", async () => {
+    const parsedBook = parseCommand(BOOK_SENTENCE);
+    expect(parsedBook.ok).toBe(true);
+    if (!parsedBook.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsedBook.command,
+      by: "model",
+    }));
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { onBook, input } = renderBar({ runs: [] }, fakeReader, recognizer);
+    const heard = "Housing A on Cell 1 in Line 1 from 6 to 2";
+
+    fireEvent.change(input, { target: { value: heard } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(candidateButtons()).toHaveLength(1));
+    const question = statusText();
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+
+    expect(statusText()).toBe(question);
+    expect(candidateButtons()).toHaveLength(1);
+    fire.status("listening");
+    expect(screen.getByText("Listening…")).toBeTruthy();
+    expect(statusText()).toBe(question);
+
+    fireEvent.click(candidateButtons()[0]);
+    await waitFor(() => expect(onBook).toHaveBeenCalledTimes(1));
+  });
+
+  // Reviewer fix (R-455 / F-221, 24 Sept session 191): the maintainer's own
+  // named shapes (CB-mic-20..22) cover a readout, a refusal and a one-button
+  // question -- "Reading…" (an in-flight model read) is a FOURTH standing
+  // shape, and a mic press does something none of the other three do: it
+  // ABORTS the read outright (`startListening`'s own "press when idle aborts
+  // any in-flight reading" branch, pre-existing) rather than merely leaving
+  // it be. The rule still holds -- the status line itself is untouched.
+  it('CB-mic-23: "Reading…" stands (an in-flight model read), mic pressed -- the read is aborted but the status line is untouched; a fresh final replaces it', () => {
+    const pendingReader: Reader = vi.fn(() => new Promise<Reading>(() => {}));
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { input } = renderBar({}, pendingReader, recognizer);
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Reading…");
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    expect(statusText()).toBe("Reading…");
+    fire.status("listening");
+    expect(screen.getByText("Listening…")).toBeTruthy();
+    expect(statusText()).toBe("Reading…");
+
+    // The aborted read can never itself land now (`readingSeqRef`'s own
+    // guard) -- only the spoken final that follows replaces the line.
+    fire.final(P1_SENTENCE);
+    expect(threadText()).not.toBe("");
+  });
+
+  // The mic button's SECOND press (a stop) is the other half of R-458's own
+  // rule -- `stopListening`'s own doc already promised this; pinned here
+  // against the SAME three shapes CB-mic-20..22 cover, for the stop half.
+  it('CB-mic-24: a mic STOP (second press) leaves the standing status untouched -- only "Listening…" disappears', () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { onOpen, input } = renderBar({ runs: [] }, null, recognizer);
+    onOpen.mockReturnValue(new Promise(() => {})); // held pending -- readout stays live
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const readout = statusText();
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    fire.status("listening");
+    expect(screen.getByText("Listening…")).toBeTruthy();
+    expect(statusText()).toBe(readout);
+
+    fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
+    expect(screen.queryByText("Listening…")).toBeNull();
+    expect(statusText()).toBe(readout);
+  });
+
+  // The Ctrl+M path (`micRequest`) reaches the same `handleMicClick` a real
+  // press does (this file's own header doc for the effect) -- pinned once,
+  // directly, rather than assumed from CB-mic-20's own click-based coverage.
+  it("CB-mic-25: Ctrl+M (micRequest) starting a session leaves the standing status untouched, same as a direct press", () => {
+    const { recognizer, fire } = makeFakeRecognizer();
+    const { onOpen, input, rerenderMicRequest } = renderBar(
+      { runs: [] },
+      null,
+      recognizer,
+      {},
+      {},
+      {},
+      { micRequest: 0 },
+    );
+    onOpen.mockReturnValue(new Promise(() => {}));
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const readout = statusText();
+
+    rerenderMicRequest(1);
+    fire.status("listening");
+    expect(screen.getByText("Listening…")).toBeTruthy();
+    expect(statusText()).toBe(readout);
+  });
 });
 
 // S71-j review: F-206's own two reproductions, re-run against the new
@@ -4550,42 +5106,52 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     { index: 7, iso: "2026-09-06", weekday: 0 as const },
   ];
 
-  it("CB-showday-1: the button appears only on a day_off_board question", () => {
+  // R-455 / F-219 (24 Sept, session 191) -- CONTRACT CHANGED (CLAUDE.md §4):
+  // CB-showday-1..2 used to pin a "Show that day" button and a press. There
+  // is no press any more -- Enter alone moves the board (a "Moved the board
+  // to …" readout, `onShowDay` called immediately) -- CB-showday-1
+  // rewritten below pins the move itself; CB-showday-2 (the button's own
+  // presence test) is gone, folded into CB-showday-1 (there is no button
+  // left to test for).
+  it("CB-showday-1: a day_off_board sentence moves the board immediately -- a 'Moved the board to …' readout, onShowDay called with no press, no button", () => {
     const ambiguous = renderBar();
     fireEvent.change(ambiguous.input, {
       target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
     });
     fireEvent.keyDown(ambiguous.input, { key: "Enter" });
     expect(statusText()).toBe('Which person? "Sam" matches 2:');
-    expect(screen.queryByRole("button", { name: "Show that day" })).toBeNull();
+    expect(ambiguous.onShowDay).not.toHaveBeenCalled();
     cleanup();
 
-    const { input } = renderBar({ todayIndex: 0 });
+    const { input, onShowDay } = renderBar({ todayIndex: 0 });
     fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(statusText()).toBe("yesterday is not on the board. Move the board to that day first.");
-    expect(screen.getByRole("button", { name: "Show that day" })).toBeTruthy();
+    // CP-5 (CLAUDE.md §4): the readout files into the thread the same tick
+    // it is set (`traceQuestionStatus`'s own readout branch finishes the
+    // trace, which clears `status`/`sentence` back to idle) -- so it reads
+    // from `threadText()`, not the now-empty live `statusText()`.
+    expect(statusText()).toBe("");
+    expect(threadText()).toContain("Moved the board to yesterday.");
+    expect(onShowDay).toHaveBeenCalledWith("yesterday");
+    expect(screen.queryByRole("button", { name: "Show that day" })).toBeNull();
   });
 
-  it("CB-showday-2: clicking the button calls onShowDay with the target verbatim -- yesterday, Friday and an ISO date", () => {
+  it("CB-showday-2: onShowDay is called with the target verbatim -- yesterday, Friday and an ISO date -- as soon as Enter is pressed", () => {
     const yesterday = renderBar({ todayIndex: 0 });
     fireEvent.change(yesterday.input, { target: { value: YESTERDAY_SENTENCE } });
     fireEvent.keyDown(yesterday.input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
     expect(yesterday.onShowDay).toHaveBeenCalledWith("yesterday");
     cleanup();
 
     const friday = renderBar({ days: MON_WED_DAYS, todayIndex: 0 });
     fireEvent.change(friday.input, { target: { value: FRIDAY_SENTENCE } });
     fireEvent.keyDown(friday.input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
     expect(friday.onShowDay).toHaveBeenCalledWith("friday");
     cleanup();
 
     const date = renderBar();
     fireEvent.change(date.input, { target: { value: FAR_DATE_SENTENCE } });
     fireEvent.keyDown(date.input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
     expect(date.onShowDay).toHaveBeenCalledWith("2026-09-25");
   });
 
@@ -4593,7 +5159,6 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     const { input, onOpen, rerenderCtx } = renderBar({ todayIndex: 0 });
     fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
 
     // No rerun yet -- the ctx prop has not changed.
     expect(onOpen).not.toHaveBeenCalled();
@@ -4612,7 +5177,6 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     const { input, onOpen, rerenderCtx } = renderBar({ todayIndex: 0 });
     fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
 
     fireEvent.change(input, { target: { value: "no" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -4626,7 +5190,6 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     const { input, onOpen, rerenderCtx } = renderBar({ todayIndex: 0 });
     fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
 
     fireEvent.keyDown(input, { key: "Escape" });
 
@@ -4648,13 +5211,14 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     const { input, onOpen, rerenderCtx } = renderBar({ todayIndex: 0 });
     fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
 
     // An irrelevant ctx change -- a fresh object, same days, "yesterday"
-    // still off the board -- must not consume the pending rerun.
+    // still off the board -- must not consume the pending rerun. The turn
+    // the "Moved the board …" readout already filed (CP-5) is untouched --
+    // nothing here re-asks or re-writes it.
     rerenderCtx({ todayIndex: 0 });
     expect(onOpen).not.toHaveBeenCalled();
-    expect(statusText()).toBe("yesterday is not on the board. Move the board to that day first.");
+    expect(threadText()).toContain("Moved the board to yesterday.");
 
     // The window has now actually moved -- "yesterday" (index 0) is on it.
     rerenderCtx({ days: SHIFTED_BACK_ONE_DAY, todayIndex: 1 });
@@ -4675,11 +5239,12 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     // Sunday 2026-09-13) is entirely off it -- `day_off_board` names its
     // FIRST missing day, "2026-09-07" (resolve.ts's own `resolveWeekDays`,
     // "seven, Monday first").
-    const { input, rerenderCtx } = renderBar();
+    const { input, onShowDay, rerenderCtx } = renderBar();
     fireEvent.change(input, { target: { value: "copy this week to next week" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(statusText()).toBe("Mon Sep 7 is not on the board. Move the board to that day first.");
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
+    // CP-5 (CLAUDE.md §4): filed into the thread the instant it is set.
+    expect(threadText()).toContain("Moved the board to Mon Sep 7.");
+    expect(onShowDay).toHaveBeenCalledWith("2026-09-07");
 
     // Only the FIRST missing day of the week lands -- the rest of next week
     // still is not on the board. Must not consume the pending rerun (a
@@ -4696,8 +5261,7 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
       { index: 7, iso: "2026-09-07", weekday: 1 as const },
     ];
     rerenderCtx({ days: onlyFirstDayOfNextWeek, todayIndex: 3 });
-    expect(statusText()).toBe("Mon Sep 7 is not on the board. Move the board to that day first.");
-    expect(screen.getByRole("button", { name: "Show that day" })).toBeTruthy();
+    expect(threadText()).toContain("Moved the board to Mon Sep 7.");
 
     // The WHOLE of next week is now on the board -- the rerun fires. Both
     // weeks are empty in this fixture (no assignments, no runs), so the
@@ -4717,7 +5281,7 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     expect(screen.queryByRole("button", { name: "Show that day" })).toBeNull();
   });
 
-  it('CB-showday-8 (F-158): a REPEAT day whose week is off the board names the week -- "Show that day" hands onShowDay the week word, and the rerun waits for all seven days of that week', () => {
+  it("CB-showday-8 (F-158): a REPEAT day whose week is off the board names the week -- onShowDay gets the week word with no press, and the rerun waits for all seven days of that week", () => {
     // A three-day board, the shape the typed walk runs on: Monday to
     // Wednesday, today Monday. "every weekday this week" needs Monday to
     // Sunday before it can expand (`resolveWeekDays`), so it asks -- and
@@ -4735,9 +5299,8 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
       },
     });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(statusText()).toBe("this week is not on the board. Move the board to that day first.");
-
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
+    // CP-5 (CLAUDE.md §4): filed into the thread the instant it is set.
+    expect(threadText()).toContain("Moved the board to this week.");
     expect(onShowDay).toHaveBeenCalledWith("this week");
 
     // Six of the seven: still not enough, and the pending rerun must stand
@@ -4749,7 +5312,7 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
       { index: 5, iso: "2026-09-05", weekday: 6 as const },
     ];
     rerenderCtx({ days: monToSat, todayIndex: 0 });
-    expect(statusText()).toBe("this week is not on the board. Move the board to that day first.");
+    expect(threadText()).toContain("Moved the board to this week.");
 
     // The whole week: the held sentence re-runs and becomes the lot of five
     // (Monday to Friday) CB-y-2 pins -- the count is unchanged by F-158.
@@ -4760,6 +5323,113 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     expect(statusText()).toMatch(/^5 commands ready: /);
     expect(screen.queryByRole("button", { name: "Show that day" })).toBeNull();
     expect(onOpen).not.toHaveBeenCalled(); // a lot waits for its own yes
+  });
+
+  // R-455 / F-219 (b) (24 Sept, session 191): `ctx.settled` gates the rerun
+  // exactly like `isTargetOnBoard` -- a ctx whose `days` axis already names
+  // the target but whose `assignments`/`runs` are still the PREVIOUS
+  // window's (`keepPreviousData`, `settled: false` while `BoardPage`'s own
+  // fetch is in flight) must not fire the rerun; the next ctx, `settled:
+  // true`, does. This is the race that told the maintainer "Maria Lopez has
+  // no block Thu Sep 24" when she had one.
+  it("CB-showday-9: the rerun does NOT fire on a ctx with settled: false even when the day is on it, and fires on the next ctx with settled: true", () => {
+    const { input, onOpen, rerenderCtx } = renderBar({ todayIndex: 0 });
+    fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).not.toHaveBeenCalled();
+
+    // The window's `days` axis already carries "yesterday" (index 0), but
+    // the ctx is still the STALE window's rows under the new axis --
+    // `settled: false`. The rerun must not consume `pendingRerunRef` here.
+    rerenderCtx({ days: SHIFTED_BACK_ONE_DAY, todayIndex: 1, settled: false });
+    expect(onOpen).not.toHaveBeenCalled();
+
+    // The same axis, now genuinely settled -- the rerun fires exactly once.
+    rerenderCtx({ days: SHIFTED_BACK_ONE_DAY, todayIndex: 1, settled: true });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.operatorId).toBe("op1");
+  });
+
+  // Reviewer fix (R-455 / F-219, 24 Sept session 191): a window whose new
+  // ctx never arrives with the target on it (a query that errors, or any
+  // other way the effect above never fires) used to leave `pendingRerunRef`
+  // standing forever -- no readout, no refusal, the "Moved the board …" turn
+  // never getting a second word. `armPendingRerun`'s own timeout bounds it.
+  it("CB-showday-10: a rerun that never gets a settled ctx times out with a refusal, not a silent hang", () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = stubFetch();
+      const { input } = renderBar({ todayIndex: 0 });
+      act(() => {
+        fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+      expect(threadText()).toContain("Moved the board to yesterday.");
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      // No ctx ever arrives with "yesterday" on it -- advance past the bound.
+      act(() => {
+        vi.advanceTimersByTime(15000);
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const entry = postedEntry(fetchMock);
+      expect(entry.asked).toBe("Moved the board to yesterday.");
+      expect(entry.answered).toBe("auto");
+      expect(entry.outcome).toBe("refused: Could not load yesterday.");
+      expect(threadText()).toContain("Refused: Could not load yesterday.");
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // A cancel word before the timeout disarms it -- the stale timer must not
+  // fire a SECOND, orphaned refusal after the sentence that dropped it has
+  // already moved on.
+  it("CB-showday-11: a cancel word before the timeout disarms it -- no orphaned refusal later", () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = stubFetch();
+      const { input } = renderBar({ todayIndex: 0 });
+      act(() => {
+        fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+      act(() => {
+        fireEvent.change(input, { target: { value: "no" } });
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+      const postedBeforeTimeout = fetchMock.mock.calls.length;
+
+      act(() => {
+        vi.advanceTimersByTime(15000);
+      });
+
+      // The timer armed for the dropped rerun must not have posted anything
+      // new -- whatever "no" itself already posted is untouched.
+      expect(fetchMock.mock.calls.length).toBe(postedBeforeTimeout);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // Reviewer fix (R-455): `ctx.settled` gates the REROUN effect only --
+  // resolve.ts never reads it (this module's own doc), so an UNRELATED
+  // ordinary sentence submitted while the ctx happens to be mid-refetch
+  // (`settled: false`, a plain background refetch of the SAME window, not a
+  // move) must resolve and write exactly as it always would.
+  it("CB-showday-12: settled: false blocks only the pending rerun, never an ordinary NEW sentence", () => {
+    const { input, onOpen, rerenderCtx } = renderBar({ todayIndex: 3 });
+    // A background refetch of the SAME window lands -- days/todayIndex
+    // unchanged, just not yet settled (exactly `BoardPage`'s own shape for
+    // "the current window is revalidating").
+    rerenderCtx({ settled: false });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -5377,7 +6047,9 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(fetchMock).not.toHaveBeenCalled();
 
-    // A fresh listen starts (clears the status, not the still-open entry).
+    // A fresh listen starts -- R-458 (24 Sept): the status (and the
+    // still-open trace entry) stand untouched; a mic press never clears
+    // either any more.
     fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
 
     fireEvent.keyDown(input, { key: "Escape" });
@@ -5656,9 +6328,16 @@ describe("CB-keep: the bar keeps its conversation through a ctx that goes null a
     const { input, onOpen, rerenderCtx } = renderBar({ todayIndex: 0 });
     fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
-    // A question stood (the day_off_board one) -- the entry is still open.
+    // Reviewer fix (S72-b's own known hole, 24 Sept): the "Moved the board
+    // …" readout FILES into the thread the instant it is set (CP-5,
+    // unchanged), but the entry itself is NOT posted yet -- the rerun this
+    // move queues (`pendingRerunRef`) still owes an answer, and posting here
+    // would leave that answer with nowhere to land (the hole this fix
+    // closes: the write used to post no trace entry at all, since
+    // `traceRef.current` was already null by the time it ran). So nothing
+    // has gone over the wire yet.
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(threadText()).toContain("Moved the board to yesterday.");
 
     // R-424: the window ctx goes null before the new window's data lands.
     rerenderCtx(null);
@@ -5671,9 +6350,20 @@ describe("CB-keep: the bar keeps its conversation through a ctx that goes null a
     expect(onOpen).toHaveBeenCalledTimes(1);
     const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
     expect(resolved.operatorId).toBe("op1");
+    // Reviewer fix: the rerun's write runs OUTSIDE `submitText` (the
+    // pending-rerun effect calls `runCommand` directly, never `startTrace`)
+    // but lands on the SAME entry the move opened (`traceRef.current` was
+    // kept open, not finished, by the move) -- so it posts exactly ONCE,
+    // carrying the whole story: the move AND what the write it triggered
+    // actually did. Two posts (one empty for the move, one orphaned for the
+    // write) would be the hole this fix closes; a second post here would be
+    // a regression back into it.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const entry = postedEntry(fetchMock);
-    expect(entry.ran).toEqual([resolved.readout]);
+    expect(entry.asked).toBe("Moved the board to yesterday.");
+    expect(entry.answered).toBe("auto");
+    expect(entry.outcome).toBe("written");
+    expect(entry.ran).toHaveLength(1);
   });
 
   // S63-a review fix (CP-5, CLAUDE.md §4): `onOpen` is held pending here --
@@ -6469,10 +7159,17 @@ describe("CB-rr: a spoken sentence clears a stale rerun (F-169)", () => {
 
     fireEvent.change(input, { target: { value: YESTERDAY_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Show that day" }));
+    // Reviewer fix (S72-b's own known hole): the move's entry is filed into
+    // the thread but stays OPEN, unposted -- nothing has gone over the wire
+    // for it yet, only the pending rerun is queued.
+    expect(fetchMock).not.toHaveBeenCalled();
 
     // A SPOKEN final sentence -- never through `handleChange`, the one path
-    // that already cleared the pending rerun before this fix.
+    // that already cleared the pending rerun before this fix. `startTrace`
+    // flushes the still-open "yesterday" move entry first (a new sentence is
+    // one of the three life-end triggers, unchanged) -- WITH NO WRITE
+    // attached, since the rerun never got the chance to run it -- then opens
+    // its own fresh entry for this sentence.
     fire.final(P1_SENTENCE);
     expect(onOpen).toHaveBeenCalledTimes(1);
 
@@ -6484,12 +7181,23 @@ describe("CB-rr: a spoken sentence clears a stale rerun (F-169)", () => {
 
     expect(onOpen).toHaveBeenCalledTimes(1);
 
-    // The spoken sentence's own entry is intact -- its own `read`/`ran`/
-    // `outcome`, never overwritten by the stale "yesterday" command's.
+    // TWO entries now: the abandoned move (flushed empty by the spoken
+    // sentence's own `startTrace`) and the spoken sentence's own, intact --
+    // its own `read`/`ran`/`outcome`, never overwritten by the stale
+    // "yesterday" command's.
     const entries = fetchMock.mock.calls.map((call: unknown[]) => {
       const [, init] = call as [string, RequestInit];
       return JSON.parse(init.body as string) as TraceEntry;
     });
+    expect(entries).toHaveLength(2);
+    const movedEntry = entries.find((e) => e.heard === YESTERDAY_SENTENCE);
+    expect(movedEntry).toBeTruthy();
+    expect(movedEntry?.asked).toBe("Moved the board to yesterday.");
+    expect(movedEntry?.answered).toBe("auto");
+    // The rerun never ran against this entry -- dropped by the spoken
+    // sentence, exactly as F-169's own guard intends.
+    expect(movedEntry?.ran).toHaveLength(0);
+    expect(movedEntry?.outcome).toBeNull();
     const spokenEntry = entries.find((e) => e.heard === P1_SENTENCE);
     expect(spokenEntry).toBeTruthy();
     expect(spokenEntry?.outcome).toBe("written");

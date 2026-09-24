@@ -791,8 +791,19 @@ export default function BoardPage() {
       // (its own documented fail-open -- the server still decides).
       outsideArea: (operatorId: string, nodeId: string) =>
         outsideAreaFor(operatorPool, index.nodeById.get(nodeId)?.path ?? null).has(operatorId),
+      // R-455 / F-219 (24 Sept, session 191): `boardQuery.data` above can be
+      // the PREVIOUS window's rows, still standing in while the new window's
+      // fetch is in flight (`useBoardWindow.ts`'s own `placeholderData:
+      // keepPreviousData` header) -- `index` (and everything built from it
+      // above: `days`, `assignments`, `runs`, …) is built from THAT stale
+      // data even though `days`' own axis already reads as the NEW window.
+      // `false` here is the flag `CommandBar.tsx`'s own rerun effect (R-419)
+      // gates a "Show that day" rerun on, alongside `isTargetOnBoard` --
+      // never a reason for the bar to unmount or go null (R-424): the ctx
+      // still carries a full, if stale, board.
+      settled: !boardQuery.isPlaceholderData,
     };
-  }, [boardQuery.data, index, operatorPool]);
+  }, [boardQuery.data, boardQuery.isPlaceholderData, index, operatorPool]);
 
   /**
    * S59-c (brief §3, design-plan §19.104 / D133 item 4): the same four

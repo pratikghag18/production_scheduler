@@ -231,6 +231,22 @@ export interface ResolveContext {
    * fixture in the resolver's own tests included) that does not supply it.
    */
   outsideArea?: (operatorId: string, nodeId: string) => boolean;
+  /**
+   * R-455 / F-219 (24 Sept, session 191): true once every field ABOVE
+   * actually belongs to the window `days`/`todayIndex` describe -- false
+   * while `BoardPage`'s own board query is still serving the PREVIOUS
+   * window's rows under a NEW window's axis (`placeholderData:
+   * keepPreviousData`, `useBoardWindow.ts`'s own header). `BoardPage` sets
+   * this to `!boardQuery.isPlaceholderData`. This module reads it nowhere
+   * itself -- `CommandBar.tsx`'s own rerun effect (R-419) is the one place
+   * it matters, gating a "Show that day" rerun so it never fires against a
+   * ctx whose `days` axis moved but whose `assignments` have not caught up
+   * (the race that told the maintainer "Maria Lopez has no block Thu Sep
+   * 24" when she had one). A `ResolveContext` this module's own tests build
+   * is always fully settled the instant it exists, so every fixture here
+   * sets this `true`.
+   */
+  settled: boolean;
 }
 
 /**

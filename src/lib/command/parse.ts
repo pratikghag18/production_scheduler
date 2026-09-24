@@ -1282,12 +1282,38 @@ function parseTimeAndDay(
 }
 
 /** Splits a product-and-places string on the shared delimiter set — never
- *  `for` (brief §3, B5: "the split words are on/at/in/comma, never for"). */
+ *  `for` (brief §3, B5: "the split words are on/at/in/comma, never for").
+ *
+ *  F-218: a comma-then-preposition qualifier ("Cell 6, in Line 3") splits on
+ *  the COMMA first (`\s*,\s*` matches before `\s+in\s+` ever gets a chance,
+ *  since the "in" here has no leading space of its own once the comma and
+ *  its trailing space are consumed) — the second piece comes back as the
+ *  literal text "in Line 3" instead of "Line 3", quoted on the round trip
+ *  and read by the resolver as a place named "in Line 3", which does not
+ *  exist ("There is no Cell 6 in in Line 3."). Every piece this function
+ *  returns loses one leading preposition word (in/on/at/of, whole word,
+ *  case-insensitive) and one trailing comma the split left stuck to an
+ *  edge — this is the ONE place every `place: [pl, ...]` site in this file
+ *  builds its pieces from, so the fix lands once for all of them.
+ *
+ *  Review (S72-a reviewer, FQ6): "Cell 6, in, Line 3" — a piece that is
+ *  ONLY a preposition word — was not caught by either the leading-word
+ *  strip above (it needs a `\s+` and something AFTER the preposition to
+ *  match; a bare "in" has nothing following it in its own piece) or the
+ *  length filter (a bare "in" is not empty), so it survived whole as a
+ *  literal invalid place named "in". Dropped explicitly below: a piece
+ *  that is nothing but a preposition word carries no place name at all. */
 function splitProductPlaces(text: string): string[] {
   return text
     .split(/\s+on\s+|\s+at\s+|\s+in\s+|\s*,\s*/gi)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .map((s) =>
+      s
+        .trim()
+        .replace(/^(?:in|on|at|of)\s+/i, "")
+        .replace(/,\s*$/, "")
+        .trim(),
+    )
+    .filter((s) => s.length > 0 && !/^(?:in|on|at|of)$/i.test(s));
 }
 
 /**
@@ -3530,6 +3556,24 @@ export function parseCommand(text: string): ParseResult {
   const { text: quoted, quotes } = extractQuotes(text);
   let norm = quoted.replace(/\s+/g, " ").trim();
   if (norm.endsWith(".")) norm = norm.slice(0, -1).trim();
+  // F-223: a dotted "a.m."/"p.m." is normalised to the bare "am"/"pm" ONCE,
+  // here, before any grammar-specific regex ever sees the sentence -- never
+  // per grammar. Every "at <time>" clause that needs a `\b` immediately
+  // after the meridiem marker (`parseAdjustRest`'s "end"/"finish" door,
+  // `parseSplitRest`'s own SPLIT_AT_RE, both built on `ADJUST_TIME_ALT`/
+  // `TIME_TOKEN_INLINE`) failed that boundary when the marker's own trailing
+  // dot was itself followed by another non-word character (a space before a
+  // trailing day word: "10 a.m. today") -- neither side of the boundary is
+  // a word character there, so `\b` does not match, the regex engine backs
+  // off the optional final dot to satisfy it, and `removeMatch` then only
+  // ever removes "at 10 a.m", leaving the SECOND dot of "a.m." stranded in
+  // the sentence -- glued, after the possessive-block-tail strip runs on
+  // stale text, to whatever came right before it ("John Kim's block ."
+  // instead of "John Kim", F-223). Same fix TIME_TOKEN_RE's own header
+  // already promises downstream ("nothing past this line needs to know the
+  // dotted form exists") -- extended to the whole sentence, not just a
+  // single already-isolated token.
+  norm = norm.replace(/\b([apAP])\.m\.?/g, "$1m");
   if (norm === "") return { ok: false, failure: { kind: "empty" } };
 
   // R-416 (S58): "every weekday"/"every day"/"weekdays" [this week|next

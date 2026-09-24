@@ -83,7 +83,11 @@ function normalize(text: string): string {
     .trim()} `;
 }
 
-function hasAnyWord(normalized: string, words: readonly string[]): boolean {
+/** S72-a (R-456): exported so `verbGuess.ts` can reuse the same whole-word
+ *  membership check rather than a second, hand-retyped copy of it (CLAUDE.md
+ *  §4 "extract, never retype") -- `normalized` must already be `normalize`'s
+ *  own shape (lowercased, padded, punctuation collapsed to single spaces). */
+export function hasAnyWord(normalized: string, words: readonly string[]): boolean {
   return words.some((w) => normalized.includes(` ${w.toLowerCase()} `));
 }
 

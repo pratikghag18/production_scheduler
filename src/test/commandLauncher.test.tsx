@@ -99,6 +99,10 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
     // scope is the launcher panel's open/close/focus, not certification).
     certificateGaps: () => [],
     eligibilityPolicy: () => "warn",
+    // R-455 / F-219 (24 Sept, session 191): same default as
+    // `commandBar.test.tsx`'s own `buildCtx` -- this file's own scope never
+    // exercises the race `settled: false` gates.
+    settled: true,
     ...over,
   };
 }

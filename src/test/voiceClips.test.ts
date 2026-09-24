@@ -447,7 +447,6 @@ describe("clipServer: handleClipRequest (S71-f, R-453, R-434)", () => {
       expect(ats).toContain(at501);
       expect(fs.existsSync(path.join(clipsDir, firstEntry.file))).toBe(false);
     },
-    20000,
   );
 
   // S71-f review fix (path traversal): `at` used to reach `join(dir, file)`
