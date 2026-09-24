@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-24'
-  tip: 'd5a8829'
+  tip: '37089e4'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13012,7 +13012,7 @@ findings:
 - id: F-224
   title: '"Clear Cell 5 for the remainder of the week" clears today only, or nothing --- the week phrase is dropped by the model and kept inside the place name by the rules, and neither reader says so'
   tag: A silent drop
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S57
   refs:
@@ -13029,6 +13029,12 @@ findings:
     hour earlier did its job ("Clean" became a clear button) and then handed the sentence to a grammar that
     lost the half that mattered. "remainder of the week did not do the job as the whole week." A phrase the
     person said and the board did not read must be asked about, never dropped (R-435).
+  fix: >-
+    Session 191 (37089e4): unassign takes the repeat days assign takes, expanded as a lot of one removal per day from
+    today on, an empty day dropped, the span refused only when every day is empty; the served model may answer the
+    kinds (untrained on them) and groundDays asks whenever a day phrase was heard and not read. The reviewer opened the
+    same gate for the absence grammar. UW-1 to 9, UW-r-1 to 5, GD-1.., CB-days-1 to 3; VR18/VR23 rewritten for the
+    changed contract.
 - id: F-223
   title: A dotted "a.m." before a trailing day word leaves the dot inside the person's name --- "end John Kim's block at 10 a.m. today" ends nobody
   tag: A grammar gap read as a name
@@ -18379,9 +18385,9 @@ sessions:
   date: 2026-09-24
   title: "The evening's findings fixed before the walk resumes: Listening only when the microphone is live, the dash stripped, the model's reading grounded in what was heard; the scorer compares models against what was said"
   shipped: []
-  commits: ['bb7237a', 'fc98959', '2b9828a', '2cc5265', 'ef7813e', '239b64d', 'a3edf3c', 'e5384f6', 'd5a8829']
+  commits: ['bb7237a', 'fc98959', '2b9828a', '2cc5265', 'ef7813e', '239b64d', 'a3edf3c', 'e5384f6', 'd5a8829', '37089e4']
   numbers:
-    app_tests: 4413
+    app_tests: 4451
     app_test_files: 170
     tsc: 0
     eslint: 0
@@ -18390,7 +18396,7 @@ sessions:
     e2e: 51
   confirmed: true
   numbers_note: >-
-    npm run test copied from the runner after the evening's lanes: 4413 in 170 files, with the live DEF-0020 pin
+    npm run test copied from the runner after the night's week lane: 4451 in 170 files (three pins that fenced the old contract rewritten, VR18/VR23), with the live DEF-0020 pin
     failing under load and passing alone as its note says; tsc -b and eslint clean; no migration or SQL change,
     db_checks carries 893; e2e untouched.
   summary: >-
