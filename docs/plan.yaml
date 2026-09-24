@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-24'
-  tip: '2cc5265'
+  tip: 'd5a8829'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12914,13 +12914,16 @@ requirements:
     window --- and then runs the same sentence, with one line in the thread first: "Moved the board to <day>."
     There is no question and no button. A cancel word, Escape or new typing while the move is in flight drops
     the rerun as R-419's did.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-showday-1 to 12: the move is one line in the thread and no button; the rerun waits for a ctx whose rows are the new window's (settled), fires on the next; Escape, a cancel word and typing drop it; a window that never loads is bounded and says so (10, 11); a fresh sentence is not blocked by an unsettled ctx (12); CB-keep-2 and CB-rr-1 the trace entry stays open across the move and the rerun's outcome closes it; CB-lot-4 a lot step landing off the board"
+  status: covered
   note: >-
     STATED 24 Sept (session 191). Supersedes R-419 (whose rerun machinery it reuses without the press). F-219 is
     the placeholder race this row's "waits for the data" clause closes: on 24 Sept the rerun fired against the
     previous window's blocks on the new window's day axis and told the maintainer Maria Lopez had no block when
-    she did.
+    she did. BUILT the same session by lane S72-b (d5a8829), reviewed by a second agent that closed the trace hole the move opened and bounded the rerun.
 - id: R-456
   title: A missing or misheard command word is asked as a choice of verbs, never answered with a grammar hint or a refusal
   source:
@@ -12935,13 +12938,19 @@ requirements:
     the sentence with that verb put in), and a press runs that reading. The grammar hint ("Say it like: ...")
     is never the first answer to a sentence that names a person, a place, a part or an hour; it remains for
     text that names none of them. R-435 (when in doubt, ask) applied to the verb.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/verbGuess.test.ts
+    cases: "VG-1 to VG-17: the four trace sentences give their verb; a sentence that already has a verb, an answer word, a filler sentence and a name that merely sounds like a verb give none or the shape guess; every table row; at most three; only readings that parse; the two question wordings"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-verb-1 to 6: the buttons render instead of the grammar hint at both sites and on the no-reader path; a press re-submits the guess's sentence and the trace records it; a guess that fails to parse falls through; a spoken yes presses a one-candidate question and not a two-candidate one; CB-ground-2, 5, 6 rewritten for the new path"
+  status: covered
   note: >-
     STATED 24 Sept (session 191). The trace of the third round: "Tom Baker to Cell 3 from 18 to 12 p.m. today"
     got the grammar hint; "and John Kim''s block at 10 a.m. today" got the hint twice and then a "move" the
     model invented; "Show up Lena Novak and Priya Shah today" was refused as ungrounded. Whisper hears "end" as
-    "and" every time; the board must meet it halfway.
+    "and" every time; the board must meet it halfway. BUILT the same session by lanes S72-a and S72-b (d5a8829). The helper lives in src/lib/voice, beside the recogniser, because it needs the real parser and the parser's directory forbids runtime imports between its files.
 - id: R-457
   title: A place the board cannot match against its line or area offers the lines it knows as buttons
   source:
@@ -12952,10 +12961,13 @@ requirements:
     you mean Line 3?" --- and the press runs the sentence with that line in place of the misheard one. R-430
     (a dead end offers the nearest choices) applied to the place-mismatch question, whose parents the resolver
     already computes (F-213) and the bar threw away (F-220).
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-pm-1 to 5: the parents are buttons, the press substitutes the qualifier at its own index (never assumed index 1) and writes, the trace carries the pick, a qualifier at index 2 of 3, a mismatch inside a lot step"
+  status: covered
   note: >-
-    STATED 24 Sept (session 191).
+    STATED 24 Sept (session 191). BUILT the same session by lane S72-b (d5a8829).
 - id: R-458
   title: The thread's last turn stays while the microphone listens --- a mic press never erases what the board last said
   source:
@@ -12965,10 +12977,13 @@ requirements:
     Pressing the microphone (the button or Ctrl+M) leaves the last readout, reading, refusal or question exactly
     where it was; it is replaced only by the next answer. The pre-S47 rule that a mic press clears anything but
     an answerable question (F-221) is retired.
-  verified_by: []
-  status: uncovered
+  verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-mic-20 to 25: a readout, a refusal, a one-button question and a Reading status all survive a mic press and a mic stop, by button and by Ctrl+M; the next answer replaces them"
+  status: covered
   note: >-
-    STATED 24 Sept (session 191).
+    STATED 24 Sept (session 191). BUILT the same session by lane S72-b (d5a8829).
 - id: R-459
   title: Every sentence the bar says is one a supervisor would say --- a readout, a question, a refusal or a move is plain words, never a form, a path or a developer's hint
   source:
@@ -12997,7 +13012,7 @@ findings:
 - id: F-223
   title: A dotted "a.m." before a trailing day word leaves the dot inside the person's name --- "end John Kim's block at 10 a.m. today" ends nobody
   tag: A grammar gap read as a name
-  status: open
+  status: fixed
   found_by: agent
   stage: S57
   refs:
@@ -13008,10 +13023,12 @@ findings:
     to an operator of "John Kim's block ." while "10 am today" and "10 a.m." with no day both parse clean.
     Whisper writes the dots every time, so the best guess for the maintainer's own sentence 9 would have
     carried a garbled name. Found by the lane's own pin, fixed in the same lane at the shared time token.
+  fix: >-
+    Session 191 (d5a8829): a dotted a.m./p.m. is normalised once at the top of parseCommand, before any grammar's own regex. F-223 block in commandParse.test.ts, five pins; VG-3/3b assert the clean parse.
 - id: F-222
   title: A sentence with no command word, or a misheard one, gets the grammar hint or a refusal instead of a question with the verbs as buttons
   tag: A dead end without a choice
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S57
   refs:
@@ -13026,10 +13043,12 @@ findings:
     refused as ungrounded. The maintainer: "it should have figured out that I was trying to assign someone and
     give me an option accordingly ... am I expecting the impossible here?" No: the shape of the sentence says
     what it is, and the verb is one of a short list.
+  fix: >-
+    Session 191 (d5a8829): the verb guess (R-456) at every site that printed the grammar hint or refused an ungrounded reading. VG-1 to 17, CB-verb-1 to 6.
 - id: F-221
   title: A mic press erases the board's last answer --- the thread's newest turn vanishes while listening and a new one appears only when the next answer lands
   tag: A screen that hides what it knows
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S57
   refs:
@@ -13040,10 +13059,12 @@ findings:
     gone when the board is listening from the chat and it reappears once the board answers." The cause is the
     pre-S47 line at the top of startListening that clears any status that is not an answerable question
     (F-197 widened the survivors to every question kind and left readouts and refusals to be wiped).
+  fix: >-
+    Session 191 (d5a8829): the clearing line at the top of startListening is gone (R-458). CB-mic-20 to 25.
 - id: F-220
   title: The place-mismatch refusal names the parent the cell is in and offers no button for it
   tag: A dead end without a choice
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S57
   refs:
@@ -13055,10 +13076,12 @@ findings:
     ("in Line 3" heard as "Online 3") was answered "There is no Cell 5 in Online 3. Cell 5 is in Line 3 ---
     Plant A > Area 2." and nothing to press. F-213 built the parents for exactly this button and the bar
     never rendered them; the maintainer had to say the whole sentence again.
+  fix: >-
+    Session 191 (d5a8829): the place-mismatch question renders its parents as buttons (R-457). CB-pm-1 to 5.
 - id: F-219
   title: A "Show that day" rerun fires against the previous window's blocks on the new window's days, and says a person has no block when she does
   tag: A race between the window and its data
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S59
   refs:
@@ -13073,10 +13096,12 @@ findings:
     the new window fetches; buildBoardIndex is rebuilt from those old rows on the NEW from/to, so the ctx's
     days hold the target (the rerun's gate passes) while its assignments are still the old window's. "It
     straight up lied to me that Maria has no block today."
+  fix: >-
+    Session 191 (d5a8829): the resolve context carries settled, false while the window's rows are the previous window's placeholder; the rerun waits for a settled ctx that holds the day. CB-showday-9.
 - id: F-218
   title: The comma Whisper writes before a line keeps the word "in" inside the place --- "on Cell 6, in Line 3" is refused as no Cell 6 in "in Line 3"
   tag: A grammar gap read as a place
-  status: open
+  status: fixed
   found_by: maintainer
   stage: S57
   refs:
@@ -13090,6 +13115,8 @@ findings:
     the place on the comma and kept the "in" that followed it as part of the qualifier. F-216's own comma
     fix covered split's "block" and not the place list. "It just lied to me about there being no cell 6 in
     line 3."
+  fix: >-
+    Session 191 (d5a8829): the one place splitter strips a leading in/on/at/of and a trailing comma from every piece and drops a piece that is only a preposition (reviewer). FQ1 to FQ6.
 - id: F-217
   title: Two pins fail only when the whole suite runs on a busy machine --- the 501-clip eviction case and the live part-day absence pin --- and pass alone
   tag: A pin with a clock in it
@@ -18332,10 +18359,10 @@ sessions:
   date: 2026-09-24
   title: "The evening's findings fixed before the walk resumes: Listening only when the microphone is live, the dash stripped, the model's reading grounded in what was heard; the scorer compares models against what was said"
   shipped: []
-  commits: ['bb7237a', 'fc98959', '2b9828a', '2cc5265']
+  commits: ['bb7237a', 'fc98959', '2b9828a', '2cc5265', 'ef7813e', '239b64d', 'a3edf3c', 'e5384f6', 'd5a8829']
   numbers:
-    app_tests: 4349
-    app_test_files: 169
+    app_tests: 4413
+    app_test_files: 170
     tsc: 0
     eslint: 0
     db_checks: 893
@@ -18343,8 +18370,9 @@ sessions:
     e2e: 51
   confirmed: true
   numbers_note: >-
-    npm run test copied from the runner on an idle machine (a first run under load read 6 failed, F-217); tsc -b
-    and eslint clean; no migration or SQL change, db_checks carries 893; no e2e spec touched.
+    npm run test copied from the runner after the evening's lanes: 4413 in 170 files, with the live DEF-0020 pin
+    failing under load and passing alone as its note says; tsc -b and eslint clean; no migration or SQL change,
+    db_checks carries 893; e2e untouched.
   summary: >-
     Two Sonnet lanes from two briefs, each broken-tested by a second agent. The small fixes (fc98959): the bar
     said Listening before the microphone was open, so the person began the sentence before capture was live
@@ -18365,6 +18393,21 @@ sessions:
     remaining rows (base.en as reference, the 34-word hint, two example sentences, greedy against beam) all run
     on it. The memory-based model choice the maintainer asked about is parked below the queue as a nice to have.
     The maintainer resumes at sentence 17.
+    THE THIRD ROUND (afternoon). The maintainer spoke the second list on small.en and stopped at the end with
+    seven complaints; the trace said which were the ear's and which the board's, and the board's were five
+    findings (F-218 to F-222, F-223 found by a lane) and four decisions written as requirements before the
+    code: the board goes to a day itself (R-455, superseding R-419's button), a missing or misheard verb is
+    asked as buttons (R-456), a mismatched line offers the lines it knows (R-457), the last turn stays while
+    listening (R-458). Two lanes built them (d5a8829), each broken by a second agent: a name that sounds like a
+    verb, a trace hole across the automatic move, a rerun that could wait forever, a cancel word that did not
+    cancel a lot. The round's 44 clips were scored on small.en against what was said: 0.164 with the hint,
+    0.258 without, names 83 of 88, 17 word-perfect, 6.7 s a clip; the walk document carries the table in
+    plain words and the four other models wait for the maintainer's swap. Then the maintainer's question ---
+    can the board not talk like a person? --- became R-459: every sentence the bar says is one a supervisor
+    would say, the board the author of every word, the model never; chosen over having the model rephrase.
+    Lane S72-d's inventory of every bar sentence (104 rows, docs/walks/bar-sentences.md) is in the
+    maintainer's hands before any of it is rewritten. A newer base model exists since March (Qwen3.5 2B,
+    Apache 2.0); the next Colab run trains both and the scorer picks.
 - id: 190
   date: 2026-09-23
   title: "The second spoken walk answered: the two bugs that stopped it fixed, a Ctrl+M mic shortcut, the demo seeded inside each person's shift, and a clip harness so the recogniser is measured instead of walked"
