@@ -24,6 +24,7 @@ import {
   ABSENCE_WORDS,
   ADJUST_VERBS,
   SAME_AS_WORDS,
+  DAY_GROUNDING_WORDS,
 } from "@/lib/command/parse";
 import type {
   AssignCommand,
@@ -38,7 +39,7 @@ import type {
   Existing,
   ParseFailure,
 } from "@/lib/command/parse";
-import { groundReading, type VerbLists } from "@/lib/command/grounded";
+import { groundReading, groundDays, type VerbLists } from "@/lib/command/grounded";
 import { guessVerbs, misheardVerbWord, describeVerbGuess } from "@/lib/voice/verbGuess";
 import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
 import type {
@@ -2301,6 +2302,15 @@ export function CommandBar({
       traceQuestionStatus(finalStatus);
       return;
     }
+    // S72-e (F-224, R-435): the rules grammar's own §1 work reads every
+    // shape this checks for, so this fires only for a phrase outside what
+    // that work covers, or an intent this lane never touched -- the same
+    // safety net `applyReading`'s own twin call is for the model.
+    const dayGrounding = groundDays(sentence, parsed.command, DAY_GROUNDING_WORDS);
+    if (!dayGrounding.ok) {
+      askDayDropped(sentence, parsed.command, dayGrounding.phrase);
+      return;
+    }
     runCommand(
       parsed.command,
       reason === null ? undefined : ` · read by the rules (${whyForReason(reason)})`,
@@ -2372,6 +2382,46 @@ export function CommandBar({
     traceQuestionStatus(next);
   }
 
+  /**
+   * S72-e (F-224, R-435): `groundDays`'s own question (`src/lib/command/
+   * grounded.ts`) -- a day or week phrase the heard sentence said that
+   * NEITHER reader kept. The candidate is built by RE-PARSING the heard
+   * sentence through the RULES grammar (`parseCommand`) -- now that this
+   * lane's own §1 grammar work reads every shape `DAY_GROUNDING_WORDS`
+   * checks for, that re-parse succeeds whenever the dropped phrase is one of
+   * ours (the model's own stale reading is what usually trips this guard --
+   * the served model has not been retrained on the wider unassign day
+   * shape this lane's own report names). A phrase the guard's word list
+   * recognises but the grammar still cannot place falls to the plain
+   * question, no button -- the same "nothing to press, only to answer in
+   * words" shape `verbGuessStatus`'s own empty case leaves the caller to
+   * fall through from.
+   */
+  function askDayDropped(sentence: string, originalCommand: Command, phrase: string): void {
+    const reparsed = parseCommand(sentence);
+    const prefix = `I heard "${phrase}" but read it as today.`;
+    const next: Status = reparsed.ok
+      ? {
+          kind: "question",
+          message: `${prefix} Did you mean: ${formatCommand(reparsed.command)}?`,
+          candidates: [
+            {
+              key: "run_ungrounded",
+              label: formatCommand(reparsed.command),
+              action: { kind: "run_ungrounded", command: reparsed.command },
+            },
+          ],
+        }
+      : {
+          kind: "question",
+          message: `${prefix} Which days? Say today, tomorrow, a weekday, this week or next week.`,
+          candidates: [],
+        };
+    if (traceRef.current) traceRef.current.read = formatCommand(originalCommand);
+    setStatus(next);
+    traceQuestionStatus(next);
+  }
+
   /** S44-b: settles a reading that is still current (brief §3.3). */
   function applyReading(sentence: string, result: Reading): void {
     if (traceRef.current) traceRef.current.model = traceModelField(result);
@@ -2400,6 +2450,16 @@ export function CommandBar({
         } else {
           askUngrounded(sentence, result.command);
         }
+        return;
+      }
+      // S72-e (F-224, R-435): grounded on its VERB does not mean the DAY
+      // survived -- the served model has not been retrained on unassign's
+      // own wider day shape (this lane's own report), so it may still
+      // answer `day: null` for a sentence that plainly named a week. Checked
+      // second, still before `runCommand` ever sees it.
+      const dayGrounding = groundDays(sentence, result.command, DAY_GROUNDING_WORDS);
+      if (!dayGrounding.ok) {
+        askDayDropped(sentence, result.command, dayGrounding.phrase);
         return;
       }
       runCommand(result.command, " · read by the model");

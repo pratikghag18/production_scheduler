@@ -3978,6 +3978,104 @@ describe("CB-ground: the model's reading must be grounded in what was heard (S71
   });
 });
 
+/**
+ * S72-e (docs/agent-briefs/s72-e-clear-over-a-week-brief.md §3, F-224,
+ * R-435): `applyReading`'s own `groundDays` call site (the model path) --
+ * grounded on its VERB (`groundReading` passes) does not mean the DAY
+ * survived. CB-days-1/2 use an ordinary single day ("tomorrow"), not a
+ * repeat week, because that is the smallest shape that exercises the same
+ * guard and still writes through the ordinary single-command path
+ * (`onOpen`) rather than a lot -- `grounded.test.ts`'s GD-3 already pins the
+ * F-224 week shape itself, at the `groundDays` level.
+ */
+describe("CB-days: a day/week phrase heard but not read is asked about (S72-e, F-224, R-435)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("CB-days-1: the model heard 'tomorrow' but its own form still carries day: null -- a question naming the phrase, one button, the corrected re-parse as its label", async () => {
+    const heard = `${P1_SENTENCE} tomorrow`;
+    const parsed = parseCommand(P1_SENTENCE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      // The model's own reading: every field right except `day`, which
+      // stayed `null` (F-224's own shape -- the day word was heard and
+      // silently dropped).
+      command: parsed.command,
+      by: "model",
+    }));
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: heard } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(candidateButtons()).toHaveLength(1));
+    expect(statusText()).toContain('I heard "tomorrow" but read it as today.');
+    expect(statusText()).toContain("Did you mean:");
+    const reparsed = parseCommand(heard);
+    expect(reparsed.ok).toBe(true);
+    if (!reparsed.ok) return;
+    expect(candidateButtons()[0].textContent).toBe(formatCommand(reparsed.command));
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("CB-days-2: pressing the button runs the RE-PARSED (corrected) command, not the model's own dropped one", async () => {
+    const heard = `${P1_SENTENCE} tomorrow`;
+    const parsed = parseCommand(P1_SENTENCE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: parsed.command,
+      by: "model",
+    }));
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+
+    fireEvent.change(input, { target: { value: heard } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(candidateButtons()).toHaveLength(1));
+
+    fireEvent.click(candidateButtons()[0]);
+    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+  });
+
+  it("CB-days-3: the heard phrase's own sentence does not re-parse at all (no operator/place said) -- the plain question, no button", async () => {
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: {
+        intent: "assign",
+        operator: "Operator 1",
+        product: "Housing A",
+        place: ["Cell 1"],
+        day: null,
+        start: { hour: 10, minute: 0 },
+        end: { hour: 14, minute: 0 },
+        attach: null,
+        existing: null,
+        shift: null,
+      },
+      by: "model",
+    }));
+    const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
+
+    // "assign" grounds the VERB (`groundReading` passes); "today" is a day
+    // phrase the fake model's own form (above) still reads as `day: null`;
+    // and "assign today" alone -- no operator, part or place -- does not
+    // re-parse into anything at all, so `askDayDropped`'s own fallback (no
+    // button) is what has to show.
+    fireEvent.change(input, { target: { value: "assign today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(statusText()).toContain('I heard "today" but read it as today.'));
+    expect(statusText()).toContain("Which days?");
+    expect(candidateButtons()).toHaveLength(0);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+});
+
 // -----------------------------------------------------------------------
 // R-457 / F-220 (24 Sept, session 191): a `place_mismatch` question offers
 // the parent as a button -- CB-pm-1..3. The fixture's two "Cell 1"s (c1a in

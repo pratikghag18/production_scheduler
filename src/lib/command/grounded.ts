@@ -174,3 +174,69 @@ export function groundReading(heard: string, command: Command, verbs: VerbLists)
   }
   return groundOne(normalized, command.intent, verbs);
 }
+
+/**
+ * S72-e (docs/agent-briefs/s72-e-clear-over-a-week-brief.md §3, F-224,
+ * R-435): a SECOND, independent check beside `groundReading` above -- that
+ * one asks "did the heard text name this command's VERB"; this one asks
+ * "did the heard text name a DAY, and did the command keep one". F-224's own
+ * trace is exactly this shape twice over: the model's unassign form has no
+ * week kind at all, so "clear Cell 5 for the whole week" came back
+ * `day: null` (today) with the week simply gone; the rules grammar (before
+ * this lane's own §1 work) swallowed the same words into the PLACE instead.
+ * Neither reader said a word about it -- the board just did less than it was
+ * asked, silently, which is exactly what R-435 ("when in doubt, ask") exists
+ * to stop.
+ *
+ * Checked on the finished `command`, never re-derived from `heard` -- a day
+ * carried correctly (`command.day !== null`, or for `unassign` the `until`
+ * clause that stands in for one) is not a drop even when the printed word
+ * is not the word said (R-435 is about SILENCE, never paraphrase -- the same
+ * distinction `groundReading`'s own header doc draws for a verb).
+ */
+export type DayGrounding = { ok: true } | { ok: false; reason: "day_dropped"; phrase: string };
+
+/** An ISO-shaped date said aloud ("2026-09-04") -- checked by shape, not as
+ *  a literal word in the caller's `dayWords` list (there is no bounded list
+ *  of every date), the same way `parse.ts`'s own `ISO_DATE_RE` reads one. */
+const ISO_DATE_RE = /\b\d{4}-\d{2}-\d{2}\b/;
+
+/** Every SINGLE command's own day-shaped field(s), by intent -- a `several`
+ *  is handled one level up by `groundDays` itself, never here (its own
+ *  members are always one of these). A `copy`'s `from`/`to` are REQUIRED,
+ *  non-null `DayWord`s in the type itself (`parse.ts`'s own `CopyCommand`
+ *  doc) -- there is no shape in which a copy silently carries no day at
+ *  all, so it is always "kept" here; listed anyway, for totality, the same
+ *  reason `WEEK_WORD.last_week` is listed in `resolve.ts` though nothing
+ *  ever produces it. */
+function commandCarriesNoDay(command: Exclude<Command, { intent: "several" }>): boolean {
+  if (command.intent === "unassign") return command.day === null && command.until === null;
+  if (command.intent === "copy") return false;
+  return command.day === null;
+}
+
+/**
+ * `heard`/`command` as the model (or the rules) answered them, `dayWords`
+ * as the caller extracted from `parse.ts` (`DAY_GROUNDING_WORDS` --
+ * `CommandBar.tsx`'s own import, this file's header doc explains why the
+ * list travels in rather than being imported here). A `several`'s members
+ * are checked together: a phrase said once for the whole sentence is not a
+ * drop as long as AT LEAST ONE member kept a day (the same "mixed lot"
+ * caution `groundReading` takes for a verb, just above) -- flagged only
+ * when EVERY member lost it, F-224's own shape one level up.
+ */
+export function groundDays(
+  heard: string,
+  command: Command,
+  dayWords: readonly string[],
+): DayGrounding {
+  const normalized = normalize(heard);
+  const isoMatch = heard.match(ISO_DATE_RE);
+  const phrase = isoMatch ? isoMatch[0] : dayWords.find((w) => hasAnyWord(normalized, [w]));
+  if (phrase === undefined) return { ok: true };
+  if (command.intent === "several") {
+    const anyKept = command.commands.some((c) => !commandCarriesNoDay(c));
+    return anyKept ? { ok: true } : { ok: false, reason: "day_dropped", phrase };
+  }
+  return commandCarriesNoDay(command) ? { ok: false, reason: "day_dropped", phrase } : { ok: true };
+}

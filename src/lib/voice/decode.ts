@@ -205,13 +205,14 @@ function decodeDayWord(value: unknown): DayWord | null | undefined {
   return undefined;
 }
 
-/** S58 (R-416, design section 19.103/D132 item 5): the two REPEAT kinds,
- *  legal ONLY on an assign's or a book's own `day` -- used nowhere else in
- *  this file (not `until`, not any other form's `day`, not a copy's own
- *  `from`/`to`). Falls back to plain `decodeDayWord` for the five ordinary
- *  kinds, so the two never disagree about what a plain day looks like; a
- *  bad or missing `week` on a `weekdays`/`every_day` kind is `undefined`,
- *  same as every other malformed shape in this file. */
+/** S58 (R-416, design section 19.103/D132 item 5), widened S72-e (F-224,
+ *  R-435): the two REPEAT kinds, legal on an assign's or a book's own `day`
+ *  and (S72-e) an unassign's own `day` too -- used nowhere else in this file
+ *  (not `until`, not any other form's `day`, not a copy's own `from`/`to`).
+ *  Falls back to plain `decodeDayWord` for the five ordinary kinds, so the
+ *  two never disagree about what a plain day looks like; a bad or missing
+ *  `week` on a `weekdays`/`every_day` kind is `undefined`, same as every
+ *  other malformed shape in this file. */
 function decodeDayWordOrRepeat(value: unknown): DayWord | null | undefined {
   if (value === null) return null;
   if (!isRecord(value)) return undefined;
@@ -342,7 +343,13 @@ function decodeBook(obj: Record<string, unknown>): BookCommand | null {
 function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
   if (!isValidName(obj.operator)) return null;
   if (!isNameArray(obj.place)) return null;
-  const day = decodeDayWord(obj.day);
+  // S72-e (F-224, R-416, R-435): unassign's own `day` accepts the two
+  // REPEAT kinds too, now that `form.schema.json` and `parse.ts`'s own
+  // grammar both do -- the served model has not been TRAINED on this shape
+  // yet (this lane's own report says so), so `groundDays`'s guard in
+  // `grounded.ts` is what covers the gap in the meantime; this decoder just
+  // has to accept the shape once the model does answer it.
+  const day = decodeDayWordOrRepeat(obj.day);
   if (day === undefined) return null;
   const span = decodeSpan(obj.span);
   if (span === undefined) return null;
@@ -353,11 +360,19 @@ function decodeUnassign(obj: Record<string, unknown>): UnassignCommand | null {
   // S55 (R-409): `until` is REQUIRED -- a missing key (`undefined`) fails
   // `decodeDayWord`'s `isRecord` check and garbles the whole form, the same
   // strictness `shift` got at VR8. Plain `decodeDayWord`, not
-  // `decodeDayOrWeekWord` and not `decodeDayWordOrRepeat`: a week kind or an
-  // S58 repeat kind on `until` is garbled too (the grammar never produces
-  // either there -- see `DayWord`'s own doc comment).
+  // `decodeDayOrWeekWord` and not `decodeDayWordOrRepeat`: a week kind on
+  // `until` is garbled too (the grammar never produces one there -- see
+  // `DayWord`'s own doc comment).
   const until = decodeDayWord(obj.until);
   if (until === undefined) return null;
+  // S72-e (F-224, §1): a repeat `day` alongside a non-null `until` names two
+  // different removal spans at once -- `parse.ts`'s own grammar refuses the
+  // combination as `bad_day` (`applyRepeatDayToSingle`); the decoder holds
+  // the model's own answer to the identical rule rather than silently
+  // picking one field over the other.
+  if (day !== null && (day.kind === "weekdays" || day.kind === "every_day") && until !== null) {
+    return null;
+  }
   return {
     intent: "unassign",
     operator: obj.operator,

@@ -1295,12 +1295,13 @@ function resolveDay(
     if (found) return { ok: true, dayIndex: found.index };
     return { ok: false, question: { kind: "day_off_board", text: day.iso } };
   }
-  // S58 (R-416, D132 item 5): `weekdays`/`every_day` are legal ONLY on an
-  // assign or a booking, and only BEFORE `expandCommand` turns them into one
-  // `{ kind: "date" }` per written day -- a caller reaching this function
-  // with one still set (any other intent, or an assign/book that skipped
-  // `expandCommand`) is a bug, never a crash. `resolveDay` on these kinds is
-  // the one place the refusal lives; every caller shares it.
+  // S58 (R-416, D132 item 5), widened S72-e (F-224): `weekdays`/`every_day`
+  // are legal on an assign, a booking or (S72-e) an unassign, and only
+  // BEFORE `expandCommand` turns them into one `{ kind: "date" }` per
+  // written day -- a caller reaching this function with one still set (any
+  // other intent, or an assign/book/unassign that skipped `expandCommand`)
+  // is a bug, never a crash. `resolveDay` on these kinds is the one place
+  // the refusal lives; every caller shares it.
   if (day.kind === "weekdays" || day.kind === "every_day") {
     return { ok: false, question: { kind: "bad_repeat_day", text: dayWordLabel(day) } };
   }
@@ -5009,6 +5010,146 @@ function expandRepeatDay(command: AssignCommand | BookCommand, ctx: ResolveConte
 }
 
 /**
+ * S72-e (F-224, R-416, R-435): "clear Cell 5 this week" / "... for the
+ * whole week" / "... for the remainder of the week" / "... next week" -- an
+ * UNASSIGN whose `day.kind` is `weekdays`/`every_day`. Unlike `expandRepeatDay`
+ * above (an assign/book always WRITES, so every day it names becomes a
+ * command), a removal can find NOTHING on a given day -- so each day is
+ * resolved on its own, the same way an ordinary one-day removal already is
+ * (`expandEveryoneUnassign` for `operator: EVERYONE`, the per-day gather
+ * below for a named person), and a day with nothing on it is DROPPED from
+ * the lot, never asked about; only a day that raises a REAL question (an
+ * ambiguous cell, a day off the board, a lot too big) stops the whole
+ * expansion, same as any other board-answered group. Every day of the WEEK
+ * must still be on the board first (`resolveWeekDays`, F-158's own
+ * `day_off_board` naming) -- there is no partial "as far as the board goes"
+ * reading here either.
+ *
+ * `this_week` never touches a day before today: `expandRepeatDay` above has
+ * NO such filter (an assign repeating "this week" on a Wednesday still
+ * writes Monday and Tuesday, days already past) -- checked and confirmed by
+ * reading it before writing this function. A removal reaching back before
+ * today has nothing sane to remove, and the brief's own pin (UW-r) requires
+ * it dropped, never attempted, so the filter is added HERE, new, rather than
+ * shared with assign's. This is also why "the whole week" and "the
+ * remainder/rest of the week" can honestly share one `DayWord` (parse.ts's
+ * own `UNASSIGN_WEEK_PHRASES`) -- the wording difference is this filter's
+ * job, not the grammar's: both phrases reach this same today-forward rule,
+ * whatever today happens to be. `next_week` needs no filter -- every one of
+ * its days is already in the future by construction (`resolveWeekDays`
+ * anchors on the plant's own today, F-191).
+ */
+function expandRepeatUnassign(command: UnassignCommand, ctx: ResolveContext): Expansion {
+  const day = command.day as { kind: "weekdays" | "every_day"; week: "this_week" | "next_week" };
+  const weekResult = resolveWeekDays(day.week, ctx, "week_word");
+  if (!weekResult.ok) return weekResult;
+  let dayIndexes = day.kind === "weekdays" ? weekResult.days.slice(0, 5) : weekResult.days;
+  if (day.week === "this_week") {
+    dayIndexes = dayIndexes.filter(
+      (idx) => (ctx.days.find((d) => d.index === idx)?.iso ?? "") >= ctx.todayIso,
+    );
+  }
+
+  const everyone = isEveryone(command.operator);
+  const commands: SingleCommand[] = [];
+  const runRemovals: ResolvedRunRemoval[] = [];
+
+  if (everyone) {
+    // Each day is its own ordinary `everyone` removal -- reuse that
+    // machinery whole (CLAUDE.md §4, "reuse the lot machinery; do not build
+    // a second expansion"), never re-derived here.
+    for (const dayIndex of dayIndexes) {
+      const perDay: UnassignCommand = { ...command, day: dayWordForIndex(dayIndex, ctx) };
+      const dayExpansion = expandEveryoneUnassign(perDay, ctx);
+      if (!dayExpansion.ok) {
+        // A day with nobody on it is `nothing_to_do` -- dropped, not asked.
+        // Any OTHER question (a real ambiguity, a board too narrow) stops
+        // the whole expansion, same as every other board-answered group.
+        if (dayExpansion.question.kind === "nothing_to_do") continue;
+        return dayExpansion;
+      }
+      const dayCommand = dayExpansion.command;
+      if (dayCommand.intent === "several") commands.push(...dayCommand.commands);
+      else if (dayCommand.intent !== "headcount") commands.push(dayCommand);
+      if (dayExpansion.runRemovals) runRemovals.push(...dayExpansion.runRemovals);
+    }
+  } else {
+    // A named person: the same person/cell/window gather
+    // `resolveUnassignCommand`'s own whole-day path and `expandAbsence`'s
+    // per-day loop already use, one day at a time -- never a second
+    // "which block" ambiguity question here (R-407's `everyone` shape has
+    // none either); a cell that cannot be resolved at all is a REAL
+    // question, asked once, not per day.
+    const byPath = buildPathIndex(ctx.nodeById);
+    const personResult = resolvePersonStep(command.operator, ctx);
+    if (!personResult.ok) return { ok: false, question: personResult.question };
+    const person = personResult.operator;
+    let cellFilter: Node | null = null;
+    if (command.place.length > 0) {
+      const cellResult = resolveCellStep(command.place, ctx, byPath);
+      if (!cellResult.ok) return { ok: false, question: cellResult.question };
+      cellFilter = cellResult.cell;
+    }
+    for (const dayIndex of dayIndexes) {
+      const win =
+        cellFilter !== null
+          ? resolveWindowForCell(
+              dayWordForIndex(dayIndex, ctx),
+              command.span,
+              command.shift,
+              dayIndex,
+              cellFilter,
+              ctx,
+            )
+          : {
+              ok: true as const,
+              startMin: ctx.wallToOffset(dayIndex, 0),
+              endMin: ctx.wallToOffset(dayIndex, 1440),
+            };
+      if (!win.ok) return win;
+      const dayBlocks = ctx.assignments.filter(
+        (x) =>
+          x.operatorId === person.id &&
+          (cellFilter === null || x.nodeId === cellFilter.id) &&
+          ctx.overlaps({ startMin: win.startMin, endMin: win.endMin }, x),
+      );
+      for (const x of dayBlocks) {
+        const edgesOk = blockEdgesOnBoard(x, ctx);
+        if (!edgesOk.ok) return edgesOk;
+        const xCell = ctx.nodeById.get(x.nodeId) as Node;
+        commands.push({
+          intent: "unassign",
+          operator: personWords(person),
+          place: cellWordsOf(xCell, byPath),
+          day: dayWordForIndex(dayIndex, ctx),
+          span: hoursOfBlock(x.startMin, x.endMin, ctx),
+          existing: { kind: "remove", assignmentId: x.id },
+          shift: null,
+          until: null,
+        });
+      }
+    }
+  }
+
+  if (commands.length === 0 && runRemovals.length === 0) {
+    const label = command.place.length > 0 ? command.place[0] : "The board";
+    return {
+      ok: false,
+      question: {
+        kind: "nothing_to_do",
+        text: `${label} has nobody on it ${WEEK_WORD[day.week]}.`,
+      },
+    };
+  }
+  const total = commands.length + runRemovals.length;
+  if (total > LOT_CEILING) {
+    return { ok: false, question: { kind: "lot_too_big", count: total, max: LOT_CEILING } };
+  }
+  if (runRemovals.length === 0) return wrapMany(commands);
+  return { ok: true, command: { intent: "several", commands }, runRemovals };
+}
+
+/**
  * S55 (D130 item 1): the board's own expansion step, called ONCE before the
  * bar's `several` intercept so the rules path and a future model path
  * expand the same way. Returns the SAME object for every ordinary form (R-406
@@ -5028,6 +5169,16 @@ export function expandCommand(command: Command, ctx: ResolveContext): Expansion 
   if (command.intent === "headcount") return { ok: true, command };
   if (command.intent === "unassign") {
     if (command.until !== null) return expandAbsence(command, ctx);
+    // S72-e (F-224, R-416, R-435): "clear Cell 5 this week"/"... for the
+    // whole week"/"... next week" -- checked BEFORE the plain `isEveryone`
+    // branch below, since a repeat-day `everyone` removal needs both: one
+    // day at a time AND, on each day, one command per matching block.
+    if (
+      command.day !== null &&
+      (command.day.kind === "weekdays" || command.day.kind === "every_day")
+    ) {
+      return expandRepeatUnassign(command, ctx);
+    }
     if (isEveryone(command.operator)) return expandEveryoneUnassign(command, ctx);
     return { ok: true, command };
   }

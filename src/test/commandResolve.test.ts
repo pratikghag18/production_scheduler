@@ -5582,6 +5582,193 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         question: { kind: "bad_repeat_day", text: "every weekday this week" },
       });
     });
+
+    // -----------------------------------------------------------------------
+    // UW-r: expandRepeatUnassign -- S72-e (F-224, R-416, R-435,
+    // docs/agent-briefs/s72-e-clear-over-a-week-brief.md §2/§5). Same
+    // rwDays/rwCtx fixture as the rest of this block (Mon 2026-08-31 ..
+    // Sun 2026-09-13, today = Wed 2026-09-02, index 2): Mon/Tue (indexes
+    // 0/1) are BEFORE today, Wed..Sun (2..6) are this_week's own remaining
+    // days.
+    // -----------------------------------------------------------------------
+
+    describe("UW-r: unassign's own repeat expansion", () => {
+      it("UW-r-1: 'clear Cell 1 this week' (everyone) -- blocks on Mon (before today), Thu and Fri, none on Wed/Sat/Sun -- exactly TWO removals, Thu then Fri; Monday's block never reached the lot", () => {
+        const monBlk = zBlk({
+          id: "uwMon",
+          nodeId: "zc1",
+          operatorId: "zsam",
+          startMin: 0 * 1440 + 600,
+          endMin: 0 * 1440 + 840,
+        });
+        const thuBlk = zBlk({
+          id: "uwThu",
+          nodeId: "zc1",
+          operatorId: "zsam",
+          startMin: 3 * 1440 + 600,
+          endMin: 3 * 1440 + 840,
+        });
+        const friBlk = zBlk({
+          id: "uwFri",
+          nodeId: "zc1",
+          operatorId: "zana",
+          startMin: 4 * 1440 + 480,
+          endMin: 4 * 1440 + 720,
+        });
+        const command: UnassignCommand = {
+          intent: "unassign",
+          operator: "everyone",
+          place: ["Cell 1"],
+          day: { kind: "every_day", week: "this_week" },
+          span: null,
+          existing: null,
+          shift: null,
+          until: null,
+        };
+        const res = expandCommand(
+          command,
+          zCtx({ days: rwDays, todayIndex: 2, assignments: [monBlk, thuBlk, friBlk] }),
+        );
+        expect(res.ok).toBe(true);
+        if (res.ok && res.command.intent === "several") {
+          const cmds = res.command.commands as UnassignCommand[];
+          expect(cmds).toHaveLength(2);
+          expect(cmds.map((c) => c.existing)).toEqual([
+            { kind: "remove", assignmentId: "uwThu" },
+            { kind: "remove", assignmentId: "uwFri" },
+          ]);
+        } else {
+          throw new Error("expected a several of two");
+        }
+      });
+
+      it("UW-r-2: 'clear Sam from Cell 1 this week' (a named person) -- Sam's own Monday block (before today) is dropped, Ana's Friday block is never Sam's, only Sam's Thursday block is removed", () => {
+        const monBlk = zBlk({
+          id: "uwMon2",
+          nodeId: "zc1",
+          operatorId: "zsam",
+          startMin: 0 * 1440 + 600,
+          endMin: 0 * 1440 + 840,
+        });
+        const thuBlk = zBlk({
+          id: "uwThu2",
+          nodeId: "zc1",
+          operatorId: "zsam",
+          startMin: 3 * 1440 + 600,
+          endMin: 3 * 1440 + 840,
+        });
+        const friBlk = zBlk({
+          id: "uwFri2",
+          nodeId: "zc1",
+          operatorId: "zana",
+          startMin: 4 * 1440 + 480,
+          endMin: 4 * 1440 + 720,
+        });
+        const command: UnassignCommand = {
+          intent: "unassign",
+          operator: "Sam",
+          place: ["Cell 1"],
+          day: { kind: "every_day", week: "this_week" },
+          span: null,
+          existing: null,
+          shift: null,
+          until: null,
+        };
+        const res = expandCommand(
+          command,
+          zCtx({ days: rwDays, todayIndex: 2, assignments: [monBlk, thuBlk, friBlk] }),
+        );
+        expect(res.ok).toBe(true);
+        if (res.ok && res.command.intent !== "several") {
+          expect((res.command as UnassignCommand).existing).toEqual({
+            kind: "remove",
+            assignmentId: "uwThu2",
+          });
+        } else {
+          throw new Error("expected exactly one removal (Sam's Thursday block)");
+        }
+      });
+
+      it("UW-r-3: 'clear Cell 2 this week' (everyone) -- nobody at all on Cell 2 any day of the week -- refuses naming the SPAN, never a single day", () => {
+        const command: UnassignCommand = {
+          intent: "unassign",
+          operator: "everyone",
+          place: ["Cell 2"],
+          day: { kind: "every_day", week: "this_week" },
+          span: null,
+          existing: null,
+          shift: null,
+          until: null,
+        };
+        const res = expandCommand(command, zCtx({ days: rwDays, todayIndex: 2, assignments: [] }));
+        expect(res).toEqual({
+          ok: false,
+          question: { kind: "nothing_to_do", text: "Cell 2 has nobody on it this week." },
+        });
+      });
+
+      it("UW-r-4: a board too narrow for the week -- day_off_board names the WEEK, same as an assign's own repeat (RD-1)", () => {
+        const command: UnassignCommand = {
+          intent: "unassign",
+          operator: "everyone",
+          place: ["Cell 1"],
+          day: { kind: "every_day", week: "this_week" },
+          span: null,
+          existing: null,
+          shift: null,
+          until: null,
+        };
+        const res = expandCommand(
+          command,
+          zCtx({ days: rwDays.slice(0, 4), todayIndex: 2, assignments: [] }),
+        );
+        expect(res).toEqual({
+          ok: false,
+          question: { kind: "day_off_board", text: "this week" },
+        });
+      });
+
+      it("UW-r-5 (reviewer, S72-e): a named person with TWO blocks the same day -- both are removed in the same lot, no per-day 'which block' question. Documented on purpose (§2's own brief: 'never a second which-block ambiguity question here, R-407's everyone shape has none either') -- the lot's own confirmation (the readout naming both blocks) is where the maintainer sees and can decline the second one, the same as `expandEveryoneUnassign` never asks per block either. Pinned so a future change to this choice is a decision, not a silent drift.", () => {
+        const thuBlkA = zBlk({
+          id: "uwAmbigA",
+          nodeId: "zc1",
+          operatorId: "zsam",
+          startMin: 3 * 1440 + 480,
+          endMin: 3 * 1440 + 600,
+        });
+        const thuBlkB = zBlk({
+          id: "uwAmbigB",
+          nodeId: "zc1",
+          operatorId: "zsam",
+          startMin: 3 * 1440 + 780,
+          endMin: 3 * 1440 + 900,
+        });
+        const command: UnassignCommand = {
+          intent: "unassign",
+          operator: "Sam",
+          place: ["Cell 1"],
+          day: { kind: "every_day", week: "this_week" },
+          span: null,
+          existing: null,
+          shift: null,
+          until: null,
+        };
+        const res = expandCommand(
+          command,
+          zCtx({ days: rwDays, todayIndex: 2, assignments: [thuBlkA, thuBlkB] }),
+        );
+        expect(res.ok).toBe(true);
+        if (res.ok && res.command.intent === "several") {
+          const cmds = res.command.commands as UnassignCommand[];
+          expect(cmds.map((c) => c.existing)).toEqual([
+            { kind: "remove", assignmentId: "uwAmbigA" },
+            { kind: "remove", assignmentId: "uwAmbigB" },
+          ]);
+        } else {
+          throw new Error("expected a several of two same-day removals");
+        }
+      });
+    });
   });
 
   // -------------------------------------------------------------------------

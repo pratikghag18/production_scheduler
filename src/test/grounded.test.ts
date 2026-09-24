@@ -14,7 +14,8 @@
  * standalone unassign or a several where NOTHING is grounded.
  */
 import { describe, it, expect } from "vitest";
-import { groundReading, type VerbLists } from "@/lib/command/grounded";
+import { groundReading, groundDays, type VerbLists } from "@/lib/command/grounded";
+import { parseCommand } from "@/lib/command/parse";
 import {
   ASSIGN_VERBS,
   BOOK_VERBS,
@@ -27,6 +28,7 @@ import {
   ABSENCE_WORDS,
   ADJUST_VERBS,
   SAME_AS_WORDS,
+  DAY_GROUNDING_WORDS,
   type AssignCommand,
   type BookCommand,
   type UnassignCommand,
@@ -234,4 +236,127 @@ describe("groundReading (S71-m, F-212/F-215, R-435/R-431)", () => {
     const g = groundReading("same as yesterday for Cell 1", command, VERBS);
     expect(g).toEqual({ ok: true });
   });
+});
+
+/**
+ * S72-e (docs/agent-briefs/s72-e-clear-over-a-week-brief.md §3, F-224,
+ * R-435): `groundDays`'s own pins, GD-1..GD-6. `DAY_GROUNDING_WORDS` is
+ * `parse.ts`'s own export, unioned with nothing here -- unlike `VerbLists`
+ * above, this is a single flat list, so there is only one to hand in.
+ */
+describe("groundDays (S72-e, F-224, R-435)", () => {
+  it("GD-1: 'Sam is off today' carries today -- no guard (the day was read, just not the exact word 'today' necessarily)", () => {
+    const g = groundDays(
+      "Sam is off today",
+      unassignCmd({ operator: "Sam", day: { kind: "today" } }),
+      DAY_GROUNDING_WORDS,
+    );
+    expect(g).toEqual({ ok: true });
+  });
+
+  it("GD-2: 'Sam is off' says no day/span phrase at all -- no guard (nothing was heard, so nothing can have been dropped)", () => {
+    const g = groundDays("Sam is off", unassignCmd({ operator: "Sam" }), DAY_GROUNDING_WORDS);
+    expect(g).toEqual({ ok: true });
+  });
+
+  it("GD-3: F-224's own shape -- 'clear Cell 5 for the whole week' heard, but the command still carries day: null (a stale/untrained model answer) -- day_dropped, naming the phrase", () => {
+    const g = groundDays(
+      "clear Cell 5 for the whole week",
+      unassignCmd({ place: ["Cell 5"] }),
+      DAY_GROUNDING_WORDS,
+    );
+    expect(g).toEqual({
+      ok: false,
+      reason: "day_dropped",
+      phrase: "for the whole week",
+    });
+  });
+
+  it("GD-4: the same heard phrase, but the command DID keep the week (day: every_day/this_week) -- no guard; R-435 is about silence, never paraphrase", () => {
+    const g = groundDays(
+      "clear Cell 5 for the whole week",
+      unassignCmd({ place: ["Cell 5"], day: { kind: "every_day", week: "this_week" } }),
+      DAY_GROUNDING_WORDS,
+    );
+    expect(g).toEqual({ ok: true });
+  });
+
+  it("GD-5: an unassign with 'until' carrying the day (an absence's own end) counts as kept, never dropped", () => {
+    const g = groundDays(
+      "Sam is off until Friday",
+      unassignCmd({ operator: "Sam", until: { kind: "weekday", day: 5 } }),
+      DAY_GROUNDING_WORDS,
+    );
+    expect(g).toEqual({ ok: true });
+  });
+
+  it("GD-6: an ISO-shaped date said aloud, dropped by the command -- checked by shape, not as a literal word in the list", () => {
+    const g = groundDays(
+      "clear Cell 5 on 2026-09-04",
+      unassignCmd({ place: ["Cell 5"] }),
+      DAY_GROUNDING_WORDS,
+    );
+    expect(g).toEqual({ ok: false, reason: "day_dropped", phrase: "2026-09-04" });
+  });
+});
+
+/**
+ * GD-fp: reviewer sweep (S72-e review) of the brief's own §3 false-positive
+ * list -- every board/adjust/book/headcount shape whose day field is NOT
+ * literally named `day` on the wire still has to be read by
+ * `commandCarriesNoDay` (`grounded.ts`), and every one of them (swap, split,
+ * move/adjust, headcount, book) DOES carry a field literally called `day`
+ * (`parse.ts`'s own `Command` union), so the generic `command.day === null`
+ * branch already covers them -- this sweep runs each sentence through the
+ * REAL `parseCommand` (never a hand-built literal) so a future field rename
+ * is caught here first, not by a maintainer report.
+ */
+describe("groundDays: the brief's §3 false-positive sweep, through parseCommand (S72-e review)", () => {
+  const cases = [
+    "Sam Patel is off today",
+    "copy today to Friday for Cell 5",
+    "same as yesterday for Cell 3",
+    "swap Lena Novak and Priya Shah today",
+    "split Tom Baker's block at 10am today",
+    "make the Common Fastener job on Cell 6 5 people today",
+    "extend Sam Patel's assignment by an hour today",
+    "book Common Fastener on Cell 6 for 2 people from 1pm to 5pm today",
+  ];
+  for (const sentence of cases) {
+    it(`does not fire on: ${sentence}`, () => {
+      const parsed = parseCommand(sentence);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(groundDays(sentence, parsed.command, DAY_GROUNDING_WORDS)).toEqual({ ok: true });
+    });
+  }
+});
+
+/**
+ * GD-fn: reviewer sweep of the brief's own §3 false-negative list, through
+ * `parseCommand`. Before this review, "Sam Patel is off for the rest of the
+ * week" failed to PARSE at all (`bad_day`) -- a grammar bug one level below
+ * `groundDays` (`parse.ts`'s week-phrase gate only checked `UNASSIGN_VERB_
+ * RE`, never the absence grammar's own name-first shape); fixed in
+ * `extractRepeatDayClause` (also gate on `ABSENCE_RE`) and
+ * `parseAbsenceRest` (skip AB2's "default to today" when a repeat clause was
+ * found, so it does not collide with the reattached repeat as `two_days`).
+ * With the grammar fixed, none of these should ever reach `groundDays`
+ * carrying a dropped day -- confirmed here, at the parse level and the
+ * guard level both, so a regression in either shows up.
+ */
+describe("groundDays: the brief's §3 false-negative sweep -- these must parse AND keep their day (S72-e review)", () => {
+  const cases = [
+    "clear Cell 5 for the whole of next week",
+    "remove Sam Patel this week",
+    "Sam Patel is off for the rest of the week",
+  ];
+  for (const sentence of cases) {
+    it(`parses and is not flagged as dropped: ${sentence}`, () => {
+      const parsed = parseCommand(sentence);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(groundDays(sentence, parsed.command, DAY_GROUNDING_WORDS)).toEqual({ ok: true });
+    });
+  }
 });

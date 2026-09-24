@@ -4379,10 +4379,24 @@ describe("commandParse: S58 grammar widening, group 2 (R-412 to R-416, D132)", (
     );
   });
 
-  it("RW5: remove Sam from Cell 1 every weekday this week -- bad_day (a repeat day is legal on assign/book only)", () => {
+  // RW5 pinned "bad_day" here -- "a repeat day is legal on assign/book
+  // only". S72-e (F-224, R-435) widens the contract to unassign too (§1 of
+  // this lane's own brief); the CONTRACT changed on purpose, so the pin
+  // changes with it rather than staying red -- see UW-2 below for the full
+  // shape this sentence now parses to.
+  it("RW5 (widened S72-e): remove Sam from Cell 1 every weekday this week -- now parses; a repeat day is legal on unassign too", () => {
     expect(parseCommand("remove Sam from Cell 1 every weekday this week")).toEqual({
-      ok: false,
-      failure: { kind: "bad_day", text: "every weekday this week" },
+      ok: true,
+      command: {
+        intent: "unassign",
+        operator: "Sam",
+        place: ["Cell 1"],
+        day: { kind: "weekdays", week: "this_week" },
+        span: null,
+        existing: null,
+        shift: null,
+        until: null,
+      },
     });
   });
 
@@ -4409,6 +4423,201 @@ describe("commandParse: S58 grammar widening, group 2 (R-412 to R-416, D132)", (
     const printed2 = formatCommand(rw2.command);
     expect(printed2).toContain("every day next week");
     expect(parseCommand(printed2)).toEqual(rw2);
+  });
+
+  // -------------------------------------------------------------------
+  // UW: unassign takes the same repeat days assign takes (S72-e, F-224,
+  // R-435, docs/agent-briefs/s72-e-clear-over-a-week-brief.md §1/§5).
+  // -------------------------------------------------------------------
+
+  function unassignEveryone(overrides: Partial<UnassignCommand> = {}): UnassignCommand {
+    return {
+      intent: "unassign",
+      operator: EVERYONE,
+      place: ["Cell 5"],
+      day: null,
+      span: null,
+      existing: null,
+      shift: null,
+      until: null,
+      ...overrides,
+    };
+  }
+
+  it("UW-1: 'clear Cell 5 this week' / 'for the whole week' / 'the whole week' / 'all week' / 'every day this week' -- all five read as every_day this_week", () => {
+    const shapes = [
+      "clear Cell 5 this week",
+      "clear Cell 5 for the whole week",
+      "clear Cell 5 the whole week",
+      "clear Cell 5 all week",
+      "clear Cell 5 every day this week",
+    ];
+    for (const text of shapes) {
+      expect(parseCommand(text)).toEqual({
+        ok: true,
+        command: unassignEveryone({ day: { kind: "every_day", week: "this_week" } }),
+      });
+    }
+  });
+
+  it("UW-2: 'for the rest of the week' / 'for the remainder of the week' / 'rest of this week' -- the SAME every_day this_week (the wording difference is the resolver's today-forward filter, not a grammar distinction -- see expandRepeatUnassign)", () => {
+    const shapes = [
+      "clear Cell 5 for the rest of the week",
+      "clear Cell 5 for the remainder of the week",
+      "clear Cell 5 rest of this week",
+    ];
+    for (const text of shapes) {
+      expect(parseCommand(text)).toEqual({
+        ok: true,
+        command: unassignEveryone({ day: { kind: "every_day", week: "this_week" } }),
+      });
+    }
+  });
+
+  it("UW-3: 'next week' / 'for the whole of next week' -- every_day next_week", () => {
+    for (const text of ["clear Cell 5 next week", "clear Cell 5 for the whole of next week"]) {
+      expect(parseCommand(text)).toEqual({
+        ok: true,
+        command: unassignEveryone({ day: { kind: "every_day", week: "next_week" } }),
+      });
+    }
+  });
+
+  it("UW-4: 'every weekday this week' / 'every weekday next week' -- weekdays, as assign already had (RW5's own new shape)", () => {
+    expect(parseCommand("clear Cell 5 every weekday this week")).toEqual({
+      ok: true,
+      command: unassignEveryone({ day: { kind: "weekdays", week: "this_week" } }),
+    });
+    expect(parseCommand("clear Cell 5 every weekday next week")).toEqual({
+      ok: true,
+      command: unassignEveryone({ day: { kind: "weekdays", week: "next_week" } }),
+    });
+  });
+
+  it("UW-5: every UW-1/UW-3/UW-4 shape's own command round-trips through formatCommand", () => {
+    const commands: UnassignCommand[] = [
+      unassignEveryone({ day: { kind: "every_day", week: "this_week" } }),
+      unassignEveryone({ day: { kind: "every_day", week: "next_week" } }),
+      unassignEveryone({ day: { kind: "weekdays", week: "this_week" } }),
+      unassignEveryone({ day: { kind: "weekdays", week: "next_week" } }),
+    ];
+    for (const command of commands) {
+      const printed = formatCommand(command);
+      expect(parseCommand(printed)).toEqual({ ok: true, command });
+    }
+  });
+
+  it("UW-6: 'clear Cell 5 this week until Friday' -- bad_day, a repeat day and an until clause never combine (R-409 stays as it is)", () => {
+    expect(parseCommand("clear Cell 5 this week until Friday")).toEqual({
+      ok: false,
+      failure: { kind: "bad_day", text: "this week" },
+    });
+  });
+
+  it("UW-7 (P-cases, tail-as-place, unchanged): 'clear Cell 5 xyzzy' -- an unrecognised tail is still swallowed into the PLACE (R-407's own EV1-EV9 mechanism), never bad_day; the guard word list does not contain 'xyzzy' so nothing here intercepts it. Resolution (not this file) is what later turns it into an 'unknown' place question.", () => {
+    expect(parseCommand("clear Cell 5 xyzzy")).toEqual({
+      ok: true,
+      command: unassignEveryone({ place: ["Cell 5 xyzzy"] }),
+    });
+  });
+
+  it("UW-8: bare 'this week'/'next week' stay legal on copy -- the unassign-only gate (UNASSIGN_VERB_RE) never touches a 'copy'/'same as' sentence", () => {
+    expect(parseCommand("copy this week to next week")).toEqual({
+      ok: true,
+      command: {
+        intent: "copy",
+        place: [],
+        from: { kind: "this_week" },
+        to: { kind: "next_week" },
+      },
+    });
+    expect(parseCommand("same as this week for Cell 1")).toEqual({
+      ok: true,
+      command: {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "this_week" },
+        to: { kind: "this_week" },
+      },
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // UW-9: reviewer break (S72-e review) -- the absence grammar ("<name> is
+  // <absence word> ...", R-409) never opens with an UNASSIGN_VERB, so the
+  // §1 gate on `UNASSIGN_WEEK_ONLY_RE` (originally `UNASSIGN_VERB_RE.test
+  // (text)` alone) never even tried the week phrase on a sentence like
+  // "Sam Patel is off for the rest of the week" -- it fell straight through
+  // to `bad_day`, the exact silent-drop shape F-224 exists to close, just on
+  // the OTHER unassign-shaped grammar. Fixed by also gating on `ABSENCE_RE`.
+  // That surfaced a second bug: AB2's own "no day at all means today"
+  // default ran on the tail left AFTER the repeat clause was stripped (which
+  // has no day words either), so `cmd.day` was already `today` by the time
+  // `applyRepeatDayToSingle` ran and it read as a genuine two-day conflict
+  // (`two_days`). Fixed by skipping AB2's default when a repeat clause was
+  // found, so the repeat is what fills `day` in, same as assign/book.
+  // -------------------------------------------------------------------
+
+  function absenceRepeat(overrides: Partial<UnassignCommand> = {}): UnassignCommand {
+    return {
+      intent: "unassign",
+      operator: "Sam Patel",
+      place: [],
+      day: { kind: "every_day", week: "this_week" },
+      span: null,
+      existing: null,
+      shift: null,
+      until: null,
+      ...overrides,
+    };
+  }
+
+  it("UW-9a: 'Sam Patel is off this week' / 'for the rest of the week' / 'on leave this week' -- every_day this_week, same as the unassign-verb shapes (UW-1/UW-2)", () => {
+    const shapes = [
+      "Sam Patel is off this week",
+      "Sam Patel is off for the rest of the week",
+      "Sam Patel is off for the remainder of the week",
+      "Sam Patel is on leave this week",
+    ];
+    for (const text of shapes) {
+      expect(parseCommand(text)).toEqual({ ok: true, command: absenceRepeat() });
+    }
+  });
+
+  it("UW-9b: 'Sam is off next week' -- every_day next_week", () => {
+    expect(parseCommand("Sam is off next week")).toEqual({
+      ok: true,
+      command: absenceRepeat({ operator: "Sam", day: { kind: "every_day", week: "next_week" } }),
+    });
+  });
+
+  it("UW-9c: an ordinary absence with no repeat is unaffected -- 'Sam is off today' still defaults nothing, still reads the literal day; 'Sam is off' still defaults to today (AB2, unaffected by the hasRepeat plumbing)", () => {
+    expect(parseCommand("Sam is off today")).toEqual({
+      ok: true,
+      command: absenceRepeat({ operator: "Sam", day: { kind: "today" } }),
+    });
+    expect(parseCommand("Sam is off")).toEqual({
+      ok: true,
+      command: absenceRepeat({ operator: "Sam", day: { kind: "today" } }),
+    });
+  });
+
+  it("UW-9d: R-409 unaffected -- 'Sam is off until Friday' still reads today + until Friday, never touched by the repeat gate widening", () => {
+    expect(parseCommand("Sam is off until Friday")).toEqual({
+      ok: true,
+      command: absenceRepeat({
+        operator: "Sam",
+        day: { kind: "today" },
+        until: { kind: "weekday", day: 5 },
+      }),
+    });
+  });
+
+  it("UW-9e: 'Sam is off this week until Friday' -- bad_day, the same repeat-vs-until refusal UW-6 pins for the verb-first shape", () => {
+    expect(parseCommand("Sam is off this week until Friday")).toEqual({
+      ok: false,
+      failure: { kind: "bad_day", text: "this week" },
+    });
   });
 
   // -------------------------------------------------------------------

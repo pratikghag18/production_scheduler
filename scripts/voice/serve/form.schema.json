@@ -268,7 +268,13 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "day": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/day_word" },
+            { "$ref": "#/$defs/repeat_day_word" }
+          ]
+        },
         "existing": { "type": "null" },
         "intent": { "const": "unassign" },
         "operator": { "type": "string" },

@@ -832,7 +832,11 @@ describe("VR18 (S55): a week kind is garbled everywhere except a copy's from/to"
     // model is physically unable to emit a week kind on any of them. S58:
     // assign and book are the one exception, gaining `repeat_day_word`
     // alongside `day_word` (R-416) -- `week_word` still never reaches them.
-    for (const name of ["unassign", "move", "replace", "swap"]) {
+    // F-224 (24 Sept, session 191): unassign joins them -- CONTRACT CHANGED,
+    // not a wrong pin: "clear Cell 5 for the rest of the week" is a repeat
+    // over this week, one removal per day, and the served model may say so.
+    // `week_word` still never reaches unassign.day either.
+    for (const name of ["move", "replace", "swap"]) {
       const branch = root.$defs[name];
       const dayProp = branch.properties?.day as { oneOf?: JsonSchemaNode[] } | undefined;
       const refs = (dayProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
@@ -1241,12 +1245,16 @@ describe("VR23 (S58, R-416): a repeat day word decodes only on assign/book's own
     expect(decodeCommand(roundTripped)).toEqual(parsed.command);
   });
 
-  it("VR23: a repeat day on an unassign's day is garbled", () => {
+  // F-224 (24 Sept, session 191): CONTRACT CHANGED -- this case pinned that an
+  // unassign could never carry a repeat day; a clear over a week is one now.
+  it("VR23: a repeat day on an unassign's day decodes (F-224), and a repeat day beside an until is still garbled", () => {
     const parsed = parseCommand("unassign Sam from Cell 1 in Line 1 from 10 to 2");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const valid = JSON.parse(JSON.stringify(parsed.command)) as Record<string, unknown>;
-    expect(decodeCommand({ ...valid, day: { kind: "weekdays", week: "this_week" } })).toBeNull();
+    const withRepeat = { ...valid, day: { kind: "weekdays", week: "this_week" } };
+    expect(decodeCommand(withRepeat)).toEqual(withRepeat);
+    expect(decodeCommand({ ...withRepeat, until: { kind: "weekday", day: 5 } })).toBeNull();
   });
 
   it("VR23: a repeat day on an unassign's until is garbled", () => {
@@ -1287,7 +1295,9 @@ describe("VR23 (S58, R-416): a repeat day word decodes only on assign/book's own
     }
   });
 
-  it("VR23: the schema itself admits repeat_day_word only on assign.day and book.day -- week_word never joins it there", () => {
+  // F-224 (24 Sept, session 191): unassign.day joins assign.day and book.day
+  // -- CONTRACT CHANGED, see VR18's own note.
+  it("VR23: the schema itself admits repeat_day_word only on assign.day, book.day and unassign.day -- week_word never joins it there", () => {
     type JsonSchemaNode = {
       $ref?: string;
       properties?: Record<string, unknown>;
@@ -1300,12 +1310,12 @@ describe("VR23 (S58, R-416): a repeat day word decodes only on assign/book's own
       .sort();
     expect(repeatKinds).toEqual(["every_day", "weekdays"]);
 
-    for (const name of ["assign", "book"]) {
+    for (const name of ["assign", "book", "unassign"]) {
       const dayProp = root.$defs[name].properties?.day as { oneOf?: JsonSchemaNode[] } | undefined;
       const refs = (dayProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
       expect(refs, `${name}.day`).toEqual(["#/$defs/day_word", "#/$defs/repeat_day_word"]);
     }
-    for (const name of ["unassign", "move", "replace", "swap", "split"]) {
+    for (const name of ["move", "replace", "swap", "split"]) {
       const dayProp = root.$defs[name].properties?.day as { oneOf?: JsonSchemaNode[] } | undefined;
       const refs = (dayProp?.oneOf ?? []).map((n) => n.$ref).filter((r): r is string => !!r);
       expect(refs, `${name}.day`).toEqual(["#/$defs/day_word"]);

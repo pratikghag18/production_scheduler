@@ -68,12 +68,16 @@ export interface ClockTime {
  * S58 (docs/agent-briefs/s58-a-grammar-brief.md, R-416, design §19.103/D132
  * item 5) adds two REPEAT kinds -- "every weekday"/"weekdays" (`weekdays`)
  * and "every day" (`every_day`), each carrying which week ("this week" said
- * or implied, or "next week"). Produced ONLY on an assign or a booking
- * (`parseCommand`'s own `extractRepeatDayClause`/`applyRepeatDay`, stripped
- * from the sentence before any verb dispatch runs and reattached to the
- * finished command only when its intent allows it); on every other intent a
- * repeat phrase is `bad_day` -- the resolver has no lot machinery here (D130
- * built that for the BOARD's own expansion, not the grammar's).
+ * or implied, or "next week"). Produced ONLY on an assign, a booking or (S72-e,
+ * F-224, R-435) an unassign (`parseCommand`'s own `extractRepeatDayClause`/
+ * `applyRepeatDay`, stripped from the sentence before any verb dispatch runs
+ * and reattached to the finished command only when its intent allows it); on
+ * every other intent a repeat phrase is `bad_day`. `resolve.ts`'s own lot
+ * machinery (D130, built for the BOARD's own expansion) is what an assign's
+ * or a booking's repeat write expands through (`expandRepeatDay`); an
+ * unassign's own repeat read expands through the sibling `expandRepeatUnassign`
+ * (S72-e) -- a removal, unlike a write, can find nothing on a given day, so
+ * that day is dropped from the lot rather than asked about.
  */
 export type DayWord =
   | { kind: "today" }
@@ -162,7 +166,11 @@ export interface UnassignCommand {
   /** R-409 (S55): "off till Friday" / "on leave until Wednesday" -- `null`
    *  on every removal that is not an absence carrying its own `until`. A
    *  week kind (`this_week`/`next_week`/`last_week`) never appears here --
-   *  those are legal only on a `CopyCommand`'s `from`/`to` (see `DayWord`). */
+   *  those are legal only on a `CopyCommand`'s `from`/`to` (see `DayWord`).
+   *  S72-e (F-224): a REPEAT kind never appears here either -- `day` is
+   *  where a repeat span lives now; a sentence naming both a repeat span and
+   *  an `until` clause is `bad_day` at parse time (`applyRepeatDayToSingle`),
+   *  never a guess at which one wins. */
   until: DayWord | null;
 }
 
@@ -3482,8 +3490,22 @@ const ABSENCE_RE = new RegExp(`^(.+?)\\s+is\\s+(${ABSENCE_WORD_ALTS})\\b(.*)$`, 
  * resolver only needs "this person is out", never which word said so).
  * AB2's explicit default: no day at all means TODAY, not "the board's own
  * day" (`null`) -- an absence always names a day, even the unstated one.
+ * S72-e (F-224): that default is SKIPPED when `extractRepeatDayClause`
+ * already found a week phrase on this sentence (`hasRepeat`) -- "Sam is off
+ * this week" strips "this week" before this function ever runs, so
+ * `tailRaw` is empty exactly the same way "Sam is off" (no day at all) is;
+ * defaulting to today here would leave `applyRepeatDayToSingle` finding
+ * `cmd.day !== null` and refusing the sentence as `two_days`, a genuine
+ * conflict this sentence never named. With `hasRepeat`, `day` stays `null`
+ * so the repeat clause is what fills it in, same as an assign's or a
+ * booking's own repeat day.
  */
-function parseAbsenceRest(namePart: string, tailRaw: string, quotes: string[]): ParseResult {
+function parseAbsenceRest(
+  namePart: string,
+  tailRaw: string,
+  quotes: string[],
+  hasRepeat: boolean,
+): ParseResult {
   const operator = restoreQuotes(namePart.trim(), quotes);
   const rest = tailRaw.trim();
 
@@ -3524,7 +3546,7 @@ function parseAbsenceRest(namePart: string, tailRaw: string, quotes: string[]): 
       intent: "unassign",
       operator,
       place: [],
-      day: day ?? { kind: "today" },
+      day: day ?? (hasRepeat ? null : { kind: "today" }),
       span: null,
       existing: null,
       shift: null,
@@ -3576,11 +3598,15 @@ export function parseCommand(text: string): ParseResult {
   norm = norm.replace(/\b([apAP])\.m\.?/g, "$1m");
   if (norm === "") return { ok: false, failure: { kind: "empty" } };
 
-  // R-416 (S58): "every weekday"/"every day"/"weekdays" [this week|next
-  // week] is stripped from the sentence HERE, before any dispatch, so every
-  // grammar below reads exactly the sentence it always has -- none of them
-  // needs to know this phrase exists. `applyRepeatDay`, at the very end,
-  // decides whether the finished command may carry it (assign/book only) or
+  // R-416 (S58), widened S72-e (F-224): "every weekday"/"every day"/
+  // "weekdays" [this week|next week] is stripped from the sentence HERE,
+  // before any dispatch, so every grammar below reads exactly the sentence
+  // it always has -- none of them needs to know this phrase exists. An
+  // unassign-shaped sentence's own bare week phrases ("for the whole week",
+  // "this week", "for the remainder of the week", "next week" --
+  // `UNASSIGN_WEEK_ONLY_RE`) are tried the same way, second, only when the
+  // first search found nothing. `applyRepeatDay`, at the very end, decides
+  // whether the finished command may carry it (assign/book/unassign) or
   // must fail `bad_day`.
   const repeat = extractRepeatDayClause(norm);
   const workingNorm = repeat ? repeat.rest : norm;
@@ -3598,7 +3624,7 @@ export function parseCommand(text: string): ParseResult {
     // ABSENCE_WORD right after "is", this simply does not match.
     const absenceMatch = norm.match(ABSENCE_RE);
     if (absenceMatch) {
-      return parseAbsenceRest(absenceMatch[1], absenceMatch[3], quotes);
+      return parseAbsenceRest(absenceMatch[1], absenceMatch[3], quotes, repeat !== null);
     }
 
     // S41-b: decided before the mandatory-time-clause path runs -- the
@@ -3821,20 +3847,108 @@ const REPEAT_DAY_RE = new RegExp(
   "i",
 );
 
+/**
+ * S72-e (F-224, R-435): the bare/short week phrases the maintainer actually
+ * said and neither reader kept -- "clear Cell 5 for the whole week" (the
+ * week swallowed into the PLACE, F-224's own trace) and "... for the
+ * remainder of the week" (same). Longest/most-specific first so a phrase
+ * containing another ("for the whole of next week" contains "next week")
+ * still matches its own full span, not a truncated one -- though position,
+ * not list order, is what actually decides that (the leftmost start wins).
+ * "the whole"/"remainder"/"rest" of the week all read as `every_day
+ * this_week` -- §1's own brief: the WORDING difference between "whole" and
+ * "remainder" is not a grammar distinction, it is `expandRepeatUnassign`'s
+ * own today-forward filter (resolve.ts), which drops a past day from either
+ * one identically, so both phrases can honestly share one `DayWord`.
+ *
+ * Gated to a sentence that OPENS with one of `UNASSIGN_VERBS`, OR reads as
+ * the absence grammar's own "<name> is <absence word> ..." shape
+ * (`ABSENCE_RE`, above -- an absence is an unassign-shaped removal that
+ * never opens with an unassign verb: "Sam Patel is off for the rest of the
+ * week" starts with the operator's own name) -- checked by
+ * `extractRepeatDayClause` below before it ever tries this regex -- because
+ * bare "this week"/"next week" are also the copy grammar's own day-or-week
+ * tokens (`parseDayOrWeekToken`, `DayWord`'s own doc: the only OTHER place
+ * those two words are legal). `extractRepeatDayClause` runs unconditionally,
+ * before ANY verb dispatch, so an ungated bare "this week" would strip
+ * itself out of a `copy`/`same as` sentence too and break it (`copy_mismatch`
+ * or worse, a silently wrong day) -- unlike "every day"/"every weekday"/
+ * "weekdays" (`REPEAT_WORDS` above), which no other grammar's words collide
+ * with, so those still strip unconditionally, on every intent.
+ */
+const UNASSIGN_WEEK_PHRASES = [
+  "for the whole of next week",
+  "for the whole week",
+  "the whole week",
+  "all week",
+  "for the remainder of the week",
+  "for the rest of the week",
+  "rest of this week",
+  "this week",
+  "next week",
+] as const;
+
+const UNASSIGN_WEEK_ONLY_RE = new RegExp(
+  `\\b(${UNASSIGN_WEEK_PHRASES.join("|").replace(/ /g, "\\s+")})\\b`,
+  "i",
+);
+
+/** S72-e: every day/span phrase this grammar's own day-word clauses read, as
+ *  literal words -- exported so `CommandBar.tsx` can hand it to `grounded.
+ *  ts`'s `groundDays` (that file's own header doc: a verb/word list travels
+ *  IN, never imported, so the pure file stays swappable) the same way
+ *  `GROUNDING_VERBS` already hands `groundReading` its verb lists. Full
+ *  weekday names (nobody SAYS the three-letter abbreviations `WEEKDAY_ABBR`
+ *  prints), "today"/"tomorrow"/"yesterday", `REPEAT_WORDS`, and this lane's
+ *  own `UNASSIGN_WEEK_PHRASES` -- an ISO date is checked separately, by
+ *  shape, not as a literal word (`groundDays`' own regex). */
+export const DAY_GROUNDING_WORDS: readonly string[] = [
+  "today",
+  "tomorrow",
+  "yesterday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+  ...REPEAT_WORDS,
+  ...UNASSIGN_WEEK_PHRASES,
+];
+
 function extractRepeatDayClause(text: string): { rest: string; day: DayWord; text: string } | null {
   const m = text.match(REPEAT_DAY_RE);
-  if (!m || m.index === undefined) return null;
-  const kind: "weekdays" | "every_day" = /^every\s+day$/i.test(m[1]) ? "every_day" : "weekdays";
-  const week: "this_week" | "next_week" = m[2] && /next/i.test(m[2]) ? "next_week" : "this_week";
-  return { rest: removeMatch(text, m), day: { kind, week }, text: m[0].trim() };
+  if (m && m.index !== undefined) {
+    const kind: "weekdays" | "every_day" = /^every\s+day$/i.test(m[1]) ? "every_day" : "weekdays";
+    const week: "this_week" | "next_week" = m[2] && /next/i.test(m[2]) ? "next_week" : "this_week";
+    return { rest: removeMatch(text, m), day: { kind, week }, text: m[0].trim() };
+  }
+  // S72-e (F-224): the week-only phrases are legal ONLY on an unassign or
+  // absence sentence (this regex's own doc, above) -- checked here, second,
+  // so "every day"/"every weekday"/"weekdays" (unconditional, every intent)
+  // still wins when both would match. The absence grammar never opens with
+  // an UNASSIGN_VERB (it opens with the operator's own name), so it needs
+  // its own check here too, or "Sam is off this week" never reaches this
+  // branch at all (found breaking the guard's own §3 sentence list, S72-e
+  // review).
+  if (UNASSIGN_VERB_RE.test(text) || ABSENCE_RE.test(text)) {
+    const wm = text.match(UNASSIGN_WEEK_ONLY_RE);
+    if (wm && wm.index !== undefined) {
+      const week: "this_week" | "next_week" = /next/i.test(wm[0]) ? "next_week" : "this_week";
+      return { rest: removeMatch(text, wm), day: { kind: "every_day", week }, text: wm[0].trim() };
+    }
+  }
+  return null;
 }
 
-/** S58 (R-416): reattaches the repeat-day clause `extractRepeatDayClause`
- *  stripped, once the finished command's intent is known -- legal ONLY on
- *  an assign or a booking (D132 item 5); everywhere else, `bad_day`. A
- *  `several`'s inner commands are always assign or move (S50) or assign or
- *  book (S41-a's own several), so the same per-command rule is applied to
- *  each in turn. */
+/** S58 (R-416), widened S72-e (F-224, R-435): reattaches the repeat-day
+ *  clause `extractRepeatDayClause` stripped, once the finished command's
+ *  intent is known -- legal on an assign, a booking (D132 item 5) or an
+ *  unassign (S72-e); everywhere else, `bad_day`. A `several`'s inner
+ *  commands are always assign or move (S50) or assign or book (S41-a's own
+ *  several) or unassign (R-407's own several, EV-series), so the same
+ *  per-command rule is applied to each in turn. */
 function applyRepeatDay(result: ParseResult, repeat: { day: DayWord; text: string }): ParseResult {
   if (!result.ok) return result;
   if (result.command.intent === "several") {
@@ -3850,7 +3964,7 @@ function applyRepeatDay(result: ParseResult, repeat: { day: DayWord; text: strin
 }
 
 function applyRepeatDayToSingle(cmd: Command, repeat: { day: DayWord; text: string }): ParseResult {
-  if (cmd.intent !== "assign" && cmd.intent !== "book") {
+  if (cmd.intent !== "assign" && cmd.intent !== "book" && cmd.intent !== "unassign") {
     return { ok: false, failure: { kind: "bad_day", text: repeat.text } };
   }
   if (cmd.day !== null) {
@@ -3858,6 +3972,14 @@ function applyRepeatDayToSingle(cmd: Command, repeat: { day: DayWord; text: stri
       ok: false,
       failure: { kind: "two_days", first: repeat.text, second: dayToCanonicalText(cmd.day) },
     };
+  }
+  // S72-e (F-224, §1): "clear Cell 5 this week until Friday" names two
+  // different removal spans at once -- the `until` clause (R-409) stays
+  // exactly as it is, never silently overridden or silently dropped, so the
+  // combination is `bad_day`, the same refusal `two_days` gives an ordinary
+  // day conflict.
+  if (cmd.intent === "unassign" && cmd.until !== null) {
+    return { ok: false, failure: { kind: "bad_day", text: repeat.text } };
   }
   return { ok: true, command: { ...cmd, day: repeat.day } };
 }
@@ -4123,7 +4245,11 @@ function formatUnassignCommand(command: UnassignCommand): string {
     }
   }
   if (command.day) {
-    parts.push("on", dayToCanonicalText(command.day));
+    // S72-e (F-224): a repeat day prints WITHOUT the "on" prefix, same as
+    // assign/book (`isRepeatDay`, above) -- the printed clause has to match
+    // exactly what `extractRepeatDayClause`/`UNASSIGN_WEEK_ONLY_RE` look
+    // for, or the round trip breaks.
+    parts.push(...(isRepeatDay(command.day) ? [] : ["on"]), dayToCanonicalText(command.day));
   }
   // R-402/R-404: a shift or boundary clause in place of the hours -- `span`
   // is null whenever `shift` is not (the type's own invariant). A paired
