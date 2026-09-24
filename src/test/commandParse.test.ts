@@ -584,9 +584,15 @@ describe("commandParse: F-133 the day word after the hours / F-134 the afternoon
     });
   });
 
-  it("P31: expectedShape() gains [on <day>] after the time clause in every clause", () => {
+  // CONTRACT CHANGED (R-459, S72-d, CLAUDE.md §4): `expectedShape()` used to
+  // be four grammar alternatives strung together with angle brackets -- this
+  // pin exercised the day clause landing in all four. R-459 retired that
+  // reference-card shape for one worked example, plain English, no angle
+  // brackets; the day clause (and every other clause) is proven by the
+  // grammar's own parse tests, never by this string.
+  it("P31: expectedShape() is one plain worked example, no angle brackets (R-459)", () => {
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]",
+      "Say who, where and when, like: assign Sam Patel to Cell 1 today from 8 am to 4 pm.",
     );
   });
 
@@ -772,12 +778,11 @@ describe("commandParse: S41-a book-a-job worked examples", () => {
     expect(parseCommand("schedule Sam to Housing A on Cell 1 from 10 to 2")).toEqual(ok(expected));
   });
 
-  it("B11: expectedShape() is the exact two-shape sentence", () => {
-    // S41-b adds a third clause and S41-c a fourth (contract changed twice
-    // now, CLAUDE.md §4) -- see MV10 in the move describe block below for
-    // the full four-shape text.
+  // CONTRACT CHANGED (R-459, S72-d): see P31's own note -- one plain worked
+  // example now, never a growing reference card.
+  it("B11: expectedShape() is one plain worked example, no angle brackets (R-459)", () => {
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]",
+      "Say who, where and when, like: assign Sam Patel to Cell 1 today from 8 am to 4 pm.",
     );
   });
 });
@@ -873,10 +878,11 @@ describe("commandParse: S41-b unassign worked examples", () => {
     expect(parseCommand(formatCommand(u2.command))).toEqual(u2);
   });
 
-  it("U8: expectedShape() is the exact three-clause sentence", () => {
-    // S41-c adds a fourth clause (contract changed again) -- see MV10 below.
+  // CONTRACT CHANGED (R-459, S72-d): see P31's own note -- one plain worked
+  // example now, never a growing reference card.
+  it("U8: expectedShape() is one plain worked example, no angle brackets (R-459)", () => {
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]",
+      "Say who, where and when, like: assign Sam Patel to Cell 1 today from 8 am to 4 pm.",
     );
   });
 
@@ -1024,9 +1030,11 @@ describe("commandParse: S41-c move worked examples", () => {
     expect(parseCommand(formatCommand(mv3.command))).toEqual(mv3);
   });
 
-  it("MV10: expectedShape() is the exact four-clause sentence", () => {
+  // CONTRACT CHANGED (R-459, S72-d): see P31's own note -- one plain worked
+  // example now, never a growing reference card.
+  it("MV10: expectedShape() is one plain worked example, no angle brackets (R-459)", () => {
     expect(expectedShape()).toBe(
-      "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]",
+      "Say who, where and when, like: assign Sam Patel to Cell 1 today from 8 am to 4 pm.",
     );
   });
 

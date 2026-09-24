@@ -269,7 +269,13 @@ const P1_RETIME_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 f
  *  `[on <day>]` after its time clause too, now that the day word may come
  *  after the hours. */
 const SHAPE =
-  "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]";
+  "I did not understand that. Say who, where and when, like: assign Sam Patel to Cell 1 today from 8 am to 4 pm.";
+// R-459: `expectedShape()`'s own raw text -- what `failureToStatus` appends
+// after naming the offending word ("I could not read "X". ..."), never
+// carrying the "I did not understand that." lead-in `SHAPE` (above) has,
+// which only the no-word-at-all fallback prints.
+const RAW_SHAPE =
+  "Say who, where and when, like: assign Sam Patel to Cell 1 today from 8 am to 4 pm.";
 /** S41-a: RB1's sentence -- book, no run in the way, on/in/from 6 to 2. */
 const BOOK_SENTENCE = "book Housing A on Cell 1 in Line 1 from 6 to 2";
 /** S41-b: RU1's sentence -- names BLK1 exactly. */
@@ -495,8 +501,8 @@ function statusText(): string {
  * carry `aria-live="polite"`.
  *
  * CP-7 (CONTRACT CHANGED, CLAUDE.md §4, session 178, found by the typed
- * walk): a LOT's last word -- "Done: N commands." or "Did k of N; the next
- * failed: …" -- is filed into the thread the moment the lot finishes, the
+ * walk): a LOT's last word -- "Done, N things." or "Did k of N things; the
+ * next failed: …" (R-459) -- is filed into the thread the moment the lot finishes, the
  * same order a single's readout takes (CP-5), so the fifteen lot cases that
  * read it from `statusText()` read it from here now, and the live line is
  * empty once the turn is filed. It used to stay live as a second copy.
@@ -601,7 +607,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(status).not.toMatch(/\d{4}-\d{2}-\d{2}/);
     expect(status).toContain(dayLabel);
     expect(status).toBe(
-      `Operator 1 → Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · ${dayLabel} · 10:00–14:00`,
+      `Operator 1 is on Cell 1 in Line 1 ${dayLabel} from 10 am to 2 pm, making Housing A.`,
     );
   });
 
@@ -658,7 +664,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe(`I could not read "10:75". ${SHAPE}`);
+    expect(statusText()).toBe(`I could not read "10:75". ${RAW_SHAPE}`);
   });
 
   // C7 (CONTRACT CHANGED, CLAUDE.md §4, R-437): this used to pin that Enter
@@ -701,7 +707,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "A Housing A job is already booked on Cell 1, Housing A 08:00–16:00. Join it, or make a separate block?",
+      "A Housing A job is already booked on Cell 1, Housing A 8 am to 4 pm. Join it, or make a separate block?",
     );
     expect(screen.getByRole("button", { name: "Housing A 08:00–16:00" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
@@ -726,7 +732,9 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
     expect(resolved.target).toEqual({ kind: "run", runId: "run1" });
-    expect(resolved.readout.endsWith("· joining Housing A 08:00–16:00")).toBe(true);
+    expect(resolved.readout.endsWith("Joining the Housing A 8 am to 4 pm job already there.")).toBe(
+      true,
+    );
 
     cleanup();
     const second = renderBar({ runs: [RUN1] });
@@ -749,7 +757,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "Operator 1 is already on Housing A at Cell 1 10:00–14:00. Change it to 10:00–15:00, or add a separate block?",
+      "Operator 1 is already on Housing A at Cell 1 10 am to 2 pm. Change it to 10 am to 3 pm, or add a separate block?",
     );
     expect(screen.getByRole("button", { name: "Change 10:00–14:00" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
@@ -780,7 +788,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     // S63-a review fix (CP-5, CLAUDE.md §4): a synchronous write is filed
     // (and the live line cleared) in the same tick it happens -- the readout
     // reads from the thread now, not the live status line.
-    expect(resolved.readout).toContain("· changing 10:00–14:00");
+    expect(resolved.readout).toContain("Changing the block that ran 10 am to 2 pm.");
     expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
@@ -802,7 +810,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Separate block" }));
 
     expect(statusText()).toBe(
-      "A Housing A job is already booked on Cell 1, Housing A 08:00–16:00. Join it, or make a separate block?",
+      "A Housing A job is already booked on Cell 1, Housing A 8 am to 4 pm. Join it, or make a separate block?",
     );
     fireEvent.click(screen.getByRole("button", { name: "Housing A 08:00–16:00" }));
     expect(second.onOpen).toHaveBeenCalledTimes(1);
@@ -821,7 +829,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     // S47 / R-395: one candidate ("Separate block") -- the message now
     // gains the yes/no suffix (CB-yes-1's rule applies to block_exists too).
     expect(statusText()).toBe(
-      "Operator 1 is already on Housing A at Cell 1 10:00–14:00 — nothing to change. Add a separate block?" +
+      "Operator 1 is already on Housing A at Cell 1 10 am to 2 pm — nothing to change. Add a separate block?" +
         " — say or type yes to do it, no to leave it.",
     );
     expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
@@ -861,7 +869,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "A Housing A job is already booked on Cell 1 08:00–16:00. Change it to 06:00–14:00, or pick other hours?",
+      "A Housing A job is already booked on Cell 1 8 am to 4 pm. Change it to 6 am to 2 pm, or pick other hours?",
     );
     expect(screen.getByRole("button", { name: "Change 08:00–16:00" })).toBeTruthy();
     expect(onBook).not.toHaveBeenCalled();
@@ -889,7 +897,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "Cell 1 already runs Cover 08:00–16:00; a cell runs one job at a time. Pick other hours, or change that job on the board.",
+      "Cell 1 already runs Cover 8 am to 4 pm; a cell runs one job at a time. Pick other hours, or change that job on the board.",
     );
     expect(screen.queryAllByRole("button")).toHaveLength(0);
     expect(onBook).not.toHaveBeenCalled();
@@ -934,7 +942,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     // S47 / R-395: one candidate ("Remove it") -- the message now gains the
     // yes/no suffix (CB-yes-1).
     expect(statusText()).toBe(
-      "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?" +
+      "Remove Operator 1's Housing A block on Cell 1, 10 am to 2 pm?" +
         " — say or type yes to do it, no to leave it.",
     );
     expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
@@ -1101,7 +1109,7 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
 
     expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
     expect(statusText()).toBe(
-      "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00? — say or type yes to do it, no to leave it.",
+      "Remove Operator 1's Housing A block on Cell 1, 10 am to 2 pm? — say or type yes to do it, no to leave it.",
     );
   });
 
@@ -1411,7 +1419,7 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     fireEvent.change(second.input, { target: { value: "yes" } });
     fireEvent.keyDown(second.input, { key: "Enter" });
     expect(needsDecision).toHaveBeenCalledTimes(1);
-    expect(statusText()).toBe("The pop-up needs a decision first.");
+    expect(statusText()).toBe("Answer the window that is open first.");
     expect(second.input.value).toBe("yes");
 
     cleanup();
@@ -1537,7 +1545,7 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     await act(async () => {});
     expect(reader).toHaveBeenCalledTimes(1);
     expect(statusText()).toBe(
-      "A Housing A job is already booked on Cell 1, Housing A 08:00–16:00. Join it, or make a separate block?",
+      "A Housing A job is already booked on Cell 1, Housing A 8 am to 4 pm. Join it, or make a separate block?",
     );
     // The placeholder names what this question actually takes -- never "yes",
     // which it does not (reviewer fix A's other half).
@@ -1630,7 +1638,7 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     fireEvent.keyDown(second.input, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
     fireEvent.change(second.input, { target: { value: "no" } });
     fireEvent.keyDown(second.input, { key: "Enter" });
     expect(statusText()).toBe("Left it.");
@@ -1676,7 +1684,7 @@ describe("CB-else: a wrong or missing cell offers the person's blocks elsewhere 
 
     expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blkC2"] });
     expect(statusText()).toBe(
-      "Operator 1 has no block on Cell 1 10:00–14:00, but has one on Cell 2: Housing A 10:00–14:00. Remove that one?" +
+      "Operator 1 has no block on Cell 1 10 am to 2 pm, but has one on Cell 2: Housing A 10 am to 2 pm. Remove that one?" +
         " — say or type yes to do it, no to leave it.",
     );
 
@@ -1696,7 +1704,7 @@ describe("CB-else: a wrong or missing cell offers the person's blocks elsewhere 
 
     expect(onMove).not.toHaveBeenCalled();
     expect(onHighlight).toHaveBeenLastCalledWith({ kind: "move", assignmentIds: ["blkC2"] });
-    expect(statusText()).toContain("Move that one to 10:00–15:00?");
+    expect(statusText()).toContain("Move that one to 10 am to 3 pm?");
     expect(screen.getByRole("button", { name: "Move it" })).toBeTruthy();
 
     fireEvent.change(input, { target: { value: "yes" } });
@@ -1736,7 +1744,7 @@ describe("CB-else: a wrong or missing cell offers the person's blocks elsewhere 
     expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
     expect(statusText()).not.toContain("but has");
     expect(statusText()).toBe(
-      "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00? — say or type yes to do it, no to leave it.",
+      "Remove Operator 1's Housing A block on Cell 1, 10 am to 2 pm? — say or type yes to do it, no to leave it.",
     );
   });
 });
@@ -1796,7 +1804,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "1 of 2: Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?" +
+      "1 of 2: Remove Operator 1's Housing A block on Cell 1, 10 am to 2 pm?" +
         " — say or type yes to do it, no to leave it.",
     );
     expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blk1"] });
@@ -1804,7 +1812,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
 
     expect(statusText()).toBe(
-      "2 of 2: Remove Sam Patel's Housing A block on Cell 1, 10:00–14:00?" +
+      "2 of 2: Remove Sam Patel's Housing A block on Cell 1, 10 am to 2 pm?" +
         " — say or type yes to do it, no to leave it.",
     );
     expect(onHighlight).toHaveBeenLastCalledWith({ kind: "remove", assignmentIds: ["blkSp"] });
@@ -1813,10 +1821,10 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
 
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
     expect(statusText()).toBe(
-      "2 commands ready: " +
-        `1. Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · ${dayLabel} · 10:00–14:00; ` +
-        `2. Removing Sam Patel's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · ${dayLabel} · 10:00–14:00` +
-        " — say or type yes to do them, no to leave them.",
+      "Ready to do 2 things: " +
+        `1. Operator 1 is off Cell 1 in Line 1 ${dayLabel}; that was 10 am to 2 pm, making Housing A.; ` +
+        `2. Sam Patel is off Cell 1 in Line 1 ${dayLabel}; that was 10 am to 2 pm, making Housing A.` +
+        " Say yes to do them, or no.",
     );
     expect(onHighlight).toHaveBeenLastCalledWith([
       { kind: "remove", assignmentIds: ["blk1"] },
@@ -1825,7 +1833,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
   });
 
-  it("CB-lot-2: yes + Enter calls onRunLot with two ResolvedUnassign in order and shows 'Done: 2 commands.' with the input cleared", async () => {
+  it("CB-lot-2: yes + Enter calls onRunLot with two ResolvedUnassign in order and shows 'Done, 2 things.' with the input cleared", async () => {
     const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
       done: resolved.length,
       error: null,
@@ -1846,7 +1854,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.change(input, { target: { value: "yes" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -1895,7 +1903,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     // reverted." at all, that F-154 fix's own clean half) reads verbatim.
     await waitFor(() =>
       expect(threadText()).toContain(
-        `Did 1 of 2; the next failed: boom. The 1 done stayed: ${renderedReadout(resolvedList[0].readout)}.`,
+        `Did 1 of 2 things; the next failed: boom. What was already done stayed: ${renderedReadout(resolvedList[0].readout)}.`,
       ),
     );
     // Not "boom.." -- the bar doesn't add a period on top of the message's
@@ -1935,7 +1943,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     // line, which is empty once the turn is filed.
     await waitFor(() =>
       expect(threadText()).toContain(
-        "Did 1 of 2; the next failed: Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
+        "Did 1 of 2 things; the next failed: Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
       ),
     );
     expect(threadText()).not.toContain("try the split again");
@@ -1958,11 +1966,11 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
     // Once, in the thread; nothing left on the live line (found by the typed
-    // walk, session 178: "Done: 2 commands." used to stay live as a second
+    // walk, session 178: "Done, 2 things." used to stay live as a second
     // copy, and every sentence after a lot inherited a stale live turn).
-    expect(threadText().split("Done: 2 commands.").length).toBe(2);
+    expect(threadText().split("Done, 2 things.").length).toBe(2);
     expect(statusText()).toBe("");
     expect(input.value).toBe("");
   });
@@ -1984,7 +1992,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
 
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
 
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
     expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
   });
 
@@ -1995,7 +2003,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "1 of 2: Operator 1 has no block on Cell 1 10:00–14:00, but has one on Cell 2: Housing A 10:00–14:00. Remove that one?" +
+      "1 of 2: Operator 1 has no block on Cell 1 10 am to 2 pm, but has one on Cell 2: Housing A 10 am to 2 pm. Remove that one?" +
         " — say or type yes to do it, no to leave it.",
     );
 
@@ -2007,7 +2015,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
 
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
 
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
   });
 
   it("CB-lot-6: 'remove it' at the lot status is answered in place, no onRunLot", () => {
@@ -2017,12 +2025,12 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
 
     fireEvent.change(input, { target: { value: "remove it" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe("That is a lot of 2 commands; say yes to do them all, or no.");
+    expect(statusText()).toBe("That is 2 things at once; say yes to do them all, or no.");
     expect(onRunLot).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
   });
@@ -2034,7 +2042,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
       fireEvent.keyDown(input, { key: "Enter" });
       fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
       fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
-      expect(statusText()).toMatch(/^2 commands ready: /);
+      expect(statusText()).toMatch(/^Ready to do 2 things: /);
       return { input, onUnassign, onHighlight };
     }
 
@@ -2069,7 +2077,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     // to type `${LOT_REMOVE_SENTENCE}x` and expect the lot gone.
     ({ input, onHighlight } = reachLotStatus());
     fireEvent.change(input, { target: { value: `${LOT_REMOVE_SENTENCE}x` } });
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     expect(statusText()).toBe("");
     expect(onHighlight).toHaveBeenLastCalledWith(null);
@@ -2137,7 +2145,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+    await waitFor(() => expect(statusText()).toMatch(/^Ready to do 2 things: /));
     expect(onHighlight).toHaveBeenLastCalledWith([
       { kind: "remove", assignmentIds: ["blk1"] },
       { kind: "retime", assignmentIds: ["blkSp"] },
@@ -2190,7 +2198,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect(onRunLot).toHaveBeenCalledTimes(1);
 
     resolveRunLot!({ done: 2, error: null });
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
   });
 
   it("CB-lot-11: two commands naming the same block drop the lot with the collision message", () => {
@@ -2207,7 +2215,9 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
 
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
 
-    expect(statusText()).toBe("Commands 1 and 2 name the same block; say them one at a time.");
+    expect(statusText()).toBe(
+      "Those two lines (1 and 2) are about the same block; say them one at a time.",
+    );
     expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 
@@ -2236,7 +2246,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect(statusText()).toBe("Working…");
 
     resolveRunLot!({ done: 2, error: null });
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
   });
 
   it("CB-lot-13: a typed edit during Working… is ignored -- the input stays unchanged", async () => {
@@ -2266,7 +2276,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect(statusText()).toBe("Working…");
 
     resolveRunLot!({ done: 2, error: null });
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
     expect(input.value).toBe("");
   });
 });
@@ -2470,14 +2480,14 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
     expect(onHighlight).toHaveBeenLastCalledWith([
       { kind: "remove", assignmentIds: ["xblk1"] },
       { kind: "remove", assignmentIds: ["xblk2"] },
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -2496,10 +2506,10 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "cover Sam with Ana on Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -2531,7 +2541,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "That would be 101 changes; say a smaller span — one cell, or one day.",
+      "That would be 101 things at once; say a smaller place or span (up to 100 at a time).",
     );
     expect(screen.queryAllByRole("button")).toHaveLength(0);
     expect(onOpen).not.toHaveBeenCalled();
@@ -2575,7 +2585,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "cover Sam with Ana on Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+    await waitFor(() => expect(statusText()).toMatch(/^Ready to do 2 things: /));
   });
 
   it("CB-x-7: a lot over six shows five and a count of the rest; six or fewer show every one", () => {
@@ -2584,7 +2594,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText().startsWith("8 commands ready: 1. ")).toBe(true);
+    expect(statusText().startsWith("Ready to do 8 things: 1. ")).toBe(true);
     expect(statusText()).toContain("… and 3 more");
     expect(statusText()).not.toContain("6. ");
 
@@ -2594,7 +2604,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(three.input, { target: { value: "clear Cell 1 today" } });
     fireEvent.keyDown(three.input, { key: "Enter" });
 
-    expect(statusText().startsWith("3 commands ready: 1. ")).toBe(true);
+    expect(statusText().startsWith("Ready to do 3 things: 1. ")).toBe(true);
     expect(statusText()).toContain("3. ");
     expect(statusText()).not.toContain("more");
   });
@@ -2664,10 +2674,10 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
 
     // The answer re-resolved the LOT's own step 2 -- the lot is now whole,
     // not a fresh single-command question against the original sentence.
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -2700,7 +2710,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "Sam's Housing A 22:00–06:00 block on Cell 1 crosses midnight and matches no shift; split it at midnight first, or say the shift.",
+      "Sam's Housing A 10 pm to 6 am block on Cell 1 crosses midnight and matches no shift; split it at midnight first, or say the shift.",
     );
   });
 
@@ -2746,8 +2756,8 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^2 commands ready: /);
-    expect(statusText()).toContain("1. John Kim · Cell 1 · ends 00:00, was 06:00");
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
+    expect(statusText()).toContain("1. John Kim's block on Cell 1 now ends midnight; it was 6 am.");
   });
 
   it("CB-x-10: an ambiguous SECOND person on a replace fills `with`, never `operator`, and the lot appears once picked", () => {
@@ -2780,7 +2790,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     // empty after every ... button press" -- the completed form goes into
     // the person's own bubble (`sentence`) now, never back into the box.
     expect(input.value).toBe("");
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
   });
 
   it("CB-x-11: an ambiguous SECOND person on a swap fills `other`, never `operator`", () => {
@@ -2826,7 +2836,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     // note -- the completed sentence goes into the person's bubble now,
     // never back into the box.
     expect(input.value).toBe("");
-    expect(statusText()).toMatch(/^4 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 4 things: /);
   });
 
   it("CB-x-12: Escape, a cancel word and a typed edit each drop an EXPANDED lot exactly as a raw several does (S51 CB-lot-7, replayed over expandCommand)", () => {
@@ -2834,7 +2844,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
       const rendered = renderXBar({ assignments: [XBLK1, XBLK2] });
       fireEvent.change(rendered.input, { target: { value: "clear Cell 1 today" } });
       fireEvent.keyDown(rendered.input, { key: "Enter" });
-      expect(statusText()).toMatch(/^2 commands ready: /);
+      expect(statusText()).toMatch(/^Ready to do 2 things: /);
       return rendered;
     }
 
@@ -2869,7 +2879,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     // sentence after it is what drops the lot.
     ({ input } = reachExpandedLot());
     fireEvent.change(input, { target: { value: "something else entirely" } });
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     expect(statusText()).toBe("");
     expect(screen.queryAllByRole("button")).toHaveLength(0);
@@ -2903,7 +2913,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "copy yesterday to today for Cell 1" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+    await waitFor(() => expect(statusText()).toMatch(/^Ready to do 2 things: /));
   });
 
   it("CB-x-14: the model path decodes an unassign with `until` (an absence) into the same lot the rules would build", async () => {
@@ -2944,7 +2954,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "Sam is off from today until tomorrow" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+    await waitFor(() => expect(statusText()).toMatch(/^Ready to do 2 things: /));
   });
 
   it("CB-x-15: exactly 100 is a lot (shows five and '… and 95 more'); 101 is still the refusal (CB-x-4)", () => {
@@ -2959,7 +2969,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText().startsWith("100 commands ready: 1. ")).toBe(true);
+    expect(statusText().startsWith("Ready to do 100 things: 1. ")).toBe(true);
     expect(statusText()).toContain("… and 95 more");
     expect(screen.getByRole("button", { name: "Do all 100" })).toBeTruthy();
   });
@@ -2996,11 +3006,11 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "swap Sam and Ana on Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^4 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 4 things: /);
     expect(statusText()).not.toContain("name the same block");
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 4" }));
-    await waitFor(() => expect(threadText()).toContain("Done: 4 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 4 things."));
     expect(onRunLot).toHaveBeenCalledTimes(1);
   });
 
@@ -3048,10 +3058,10 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     // highlight (S51's own `buildLotHighlights` doc: a create/booking names
     // nothing either, and a run removal is the same shape of nothing-to-
     // outline here).
-    expect(statusText()).toMatch(/^3 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 3 things: /);
     expect(statusText()).toContain(
       renderedReadout(
-        "Removing the Housing A job · Plant X › Line X › Cell 1 · 2026-09-03 · 08:00–16:00 · 3 people",
+        "The Housing A job is off Cell 1 2026-09-03; that was 8 am to 4 pm, for 3 people.",
       ),
     );
     expect(onHighlight).toHaveBeenLastCalledWith([
@@ -3060,7 +3070,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 3" }));
-    await waitFor(() => expect(threadText()).toContain("Done: 3 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 3 things."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -3083,12 +3093,12 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^1 commands ready: /);
-    expect(statusText()).toContain("Removing the Housing A job");
+    expect(statusText()).toMatch(/^Ready to do 1 things: /);
+    expect(statusText()).toContain("The Housing A job is off");
     expect(statusText()).not.toContain("has nobody on it");
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 1" }));
-    await waitFor(() => expect(threadText()).toContain("Done: 1 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 1 things."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -3123,10 +3133,10 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     fireEvent.change(input, { target: { value: "split Sam's block at noon" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -3145,7 +3155,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^5 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 5 things: /);
     expect(screen.getByRole("button", { name: "Do all 5" })).toBeTruthy();
   });
 
@@ -3161,7 +3171,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
     // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
     // cleared) the same tick -- the readout reads from the thread now.
-    expect(resolved.readout).toContain("Sam · Cell 1 · ends 15:00, was 14:00");
+    expect(resolved.readout).toContain("Sam's block on Cell 1 now ends 3 pm; it was 2 pm.");
     expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
@@ -3213,7 +3223,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "Housing A runs more than once on Cell 1: 08:00–16:00, 16:00–20:00. Say the hours.",
+      "Housing A runs more than once on Cell 1: 8 am to 4 pm, 4 pm to 8 pm. Say the hours.",
     );
     expect(onOpen).not.toHaveBeenCalled();
   });
@@ -3281,15 +3291,15 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     // a genuine second overlapping block of the same person/part/cell, never
     // exempted by `separate_from` (only XSAM, the block being split, is).
     expect(statusText()).toMatch(/^2 of 2: /);
-    expect(statusText()).toContain("13:00–15:00");
+    expect(statusText()).toContain("1 pm to 3 pm");
 
     fireEvent.click(screen.getByRole("button", { name: "Separate block" }));
 
     // The answer re-resolved the LOT's own step 2 -- the lot is now whole.
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
 
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
     expect(resolvedList.map((r) => r.intent)).toEqual(["move", "assign"]);
@@ -3335,11 +3345,11 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
 
     // Straight to the lot's own "2 commands ready" -- no "Move which?"
     // detour, no numbered "1 of 2: ..." question standing in the way.
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
     expect(statusText()).not.toMatch(/move which/i);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
     expect(resolvedList.map((r) => r.intent)).toEqual(["move", "assign"]);
     const moveStep = resolvedList[0];
@@ -3377,7 +3387,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 });
     // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
     // cleared) the same tick -- the readout reads from the thread now.
-    expect(resolved.readout).toContain("Sam · Cell 1 · ends 15:00, was 14:00");
+    expect(resolved.readout).toContain("Sam's block on Cell 1 now ends 3 pm; it was 2 pm.");
     expect(threadText()).toContain(`Written: ${resolved.readout}`);
   });
 
@@ -3444,7 +3454,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     fireEvent.change(input, { target: { value: "split Sam's block at noon" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(statusText()).toMatch(/^2 commands ready: /));
+    await waitFor(() => expect(statusText()).toMatch(/^Ready to do 2 things: /));
   });
 
   it("CB-y-15: reviewer scenario 6b -- the model path decodes a move with `adjust` set and reaches the single move path, same as the rules (CB-y-3)", async () => {
@@ -3502,7 +3512,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
 
     await waitFor(() =>
       expect(statusText()).toBe(
-        "I could not read that as several commands. Say them one at a time.",
+        "I could not read that as more than one thing. Say them one at a time.",
       ),
     );
     expect(onSetHeadcount).not.toHaveBeenCalled();
@@ -3594,9 +3604,11 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^5 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 5 things: /);
     expect(statusText()).not.toMatch(/and \d+ more/);
-    expect(statusText()).toMatch(/^5 commands ready: 1\. .+; 2\. .+; 3\. .+; 4\. .+; 5\. .+ — say/);
+    expect(statusText()).toMatch(
+      /^Ready to do 5 things: 1\. .+; 2\. .+; 3\. .+; 4\. .+; 5\. .+ Say yes/,
+    );
   });
 
   it("CB-y-20: reviewer scenario 11b -- a seven-command every-day lot shows five and '… and 2 more'", async () => {
@@ -3611,7 +3623,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^7 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 7 things: /);
     expect(statusText()).toContain("… and 2 more");
     expect(screen.getByRole("button", { name: "Do all 7" })).toBeTruthy();
   });
@@ -3627,7 +3639,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
 // -----------------------------------------------------------------------
 
 describe("CB-model: the bar reads through a model reader (S44-b)", () => {
-  it("CB-model-1: a clean model answer opens the popover exactly as the rules would, readout says read by the model", async () => {
+  it("CB-model-1: a clean model answer opens the popover exactly as the rules would, the readout carries no suffix (R-459)", async () => {
     const parsed = parseCommand(P1_SENTENCE);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
@@ -3637,12 +3649,10 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
       by: "model",
     }));
 
-    // S63-a review fix (CP-5, CLAUDE.md §4): the " · read by the model"
-    // suffix lives only on the live, OPTIMISTIC status line (`runCommand`'s
-    // own `suffix` argument -- never stored in `entry.ran`, so the thread's
-    // "Written: …" never carries it) -- `onOpen` is held pending so that
-    // line is still there to read once the model has answered, the same
-    // shape C2/CB-day-1 use.
+    // R-459 (the maintainer, 24 Sept): the " · read by the model" suffix is
+    // gone from the thread entirely -- nothing replaces it. `onOpen` is held
+    // pending so the live status line is still there to read once the model
+    // has answered, the same shape C2/CB-day-1 use.
     const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
     onOpen.mockReturnValue(new Promise(() => {}));
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
@@ -3657,17 +3667,20 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
     expect(resolved.operatorId).toBe("op1");
     expect(resolved.target).toEqual({ kind: "direct", productId: "ha" });
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 });
-    expect(statusText().endsWith(" · read by the model")).toBe(true);
+    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
+    expect(statusText()).toBe(
+      `Operator 1 is on Cell 1 in Line 1 ${dayLabel} from 10 am to 2 pm, making Housing A.`,
+    );
   });
 
-  it("CB-model-2: 'unavailable' falls back to the rules, readout says why", async () => {
+  it("CB-model-2: 'unavailable' falls back to the rules, the readout carries no suffix (R-459)", async () => {
     const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
       ok: false,
       reason: "unavailable",
     }));
-    // S63-a review fix (CP-5, CLAUDE.md §4): see CB-model-1's own identical
-    // note -- the "· read by the rules (…)" suffix only ever lives on the
-    // live, optimistic status line.
+    // R-459: the "· read by the rules (…)" suffix is gone from the thread
+    // entirely -- a rules fallback and a clean model reading print the
+    // identical sentence now.
     const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
     onOpen.mockReturnValue(new Promise(() => {}));
 
@@ -3675,7 +3688,10 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
 
-    expect(statusText()).toContain("· read by the rules (the model service is off)");
+    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
+    expect(statusText()).toBe(
+      `Operator 1 is on Cell 1 in Line 1 ${dayLabel} from 10 am to 2 pm, making Housing A.`,
+    );
   });
 
   it("CB-model-3: a failed parse under 'timeout' is prefixed with why the rules read it", async () => {
@@ -3688,7 +3704,9 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
     fireEvent.change(input, { target: { value: "gibberish" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
-      expect(statusText()).toBe(`The model took too long, so the rules read this: ${SHAPE}`),
+      expect(statusText()).toBe(
+        `I could not reach the voice model, so I read this as typed: ${SHAPE}`,
+      ),
     );
   });
 
@@ -3829,7 +3847,7 @@ describe("CB-ground: the model's reading must be grounded in what was heard (S71
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(statusText()).toContain('Did not run: nothing in "EF76." says');
+    expect(statusText()).toContain('Not done: nothing in "EF76." says');
     expect(statusText()).toContain("Say it again.");
     expect(candidateButtons()).toHaveLength(0);
     expect(onUnassign).not.toHaveBeenCalled();
@@ -3917,7 +3935,11 @@ describe("CB-ground: the model's reading must be grounded in what was heard (S71
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
-    expect(statusText().endsWith(" · read by the model")).toBe(true);
+    // R-459: no suffix at all -- the readout is the plain sentence.
+    const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
+    expect(statusText()).toBe(
+      `Operator 1 is on Cell 1 in Line 1 ${dayLabel} from 10 am to 2 pm, making Housing A.`,
+    );
     expect(candidateButtons()).toHaveLength(0);
   });
 
@@ -4094,9 +4116,7 @@ describe("CB-pm: place_mismatch offers the parent (R-457, F-220)", () => {
     fireEvent.change(input, { target: { value: PM_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe(
-      "There is no Cell 1 in Line 2. Cell 1 is in Line 1 — Plant 1 › Assembly / Line 3 — Plant 1 › Assembly.",
-    );
+    expect(statusText()).toBe("There is no Cell 1 in Line 2. Cell 1 is in Line 1, Line 3.");
     expect(screen.getByRole("button", { name: "Line 1" })).toBeTruthy();
     const line3 = screen.getByRole("button", { name: "Line 3" });
     expect(line3).toBeTruthy();
@@ -4117,9 +4137,7 @@ describe("CB-pm: place_mismatch offers the parent (R-457, F-220)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Line 3" }));
 
     const entry = postedEntry(fetchMock);
-    expect(entry.asked).toBe(
-      "There is no Cell 1 in Line 2. Cell 1 is in Line 1 — Plant 1 › Assembly / Line 3 — Plant 1 › Assembly.",
-    );
+    expect(entry.asked).toBe("There is no Cell 1 in Line 2. Cell 1 is in Line 1, Line 3.");
     expect(entry.answered).toBe("Line 3");
   });
 
@@ -4171,9 +4189,7 @@ describe("CB-pm: place_mismatch offers the parent (R-457, F-220)", () => {
     });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe(
-      "There is no Cell 1 in Zone 9. Cell 1 is in Line 1 — Plant 1 › Zone 1.",
-    );
+    expect(statusText()).toBe("There is no Cell 1 in Zone 9. Cell 1 is in Line 1.");
     const line1Button = screen.getByRole("button", { name: "Line 1" });
 
     fireEvent.click(line1Button);
@@ -4204,17 +4220,13 @@ describe("CB-pm: place_mismatch offers the parent (R-457, F-220)", () => {
     });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe(
-      "1 of 2: There is no Cell 1 in Line 2. Cell 1 is in Line 1 — Plant 1 › Assembly / Line 3 — Plant 1 › Assembly.",
-    );
+    expect(statusText()).toBe("1 of 2: There is no Cell 1 in Line 2. Cell 1 is in Line 1, Line 3.");
     fireEvent.click(screen.getByRole("button", { name: "Line 3" }));
 
     // The lot advances to its SECOND person on the SAME (now corrected)
     // place -- never a write yet (this several has two steps, so a write
     // only happens once both have resolved and "yes" runs the lot).
-    expect(statusText()).toBe(
-      "2 of 2: There is no Cell 1 in Line 2. Cell 1 is in Line 1 — Plant 1 › Assembly / Line 3 — Plant 1 › Assembly.",
-    );
+    expect(statusText()).toBe("2 of 2: There is no Cell 1 in Line 2. Cell 1 is in Line 1, Line 3.");
     expect(onOpen).not.toHaveBeenCalled();
   });
 });
@@ -4326,7 +4338,7 @@ describe("CB-verb: the verb question (R-456, F-222)", () => {
     // `describeVerbGuess`'s own wording for a table hit, never the bare
     // "Did you mean:" a shape-only guess (no word replaced) gets.
     await waitFor(() => expect(statusText()).toBe('I heard "Show up". Did you mean:'));
-    expect(statusText()).not.toContain("Did not run:");
+    expect(statusText()).not.toContain("Not done:");
     const buttons = candidateButtons();
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toBe(guessA.label);
@@ -4784,7 +4796,7 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     expect(onOpen).toHaveBeenCalledTimes(2);
   });
 
-  it('CB-mic-21: a refusal ("Did not run: …") stands, mic pressed -- the refusal is still rendered while Listening… shows', async () => {
+  it('CB-mic-21: a refusal ("Not done: …") stands, mic pressed -- the refusal is still rendered while Listening… shows', async () => {
     const fetchMock = stubFetch();
     const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
       ok: true,
@@ -4806,14 +4818,14 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     fireEvent.change(input, { target: { value: "EF76." } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(statusText()).toContain("Did not run:");
+    expect(statusText()).toContain("Not done:");
 
     fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
 
-    expect(statusText()).toContain("Did not run:");
+    expect(statusText()).toContain("Not done:");
     fire.status("listening");
     expect(screen.getByText("Listening…")).toBeTruthy();
-    expect(statusText()).toContain("Did not run:");
+    expect(statusText()).toContain("Not done:");
   });
 
   it("CB-mic-22: a one-button question stands, mic pressed -- the question and its button are still rendered while Listening… shows; the press still writes", async () => {
@@ -5065,7 +5077,7 @@ describe("CB-confirm: the floor's own confirm/cancel words (S59, F-150)", () => 
       fireEvent.keyDown(input, { key: "Enter" });
       fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
       fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
-      expect(statusText()).toMatch(/^2 commands ready: /);
+      expect(statusText()).toMatch(/^Ready to do 2 things: /);
 
       fireEvent.change(input, { target: { value: word } });
       fireEvent.keyDown(input, { key: "Enter" });
@@ -5092,7 +5104,7 @@ describe("CB-confirm: the floor's own confirm/cancel words (S59, F-150)", () => 
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
     fire.final("Yes.");
@@ -5418,7 +5430,7 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
       days: [...monToSat, { index: 6, iso: "2026-09-06", weekday: 0 as const }],
       todayIndex: 0,
     });
-    expect(statusText()).toMatch(/^5 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 5 things: /);
     expect(screen.queryByRole("button", { name: "Show that day" })).toBeNull();
     expect(onOpen).not.toHaveBeenCalled(); // a lot waits for its own yes
   });
@@ -5476,7 +5488,7 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
       expect(entry.asked).toBe("Moved the board to yesterday.");
       expect(entry.answered).toBe("auto");
       expect(entry.outcome).toBe("refused: Could not load yesterday.");
-      expect(threadText()).toContain("Refused: Could not load yesterday.");
+      expect(threadText()).toContain("Not done: Could not load yesterday.");
     } finally {
       vi.useRealTimers();
       vi.unstubAllGlobals();
@@ -5642,6 +5654,41 @@ describe("CB-unknown: nearest names as buttons (S59, R-418's message)", () => {
       const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
       expect(resolved.nodeId).toBe("c2");
     });
+  });
+
+  it("CB-unknown-3b (S72-d review, R-459): a REAL place suggestion carries an arrow-path `label` from `placeLabel` -- the button must show `word` (the bare name), never it", () => {
+    // CB-unknown-3 above never caught this: its mock candidate sets
+    // `label` equal to `word` ("Cell 2"/"Cell 2"), which the real resolver
+    // never does for a place -- `nodeSuggestions`/`trackCellSuggestions`
+    // (resolve.ts) build a place candidate's `label` from `placeLabel`, an
+    // ancestor-chain path ("Cell 2 — Plant 1 › Assembly › Line 1"), kept for
+    // an off-screen id/key only (the doc on `cellDisplayName`, resolve.ts).
+    // This candidate is shaped the way the REAL resolver actually returns
+    // one, to prove the button reads the bare name and nothing with a "›"
+    // or "—" in it ever reaches the screen (R-459: no arrow, no chain).
+    withUnknownSuggestions(
+      "place",
+      [{ id: "c2", label: "Cell 2 — Plant 1 › Assembly › Line 1", word: "Cell 2" }],
+      () => {
+        const { input, onOpen } = renderBar();
+        fireEvent.change(input, {
+          target: { value: "assign Operator 1 to Housing A on Zzznotacell in Line 1 from 10 to 2" },
+        });
+        fireEvent.keyDown(input, { key: "Enter" });
+
+        expect(statusText()).toBe(
+          'No place called "Zzznotacell" on this board. Did you mean one of these?',
+        );
+        // The button's own accessible name is the bare name -- a query for
+        // the path-shaped label must find nothing at all.
+        expect(screen.queryByRole("button", { name: /›|—/ })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Cell 2" }));
+
+        expect(onOpen).toHaveBeenCalledTimes(1);
+        const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+        expect(resolved.nodeId).toBe("c2");
+      },
+    );
   });
 
   it("CB-unknown-4: no suggestions (today's real resolver) keeps the plain message and no buttons", () => {
@@ -6049,7 +6096,7 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     fireEvent.change(input, { target: { value: "yes" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    await waitFor(() => expect(threadText()).toContain("Done: 2 commands."));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const entry = postedEntry(fetchMock);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -6549,7 +6596,7 @@ describe("CB-day: the readout's ISO day renders in the plant's own zone (F-153)"
 // This pin is now just the "stayed" clause, same as CB-lot-3's "boom" case,
 // against a message shaped the way a real certificate refusal reads.
 describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-154)", () => {
-  it("CB-lot-fail-1: 'Did 1 of 2; the next failed: <message>. The 1 done stayed: <readout>.'", async () => {
+  it("CB-lot-fail-1: 'Did 1 of 2 things; the next failed: <message>. What was already done stayed: <readout>.'", async () => {
     const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
       done: 1,
       error: "Tom Baker is not certified for Cell 1: missing Welding.",
@@ -6569,7 +6616,7 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
 
     await waitFor(() =>
       expect(threadText()).toContain(
-        `Did 1 of 2; the next failed: Tom Baker is not certified for Cell 1: missing Welding. The 1 done stayed: ${renderedReadout(resolved[0].readout)}.`,
+        `Did 1 of 2 things; the next failed: Tom Baker is not certified for Cell 1: missing Welding. What was already done stayed: ${renderedReadout(resolved[0].readout)}.`,
       ),
     );
     expect(threadText()).not.toContain("reverted");
@@ -6645,7 +6692,7 @@ describe("CB-ans: the answer box (F-162)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+      "Not done: Operator 1 is not certified for Cell 1, missing Welding. Say the reason to schedule anyway, or no.",
     );
     expect(input.value).toBe("");
     expect(input.placeholder).toBe("the reason, or no");
@@ -6801,7 +6848,7 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
-    expect(statusText()).toMatch(/^2 commands ready: /);
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
     expect(onRunLot).toHaveBeenCalledTimes(1);
@@ -6809,14 +6856,14 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
       settle({ done: 1, error: "That person belongs to a different part of the structure." });
     });
 
-    expect(threadText()).toContain("Did 1 of 2; the next failed:");
+    expect(threadText()).toContain("Did 1 of 2 things; the next failed:");
     const entry = postedEntry(fetchMock);
     // The one thing the maintainer's own trace could not tell him. CP-7
     // (session 178): the outcome is the whole sentence the thread shows, the
     // "stayed" clause included, so this reads the failure's own words rather
     // than the exact string.
     expect(entry.outcome).toContain(
-      "Did 1 of 2; the next failed: That person belongs to a different part of the structure.",
+      "Did 1 of 2 things; the next failed: That person belongs to a different part of the structure.",
     );
     // And only the step that actually ran.
     expect(entry.ran).toHaveLength(1);
@@ -6906,7 +6953,7 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     );
     expect(entry.ran).toEqual([]);
     expect(document.body.textContent).toContain(
-      "Refused: That person does not belong to this part of the structure.",
+      "Not done: That person does not belong to this part of the structure.",
     );
   });
 
@@ -7128,7 +7175,7 @@ describe("CB-w: the four silent writers answer for real (F-168)", () => {
     await act(async () => {});
 
     expect(onUnassign).toHaveBeenCalledTimes(1);
-    expect(threadText()).toContain("Refused: You don't have permission to change that.");
+    expect(threadText()).toContain("Not done: You don't have permission to change that.");
     const entry = postedEntry(fetchMock);
     expect(entry.outcome).toBe("refused: You don't have permission to change that.");
     expect(entry.ran).toEqual([]);
@@ -7148,7 +7195,7 @@ describe("CB-w: the four silent writers answer for real (F-168)", () => {
     await act(async () => {});
 
     expect(onRetime).toHaveBeenCalledTimes(1);
-    expect(threadText()).toContain("Refused: That block is no longer on the board.");
+    expect(threadText()).toContain("Not done: That block is no longer on the board.");
     const entry = postedEntry(fetchMock);
     expect(entry.outcome).toBe("refused: That block is no longer on the board.");
     expect(entry.ran).toEqual([]);
@@ -7168,7 +7215,7 @@ describe("CB-w: the four silent writers answer for real (F-168)", () => {
     await act(async () => {});
 
     expect(onRetimeRun).toHaveBeenCalledTimes(1);
-    expect(threadText()).toContain("Refused: That job is no longer on the board.");
+    expect(threadText()).toContain("Not done: That job is no longer on the board.");
     const entry = postedEntry(fetchMock);
     expect(entry.outcome).toBe("refused: That job is no longer on the board.");
     expect(entry.ran).toEqual([]);
@@ -7189,7 +7236,7 @@ describe("CB-w: the four silent writers answer for real (F-168)", () => {
     expect(onMove).toHaveBeenCalledTimes(1);
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.target).toEqual({ kind: "retime" });
-    expect(threadText()).toContain("Refused: You cannot place anyone on this board.");
+    expect(threadText()).toContain("Not done: You cannot place anyone on this board.");
     const entry = postedEntry(fetchMock);
     expect(entry.outcome).toBe("refused: You cannot place anyone on this board.");
     expect(entry.ran).toEqual([]);
@@ -7212,7 +7259,7 @@ describe("CB-w: the four silent writers answer for real (F-168)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
     await act(async () => {});
 
-    expect(threadText()).toContain("Refused: no answer from the writer");
+    expect(threadText()).toContain("Not done: no answer from the writer");
     const entry = postedEntry(fetchMock);
     expect(entry.outcome).toBe("refused: no answer from the writer");
     expect(entry.ran).toEqual([]);
@@ -7325,7 +7372,7 @@ describe("CB-tr: the entry closes on R-434's four named paths", () => {
     // already uses: file the turn, THEN set the live status -- CB-mic-7's
     // own pin, unchanged by this fix).
     expect(statusText()).toBe("Nothing was heard.");
-    expect(threadText()).toContain("Refused: Nothing was heard.");
+    expect(threadText()).toContain("Not done: Nothing was heard.");
     const entry = postedEntry(fetchMock);
     expect(entry.heard).toBe("");
     expect(entry.outcome).toBe("refused: Nothing was heard.");
@@ -7366,7 +7413,7 @@ describe("CB-tr: the entry closes on R-434's four named paths", () => {
     // "Working…" is untouched -- the dropped sentence never fights the lot
     // for the live status line.
     expect(statusText()).toBe("Working…");
-    expect(threadText()).toContain("Refused: a lot was still writing; the sentence was dropped");
+    expect(threadText()).toContain("Not done: a lot was still writing; the sentence was dropped");
     const entry = postedEntry(fetchMock);
     expect(entry.heard).toBe("gibberish");
     expect(entry.outcome).toBe("refused: a lot was still writing; the sentence was dropped");
@@ -7417,7 +7464,7 @@ describe("CB-tr: the entry closes on R-434's four named paths", () => {
     // every other exit `submitText` has.
     expect((input as HTMLInputElement).value).toBe("");
     expect(threadText()).toContain("a sentence typed ahead of the click");
-    expect(threadText()).toContain("Refused: a lot was still writing; the sentence was dropped");
+    expect(threadText()).toContain("Not done: a lot was still writing; the sentence was dropped");
     const entry = postedEntry(fetchMock);
     expect(entry.heard).toBe("a sentence typed ahead of the click");
 
@@ -7442,7 +7489,7 @@ describe("CB-tr: the entry closes on R-434's four named paths", () => {
       (el) => (el.textContent ?? "") === "",
     );
     expect(empty).toHaveLength(0);
-    expect(threadText()).toContain("Refused: Nothing was heard.");
+    expect(threadText()).toContain("Not done: Nothing was heard.");
     const entry = postedEntry(fetchMock);
     expect(entry.heard).toBe("");
   });
@@ -7629,7 +7676,7 @@ describe("CH: the conversation thread (R-427)", () => {
     await act(async () => {});
 
     expect(document.body.textContent).toContain(
-      "Refused: That person does not belong to this part of the structure.",
+      "Not done: That person does not belong to this part of the structure.",
     );
   });
 
@@ -7651,7 +7698,7 @@ describe("CH: the conversation thread (R-427)", () => {
     await act(async () => {});
 
     expect(document.body.textContent).toContain(
-      "Refused: Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
+      "Not done: Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
     );
     expect(document.body.textContent).not.toContain("try the split again");
   });
@@ -7970,7 +8017,7 @@ describe("CP: a finished turn is bubbles, not prefixed lines (R-428)", () => {
 
     const log2 = document.querySelector('[class*="threadBody"]');
     expect(log2?.getAttribute("role")).toBe("log");
-    expect(log2?.textContent).toContain("Refused: Nope.");
+    expect(log2?.textContent).toContain("Not done: Nope.");
     expect(statusText()).toBe("");
   });
 });
@@ -8003,7 +8050,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+      "Not done: Operator 1 is not certified for Cell 1, missing Welding. Say the reason to schedule anyway, or no.",
     );
   });
 
@@ -8024,7 +8071,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
     expect(resolved.override).toEqual({ reason: "Covering an absence" });
-    expect(statusText()).toContain("· override: Covering an absence");
+    expect(statusText()).toContain("The reason given: Covering an absence.");
   });
 
   it("CB-nc-3: a bare confirm word re-asks -- 'Say the reason, not yes.', nothing runs", () => {
@@ -8063,7 +8110,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe("Operator 1 is not certified for Cell 1: missing Welding.");
+    expect(statusText()).toBe("Not done: Operator 1 is not certified for Cell 1, missing Welding.");
 
     // No reason is offered or accepted -- this is ordinary text now, which
     // fails to parse as a sentence (the shape hint), never an override.
@@ -8098,7 +8145,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
       fireEvent.keyDown(input, { key: "Enter" });
 
       expect(statusText()).toBe(
-        "Operator 1 is not certified for Cell 1: missing Welding. Nothing was written.",
+        "Not done: Operator 1 is not certified for Cell 1, missing Welding. Nothing changed.",
       );
 
       fireEvent.change(input, { target: { value: "Covering an absence" } });
@@ -8146,7 +8193,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(statusText()).toBe(
-      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+      "Not done: Operator 1 is not certified for Cell 1, missing Welding. Say the reason to schedule anyway, or no.",
     );
 
     fireEvent.change(input, { target: { value: "covering for Sam" } });
@@ -8154,7 +8201,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     // The certificate answer is kept, so the second question is a NEW one --
     // never the first asked again.
     expect(statusText()).toBe(
-      "Operator 1 is not from Cell 1's area. Say the reason to schedule anyway, or no.",
+      "Not done: Operator 1 is not from Cell 1's area. Say the reason to schedule anyway, or no.",
     );
     expect(onOpen).not.toHaveBeenCalled();
 
@@ -8167,8 +8214,8 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     expect(resolved.areaOverride).toEqual({ reason: "short-handed on Line 1" });
     // S62-b reviewer fix (E): the readout named only the LAST reason given,
     // so a block written with two overrides read as if it carried one.
-    expect(statusText()).toContain("· override: covering for Sam");
-    expect(statusText()).toContain("· area override: short-handed on Line 1");
+    expect(statusText()).toContain("The reason given: covering for Sam.");
+    expect(statusText()).toContain("The area reason given: short-handed on Line 1.");
   });
 
   // CB-nc-8 (F-197, R-425/R-434, the spoken walk 22 Sept): typed, a reason
@@ -8193,7 +8240,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(statusText()).toBe(
-      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+      "Not done: Operator 1 is not certified for Cell 1, missing Welding. Say the reason to schedule anyway, or no.",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
@@ -8201,7 +8248,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     // the two bugs: the guard used to preserve only a `blockHighlight`
     // question).
     expect(statusText()).toBe(
-      "Operator 1 is not certified for Cell 1: missing Welding. Say the reason to schedule anyway, or no.",
+      "Not done: Operator 1 is not certified for Cell 1, missing Welding. Say the reason to schedule anyway, or no.",
     );
 
     // An interim result while the reason is still being spoken (the second

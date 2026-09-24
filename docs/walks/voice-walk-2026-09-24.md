@@ -120,15 +120,23 @@ per model:
 "Hint" means the model is told the board's own words (the names, the verbs) before it listens; that is
 what the app does today.
 
+The small.en rows were scored on the round's 44 clips; the five clears the maintainer spoke after the
+round pushed the scorer's window, so every later model is scored on all 49 clips since the round began
+(the five later ones have references of their own), and small.en is rerun on the 49 when it is back.
+
 | Model | Hint | Words wrong per 100 | Names heard right | Word-perfect clips | Seconds to answer | In short |
 |---|---|---|---|---|---|---|
 | small.en (today's default) | yes | 16 | 83 of 88 | 17 of 44 | 6.7 | The one to beat |
 | small.en | no | 26 | 55 of 88 | 11 of 44 | 4.8 | The hint is worth a third of the errors and a third of the names |
 | small.en, yesterday's clips | yes | 19 | 69 of 78 | 11 of 36 | 5.7 | Yesterday's round, for comparison; the mic was quieter |
-| tiny.en | yes | waiting for the swap | | | | |
-| base.en | yes | waiting for the swap | | | | |
-| medium.en-q5_0 | yes | waiting for the swap | | | | |
-| large-v3-turbo-q5_0 | yes | waiting for the swap | | | | |
+| tiny.en (49 clips) | yes | 38 | 76 of 93 | 5 of 49 | 1.1 | Six times faster, twice the errors; out |
+| tiny.en (49 clips) | no | 68 | 21 of 93 | 3 of 49 | 1.6 | Useless without the hint |
+| base.en (49 clips) | yes | 24 | 78 of 93 | 10 of 49 | 1.9 | Half the errors of tiny, still well behind small.en |
+| base.en (49 clips) | no | 40 | 34 of 93 | 8 of 49 | 2.0 | |
+| medium.en-q5_0 (49 clips) | yes | 14 | 86 of 93 | 19 of 49 | 16.7 | The most accurate so far, and the slowest: a 17 s wait |
+| medium.en-q5_0 (49 clips) | no | 24 | 62 of 93 | 10 of 49 | 19.5 |  |
+| large-v3-turbo-q5_0 (49 clips) | yes | 20 | 79 of 93 | 18 of 49 | 25.1 | Behind small.en and medium, and the slowest of all; out (same verdict as 23 Sept) |
+| large-v3-turbo-q5_0 (49 clips) | no | 25 | 58 of 93 | 12 of 49 | 22.6 |  |
 
 **Where the 16 words per 100 went.** Nearly all of them are the first word of the sentence: "end" came
 back as "and" four times out of five, "swap" as "show up", "assign" as "sign" or "a sign", "split ...

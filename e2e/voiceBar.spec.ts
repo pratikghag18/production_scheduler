@@ -22,8 +22,23 @@ const OPERATOR = "Sam Patel";
 const PRODUCT = "Housing A";
 const FIXED_SENTENCE = `Assign ${OPERATOR} to ${PRODUCT} on Cell 1 in Line 1 from 9 to 11 tomorrow`;
 const FREE_SENTENCE = `could you put ${OPERATOR} on ${PRODUCT} at Cell 1 tomorrow between 9 and 11`;
-const READ_BY_MODEL = / · read by the model$/;
-const READ_BY_RULES_OFF = / · read by the rules \(the model service is off\)$/;
+// R-459 (S72-d, 24 Sept, reviewer fix): the " · read by the model"/" · read
+// by the rules (...)" suffix these two regexes matched is gone from the
+// thread/status line entirely (CommandBar.tsx's own `runCommand` call sites
+// no longer pass it) -- the trace's own `by`/`model` fields still record
+// which engine answered (R-459: "the trace keeps its own compact form"),
+// but nothing on screen says so any more, so a regex anchored on that
+// suffix can never match again. This file is GATED (VOICE_E2E=1, a live
+// voice container, and the dev server started with VITE_VOICE_URL=/voice)
+// and was not run as part of this fix -- doing so would have meant
+// restarting the maintainer's own dev server, which CLAUDE.local.md
+// forbids. Cases 1/2/3 below now assert only that the OLD suffix is gone
+// (still real evidence the R-459 change reached this path), not which
+// engine answered -- recovering that distinction on screen would need a
+// new, deliberate signal (or a trace-file read, `typedWalk.spec.ts`'s own
+// pattern), a decision for whoever owns this file next, not a quiet guess
+// here.
+const OLD_READ_BY_SUFFIX = / · read by the (?:model|rules \([^)]*\))$/;
 
 /** Sign in through the real form -- copied from roleWalk.spec.ts's helper. */
 async function signIn(page: Page, email: string, path = "/"): Promise<void> {
@@ -75,7 +90,9 @@ test.describe.serial("voice bar, against the real model service", () => {
     await expect(dialog).toContainText(OPERATOR);
     await expect(dialog).toContainText("09:00");
     await expect(dialog).toContainText("11:00");
-    await expect(statusLine(page)).toHaveText(READ_BY_MODEL);
+    await expect
+      .poll(async () => (await statusLine(page).textContent()) ?? "")
+      .not.toMatch(OLD_READ_BY_SUFFIX);
     await dialog.getByRole("button", { name: "Cancel" }).click(); // do not create the block
   });
 
@@ -87,7 +104,9 @@ test.describe.serial("voice bar, against the real model service", () => {
 
     const dialog = page.getByRole("dialog", { name: "New" });
     await expect(dialog).toBeVisible({ timeout: 30_000 });
-    await expect(statusLine(page)).toHaveText(READ_BY_MODEL);
+    await expect
+      .poll(async () => (await statusLine(page).textContent()) ?? "")
+      .not.toMatch(OLD_READ_BY_SUFFIX);
     await dialog.getByRole("button", { name: "Cancel" }).click();
   });
 
@@ -109,7 +128,9 @@ test.describe.serial("voice bar, against the real model service", () => {
 
       const dialog = page.getByRole("dialog", { name: "New" });
       await expect(dialog).toBeVisible({ timeout: 30_000 });
-      await expect(statusLine(page)).toHaveText(READ_BY_RULES_OFF);
+      await expect
+        .poll(async () => (await statusLine(page).textContent()) ?? "")
+        .not.toMatch(OLD_READ_BY_SUFFIX);
       await dialog.getByRole("button", { name: "Cancel" }).click();
     } finally {
       const opts = { detached: true, stdio: "ignore" as const, shell: true };

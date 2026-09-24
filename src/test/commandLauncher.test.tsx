@@ -606,7 +606,7 @@ describe("CB-keep: closing the panel never loses the conversation (F-163)", () =
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
     const listing = statusLine()?.textContent ?? "";
-    expect(listing.startsWith("2 commands ready: ")).toBe(true);
+    expect(listing.startsWith("Ready to do 2 things: ")).toBe(true);
 
     // R-429: closing is the header's own "Close" button now -- a mousedown
     // outside no longer closes anything (CL-5, CB-keep-4 above).

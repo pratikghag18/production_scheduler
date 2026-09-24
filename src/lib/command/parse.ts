@@ -4589,6 +4589,15 @@ export function formatCommand(command: Command): string {
 
 /** The one sentence the bar shows when parsing fails (brief §3: the three
  *  shapes in one sentence, S41-b adds the third, S41-c a fourth). */
+/** R-459 (S72-d brief §2): this used to be four grammar alternatives strung
+ *  together with angle brackets ("assign <person> to <part> on <cell> ...")
+ *  -- a developer's reference card, never a sentence a supervisor reads.
+ *  R-456's verb guess now answers any sentence that named a shape but the
+ *  wrong (or no) verb, so what reaches this at all is a sentence with no
+ *  shape whatsoever; one worked example is plainer than four half-read
+ *  grammars. `CommandBar.tsx`'s `failureToStatus` leads with this, either
+ *  after naming the word it could not read, or on its own ("I did not
+ *  understand that. ..."). */
 export function expectedShape(): string {
-  return "Say it like: assign <person> to <part> on <cell> [in <line>] [on <day>] from <time> to <time> [on <day>] — or: book <part> on <cell> [in <line>] [for <n> people] [on <day>] from <time> to <time> [on <day>] — or: unassign <person> from <cell> [in <line>] [on <day>] [from <time> to <time> [on <day>]] — or: move <person> on <cell> [in <line>] [to <cell> [in <line>]] [on <day>] [from <time> to <time> [on <day>]]";
+  return "Say who, where and when, like: assign Sam Patel to Cell 1 today from 8 am to 4 pm.";
 }

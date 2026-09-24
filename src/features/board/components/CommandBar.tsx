@@ -201,10 +201,12 @@ export interface LotResult {
  * with an empty string. That is fine, on purpose: the guess is never run
  * unseen. `applyReading`'s own success path hands the model's `command`
  * (guessed part included) to `runCommand`, whose readout is what actually
- * shows on screen, suffixed " · read by the model" -- the person sees the
- * GUESSED part named in that readout, exactly the same as any other model
- * reading, before anything is written (`onOpen`/`onBook`/etc. still wait on
- * the pop-up or a further confirm). A future training pass that teaches the
+ * shows on screen -- the person sees the GUESSED part named in that
+ * readout, exactly the same as any other model reading, before anything is
+ * written (`onOpen`/`onBook`/etc. still wait on the pop-up or a further
+ * confirm). R-459: this readout no longer carries a "read by the model"
+ * suffix -- the thread says only the fact, never how it was read. A future
+ * training pass that teaches the
  * model this shape (S56's successor) only ever needs to start emitting
  * `product: ""` itself -- this file needs no change either way, since it
  * already renders whatever `resolveCommand` answers.
@@ -773,13 +775,14 @@ function isTargetOnBoard(
  */
 function turnResultLine(turn: HistoryTurn): string {
   const outcome = turn.outcome;
-  // CP-7 (session 178): a LOT's last word is its own sentence -- "Done: N
-  // commands." or "Did k of N; the next failed: … The k done stayed: …" --
-  // and it is the thread's result line, the readouts that landed after it.
-  // Before this, `ran` won and a lot that stopped at step two read
-  // "Written: <step one>" with nothing saying why it stopped (F-154's
-  // lesson, lost again on the way from the live line to the thread).
-  if (outcome !== null && (outcome.startsWith("Done: ") || outcome.startsWith("Did "))) {
+  // CP-7 (session 178): a LOT's last word is its own sentence -- "Done, N
+  // things." or "Did k of N things; the next failed: … What was already
+  // done stayed: …" (R-459) -- and it is the thread's result line, the
+  // readouts that landed after it. Before this, `ran` won and a lot that
+  // stopped at step two read "Written: <step one>" with nothing saying why
+  // it stopped (F-154's lesson, lost again on the way from the live line to
+  // the thread).
+  if (outcome !== null && (outcome.startsWith("Done, ") || outcome.startsWith("Did "))) {
     return turn.ran.length > 0 ? `${outcome} Written: ${turn.ran.join("; ")}` : outcome;
   }
   if (turn.ran.length > 0) return `Written: ${turn.ran.join("; ")}`;
@@ -803,11 +806,15 @@ function turnResultLine(turn: HistoryTurn): string {
     // and `bar.jsonl`'s record of what happened) -- only the rendered
     // SECOND bubble is what disappears.
     if (turn.asked !== null && message === turn.asked) return "";
-    return `Refused: ${message}`;
+    // R-459: every refusal leads with "Not done:" (the register's own
+    // example, CLAUDE.md §0/this lane's brief) -- this is the ONE place a
+    // genuine write-time refusal (a cap, an RLS reason, a resize guard) is
+    // turned into the thread's own last line, so the prefix lives here once.
+    return `Not done: ${message}`;
   }
   // F-167: the pop-up was closed without writing -- neither done nor refused.
   if (outcome === "cancelled") return "Cancelled";
-  return `Refused: ${outcome}`;
+  return `Not done: ${outcome}`;
 }
 
 /**
@@ -959,7 +966,10 @@ function failureToStatus(failure: ParseFailure): Status {
   if (failure.kind === "no_split_time") {
     return { kind: "shape", message: `Say where to split — "at noon".` };
   }
-  return { kind: "shape", message: shape };
+  // R-459: no shape was read at all -- "I did not understand that." plus the
+  // one worked example (`expectedShape`, parse.ts), never the old four-
+  // grammar reference card.
+  return { kind: "shape", message: `I did not understand that. ${shape}` };
 }
 
 /**
@@ -1941,7 +1951,7 @@ export function CommandBar({
         lotRef.current = null;
         setStatus({
           kind: "shape",
-          message: "I could not read that as several commands. Say them one at a time.",
+          message: "I could not read that as more than one thing. Say them one at a time.",
         });
         return;
       }
@@ -2095,7 +2105,7 @@ export function CommandBar({
       lotRef.current = null;
       setStatus({
         kind: "shape",
-        message: `Commands ${dup[0]} and ${dup[1]} name the same block; say them one at a time.`,
+        message: `Those two lines (${dup[0]} and ${dup[1]}) are about the same block; say them one at a time.`,
       });
       return;
     }
@@ -2103,13 +2113,19 @@ export function CommandBar({
     // S55 (brief §4): unchanged for a lot of up to 6 (every existing CB-lot
     // case pins this small format); above it, the first 5 numbered readouts
     // followed by a count of the rest -- `expandCommand` can hand back many
-    // more than a person would ever read one by one, and the "N commands
-    // ready" question and the outline (`buildLotHighlights`, below) already
+    // more than a person would ever read one by one, and the "Ready to do N
+    // things" question and the outline (`buildLotHighlights`, below) already
     // say what the whole lot touches.
     const shown = n > 6 ? lot.done.slice(0, 5) : lot.done;
     const readouts = shown.map((r, i) => `${i + 1}. ${renderReadout(r.readout)}`).join("; ");
     const readoutText = n > 6 ? `${readouts}; … and ${n - 5} more` : readouts;
-    const message = `${n} commands ready: ${readoutText} — say or type yes to do them, no to leave them.`;
+    // R-459 (§0's own lot example): "Ready to do N things: ... Say yes to do
+    // them, or no." -- never "commands" (a developer's word for a sentence).
+    // R-459: `readoutText`'s last item already ends in its own period (every
+    // readout sentence does) -- a second, hardcoded one here would print
+    // "making Housing A.. Say yes ..." Say yes joins with a leading space,
+    // never its own leading period.
+    const message = `Ready to do ${n} things: ${readoutText} Say yes to do them, or no.`;
     setStatus({
       kind: "question",
       message,
@@ -2124,8 +2140,8 @@ export function CommandBar({
 
   /**
    * S51 (brief §2 item 3): the lot's single "yes" -- a busy status while
-   * `onRunLot` is in flight, then either "Done: N commands." (input
-   * cleared) or "Did k of N; the next failed: <error>" (input kept). The
+   * `onRunLot` is in flight, then either "Done, N things." (input
+   * cleared) or "Did k of N things; the next failed: <error>" (input kept). The
    * lot is dropped either way: a half-answered lot never lingers once its
    * one question has been answered.
    *
@@ -2173,7 +2189,7 @@ export function CommandBar({
       // finished. `runLotNow` used to call `finishTrace()` here and set the
       // failure status AFTER it, so the maintainer's trace listed three of
       // four readouts and NOTHING said why the fourth stopped. `asked`
-      // already holds the lot's "N commands ready" question, so the result
+      // already holds the lot's "Ready to do N things" question, so the result
       // goes in `outcome` -- the same sentence the status line shows.
       // CR-1 (reviewer fix, S63 review): `result.error` is "the same wording
       // a toast would show" (`LotResult`'s own doc) -- the identical
@@ -2194,19 +2210,23 @@ export function CommandBar({
       // more. CR-1: except the ONE shape `rewriteCapRefusal` rewrites
       // (`lotError`, above) -- the bar has no split to offer here either.
       const stayedReadouts = resolved.slice(0, result.done).map((r) => renderReadout(r.readout));
+      // R-459 (§0's own register): "Done, N things." on a clean sweep,
+      // "Nothing changed." never applies here (a lot's partial failure
+      // keeps what it already wrote, R-432's own "reverted" case is a
+      // different shape) -- what already ran is named, never claimed undone.
       const stayed =
         stayedReadouts.length > 0
-          ? ` The ${result.done} done stayed: ${stayedReadouts.join("; ")}.`
+          ? ` What was already done stayed: ${stayedReadouts.join("; ")}.`
           : "";
       const lotOutcome =
         lotError === null
-          ? `Done: ${n} commands.`
-          : `Did ${result.done} of ${n}; the next failed: ${lotError}${stayed}`;
+          ? `Done, ${n} things.`
+          : `Did ${result.done} of ${n} things; the next failed: ${lotError}${stayed}`;
       if (traceRef.current) traceRef.current.outcome = lotOutcome;
       // CP-7 (session 178, found by the typed walk): the status is set
       // BEFORE the entry is finished, the same order `settleWrite` uses, so
       // `fileTurn` clears it and the lot's last word is on screen ONCE, in
-      // the thread. It used to be set after, so "Done: 2 commands." stayed
+      // the thread. It used to be set after, so "Done, 2 things." stayed
       // on the live line as a second copy of the filed turn, and the walk's
       // count of turns was one too high for every sentence that followed a
       // lot. The trace's `outcome` and the thread's result line are the same
@@ -2221,19 +2241,14 @@ export function CommandBar({
     });
   }
 
-  /** S44-b: the three "why the rules read this instead" phrases, shared by
-   *  the readout suffix and the failure-message prefix below. */
-  function whyForReason(reason: "unavailable" | "timeout" | "garbled"): string {
-    if (reason === "unavailable") return "the model service is off";
-    if (reason === "timeout") return "the model took too long";
-    return "the model's answer was not a form";
-  }
-
-  /** S44-b: `"the model service is off"` -> `"The model service is off, so
-   *  the rules read this: "` -- the same phrase, capitalised, as a prefix. */
-  function failurePrefixForReason(reason: "unavailable" | "timeout" | "garbled"): string {
-    const why = whyForReason(reason);
-    return `${why.charAt(0).toUpperCase()}${why.slice(1)}, so the rules read this: `;
+  /** R-459 (the maintainer, 24 Sept, this lane's decision on the wording
+   *  table's own unsure row): one fixed lead-in, regardless of which of the
+   *  three reasons (`unavailable`/`timeout`/`garbled`) sent this sentence to
+   *  the rules -- a supervisor does not need to know WHY the voice model
+   *  did not answer, only that it did not. `traceModelField` (below) still
+   *  records the specific reason for the trace. */
+  function failurePrefixForReason(_reason: "unavailable" | "timeout" | "garbled"): string {
+    return "I could not reach the voice model, so I read this as typed: ";
   }
 
   /**
@@ -2311,18 +2326,21 @@ export function CommandBar({
       askDayDropped(sentence, parsed.command, dayGrounding.phrase);
       return;
     }
-    runCommand(
-      parsed.command,
-      reason === null ? undefined : ` · read by the rules (${whyForReason(reason)})`,
-    );
+    // R-459 (the maintainer, 24 Sept): the "· read by the rules (...)"
+    // suffix used to be appended to the readout here whenever a down model
+    // sent this path to the rules instead -- dropped from the thread
+    // entirely, nothing replaces it (the trace's own `model` field, set by
+    // `traceModelField`, still records why).
+    runCommand(parsed.command);
   }
 
   /** S59-e (brief §2/§3): the trace entry's own `model` field for `result`
    *  -- the raw answer when the reader got far enough to have one (a form,
    *  or a garbled answer past "no message content"), the plain reason
    *  otherwise. `readSentence.ts`'s own `reason`s map onto the brief's own
-   *  words ("no service", "timeout", "network") rather than the readout's
-   *  phrasing (`whyForReason`), which is written for a person, not a log. */
+   *  words ("no service", "timeout", "network") rather than the thread's
+   *  own fixed lead-in (`failurePrefixForReason`), which is written for a
+   *  person, not a log. */
   function traceModelField(result: Reading): TraceEntry["model"] {
     if (result.ok) return { raw: result.raw ?? "" };
     if (result.reason === "garbled" && result.raw !== undefined) return { raw: result.raw };
@@ -2343,7 +2361,9 @@ export function CommandBar({
    * own last word, same as `cancelStanding`'s "Left it." does).
    */
   function refuseUngrounded(sentence: string, command: Command, versPhrase: string): void {
-    const message = `Did not run: nothing in "${sentence}" says ${versPhrase}. Say it again.`;
+    // R-459 (the maintainer, 24 Sept): every refusal leads with "Not done:",
+    // this one included.
+    const message = `Not done: nothing in "${sentence}" says ${versPhrase}. Say it again.`;
     if (traceRef.current) {
       traceRef.current.read = formatCommand(command);
       traceRef.current.asked = message;
@@ -2430,7 +2450,7 @@ export function CommandBar({
       // unchanged only when it is GROUNDED -- the heard text names its own
       // intent, in some spelling `parse.ts` itself accepts. Checked here,
       // before `runCommand` ever sees it, so neither a write nor a lot's
-      // own "N commands ready" can stand on a reading nothing in the
+      // own "Ready to do N things" can stand on a reading nothing in the
       // sentence actually said.
       const grounding = groundReading(sentence, result.command, GROUNDING_VERBS);
       if (!grounding.ok) {
@@ -2462,7 +2482,10 @@ export function CommandBar({
         askDayDropped(sentence, result.command, dayGrounding.phrase);
         return;
       }
-      runCommand(result.command, " · read by the model");
+      // R-459: the "· read by the model" suffix used to be appended to the
+      // readout here -- dropped from the thread entirely (the trace's own
+      // `model` field still records the raw model answer).
+      runCommand(result.command);
       return;
     }
     fallbackToRules(sentence, result.reason === "no-service" ? null : result.reason);
@@ -2720,12 +2743,6 @@ export function CommandBar({
   }
 
   function questionToStatus(question: Question, command: Command): Status {
-    // S55 (R-406 to R-410, D130/brief §3): the bar's own words for the seven
-    // new `expandCommand` questions -- plainer, or with fields
-    // `describeQuestion`'s generic sentence does not carry, than the
-    // resolver's own wording (which still backs every OTHER kind below,
-    // unchanged). No candidates on any of these (brief §3): a cancel word or
-    // fresh typing clears them exactly as any other question does.
     // `nothing_to_do` is a plain READOUT, not a question at all -- the text
     // as the resolver wrote it (brief §3, D130 item 1).
     //
@@ -2747,155 +2764,47 @@ export function CommandBar({
       if (traceRef.current) traceRef.current.outcome = `refused: ${rendered}`;
       return { kind: "readout", message: rendered };
     }
-    if (question.kind === "lot_too_big") {
-      return {
-        kind: "question",
-        message: `That would be ${question.count} changes; say a smaller span — one cell, or one day.`,
-        candidates: [],
-      };
-    }
-    if (question.kind === "split_needed") {
-      return {
-        kind: "question",
-        message: `${question.person}'s ${question.block} block on ${question.cell} runs across both sides of ${question.span}; say a span that reaches one end of it.`,
-        candidates: [],
-      };
-    }
-    // F-152 review follow-up (the maintainer, 16 Sept): a block that
-    // genuinely crosses a day boundary and matches no shift band -- never
-    // the window's own bounds (untrue and unanswerable for a whole-day
-    // window's "00:00-00:00"). `question.hours` (the block's own real
-    // span) stays on the question for the trace/tests, but the text itself
-    // drops it -- `question.block` already carries the hours in its own
-    // label, so printing both said them twice (the maintainer, wording
-    // trim, 16 Sept).
-    if (question.kind === "across_midnight") {
-      return {
-        kind: "question",
-        message: `${question.person}'s ${question.block} block on ${question.cell} crosses midnight and matches no shift; split it at midnight first, or say the shift.`,
-        candidates: [],
-      };
-    }
-    if (question.kind === "swap_which") {
-      return {
-        kind: "question",
-        message: `${question.person} has more than one block ${question.when}: ${question.blocks.join(", ")}. Say the hours.`,
-        candidates: [],
-      };
-    }
-    if (question.kind === "day_order") {
-      return {
-        kind: "question",
-        message: `${question.second} is before ${question.first}; say the days the other way round.`,
-        candidates: [],
-      };
-    }
-    if (question.kind === "no_start") {
-      return {
-        kind: "question",
-        message: `Say when it starts — "from 10", say.`,
-        candidates: [],
-      };
-    }
-    if (question.kind === "no_shift_at") {
-      return {
-        kind: "question",
-        message: `No shift on ${question.cell} covers ${question.time}.`,
-        candidates: [],
-      };
-    }
-    // S61-a (R-425, F-155): the bar's own wording -- `describeQuestion`
-    // carries only a baseline (its own comment: "the bar ... may refine
-    // this further"), and never branches on `inLot` at all, so a lot's own
-    // "warn" refusal (`inLot: true`) would otherwise get the single
-    // sentence's "say the reason" offer, which a lot never honours (R-425:
-    // "a lot never writes half of itself"). No candidates either way --
-    // "warn"/single takes its answer as free TEXT (`awaitingOverrideReason`,
-    // read by `submitText`), never a button; "block" or `inLot: true` accept
-    // nothing at all.
-    if (question.kind === "not_certified") {
-      const missing = question.missing.join(", ");
-      const base = `${question.person} is not certified for ${question.cell}: missing ${missing}.`;
-      if (question.policy === "warn" && !question.inLot) {
-        return {
-          kind: "question",
-          message: `${base} Say the reason to schedule anyway, or no.`,
-          candidates: [],
-          awaitingOverrideReason: true,
-        };
-      }
-      return {
-        kind: "question",
-        message: question.inLot ? `${base} Nothing was written.` : base,
-        candidates: [],
-      };
-    }
-    // F-165 (S62-b): R-425's shape for the AREA rule -- the twin of the
-    // branch above. A single sentence takes the reason as its next answer
-    // (`awaitingAreaReason`, read by `submitText`) and re-resolves with
-    // `{ areaReason }`; a lot is REFUSED before its yes and says nothing was
-    // written (a lot never writes half of itself). No candidates either way:
-    // this question's answer is free text, never a button.
-    if (question.kind === "outside_area") {
-      const base = `${question.person} is not from ${question.cell}'s area.`;
-      if (question.inLot) {
-        return { kind: "question", message: `${base} Nothing was written.`, candidates: [] };
-      }
-      return {
-        kind: "question",
-        message: `${base} Say the reason to schedule anyway, or no.`,
-        candidates: [],
-        awaitingAreaReason: true,
-      };
-    }
-    // S58 (R-412 to R-415, D132/brief §3): the bar's own words for the five
-    // new group-2 `expandCommand`/resolver questions -- plainer, or with
-    // fields `describeQuestion`'s generic sentence does not carry, than the
-    // resolver's own wording (which still backs the resolver-defensive
-    // `bad_adjust`/`bad_repeat_day` kinds below, unchanged). No candidates on
-    // any of these: a cancel word or fresh typing clears them exactly as any
-    // other question does.
-    if (question.kind === "adjust_inverts") {
-      return {
-        kind: "question",
-        message: `${question.person}'s ${question.block} block would end before it starts; say a smaller change.`,
-        candidates: [],
-      };
-    }
-    if (question.kind === "adjust_off_day") {
-      return {
-        kind: "question",
-        message: `${question.person}'s ${question.block} block would leave the day; say a time inside it.`,
-        candidates: [],
-      };
-    }
-    if (question.kind === "split_outside") {
-      return {
-        kind: "question",
-        message: `${question.at} is outside ${question.person}'s block${question.blocks.length > 1 ? "s" : ""} (${question.blocks.join(", ")}); say a time inside one.`,
-        candidates: [],
-      };
-    }
-    if (question.kind === "no_job") {
-      return {
-        kind: "question",
-        message: `There is no ${question.product} job on ${question.cell} ${question.when}; book it first, or say the hours.`,
-        candidates: [],
-      };
-    }
-    if (question.kind === "which_job") {
-      return {
-        kind: "question",
-        message: `${question.product} runs more than once on ${question.cell}: ${question.runs.join(", ")}. Say the hours.`,
-        candidates: [],
-      };
-    }
-    // `expand_first` (brief §3: "should never show") and every existing kind
-    // keep `describeQuestion`'s own wording, unchanged.
     // CU4 (S41-b brief §5): a question's message can carry an ISO day too
     // (`remove_which`/`no_block`'s whole-day `when`) -- the same
     // `renderReadout` substitution the successful-open readout gets.
+    //
+    // R-459 (the maintainer, 24 Sept): `resolve.ts`'s `describeQuestion` is
+    // now the ONE builder for every question sentence -- this used to be
+    // computed further down, after a run of ~10 branches that each kept a
+    // second, hand-written copy of the SAME fact (`lot_too_big`,
+    // `split_needed`, `across_midnight`, `swap_which`, `day_order`,
+    // `no_start`, `no_shift_at`, `adjust_inverts`, `adjust_off_day`,
+    // `split_outside`, `no_job`, `which_job`) -- the very duplicate control
+    // R-449 forbids, and the two copies had already drifted (`split_needed`
+    // read two different ways depending on which one answered). Every kind
+    // below now falls straight through to this one `message`; only
+    // `not_certified`/`outside_area` still need a branch of their own, for
+    // the `awaitingOverrideReason`/`awaitingAreaReason` FLAG (never a second
+    // copy of the text -- both read `message` too).
     const message = renderReadout(describeQuestion(question));
+    // S61-a (R-425, F-155): "warn" (never "block") on a single sentence
+    // (never `inLot` -- a lot is refused before its yes, R-425: "a lot
+    // never writes half of itself") is the ONE shape that takes a reason as
+    // its next answer, free TEXT (`awaitingOverrideReason`, read by
+    // `submitText`), never a button.
+    if (question.kind === "not_certified") {
+      return {
+        kind: "question",
+        message,
+        candidates: [],
+        ...(question.policy === "warn" && !question.inLot ? { awaitingOverrideReason: true } : {}),
+      };
+    }
+    // F-165 (S62-b): R-425's shape for the AREA rule -- the twin of the
+    // branch above.
+    if (question.kind === "outside_area") {
+      return {
+        kind: "question",
+        message,
+        candidates: [],
+        ...(!question.inLot ? { awaitingAreaReason: true } : {}),
+      };
+    }
     if (question.kind === "ambiguous") {
       const field = question.field;
       const text = question.text;
@@ -3022,9 +2931,18 @@ export function CommandBar({
           return {
             kind: "question",
             message: more ? `${whichPartBase} … and more — say the part.` : `${whichPartBase} `,
+            // R-459 review fix (S72-d): `label` used to be `c.label`, which
+            // is a PATH for a place candidate (`nodeSuggestions`/
+            // `trackCellSuggestions`, resolve.ts: "Cell 2 — Plant 1 ›
+            // Assembly ›...", built from `placeLabel`) -- harmless here
+            // (this branch only ever fires for `field === "product"`, whose
+            // own suggestions always carry `label === word`, a plain name),
+            // but the SAME pattern one branch down genuinely showed an
+            // arrow-path on a button; fixed to `c.word` in both places for
+            // the one rule (never two copies of "which field can this be").
             candidates: suggestions.map((c) => ({
               key: c.id,
-              label: c.label,
+              label: c.word,
               action: { kind: "pick_candidate", command, field, candidate: c, text },
             })),
           };
@@ -3033,9 +2951,19 @@ export function CommandBar({
         return {
           kind: "question",
           message: `No ${fieldNoun} called "${text}" on this board. Did you mean one of these?${moreTail}`,
+          // R-459 review fix (S72-d, CB-unknown-3b pin below): this used to
+          // render `c.label` -- for `field === "place"`, a place candidate's
+          // `label` is `placeLabel`'s own arrow-path chain ("Cell 2 — Plant
+          // 1 › Assembly › Line 1"), never a bare name (`nodeSuggestions`,
+          // resolve.ts). `CB-unknown-3`'s own pin never caught this because
+          // its mock (`withUnknownSuggestions`) happened to set `label`
+          // equal to `word`; the REAL resolver's place suggestions never do.
+          // `c.word` is the bare name every other candidate button in this
+          // file shows (`place_mismatch`'s own candidates, just above,
+          // already get this right).
           candidates: suggestions.map((c) => ({
             key: c.id,
-            label: c.label,
+            label: c.word,
             action: { kind: "pick_candidate", command, field, candidate: c, text },
           })),
         };
@@ -3306,7 +3234,8 @@ export function CommandBar({
         onShowDay?.(action.target);
         return;
       case "run_ungrounded":
-        runCommand(action.command, " · read by the model");
+        // R-459: the "· read by the model" suffix is gone from the thread.
+        runCommand(action.command);
         return;
       case "run_sentence":
         // R-456 / F-222 (24 Sept, session 191): the generic candidate-button
@@ -3492,7 +3421,7 @@ export function CommandBar({
     // three open product questions, not "the entry closes" this item asks
     // for. Saying plainly that it was dropped is small, honest (R-434's own
     // rule: never a blank last line) and reversible: the person can simply
-    // say it again once the lot's own "Done: …"/"Did k of N…" turn lands.
+    // say it again once the lot's own "Done, …"/"Did k of N…" turn lands.
     //
     // WR-1 (reviewer, S64-c review): a TYPED sentence can sit in the box
     // through this whole branch -- `handleChange` only blocks an edit once
@@ -3616,12 +3545,14 @@ export function CommandBar({
         // twice, certificate first. The readout used to name only the
         // reason given LAST, so a block written with two overrides read as
         // if it carried one. Both are named, in the order they were asked.
+        // R-459: no "·" in a sentence the bar shows -- each reason is its
+        // own plain clause, appended after the readout's own period.
         const suffixParts: string[] = [];
         if (nextOptions.overrideReason !== undefined) {
-          suffixParts.push(` · override: ${nextOptions.overrideReason}`);
+          suffixParts.push(` The reason given: ${nextOptions.overrideReason}.`);
         }
         if (nextOptions.areaReason !== undefined) {
-          suffixParts.push(` · area override: ${nextOptions.areaReason}`);
+          suffixParts.push(` The area reason given: ${nextOptions.areaReason}.`);
         }
         // R-437: this Enter answered the standing question with a reason --
         // never a new sentence (`sentence` already names the ORIGINAL one,
@@ -3656,7 +3587,7 @@ export function CommandBar({
         const n = lotRef.current?.done.length ?? status.candidates.length;
         setStatus({
           ...status,
-          message: `That is a lot of ${n} commands; say yes to do them all, or no.`,
+          message: `That is ${n} things at once; say yes to do them all, or no.`,
         });
         return;
       }
@@ -3723,7 +3654,7 @@ export function CommandBar({
             return;
           }
           if (result === "needs-decision") {
-            setStatus({ kind: "shape", message: "The pop-up needs a decision first." });
+            setStatus({ kind: "shape", message: "Answer the window that is open first." });
             return;
           }
           // "none" -- nothing on screen wanted it; answered below.

@@ -46,35 +46,40 @@ import {
   type WalkDates,
 } from "./sentences";
 
-const EN_DASH = "–";
-const DOT = " · ";
+/** R-459: a cell's own name in a sentence carries "in <line>" only when the
+ *  board has more than one cell of that name (`cellDisplayName`,
+ *  `resolve.ts`) -- this walk's own board may or may not, so both builders
+ *  below allow either. */
+function cellPhrase(cell: string): string {
+  return `${cell}(?: in [^,.;]+)?`;
+}
 
 /** `Remove <who>'s <part> block on <cell>, <when>? — say or type yes to do
  *  it, no to leave it.` -- the absence grammar's own `remove_which`
  *  question, one candidate (S49/R-409, `resolve.ts`'s `describeQuestion`,
  *  the `q.cell === null` branch: an absence names no cell of its own, so
  *  the ONE candidate names its own), with `CommandBar.tsx`'s own
- *  `YES_SUFFIX` appended for exactly one candidate (`withBlockHighlight`). */
+ *  `YES_SUFFIX` appended for exactly one candidate (`withBlockHighlight`).
+ *  `when` is spoken ("8 am to 10 am"), the same as every other hour this
+ *  file names (R-459) -- never the raw "HH:MM–HH:MM" a board label carries. */
 function removeWhichQuestionRe(who: string, part: string, cell: string, when: string): RegExp {
   return new RegExp(
     `^Remove ${who}'s ${part} block on ${cell}, ${when}\\? — say or type yes to do it, no to leave it\\.$`,
   );
 }
 
-/** `Removing <who>'s <part> block · <chain> · <day> · <when>` -- the same
- *  question answered (`finishRemoval`'s own readout). The chain's own
- *  PLANT/AREA/LINE segments are left loose, the same way `assignReadoutRe`
- *  leaves them (the DATABASE read after is what proves the row is gone). */
+/** `<who> is off <cell>[ in <line>] <day>; that was <when>, making <part>.`
+ *  -- the same question answered (`finishRemoval`'s own readout, R-459). */
 function removedReadoutRe(who: string, part: string, cell: string, when: string): RegExp {
-  return new RegExp(`^Removing ${who}'s ${part} block${DOT}.*${cell}${DOT}.+${DOT}${when}$`);
+  return new RegExp(`^${who} is off ${cellPhrase(cell)} .+; that was ${when}, making ${part}\\.$`);
 }
 
-/** Any "N commands ready: ..." lot listing -- the generic shape every
- *  multi-command turn (split/swap/copy/repeat/clear) settles on, the same
- *  flexible pattern `sentences.ts`'s own copy/repeat/clear entries use
- *  (their own comment: the exact trailing "say or type yes..." suffix is
- *  not the fact under test). */
-const LOT_RE = /^\d+ commands? ready: .+$/;
+/** Any "Ready to do N things: ..." lot listing (R-459) -- the generic shape
+ *  every multi-command turn (split/swap/copy/repeat/clear) settles on, the
+ *  same flexible pattern `sentences.ts`'s own copy/repeat/clear entries use
+ *  (their own comment: the exact trailing "Say yes..." suffix is not the
+ *  fact under test). */
+const LOT_RE = /^Ready to do \d+ things: .+$/;
 
 export function buildSentences2(dates: WalkDates): Sentence[] {
   return [
@@ -103,7 +108,7 @@ export function buildSentences2(dates: WalkDates): Sentence[] {
       answer: "Lena is covering for the Line 1 shortfall today",
       note: "not_certified under warn (Lena lacks Welding, Cell 2 is Line 1): the typed reason re-resolves with eligibility_override -- the DB read after asserts eligibility_override = true.",
       expect:
-        /^Lena Novak is not certified for Cell 2: missing Welding\. Say the reason to schedule anyway, or no\.$/,
+        /^Not done: Lena Novak is not certified for Cell 2, missing Welding\. Say the reason to schedule anyway, or no\.$/,
     },
     {
       say: `Assign John Kim to Common Fastener on Cell 5 in Line 3 from 8am to 12pm ${dates.day}`,
@@ -189,7 +194,8 @@ export function buildSentences2(dates: WalkDates): Sentence[] {
     // block crosses to Priya's Cell 1; Lena is not certified for Cell 1.
     {
       say: `swap Lena Novak and Priya Shah ${dates.day}`,
-      expect: /^Lena Novak is not certified for Cell 1: missing Welding\. Nothing was written\.$/,
+      expect:
+        /^Not done: Lena Novak is not certified for Cell 1, missing Welding\. Nothing changed\.$/,
     },
 
     // 14. A swap that writes -- Maria Lopez (Cell 6) and John Kim (Cell 5,
@@ -223,7 +229,7 @@ export function buildSentences2(dates: WalkDates): Sentence[] {
       say: `Assign John Kim to Housing A on Cell 6 in Line 3 from 4 until end of shift ${dates.day}`,
       note: 'model gap: the rules read "4" as 16:00 (Shift 2, ends 22:00); a model reading may take it literally as 04:00 (Shift 3, ends 06:00 the next day). Both accepted; the table records which one the bar showed.',
       expect: new RegExp(
-        `^John Kim → Housing A${DOT}.*Cell 6${DOT}.+${DOT}(?:16:00${EN_DASH}22:00|04:00${EN_DASH}06:00)(?:${DOT}read by the (?:model|rules \\([^)]*\\)))?$`,
+        `^John Kim is on ${cellPhrase("Cell 6")} .+ from (?:4 pm to 10 pm|4 am to 6 am), making Housing A\\.(?: .+)?$`,
       ),
     },
 
@@ -256,21 +262,25 @@ export function buildSentences2(dates: WalkDates): Sentence[] {
     },
 
     // 18. A repeat day, answered no -- "next week" is off the board (F-158:
-    // the question names the WEEK, Show that day widens to seven days,
-    // Monday to Friday is a lot of five, CB-y-2). Lena Novak's own Cell 2
-    // block (entry 4) is on THIS week, so next week's Cell 4 is untouched
-    // either way. (Not Tom Baker: this entry doesn't need his own block, and
-    // the model-gap mishearing this file's entry 12 already carries is
-    // better kept to one place than risked here too.)
+    // the move names the WEEK, widens to seven days, Monday to Friday is a
+    // lot of five, CB-y-2). Lena Novak's own Cell 2 block (entry 4) is on
+    // THIS week, so next week's Cell 4 is untouched either way. (Not Tom
+    // Baker: this entry doesn't need his own block, and the model-gap
+    // mishearing this file's entry 12 already carries is better kept to one
+    // place than risked here too.)
+    //
+    // R-455 (24 Sept, lane S72-b, d5a8829) retired the "Show that day"
+    // button this used to press: the bar now moves the window on its own,
+    // posts "Moved the board to next week." as one line, and reruns the
+    // held sentence once the new window's data lands -- no press left to
+    // wait on. The plain final regex is proof enough of both steps
+    // (`expectAnswered` in `typedWalk.spec.ts` polls the live status line
+    // and the filed thread turn the move updates in place).
     {
       say: "Assign Lena Novak to Common Fastener on Cell 4 in Line 2 every weekday next week from 9am to 1pm",
       answer: "no",
-      note: "a repeat day must be on the board (R-416); F-158 widens to the week, five commands (Monday-Friday, CB-y-2), and no leaves every one of them unwritten.",
-      expect: {
-        question: /^next week is not on the board\. Move the board to that day first\.$/,
-        button: "Show that day",
-        then: LOT_RE,
-      },
+      note: "a repeat day must be on the board (R-416); F-158 widens to the week, five commands (Monday-Friday, CB-y-2), and no leaves every one of them unwritten. R-455's own move runs with no press.",
+      expect: LOT_RE,
     },
 
     // 19. An absence -- R-409's shape, pinned as it actually behaves rather
@@ -286,8 +296,13 @@ export function buildSentences2(dates: WalkDates): Sentence[] {
       note: "R-409: the absence grammar is an unassign with no cell of its own -- pinned here as remove_which (one candidate still asks, never a silent whole-day wipe): press the one button, then the DB read proves the row gone.",
       expect: {
         button: "Remove it",
-        question: removeWhichQuestionRe("Maria Lopez", "Common Fastener", "Cell 5", "08:00–10:00"),
-        then: removedReadoutRe("Maria Lopez", "Common Fastener", "Cell 5", "08:00–10:00"),
+        question: removeWhichQuestionRe(
+          "Maria Lopez",
+          "Common Fastener",
+          "Cell 5",
+          "8 am to 10 am",
+        ),
+        then: removedReadoutRe("Maria Lopez", "Common Fastener", "Cell 5", "8 am to 10 am"),
       },
     },
 

@@ -68,8 +68,8 @@ let WALK_DAY = "";
 let TOMORROW = "";
 // Within the setup/teardown window (walk day .. walk day + 8) but past the
 // board's own default 3-day window (walk day, +1, +2) -- so it is
-// guaranteed off-board for entry 19's own "Show that day" case, and still
-// cleaned up at the end.
+// guaranteed off-board for entry 19's own day-off-board move (R-455, no
+// button since 24 Sept), and still cleaned up at the end.
 let FAR = "";
 let CLEAN_FROM_MS = 0;
 let CLEAN_TO_MS = 0;
@@ -469,8 +469,11 @@ async function runEntry(page: Page, entry: Sentence): Promise<EntryResult> {
       const after = await recordMismatch(page, entry, `after pressing "${entry.expect.button}"`);
       return { ...after, barSaid };
     }
-    // A button-form entry may still take a typed answer: entry 17 goes
-    // through "Show that day" to REACH its lot, and then declines it.
+    // A button-form entry may still take a typed answer: the second list's
+    // "split Tom Baker's block" goes through a Did-you-mean button to reach
+    // its own lot, then answers it "yes". (No day_off_board entry does this
+    // any more -- R-455 moves and reruns with no button at all, so those are
+    // plain `RegExp` entries now, handled by the non-button branch below.)
     const listing = await currentStatusText(page);
     const written = await answerIfAny(page, entry, listing);
     return { say: entry.say, barSaid, written, note: entry.note, listing };
@@ -553,16 +556,26 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
     const table: EntryResult[] = [];
     const surprises: string[] = [];
     // S71-n: entries whose trace line is EXPECTED to carry a null
-    // `answered` -- the first list's `dayLessToday` (F-182: declined by
-    // silence, never a button, never a typed answer) and, discovered live
-    // on the second list's own first green run (24 Sept), a swap's
-    // `inLot: true` certificate refusal (entry 13 here: "swap Lena Novak
-    // and Priya Shah"), which offers NO candidate and NO yes/no of its own
-    // to answer at all -- unlike a plain `nothing_to_do` refusal (entry 1,
-    // both lists), whose own single turn is filed as its own answer. Set
-    // inside whichever WALK_SET branch below applies; the trace loop at the
-    // end reads this set instead of a single block-scoped name so it works
-    // for either list.
+    // `answered` -- discovered live on the second list's own first green
+    // run (24 Sept), a swap's `inLot: true` certificate refusal (entry 13
+    // here: "swap Lena Novak and Priya Shah"), which offers NO candidate and
+    // NO yes/no of its own to answer at all -- unlike a plain `nothing_to_do`
+    // refusal (entry 1, both lists), whose own single turn is filed as its
+    // own answer. Set inside whichever WALK_SET branch below applies; the
+    // trace loop at the end reads this set instead of a single block-scoped
+    // name so it works for either list.
+    //
+    // The first list's own `dayLessToday` used to belong here too (F-182:
+    // declined by silence, a standing day_off_board QUESTION with no button
+    // pressed and no text typed). R-455 (24 Sept, lane S72-b, d5a8829)
+    // changed `day_off_board` itself into a READOUT (`status.moving`), and a
+    // readout fills in `answered: "auto"` the instant it is set
+    // (`traceQuestionStatus`, CommandBar.tsx) whether or not a person ever
+    // presses anything -- so EVERY entry that crosses a day_off_board move
+    // now gets a real `answered` value, `dayLessToday` included (repointed,
+    // S72-d review, off the real "today" write F-182 itself was about --
+    // see that entry's own long comment in `sentences.ts`). It is no longer
+    // added to this set.
     const answerlessEntries = new Set<Sentence>();
 
     try {
@@ -594,7 +607,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           clearArea1,
           clearArea2,
         ] = SENTENCES;
-        answerlessEntries.add(dayLessToday);
+        // `dayLessToday` no longer belongs in `answerlessEntries` -- see
+        // that Set's own comment above (R-455 gives it a real `answered`).
 
         // 1. Clear of an empty cell.
         table.push(await runEntry(page, clearEmptyCell));
@@ -829,9 +843,13 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           // the walk on the spot and cost every sentence after it -- the very
           // thing `recordMismatch` exists to prevent.
           if (weekdayResult.unpredicted === undefined) {
-            const listing = weekdayResult.listing ?? "";
+            // R-455: `everyWeekdayNo`'s `expect` is a plain RegExp now (no
+            // button left to press), so `runEntry`'s non-button branch never
+            // sets `.listing` -- the lot text is `barSaid` itself, same
+            // fallback `listedCount` (entry 21, below) already uses.
+            const listing = weekdayResult.listing ?? weekdayResult.barSaid ?? "";
             expect(
-              listing.match(/^(\d+) commands? ready/)?.[1],
+              listing.match(/^Ready to do (\d+) things/)?.[1],
               `the repeat day's own listing should count five: "${listing}"`,
             ).toBe("5");
             // F-158: Monday to Friday of the walk day's own week -- the five
@@ -873,10 +891,12 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           const lenaRows = rows.filter((r) => r.operator_id === opId.lena);
           expect(lenaRows, '"no" to the lot should have written nothing this week').toHaveLength(0);
         }
-        // The "Show that day" this entry went through widened the window to
-        // the walk day's week; entry 19 below moves it to the far Monday, entry
-        // 20 asks about today and stays put, and entry 21 brings it back to
-        // the walk day through its own "Show that day".
+        // R-455's own move (no button since 24 Sept) widened the window to
+        // the walk day's week here; entry 19 below moves it to the far
+        // Monday, entry 20 moves it again to the real machine's actual
+        // current day (repointed off a write, S72-d review -- see that
+        // entry's own comment in sentences.ts), and entry 21 moves it back
+        // to the walk day, all without a press.
 
         // 18. An uncertified person on Cell 1, under warn -- a typed reason
         // runs it anyway.
@@ -892,7 +912,8 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           expect(row.override_reason).toBe(tomOverride.answer);
         }
 
-        // 19. A day past the board's own window -- "Show that day" moves it.
+        // 19. A day past the board's own window -- R-455's own move (no
+        // press) moves it.
         table.push(await runEntry(page, dayOffBoardFar));
         await waitForAssignment(dana, {
           operatorId: opId.maria,
@@ -901,8 +922,15 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           endMs: wallMs(FAR, 12, 0),
         });
 
-        // 20. A day-less sentence -- today is off the board, and stays off it:
-        // the question is the proof and nothing is written (F-182).
+        // 20. A day-less sentence -- today is off the board, so R-455's own
+        // move fires for it too (no press). Repointed (S72-d review, 24
+        // Sept) off the original Maria Lopez/Cell 3 target, which R-455
+        // would now actually WRITE to the real machine's actual current day
+        // on the maintainer's live server -- the exact thing F-182 already
+        // fixed once (the walk emptying the maintainer's own morning board).
+        // A too-short span proves the same day-less-moves-on-its-own fact
+        // with nothing written either way; see sentences.ts's own long
+        // comment on this entry.
         table.push(await runEntry(page, dayLessToday));
 
         // 21 and 22. The clear of the walk day, one sentence per area (R-407: a
@@ -925,9 +953,11 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         );
         const beforeClear = beforeClearBlocks.length + beforeClearJobs.length;
         const listedCount = (result: EntryResult): number => {
-          // Entry 21 reaches its listing through "Show that day", so the
-          // listing is what the bar showed AFTER the button, not `barSaid`.
-          const match = (result.listing ?? result.barSaid).match(/^(\d+) commands?/);
+          // Entry 21's `expect` is a plain RegExp now (R-455: no button left
+          // to press), so `runEntry`'s non-button branch never sets
+          // `.listing` at all -- the lot text is `barSaid` itself, which is
+          // exactly what this falls back to.
+          const match = (result.listing ?? result.barSaid).match(/^Ready to do (\d+) things/);
           if (match === null) return Number.NaN; // already recorded as the finding
           return Number(match[1]);
         };
@@ -1296,7 +1326,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         );
         const beforeClear2 = beforeClearBlocks2.length + beforeClearJobs2.length;
         const listedCount2 = (result: EntryResult): number => {
-          const match = (result.listing ?? result.barSaid).match(/^(\d+) commands?/);
+          const match = (result.listing ?? result.barSaid).match(/^Ready to do (\d+) things/);
           if (match === null) return Number.NaN;
           return Number(match[1]);
         };
@@ -1386,10 +1416,13 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         const entry = parsedTrace[i];
         expect(entry.heard, `trace line ${i + 1}'s heard`).toBe(nonVoice[i].say);
         expect(entry.asked, `trace line ${i + 1}'s asked`).not.toBeNull();
-        // Entry 20 asks and is declined (F-182): its line has no answer, and
-        // the trace says so honestly (R-434) -- every other turn was answered.
-        // An entry that landed on its direct readout (orDirect) was never a
-        // question either, so its line carries no answer.
+        // R-455 (24 Sept): a day_off_board move is a READOUT now, which
+        // fills in `answered: "auto"` the instant it fires -- entry 20 no
+        // longer belongs in `answerlessEntries` (see that Set's own
+        // comment). What is still genuinely answerless: an `inLot`
+        // certificate refusal with no candidate and no yes/no of its own
+        // (entry 13, second list), and an entry that landed on its direct
+        // readout (orDirect) without ever raising a question at all.
         const landedDirect = table[i]?.note?.includes("[direct, no question]") ?? false;
         if (!answerlessEntries.has(nonVoice[i]) && !landedDirect) {
           expect(entry.answered, `trace line ${i + 1}'s answered`).not.toBeNull();
@@ -1419,8 +1452,11 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         console.log(`SAY:     ${row.say}`);
         console.log(`BAR:     ${row.barSaid}`);
         // The lot a button led to, before the entry answered it -- without
-        // this, an entry that reaches its listing through "Show that day"
-        // and then declines it prints as though nothing happened.
+        // this, an entry whose question came from a real button (a
+        // Did-you-mean, "Which part?") and then declined it prints as
+        // though nothing happened. (Not day_off_board any more -- R-455
+        // moves and reruns with no button, so `.listing` stays undefined
+        // for those and `listedCount` above falls back to `barSaid`.)
         if (row.listing !== undefined && row.listing !== row.barSaid) {
           console.log(`LISTING: ${row.listing}`);
         }

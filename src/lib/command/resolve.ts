@@ -269,9 +269,9 @@ export interface ResolvedCommand {
   target: CommandTarget;
   /** Real minutes from the window's origin — the pop-up's own `Range`. */
   range: { startMin: number; endMin: number };
-  /** "Sam Patel → Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00"
-   *  (+ " · joining <run label>" for a run target). The ISO day is a token the bar
-   *  re-renders through `formatDayLabel(_, dateFormat, zone)`. */
+  /** R-459: "Sam Patel is on Cell 1 2026-09-03 from 10 am to 2 pm, making Housing A."
+   *  (+ " Joining the <run label> job already there." for a run target). The
+   *  ISO day is a token the bar re-renders through `formatDayLabel(_, dateFormat, zone)`. */
   readout: string;
   /** S61-b (R-425, F-155): set ONLY when a `not_certified` "warn" question
    *  was suppressed by a re-resolve carrying `{ overrideReason }` (never by
@@ -303,9 +303,9 @@ export interface ResolvedBook {
   productId: string;
   target: BookTarget;
   range: { startMin: number; endMin: number };
-  /** "Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 06:00–14:00 · 3 people"
-   *  (+ " · changing <run label>" for a retime; the " · N people" part only
-   *  when the sentence said a number). */
+  /** R-459: "Cell 1 is booked 2026-09-03 from 6 am to 2 pm, making Housing A."
+   *  (+ " For N people." only when the sentence said a number; + " Changing
+   *  the job that ran <hours>." for a retime). */
   readout: string;
 }
 
@@ -319,8 +319,8 @@ export interface ResolvedBook {
 export interface ResolvedUnassign {
   intent: "unassign";
   assignmentId: string;
-  /** "Removing Sam Patel's Housing A block · Plant 1 › Assembly › Line 1 ›
-   *  Cell 1 · 2026-09-03 · 10:00–14:00" */
+  /** R-459: "Sam Patel is off Cell 1 2026-09-03; that was 10 am to 2 pm,
+   *  making Housing A." */
   readout: string;
 }
 
@@ -341,9 +341,9 @@ export interface ResolvedUnassign {
 export interface ResolvedRunRemoval {
   intent: "remove_run";
   runId: string;
-  /** "Removing the Bracket A job · Plant 1 › Assembly › Line 1 › Cell 3 ·
-   *  2026-09-03 · 08:00–16:00" (+ " · 3 people" when the run has a
-   *  headcount -- the same suffix `ResolvedBook.readout` appends). */
+  /** R-459: "The Bracket A job is off Cell 3 2026-09-03; that was 8 am to 4
+   *  pm, for 3 people." (the trailing ", for N people" only when the run has
+   *  a headcount). */
   readout: string;
 }
 
@@ -366,9 +366,10 @@ export interface ResolvedMove {
   productId: string;
   range: { startMin: number; endMin: number };
   target: { kind: "retime" } | { kind: "move_cell" };
-  /** "Moving Sam Patel's Housing A block · Plant 1 › Assembly › Line 1 ›
-   *  Cell 1 · 2026-09-03 · 10:00–14:00 → Cell 2 · 10:00–14:00" (the arrow
-   *  names what changes: the cell, the hours, or both). */
+  /** R-459: "Sam Patel is moving from Cell 1 to Cell 2, 2026-09-03 from 10 am
+   *  to 2 pm." for a `move_cell` target; "Sam Patel's Housing A block on Cell
+   *  1 now runs 2026-09-03 from 10 am to 2 pm." for a move in time; "Sam
+   *  Patel's block on Cell 1 now ends 2 pm; it was 10 am." for an adjust. */
   readout: string;
   /** S61-b (R-425, F-155): the same field `ResolvedCommand` carries, for a
    *  `move_cell` target only (a `retime` target never asks -- same cell,
@@ -970,6 +971,21 @@ function placeLabel(cell: Node, byPath: Map<string, Node>): string {
   return `${cell.name} — ${names.join(" › ")}`;
 }
 
+/** R-459 (the register's own rule, §0 of the wording brief): "cells by
+ *  name; the line or area only when the cell's name is not unique on the
+ *  board." The bar's own name for a cell IN A SENTENCE -- the bare name,
+ *  unless another track cell shares it, in which case the immediate parent
+ *  (the line or area) is named too. Never the whole ancestor chain
+ *  (`placeLabel`'s own arrow path, built for a candidate's off-screen id,
+ *  never a sentence a person reads). */
+function cellDisplayName(cell: Node, ctx: ResolveContext, byPath: Map<string, Node>): string {
+  const dup = ctx.cells.filter((c) => c.name === cell.name).length > 1;
+  if (!dup) return cell.name;
+  const ancestors = ancestorsOf(cell, byPath);
+  const parent = ancestors[ancestors.length - 1];
+  return parent ? `${cell.name} in ${parent.name}` : cell.name;
+}
+
 /** F-213 (R-430): the `place_mismatch` question's own `elsewhere` list --
  *  each candidate's PARENT, never the candidate again ("Cell 5 is in Cell
  *  5"). Shared by `resolveCellStep` and `resolveEveryonePlaceCells`, which
@@ -1160,24 +1176,69 @@ function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** The one place "HH:MM–HH:MM" is built from a start/end pair -- used by
- *  `resolveDaySpanStep`'s `timeText` (the arrow) AND (S49) by the elsewhere
- *  destination text, so the two are always the same string for the same
- *  hours. */
+/** R-459: hours read the way a person says them -- "4 pm", "10:30 am",
+ *  "noon", "midnight" -- never a 24-hour "HH:MM". The one place a single
+ *  clock is turned into words; `formatSpan` and `spokenizeSpans` below both
+ *  build on it, so every sentence the bar shows says an hour the same way. */
+function spokenClock(c: { hour: number; minute: number }): string {
+  // S72-d review fix (R-459/F-146): `DAY_END` (parse.ts's own {23, 59} --
+  // the one value an explicit "at midnight"/"at 24:00"/"12 am" adjust
+  // target holds LITERALLY, `resolveMoveCommand`'s own `adjust.at` comment)
+  // never goes through `clockOfOffset`'s 1440-wraps-to-0 normalizing --
+  // `((c.hour % 24) + 24) % 24` leaves 23 as 23, so this read "11:59 pm"
+  // before this check, contradicting this function's own doc ("DAY_END
+  // included, reads back as 'midnight'") and `parse.ts`'s OWN twin of this
+  // special case (`formatCommand`'s `formatClock`, parse.ts ~4089: "an END
+  // clock reading DAY_END prints as 'midnight'"). Checked before the mod-24
+  // wrap below, which normalizes an ordinary 24:00/25:00-style offset
+  // (`h === 0` after wrapping) the same way.
+  if (c.hour === 23 && c.minute === 59) return "midnight";
+  const h = ((c.hour % 24) + 24) % 24;
+  const m = c.minute;
+  if (h === 0 && m === 0) return "midnight";
+  if (h === 12 && m === 0) return "noon";
+  const period = h < 12 ? "am" : "pm";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${h12} ${period}` : `${h12}:${pad2(m)} ${period}`;
+}
+
+/** The one place a spoken "<start> to <end>" pair is built from a start/end
+ *  clock -- used by `resolveDaySpanStep`'s `timeText` (the arrow) AND (S49)
+ *  by the elsewhere destination text, so the two are always the same words
+ *  for the same hours. R-459: this used to return "HH:MM–HH:MM"; every
+ *  caller only ever puts the result straight into a sentence, so the format
+ *  changed here, once, rather than at each call site. */
 function formatSpan(
   start: { hour: number; minute: number },
   end: { hour: number; minute: number },
 ): string {
-  return `${pad2(start.hour)}:${pad2(start.minute)}–${pad2(end.hour)}:${pad2(end.minute)}`;
+  return `${spokenClock(start)} to ${spokenClock(end)}`;
 }
 
-/** F-152-b: a single "HH:MM" -- the adjust readout's own "ends 00:00, was
- *  06:00" names one clock at a time, never a pair, so `formatSpan` does not
+/** R-459: a single spoken clock -- the adjust readout's own "ends 2 pm, was
+ *  10 am" names one clock at a time, never a pair, so `formatSpan` does not
  *  fit. A literal `ClockTime`, never `clockOfOffset`'s own `wallOf` read,
  *  when the caller already has one (`adjust.at`, DAY_END included, reads
- *  back as "23:59" exactly like every other DAY_END text in this file). */
+ *  back as "midnight" exactly like every other DAY_END text in this file). */
 function formatClockTime(c: { hour: number; minute: number }): string {
-  return `${pad2(c.hour)}:${pad2(c.minute)}`;
+  return spokenClock(c);
+}
+
+/** R-459: a last-resort catch for an "HH:MM–HH:MM"/"HH:MM-HH:MM" pair that
+ *  reaches a sentence already built elsewhere -- a board label passed
+ *  straight through from `ContextAssignment`/`ContextRun` (`label`/`span`,
+ *  built by `BoardPage`, never re-derived here), read back to spoken words
+ *  the same way `spokenClock` reads every hour this module builds itself.
+ *  Applied once, at the edge, to every readout and every `describeQuestion`
+ *  sentence -- never a second formatter for the same fact (CLAUDE.md's
+ *  "changed in one place"). A string with nothing to convert passes through
+ *  unchanged; an ISO day token ("2026-09-03") has no colon, so it is never
+ *  matched here -- that substitution is `renderReadout`'s own (CommandBar.tsx). */
+const HHMM_SPAN_RE = /(\d{1,2}):(\d{2})\s*[–-]\s*(\d{1,2}):(\d{2})/g;
+function spokenizeSpans(text: string): string {
+  return text.replace(HHMM_SPAN_RE, (_all, h1, m1, h2, m2) =>
+    formatSpan({ hour: Number(h1), minute: Number(m1) }, { hour: Number(h2), minute: Number(m2) }),
+  );
 }
 
 /** S55 (R-404, D130 item 3): a `ClockTime` of `DAY_END` (23:59, parse.ts's
@@ -1192,11 +1253,10 @@ function clockToMinuteOfDay(t: { hour: number; minute: number }): number {
   return t.hour * 60 + t.minute;
 }
 
-/** "HH:MM" for a single minute-of-day -- `no_shift_at`'s own `time` field,
- *  and the boundary helpers below. */
+/** A spoken clock for a single minute-of-day -- `no_shift_at`'s own `time`
+ *  field, and the boundary helpers below. */
 function formatClockMinuteOfDay(mod: number): string {
-  const c = shiftClockOf(mod);
-  return `${pad2(c.hour)}:${pad2(c.minute)}`;
+  return spokenClock(shiftClockOf(mod));
 }
 
 /** R-404: `m` rounded UP to the next quarter hour (10:07 -> 10:15; 10:15
@@ -2337,19 +2397,22 @@ function resolveAssignCommand(
     areaOverride = area.areaOverride;
   }
 
-  // Readout.
-  const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
-  const chain = [...ancestorNames, cell.name].join(" › ");
+  // Readout (R-459: one plain sentence, the register's own example --
+  // "Sam Patel is on Cell 1 <day> from <hours>, making Housing A." -- `iso`
+  // stays a literal token here; `renderReadout` (CommandBar.tsx) is what
+  // turns it into "today"/"tomorrow"/"Mon 28 Sep" in the plant's own zone).
+  const cellName = cellDisplayName(cell, ctx, byPath);
   const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
-  let readout = `${operator.displayName} → ${product.name} · ${chain} · ${iso} · ${timeText}`;
+  let readout = `${operator.displayName} is on ${cellName} ${iso} from ${timeText}, making ${product.name}.`;
   if (target.kind === "run") {
     // S58: `ctx.runs` (not `hits`, which stays empty on the job-hours
     // branch) so the readout names the run regardless of which path found it.
     const runLabel = ctx.runs.find((r) => r.id === target.runId)?.label ?? "";
-    readout += ` · joining ${runLabel}`;
+    readout += ` Joining the ${runLabel} job already there.`;
   } else if (target.kind === "retime" && retime !== null) {
-    readout += ` · changing ${retime.label}`;
+    readout += ` Changing the block that ran ${retime.label}.`;
   }
+  readout = spokenizeSpans(readout);
 
   return {
     ok: true,
@@ -2455,16 +2518,16 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
     target = { kind: "retime_run", runId: hit.id };
   }
 
-  // Readout.
-  const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
-  const chain = [...ancestorNames, cell.name].join(" › ");
+  // Readout (R-459).
+  const cellName = cellDisplayName(cell, ctx, byPath);
   const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
-  let readout = `${product.name} · ${chain} · ${iso} · ${timeText}`;
+  let readout = `${cellName} is booked ${iso} from ${timeText}, making ${product.name}.`;
   if (target.kind === "run_create" && command.headcount !== null) {
-    readout += ` · ${command.headcount} people`;
+    readout += ` For ${command.headcount} people.`;
   } else if (target.kind === "retime_run" && retimeHit !== null) {
-    readout += ` · changing ${retimeHit.label}`;
+    readout += ` Changing the job that ran ${retimeHit.label}.`;
   }
+  readout = spokenizeSpans(readout);
 
   return {
     ok: true,
@@ -2617,10 +2680,12 @@ function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): 
   });
   const finishRemoval = (hit: ContextAssignment): Resolution => {
     const hitCellNode = ctx.nodeById.get(hit.nodeId) ?? null;
-    const ancestorNames = hitCellNode ? ancestorsOf(hitCellNode, byPath).map((n) => n.name) : [];
-    const chain = hitCellNode ? [...ancestorNames, hitCellNode.name].join(" › ") : "";
+    const cellName = hitCellNode ? cellDisplayName(hitCellNode, ctx, byPath) : "";
     const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
-    const readout = `Removing ${operator.displayName}'s ${hit.productName ?? "block"} block · ${chain} · ${iso} · ${hit.label}`;
+    const productPhrase = hit.productName === null ? "" : `, making ${hit.productName}`;
+    const readout = spokenizeSpans(
+      `${operator.displayName} is off ${cellName} ${iso}; that was ${hit.label}${productPhrase}.`,
+    );
     return { ok: true, resolved: { intent: "unassign", assignmentId: hit.id, readout } };
   };
 
@@ -2681,7 +2746,7 @@ function buildDestinationText(command: MoveCommand): string {
   }
   const placeText = command.toPlace.join(" in ");
   if (command.span !== null)
-    return `${placeText} · ${formatSpan(command.span.start, command.span.end)}`;
+    return `${placeText} from ${formatSpan(command.span.start, command.span.end)}`;
   return placeText;
 }
 
@@ -2827,6 +2892,11 @@ function resolveMoveCommand(
   let startMin: number;
   let endMin: number;
   let arrow: string;
+  // R-459: the destination cell's own name, set only in the `move_cell`
+  // branch below -- kept apart from `arrow` (the hours only, never a "·"
+  // joined pair) so the readout can say "moving from X to Y" as one plain
+  // sentence instead of gluing a path together.
+  let destCellName: string | null = null;
   // F-152-b (the maintainer, window-edge follow-up): non-null only for an
   // adjust -- the compact readout below ("ends 00:00, was 06:00") names
   // just the ADJUSTED edge's own before/after, never the whole block's
@@ -2957,20 +3027,21 @@ function resolveMoveCommand(
       if (!spanResult.ok) return { ok: false, question: spanResult.question };
       startMin = spanResult.startMin;
       endMin = spanResult.endMin;
-      arrow = `${newCell.name} · ${spanResult.timeText}`;
+      arrow = spanResult.timeText;
     } else if (command.span !== null) {
       const spanResult = resolveDaySpanStep(command.day, command.span.start, command.span.end, ctx);
       if (!spanResult.ok) return { ok: false, question: spanResult.question };
       startMin = spanResult.startMin;
       endMin = spanResult.endMin;
-      arrow = `${newCell.name} · ${spanResult.timeText}`;
+      arrow = spanResult.timeText;
     } else {
       startMin = blk.startMin;
       endMin = blk.endMin;
-      arrow = `${newCell.name} · ${blk.label}`;
+      arrow = blk.label;
     }
     target = { kind: "move_cell" };
     targetNodeId = newCell.id;
+    destCellName = newCell.name;
 
     // S61-b (R-425, F-155): the certificate question, before anything is
     // written -- ONLY here, moving to ANOTHER cell (never a move-in-time or
@@ -2986,21 +3057,23 @@ function resolveMoveCommand(
     areaOverride = area.areaOverride;
   }
 
-  // Readout -- the chain names the BLOCK's own cell (S49: it may have come
+  // Readout (R-459) -- names the BLOCK's own cell (S49: it may have come
   // from elsewhere, never the sentence's named cell).
   const blkCellNode = ctx.nodeById.get(blk.nodeId) ?? null;
-  const ancestorNames = blkCellNode ? ancestorsOf(blkCellNode, byPath).map((n) => n.name) : [];
-  const chain = blkCellNode ? [...ancestorNames, blkCellNode.name].join(" › ") : "";
+  const blkCellName = blkCellNode ? cellDisplayName(blkCellNode, ctx, byPath) : blk.nodeId;
   // F-152-b: an adjust's own readout names just the ONE edge that moved,
-  // "<person> · <cell> · ends 00:00, was 06:00" -- the generic arrow
-  // (`blk.label → formatSpan(newStart, newEnd)`) reads backward for a
-  // block whose OTHER edge is genuinely on a different calendar day (the
-  // edge-adjust `expandEveryoneUnassign` now builds), and is no plainer
-  // even for an ordinary same-day "shorten by 6 hours".
-  const readout =
+  // "Sam Patel's block on Cell 1 now ends 2 pm; it was 10 am" -- the
+  // generic before/after pair reads backward for a block whose OTHER edge
+  // is genuinely on a different calendar day (the edge-adjust
+  // `expandEveryoneUnassign` now builds), and is no plainer even for an
+  // ordinary same-day "shorten by 6 hours".
+  const readout = spokenizeSpans(
     adjustReadout !== null
-      ? `${operator.displayName} · ${blkCellNode?.name ?? blk.nodeId} · ${adjustReadout.edge}s ${formatClockTime(adjustReadout.newClock)}, was ${formatClockTime(adjustReadout.oldClock)}`
-      : `Moving ${operator.displayName}'s ${blk.productName ?? "block"} block · ${chain} · ${whenText} · ${blk.label} → ${arrow}`;
+      ? `${operator.displayName}'s block on ${blkCellName} now ${adjustReadout.edge}s ${formatClockTime(adjustReadout.newClock)}; it was ${formatClockTime(adjustReadout.oldClock)}.`
+      : destCellName !== null
+        ? `${operator.displayName} is moving from ${blkCellName} to ${destCellName}, ${whenText} from ${arrow}.`
+        : `${operator.displayName}'s ${blk.productName ?? "block"} block on ${blkCellName} now runs ${whenText} from ${arrow}.`,
+  );
 
   return {
     ok: true,
@@ -3060,9 +3133,10 @@ function resolveHeadcountCommand(command: HeadcountCommand, ctx: ResolveContext)
   if (q !== null) return { ok: false, question: q };
   const run = runsHere[0];
 
-  const ancestorNames = ancestorsOf(cell, byPath).map((n) => n.name);
-  const chain = [...ancestorNames, cell.name].join(" › ");
-  const readout = `${product.name} · ${chain} · ${whenIso} · ${run.span} · ${command.headcount} people`;
+  const cellName = cellDisplayName(cell, ctx, byPath);
+  const readout = spokenizeSpans(
+    `The ${product.name} job on ${cellName} now takes ${command.headcount} people; it runs ${whenIso} from ${run.span}.`,
+  );
 
   return {
     ok: true,
@@ -3740,9 +3814,8 @@ function expandEveryoneUnassign(command: UnassignCommand, ctx: ResolveContext): 
     const window = windows.get(run.nodeId);
     if (!window || !ctx.overlaps(window, run)) continue;
     const runCell = ctx.nodeById.get(run.nodeId) as Node;
-    const ancestorNames = ancestorsOf(runCell, byPath).map((n) => n.name);
-    const chain = [...ancestorNames, runCell.name].join(" › ");
-    const headcountSuffix = run.headcount !== null ? ` · ${run.headcount} people` : "";
+    const runCellName = cellDisplayName(runCell, ctx, byPath);
+    const headcountPhrase = run.headcount !== null ? `, for ${run.headcount} people` : "";
     // REVIEWER FIX (S70-d review): `deleteRun`'s `cascade` mode deletes
     // EVERY assignment with `run_id = p_run_id`, with no window of its
     // own -- `delete_run`'s SQL is `DELETE FROM assignments WHERE run_id =
@@ -3792,7 +3865,9 @@ function expandEveryoneUnassign(command: UnassignCommand, ctx: ResolveContext): 
       // as every OTHER `?? "block"` fallback in this file reads (e.g.
       // `${x.productName ?? "block"} ${x.label}` -- "block 10:00-12:00",
       // no second "block").
-      readout: `Removing the ${run.productName === null ? "job" : `${run.productName} job`} · ${chain} · ${iso} · ${run.span}${headcountSuffix}`,
+      readout: spokenizeSpans(
+        `The ${run.productName === null ? "job" : `${run.productName} job`} is off ${runCellName} ${iso}; that was ${run.span}${headcountPhrase}.`,
+      ),
     });
   }
 
@@ -5214,7 +5289,22 @@ function partHoursPhrase(c: Candidate): string {
 }
 
 /** The sentence for a Question — the words the bar shows. Pure, so it is tested verbatim. */
-export function describeQuestion(q: Question): string {
+/**
+ * R-459: the ONE builder for every question sentence the bar shows -- until
+ * S72-d, `CommandBar.tsx` kept a second, hand-written copy of about ten of
+ * these cases (its own comment called this module's copy "a baseline only
+ * ... the bar may refine it further"). That was the very duplicate control
+ * CLAUDE.md's R-449 forbids: two copies of the same fact (here, the same
+ * SENTENCE) drift, and did -- `split_needed` read "crosses both ends of"
+ * here and "runs across both sides of" there, `no_job`/`which_job` offered
+ * different next steps in each copy. The richer of each pair is kept here,
+ * now the only copy; `CommandBar.tsx`'s duplicate branches are gone, and
+ * every kind falls through to this one function. `spokenizeSpans` is
+ * applied once, at the very end (`describeQuestion`, below `Raw`), so no
+ * individual case has to remember to convert an "HH:MM" it borrowed from a
+ * board label (a candidate's own `label`, a run's own `span`) itself.
+ */
+function describeQuestionRaw(q: Question): string {
   switch (q.kind) {
     case "ambiguous":
       return `Which ${fieldWord(q.field)}? "${q.text}" matches ${q.candidates.length}:`;
@@ -5230,24 +5320,41 @@ export function describeQuestion(q: Question): string {
       // first one rather than print "... is in ." with nothing after it.
       const first = `There is no ${q.cell} in ${q.qualifier}.`;
       if (q.elsewhere.length === 0) return first;
-      return `${first} ${q.cell} is in ${q.elsewhere.map((c) => c.label).join(" / ")}.`;
+      // R-459/R-457: the buttons this question offers carry `c.word` (the
+      // parent's bare name -- "Line 3", what a person would actually say),
+      // never `c.label` (`placeLabel`'s own arrow path, "Line 3 — Plant 1 ›
+      // Assembly", built for the button's `key` only). The sentence must
+      // name the SAME choices the buttons carry (§0's own rule), so it
+      // reads `c.word` too, comma-joined like every other list in this
+      // file's questions.
+      return `${first} ${q.cell} is in ${q.elsewhere.map((c) => c.word).join(", ")}.`;
     }
-    // S61-b (R-425, F-155): the wording here is a baseline only -- the bar
-    // (`CommandBar.tsx`, another lane) is the one that reads this string,
-    // and may refine it further; the shape (`missing`/`policy`/`inLot`) is
-    // this module's own, pinned by `commandResolve.test.ts`'s NC1-NC7.
+    // R-459: the ONE wording for a certificate gap -- every refusal leads
+    // with "Not done:" (the register's own example, CLAUDE.md §0/this
+    // lane's brief). `inLot` (a lot's own expansion-time question, which
+    // never takes a reason and never writes half of itself, R-425) gets
+    // "Nothing changed." in place of the single sentence's offer to give a
+    // reason.
     case "not_certified": {
       const missing = q.missing.join(", ");
-      if (q.policy === "block") {
-        return `${q.person} is not certified for ${q.cell}: missing ${missing}.`;
-      }
-      return `${q.person} is not certified for ${q.cell}: missing ${missing}. Say the reason to schedule anyway, or no.`;
+      const base = `Not done: ${q.person} is not certified for ${q.cell}, missing ${missing}.`;
+      // S72-d review fix: `inLot` is checked FIRST, regardless of `policy`
+      // -- the old CommandBar.tsx copy this lane merged away checked
+      // `question.inLot` before `policy`, so a "block" refusal INSIDE a lot
+      // still got "Nothing was written."; the merge had briefly reordered
+      // this to check `policy === "block"` first, which silently dropped
+      // that suffix for a block-policy gap inside a lot (untested -- no
+      // existing fixture combines `policy: "block"` with `inLot: true`).
+      if (q.inLot) return `${base} Nothing changed.`;
+      if (q.policy === "block") return base;
+      return `${base} Say the reason to schedule anyway, or no.`;
     }
-    // F-165 (S62-b): the baseline wording; `CommandBar.tsx` refines it for a
-    // lot (which never takes a reason) exactly as it already does for
-    // `not_certified`.
-    case "outside_area":
-      return `${q.person} is not from ${q.cell}'s area. Say the reason to schedule anyway, or no.`;
+    // F-165 (S62-b): the AREA twin of `not_certified`, same shape.
+    case "outside_area": {
+      const base = `Not done: ${q.person} is not from ${q.cell}'s area.`;
+      if (q.inLot) return `${base} Nothing changed.`;
+      return `${base} Say the reason to schedule anyway, or no.`;
+    }
     case "day_off_board":
       return `${q.text} is not on the board. Move the board to that day first.`;
     case "too_short":
@@ -5332,45 +5439,60 @@ export function describeQuestion(q: Question): string {
       }
       return `${q.person} has ${q.blocks.length} blocks on ${q.cell} ${q.when}. Move which?`;
     }
+    // R-459: "commands" (a developer's word for what the person said) is
+    // never shown; "things" is the register's own word (§0's lot example,
+    // "Ready to do 2 things").
     case "several_unsupported":
-      return "Several commands in one sentence are read but not yet run; say them one at a time for now.";
+      return "I can only run one thing at a time from a typed sentence; say them one at a time for now.";
     case "no_shift_pattern":
       return `${q.cell} has no shift pattern, so say the hours.`;
     case "no_shift":
       return `No shift called "${q.text}" on ${q.cell}; it has ${q.shifts.join(", ")}.`;
     case "no_shift_at":
       return `No shift on ${q.cell} covers ${q.time}; say a start that falls in one.`;
+    // R-459: `q.text` is already this module's own plain sentence, built
+    // where the question is raised ("Say when it starts — from 10, say.") --
+    // the ONE copy; `CommandBar.tsx` used to keep a second, near-identical
+    // one (quoted differently) that this lane retired.
     case "no_start":
       return q.text;
     case "lot_too_big":
-      return `That is ${q.count} commands; say a smaller place or span (the limit is ${q.max}).`;
+      return `That would be ${q.count} things at once; say a smaller place or span (up to ${q.max} at a time).`;
     case "nothing_to_do":
       return q.text;
     case "split_needed":
-      return `${q.person}'s ${q.block} on ${q.cell} crosses both ends of ${q.span}; say a span that reaches one end of the block instead.`;
+      return `${q.person}'s ${q.block} block on ${q.cell} runs across both sides of ${q.span}; say a span that reaches one end of it.`;
     case "across_midnight":
       return `${q.person}'s ${q.block} block on ${q.cell} crosses midnight and matches no shift; split it at midnight first, or say the shift.`;
     case "swap_which":
-      return `${q.person} has ${q.blocks.length} blocks ${q.when} (${q.blocks.join(", ")}). Swap which?`;
+      return `${q.person} has more than one block ${q.when}: ${q.blocks.join(", ")}. Say the hours.`;
     case "day_order":
       return `${q.second} is before ${q.first}; say the later day second.`;
     case "expand_first":
-      return `That ${q.intent} has to be worked out before it can run.`;
+      return `Say that ${q.intent} on its own first; it has to run before this one can.`;
     case "adjust_inverts":
-      return `${q.person}'s ${q.block} would end before it starts.`;
+      return `${q.person}'s ${q.block} block would end before it starts; say a smaller change.`;
     case "adjust_off_day":
-      return `${q.person}'s ${q.block} would cross midnight; that is not on this board.`;
+      return `${q.person}'s ${q.block} block would leave the day; say a time inside it.`;
     case "bad_adjust":
       return q.text;
     case "split_outside":
       return q.blocks.length > 0
-        ? `${q.person} has no block that covers ${q.at} (has ${q.blocks.join(", ")}).`
-        : `${q.person} has no block that covers ${q.at}.`;
+        ? `${q.at} is outside ${q.person}'s block${q.blocks.length > 1 ? "s" : ""} (${q.blocks.join(", ")}); say a time inside one.`
+        : `${q.person} has no block that covers ${q.at}; say a time inside one.`;
     case "no_job":
-      return `No ${q.product} job on ${q.cell} ${q.when}.`;
+      return `There is no ${q.product} job on ${q.cell} ${q.when}; book it first, or say the hours.`;
     case "which_job":
-      return `${q.runs.length} ${q.product} jobs on ${q.cell} (${q.runs.join(", ")}). Say which.`;
+      return `${q.product} runs more than once on ${q.cell}: ${q.runs.join(", ")}. Say the hours.`;
     case "bad_repeat_day":
       return `${q.text} cannot be used here.`;
   }
+}
+
+/** R-459: hours read as a person says them in every question the bar shows,
+ *  even a raw "HH:MM–HH:MM" a candidate's own board label (`spokenizeSpans`,
+ *  above) carried straight through -- the one place this conversion is
+ *  applied, so no individual case above has to remember it. */
+export function describeQuestion(q: Question): string {
+  return spokenizeSpans(describeQuestionRaw(q));
 }

@@ -12,13 +12,23 @@
  *   - a plain `RegExp`: what the bar shows right then IS the end of this
  *     entry's turn (an ordinary single sentence's own readout, S47's "runs on
  *     its readout with no yes", or a terminal refusal with no candidates at
- *     all -- `nothing_to_do`, an `inLot` certificate refusal).
+ *     all -- `nothing_to_do`, an `inLot` certificate refusal). R-455 (24
+ *     Sept, lane S72-b, d5a8829) moved `day_off_board` into this bucket too
+ *     -- the bar posts "Moved the board to <day>." and reruns the held
+ *     sentence on its own, no button, no press; `expectAnswered`
+ *     (`typedWalk.spec.ts`) already polls both the live status line and the
+ *     filed thread turn the move updates in place, so the FINAL text is
+ *     proof enough of both steps without a separate assertion of the moved
+ *     line.
  *   - `{ button, then }`: a question with a named button stands (a
- *     near-miss's Did-you-mean, "Which part?", "Show that day") -- the spec
- *     presses it and `then` is what the bar shows once that settles.
+ *     near-miss's Did-you-mean, "Which part?") -- the spec presses it and
+ *     `then` is what the bar shows once that settles. "Show that day" was
+ *     this shape's own example until R-455 retired the button entirely; a
+ *     day off the board is a plain `RegExp` of the final text now (see
+ *     above).
  * `answer` is set only when the status the bar showed for `say` needs a
  * typed reply to finish the turn: "yes"/"no" for a single block question's
- * own yes/no suffix or a lot's "N commands ready", or a free-text override
+ * own yes/no suffix or a lot's "Ready to do N things" (R-459), or a free-text override
  * reason for a `not_certified` "warn" question. `expect` in that case still
  * names what `say` alone produced (the question/lot text) -- the spec reads
  * that, types `answer`, and the DATABASE (not a second `expect`) is what
@@ -44,32 +54,51 @@ export interface Sentence {
   voice?: true;
 }
 
-/** En dash (U+2013, a span's own separator) and the arrow/middle-dot/chain
- *  separators `resolve.ts`'s own readouts are built from (its own doc
- *  comments on `ResolvedCommand`/`ResolvedBook`/etc.) -- named once so a
- *  typo in one regex is not a second, silently different, copy. */
-const EN_DASH = "–";
-const ARROW = "→";
-const DOT = " · ";
-
-/** The optional "read by the model"/"read by the rules (...)" suffix S44-b
- *  adds to a WRITE readout only -- never a question, never `nothing_to_do`
- *  (`CommandBar.tsx`'s own `runCommand`: the suffix is appended solely on
- *  the `resolution.ok` branch's readout). This dev machine's server is up
- *  with the model container running, so most writes are expected to carry
- *  it -- but the suffix is not the fact this walk is testing, so every
- *  write regex below tolerates its absence too rather than overfitting to
- *  which engine happened to answer. */
-const READ_SUFFIX = `(?:${DOT}read by the (?:model|rules \\([^)]*\\)))?`;
-
+/** R-459 (S72-d, 24 Sept): the bar's own readouts stopped being an arrow
+ *  chain of "·"-joined fields ("Sam Patel → Housing A · Plant 1 › Assembly ›
+ *  Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00") and became one or two plain
+ *  sentences, the register CLAUDE.md §0 names: "Done. John Kim is on Cell 6
+ *  today from 4 pm to 10 pm, making Housing A." No more arrow, middle dot,
+ *  chain or 24-hour span -- every builder below matches the new shape.
+ *  `esc` still escapes every literal fragment a regex is built from. */
 function esc(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** `<who> → <product> · <chain ending in Cell N> · <day> · HH:MM–HH:MM`,
- *  optionally suffixed -- an assign's own readout (`resolve.ts`'s doc on
- *  `ResolvedCommand.readout`). The chain's PLANT/AREA/LINE segments are left
- *  as `.*` -- this walk asserts the DATABASE row for exactness (brief §3);
+/** R-459: a spoken clock the same way `resolve.ts`'s own `spokenClock`
+ *  reads one -- "4 pm", "10:30 am", "noon", "midnight" -- built once here
+ *  from the walk list's own "HH:MM" fixture strings (`assignReadoutRe`'s
+ *  own params, unchanged) so every call site below keeps naming hours the
+ *  way the board itself does, never retyped per entry. */
+function spokenClock(hhmm: string): string {
+  const [hStr, mStr] = hhmm.split(":");
+  const h = Number(hStr);
+  const m = Number(mStr);
+  if (h === 0 && m === 0) return "midnight";
+  if (h === 12 && m === 0) return "noon";
+  const period = h < 12 ? "am" : "pm";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${h12} ${period}` : `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+/** `<start> to <end>`, spoken -- `formatSpan`'s own words (`resolve.ts`). */
+function spokenSpan(start: string, end: string): string {
+  return `${spokenClock(start)} to ${spokenClock(end)}`;
+}
+
+/** A cell's own name in a sentence carries "in <line>" only when the board
+ *  has more than one cell of that name (`cellDisplayName`, `resolve.ts`) --
+ *  this walk's own board may or may not, so every builder below allows
+ *  either: the bare name, or the name plus one optional "in <place>" tail. */
+function cellPhrase(cell: string): string {
+  return `${esc(cell)}(?: in [^,.;]+)?`;
+}
+
+/** `<who> is on <cell>[ in <line>] <day> from <span>, making <product>.`
+ *  (+ " Joining the <run> job already there." / " Changing the block that
+ *  ran <hours>." for a run/retime target) -- an assign's own readout
+ *  (`resolve.ts`'s doc on `ResolvedCommand.readout`). The day word is left
+ *  as `.+` -- this walk asserts the DATABASE row for exactness (brief §3);
  *  the regex only has to prove the STATUS LINE named the right person,
  *  product, cell and hours. */
 export function assignReadoutRe(
@@ -80,12 +109,12 @@ export function assignReadoutRe(
   end: string,
 ): RegExp {
   return new RegExp(
-    `^${esc(who)} ${ARROW} ${esc(product)}${DOT}.*${esc(cell)}${DOT}.+${DOT}${start}${EN_DASH}${end}${READ_SUFFIX}$`,
+    `^${esc(who)} is on ${cellPhrase(cell)} .+ from ${spokenSpan(start, end)}, making ${esc(product)}\\.(?: .+)?$`,
   );
 }
 
-/** `<product> · <chain> · <day> · HH:MM–HH:MM[ · N people]` -- a book's own
- *  readout. */
+/** `<cell>[ in <line>] is booked <day> from <span>, making <product>.[ For N
+ *  people.]` -- a book's own readout. */
 export function bookReadoutRe(
   product: string,
   cell: string,
@@ -93,14 +122,14 @@ export function bookReadoutRe(
   end: string,
   people?: number,
 ): RegExp {
-  const tail = people !== undefined ? `${DOT}${people} people` : "";
+  const tail = people !== undefined ? ` For ${people} people\\.` : "(?: .+)?";
   return new RegExp(
-    `^${esc(product)}${DOT}.*${esc(cell)}${DOT}.+${DOT}${start}${EN_DASH}${end}${esc(tail)}${READ_SUFFIX}$`,
+    `^${cellPhrase(cell)} is booked .+ from ${spokenSpan(start, end)}, making ${esc(product)}\\.${tail}$`,
   );
 }
 
-/** `<who> · <cell> · <edge>s HH:MM, was HH:MM` -- an adjust's own readout
- *  (`resolve.ts` line ~2819). */
+/** `<who>'s block on <cell>[ in <line>] now <edge>s <new>; it was <old>.` --
+ *  an adjust's own readout (`resolve.ts`, the `adjustReadout` branch). */
 export function adjustReadoutRe(
   who: string,
   cell: string,
@@ -109,16 +138,17 @@ export function adjustReadoutRe(
   oldT: string,
 ): RegExp {
   return new RegExp(
-    `^${esc(who)}${DOT}${esc(cell)}${DOT}${edge}s ${newT}, was ${oldT}${READ_SUFFIX}$`,
+    `^${esc(who)}'s block on ${cellPhrase(cell)} now ${edge}s ${spokenClock(newT)}; it was ${spokenClock(oldT)}\\.$`,
   );
 }
 
-/** `<product> · <chain> · <day> · <span> · N people` -- the headcount form's
- *  own readout (`resolve.ts` line ~2883). `<span>` is the run's own hours,
- *  asserted loosely here (the DB read after is what proves it). */
+/** `The <product> job on <cell>[ in <line>] now takes N people; it runs
+ *  <day> from <span>.` -- the headcount form's own readout (`resolve.ts`'s
+ *  `resolveHeadcountCommand`). `<span>` is the run's own hours, asserted
+ *  loosely here (the DB read after is what proves it). */
 export function headcountReadoutRe(product: string, cell: string, n: number): RegExp {
   return new RegExp(
-    `^${esc(product)}${DOT}.*${esc(cell)}${DOT}.+${DOT}.+${DOT}${n} people${READ_SUFFIX}$`,
+    `^The ${esc(product)} job on ${cellPhrase(cell)} now takes ${n} people; it runs .+ from .+\\.$`,
   );
 }
 
@@ -206,7 +236,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       say: `Assign Priya Shah to Line 1 Subassembly A on Cell 2 in Line 1 from 2 until end of shift ${dates.day}`,
       note: 'model gap until the sixth run: the rules read "2" as 14:00 (Shift 2, ends 22:00); a model reading may take it literally as 02:00 (Shift 3, ends 06:00). Both are accepted; the spec records which one the bar actually showed.',
       expect: new RegExp(
-        `^Priya Shah ${ARROW} Line 1 Subassembly A${DOT}.*Cell 2${DOT}.+${DOT}(?:14:00${EN_DASH}22:00|02:00${EN_DASH}06:00)${READ_SUFFIX}$`,
+        `^Priya Shah is on ${cellPhrase("Cell 2")} .+ from (?:2 pm to 10 pm|2 am to 6 am), making Line 1 Subassembly A\\.(?: .+)?$`,
       ),
     },
 
@@ -244,9 +274,9 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       expect: {
         question: /^No person called "Tom Bakker" on this board\. Did you mean one of these\?$/,
         button: "Tom Baker",
-        then: /^Tom Baker is not certified for Cell 1: missing Welding\. Nothing was written\.$/,
+        then: /^Not done: Tom Baker is not certified for Cell 1, missing Welding\. Nothing changed\.$/,
         orDirect:
-          /^Tom Baker is not certified for Cell 1: missing Welding\. Nothing was written\.$/,
+          /^Not done: Tom Baker is not certified for Cell 1, missing Welding\. Nothing changed\.$/,
       },
     },
 
@@ -256,7 +286,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       say: `split Sam Patel's block at 1pm ${dates.day}`,
       answer: "yes",
       note: "splits Sam's 08:00-14:00 Cell 1 block into 08:00-13:00 and 13:00-14:00; a two-command lot (move, then assign), one yes runs both (CB-y-1).",
-      expect: /^2 commands ready: .+ — say or type yes to do them, no to leave them\.$/,
+      expect: /^Ready to do 2 things: .+ Say yes to do them, or no\.$/,
     },
 
     // 12. extend -- John Kim's own Cell 3 block (08:00-12:00) by an hour.
@@ -286,7 +316,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     {
       say: `swap Lena Novak and John Kim ${dates.day}`,
       answer: "yes",
-      expect: /^4 commands ready: .+ — say or type yes to do them, no to leave them\.$/,
+      expect: /^Ready to do 4 things: .+ Say yes to do them, or no\.$/,
     },
 
     // 16. A copy to the day after -- Cell 3's own blocks/runs, copied
@@ -294,7 +324,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     {
       say: `copy ${dates.day} to ${dates.tomorrow} for Cell 3`,
       answer: "yes",
-      expect: /^\d+ commands? ready: .+$/,
+      expect: /^Ready to do \d+ things: .+$/,
     },
 
     // 17. A repeat day, answered no: nothing written. R-416's rule is that
@@ -311,21 +341,22 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // lot of FIVE (`src/test/commandBar.test.tsx`'s own CB-y-2 pins that
     // number). It is never the two or three of the week that happen to be in
     // the window.
-    // The door is "Show that day", and F-158 is what makes it one: the
-    // question now names the WEEK, so the board widens to the seven days the
-    // repeat needs and anchors on that week's Monday, rather than shuffling a
-    // three-day window from one missing day to the next. The window is
-    // Mon-Sun afterwards, which still holds the walk day -- entries 18, 21
-    // and 22 below name it and are unaffected.
+    // The door used to be a "Show that day" button (S59/R-419); R-455 (24
+    // Sept, lane S72-b, d5a8829) retired the press -- the bar moves the
+    // window on its own and posts "Moved the board to next week." as one
+    // line in the thread, then reruns the held sentence once the new
+    // window's data lands, landing on the SAME lot question below with no
+    // press at all. `expectAnswered` (typedWalk.spec.ts) already polls both
+    // the live line and the filed thread turn, so the plain final regex
+    // below is proof enough of both steps -- there is no button locator
+    // left to wait on. The window is Mon-Sun afterwards, which still holds
+    // the walk day -- entries 18, 21 and 22 below name it and are
+    // unaffected.
     {
       say: "Assign Lena Novak to Bracket A on Cell 4 in Line 2 every weekday next week from 8am to 12pm",
       answer: "no",
-      note: "a repeat day must be on the board (R-416); F-158 makes the question name the week, so its own Show that day widens the board to seven days. Five commands, Monday to Friday (CB-y-2), and no leaves every one of them unwritten.",
-      expect: {
-        question: /^next week is not on the board\. Move the board to that day first\.$/,
-        button: "Show that day",
-        then: /^5 commands ready: .+ — say or type yes to do them, no to leave them\.$/,
-      },
+      note: "a repeat day must be on the board (R-416); F-158 makes the move name the week, so R-455's own move widens the board to seven days on its own, no press. Five commands, Monday to Friday (CB-y-2), and no leaves every one of them unwritten.",
+      expect: /^Ready to do 5 things: .+ Say yes to do them, or no\.$/,
     },
 
     // 18. An uncertified person on Cell 1, as an ordinary single sentence --
@@ -336,29 +367,56 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       answer: "the line supervisor approved the cover",
       note: "not_certified under warn: the typed reason re-resolves with eligibility_override -- the DB read after asserts eligibility_override = true.",
       expect:
-        /^Tom Baker is not certified for Cell 1: missing Welding\. Say the reason to schedule anyway, or no\.$/,
+        /^Not done: Tom Baker is not certified for Cell 1, missing Welding\. Say the reason to schedule anyway, or no\.$/,
     },
 
-    // 19. A day past the board's own window -- "Show that day" moves it,
-    // then the held sentence re-runs on its own once the new ctx lands.
+    // 19. A day past the board's own window -- R-455's own move (no press)
+    // moves it, posting "Moved the board to <day>." first, then the held
+    // sentence re-runs on its own once the new ctx lands.
     {
       say: `Assign Maria Lopez to Bracket A on Cell 3 in Line 2 from 8am to 12pm ${dates.far}`,
-      expect: {
-        button: "Show that day",
-        then: assignReadoutRe("Maria Lopez", "Bracket A", "Cell 3", "08:00", "12:00"),
-      },
+      expect: assignReadoutRe("Maria Lopez", "Bracket A", "Cell 3", "08:00", "12:00"),
     },
 
-    // 20. A day-LESS sentence (defaults to "today") with the window on the
-    // walk's own week -- today is off the board, so the SAME question is
-    // asked again, this time naming "today". The button is NOT pressed
-    // (F-182): pressing it would move the window to the day a person is
-    // using and write there. The question itself is the proof; `runEntry`
-    // closes the standing question so entry 21 starts clean.
+    // 20. RETIRED, 24 Sept (R-459 review, S72-d): this used to be a
+    // day-LESS sentence (defaults to "today") that the walk deliberately
+    // left UNMOVED (F-182) -- the window sat on the walk's own week, today
+    // was off it, "Show that day" stood unpressed, and the standing
+    // question was the proof: pressing it would have moved the window to
+    // the day a real person might be using and written there.
+    //
+    // R-455 (lane S72-b, d5a8829) removed that door: a day_off_board move
+    // now fires with no press at all, for "today" exactly as for any other
+    // day (that IS the maintainer's own complaint the row records: "why
+    // would it not go to it on its own?"). So a day-less sentence run here
+    // would no longer stop at a question -- it would move the window to the
+    // REAL machine's actual current day and WRITE Maria Lopez's block
+    // there, on the maintainer's live shared dev server, the one thing
+    // `WalkDates`' own doc says this whole walk is built to avoid ("so the
+    // walk's writes and its closing clears land on a day nobody is using").
+    // There is no way left to observe "today is off the board" from the bar
+    // without also letting it write to today.
+    //
+    // This entry is repointed at a target that is refused for a reason that
+    // has nothing to do with the day AND captures no follow-up text: NOT a
+    // certificate or area refusal (both of those, outside a lot, set an
+    // `awaitingOverrideReason`/`awaitingAreaReason` flag on the bar that
+    // reads entry 21's next typed sentence as the override's free-text
+    // reason instead of a command -- confirmed by reading `submitText`'s own
+    // handling of those flags, CommandBar.tsx, before picking this). A
+    // five-minute span is `too_short` instead (row #22 of the R-459
+    // inventory, `docs/walks/bar-sentences.md`): a plain informational
+    // refusal, day-independent, no candidates, no flag. Cell 1 still needs a
+    // day resolved before the span can even be checked (`resolveDaySpanStep`
+    // computes the day index first), so the day-less sentence still reaches
+    // `resolveDay`, still gets `day_off_board` on the first pass (today off
+    // the board), still proves R-455's own move fires with no press for
+    // "today" too -- and still writes nothing, on the walk's own day or the
+    // real machine's, because the span itself is refused on the rerun.
     {
-      say: "Assign Maria Lopez to Bracket A on Cell 3 in Line 2 from 8am to 12pm",
-      note: 'no day word at all (defaults to "today"); the board is showing the walk\'s own days, so today is off it -- day_off_board asks about "today" specifically, and the walk declines to move there (F-182).',
-      expect: /^today is not on the board\. Move the board to that day first\.$/,
+      say: "Assign Lena Novak to Housing A on Cell 1 in Line 1 from 1pm to 1:05pm",
+      note: 'no day word at all (defaults to "today"); repointed off the original Maria Lopez/Cell 3 target after R-455 removed the decline path -- see the long comment above. A 5-minute span is too_short regardless of which day it lands on and captures no override flag, so the day-less-defaults-and-moves-on-its-own fact is proven with no write, even if the move lands on the real machine\'s actual current day.',
+      expect: /^That is 5 minutes; a block is at least \d+ minutes\.$/,
     },
 
     // 21 and 22. The clear of the walk day, at the end -- TWO sentences,
@@ -375,23 +433,25 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // to, and the spec asserts the two listings' counts SUM to an
     // independent database count of the walk day's rows taken just before
     // the first of them -- never a hand-summed number here.
-    // The window is still on the far Monday entry 19 moved it to, so the
-    // first clear asks for the walk day and goes through "Show that day";
-    // the second finds it on the board.
+    // R-455 (24 Sept, lane S72-b, d5a8829): the window is off the walk day
+    // here no matter what came before (entry 19 left it on the far Monday;
+    // entry 20 above, repointed after R-455, leaves it on the REAL
+    // machine's actual current day) -- there is no button left to press
+    // either way, the bar just moves and reruns on its own, posting "Moved
+    // the board to <day>." first. The plain final regex below is proof
+    // enough of both steps (`expectAnswered` polls the live line and the
+    // filed thread turn the move updates in place, `typedWalk.spec.ts`).
     {
       say: `clear Area 1 ${dates.day}`,
       answer: "yes",
-      note: "R-407: a place above the cells clears every cell under it -- Area 1 is Cells 1 to 4. Reached through Show that day: the window sat on entry 19's far Monday.",
-      expect: {
-        button: "Show that day",
-        then: /^\d+ commands? ready: .+$/,
-      },
+      note: "R-407: a place above the cells clears every cell under it -- Area 1 is Cells 1 to 4. Reached through R-455's own move, no press.",
+      expect: /^Ready to do \d+ things: .+$/,
     },
     {
       say: `clear Area 2 ${dates.day}`,
       answer: "yes",
       note: "the other half of the clear -- Area 2 is Cells 5 and 6.",
-      expect: /^\d+ commands? ready: .+$/,
+      expect: /^Ready to do \d+ things: .+$/,
     },
   ];
 }

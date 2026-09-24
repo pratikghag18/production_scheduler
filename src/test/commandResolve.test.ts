@@ -92,8 +92,8 @@ const run1: ContextRun = {
   productId: "ha",
   startMin: 3 * 1440 + 480,
   endMin: 3 * 1440 + 960,
-  label: "Housing A 08:00–16:00",
-  span: "08:00–16:00",
+  label: "Housing A 8 am to 4 pm",
+  span: "8 am to 4 pm",
   productName: "Housing A",
   headcount: null,
 };
@@ -119,8 +119,8 @@ const runCov: ContextRun = {
   productId: "cov",
   startMin: 3 * 1440 + 480,
   endMin: 3 * 1440 + 960,
-  label: "Cover 08:00–16:00",
-  span: "08:00–16:00",
+  label: "Cover 8 am to 4 pm",
+  span: "8 am to 4 pm",
   productName: "Cover",
   headcount: null,
 };
@@ -302,9 +302,9 @@ function unassignCmd(overrides: Partial<UnassignCommand> = {}): UnassignCommand 
 }
 
 const R1_READOUT =
-  "Operator 1 → Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00";
+  "Operator 1 is on Cell 1 in Line 1 2026-09-03 from 10 am to 2 pm, making Housing A.";
 
-const RB1_READOUT = "Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 06:00–14:00";
+const RB1_READOUT = "Cell 1 in Line 1 is booked 2026-09-03 from 6 am to 2 pm, making Housing A.";
 
 // R-385 §9 fixture blocks, verbatim. `productName` added for S41-b (brief
 // §3): the effective part's NAME, the same as its id -- contract changed,
@@ -318,7 +318,7 @@ const blk1: ContextAssignment = {
   productName: "Housing A",
   startMin: 3 * 1440 + 600,
   endMin: 3 * 1440 + 840,
-  label: "10:00–14:00",
+  label: "10 am to 2 pm",
   runId: null,
 }; // the maintainer's first sentence
 const blk2: ContextAssignment = {
@@ -326,14 +326,14 @@ const blk2: ContextAssignment = {
   id: "blk2",
   startMin: 3 * 1440 + 840,
   endMin: 3 * 1440 + 960,
-  label: "14:00–16:00",
+  label: "2 pm to 4 pm",
 };
 const blkHb: ContextAssignment = {
   ...blk1,
   id: "blkHb",
   productId: "hb",
   productName: "Housing B",
-  label: "10:00–14:00",
+  label: "10 am to 2 pm",
 };
 const blkSp: ContextAssignment = { ...blk1, id: "blkSp", operatorId: "sp" };
 const blkGone: ContextAssignment = { ...blk1, id: "blkGone", operatorId: null };
@@ -414,7 +414,7 @@ describe("commandResolve: brief §5 worked examples", () => {
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "There is no Cell 1 in Line 2. Cell 1 is in Line 1 — Plant 1 › Assembly / Line 3 — Plant 1 › Assembly.",
+        "There is no Cell 1 in Line 2. Cell 1 is in Line 1, Line 3.",
       );
     }
   });
@@ -672,12 +672,12 @@ describe("commandResolve: brief §5 worked examples", () => {
         kind: "run_exists",
         product: "Housing A",
         cell: "Cell 1",
-        runs: [{ id: "run1", label: "Housing A 08:00–16:00", word: "" }],
+        runs: [{ id: "run1", label: "Housing A 8 am to 4 pm", word: "" }],
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "A Housing A job is already booked on Cell 1, Housing A 08:00–16:00. Join it, or make a separate block?",
+        "A Housing A job is already booked on Cell 1, Housing A 8 am to 4 pm. Join it, or make a separate block?",
       );
     }
   });
@@ -694,7 +694,7 @@ describe("commandResolve: brief §5 worked examples", () => {
         productId: "ha",
         target: { kind: "run", runId: "run1" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
-        readout: `${R1_READOUT} · joining Housing A 08:00–16:00`,
+        readout: `${R1_READOUT} Joining the Housing A 8 am to 4 pm job already there.`,
       },
     });
   });
@@ -740,7 +740,7 @@ describe("commandResolve: brief §5 worked examples", () => {
         product: "Housing A",
         cell: "Cell 1",
         runs: [
-          { id: "run1", label: "Housing A 08:00–16:00", word: "" },
+          { id: "run1", label: "Housing A 8 am to 4 pm", word: "" },
           { id: "run2", label: "Housing A 09:00–15:00", word: "" },
         ],
       },
@@ -761,7 +761,7 @@ describe("commandResolve: brief §5 worked examples", () => {
         kind: "run_exists",
         product: "Housing A",
         cell: "Cell 1",
-        runs: [{ id: "run1", label: "Housing A 08:00–16:00", word: "" }],
+        runs: [{ id: "run1", label: "Housing A 8 am to 4 pm", word: "" }],
       },
     });
   });
@@ -779,14 +779,14 @@ describe("commandResolve: brief §5 worked examples", () => {
         person: "Operator 1",
         product: "Housing A",
         cell: "Cell 1",
-        span: "10:00–15:00",
-        blocks: [{ id: "blk1", label: "10:00–14:00", word: "" }],
+        span: "10 am to 3 pm",
+        blocks: [{ id: "blk1", label: "10 am to 2 pm", word: "" }],
         same: false,
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Operator 1 is already on Housing A at Cell 1 10:00–14:00. Change it to 10:00–15:00, or add a separate block?",
+        "Operator 1 is already on Housing A at Cell 1 10 am to 2 pm. Change it to 10 am to 3 pm, or add a separate block?",
       );
     }
   });
@@ -800,14 +800,14 @@ describe("commandResolve: brief §5 worked examples", () => {
         person: "Operator 1",
         product: "Housing A",
         cell: "Cell 1",
-        span: "10:00–14:00",
-        blocks: [{ id: "blk1", label: "10:00–14:00", word: "" }],
+        span: "10 am to 2 pm",
+        blocks: [{ id: "blk1", label: "10 am to 2 pm", word: "" }],
         same: true,
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Operator 1 is already on Housing A at Cell 1 10:00–14:00 — nothing to change. Add a separate block?",
+        "Operator 1 is already on Housing A at Cell 1 10 am to 2 pm — nothing to change. Add a separate block?",
       );
     }
   });
@@ -824,7 +824,7 @@ describe("commandResolve: brief §5 worked examples", () => {
         productId: "ha",
         target: { kind: "retime", assignmentId: "blk1" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
-        readout: `${R1_READOUT.replace("10:00–14:00", "10:00–15:00")} · changing 10:00–14:00`,
+        readout: `${R1_READOUT.replace("10 am to 2 pm", "10 am to 3 pm")} Changing the block that ran 10 am to 2 pm.`,
       },
     });
   });
@@ -845,7 +845,7 @@ describe("commandResolve: brief §5 worked examples", () => {
         kind: "run_exists",
         product: "Housing A",
         cell: "Cell 1",
-        runs: [{ id: "run1", label: "Housing A 08:00–16:00", word: "" }],
+        runs: [{ id: "run1", label: "Housing A 8 am to 4 pm", word: "" }],
       },
     });
   });
@@ -886,17 +886,17 @@ describe("commandResolve: brief §5 worked examples", () => {
         person: "Operator 1",
         product: "Housing A",
         cell: "Cell 1",
-        span: "10:00–16:00",
+        span: "10 am to 4 pm",
         blocks: [
-          { id: "blk1", label: "10:00–14:00", word: "" },
-          { id: "blk2", label: "14:00–16:00", word: "" },
+          { id: "blk1", label: "10 am to 2 pm", word: "" },
+          { id: "blk2", label: "2 pm to 4 pm", word: "" },
         ],
         same: false,
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Operator 1 already has 2 Housing A blocks at Cell 1 (10:00–14:00, 14:00–16:00). Change one to 10:00–16:00, or add a separate block?",
+        "Operator 1 already has 2 Housing A blocks at Cell 1 (10 am to 2 pm, 2 pm to 4 pm). Change one to 10 am to 4 pm, or add a separate block?",
       );
     }
   });
@@ -952,7 +952,7 @@ describe("commandResolve: brief §5 worked examples", () => {
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.resolved.target).toEqual({ kind: "run_create", productId: "ha", headcount: 3 });
-      expect(res.resolved.readout).toBe(`${RB1_READOUT} · 3 people`);
+      expect(res.resolved.readout).toBe(`${RB1_READOUT} For 3 people.`);
     }
   });
 
@@ -964,14 +964,14 @@ describe("commandResolve: brief §5 worked examples", () => {
         kind: "job_exists",
         product: "Housing A",
         cell: "Cell 1",
-        span: "06:00–14:00",
-        run: { id: "run1", label: "08:00–16:00", word: "" },
+        span: "6 am to 2 pm",
+        run: { id: "run1", label: "8 am to 4 pm", word: "" },
         same: false,
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "A Housing A job is already booked on Cell 1 08:00–16:00. Change it to 06:00–14:00, or pick other hours?",
+        "A Housing A job is already booked on Cell 1 8 am to 4 pm. Change it to 6 am to 2 pm, or pick other hours?",
       );
     }
   });
@@ -987,12 +987,12 @@ describe("commandResolve: brief §5 worked examples", () => {
         kind: "job_exists",
         product: "Housing A",
         cell: "Cell 1",
-        span: "08:00–16:00",
-        run: { id: "run1", label: "08:00–16:00", word: "" },
+        span: "8 am to 4 pm",
+        run: { id: "run1", label: "8 am to 4 pm", word: "" },
         same: true,
       });
       expect(describeQuestion(res.question)).toBe(
-        "A Housing A job is already booked on Cell 1 08:00–16:00 — nothing to change.",
+        "A Housing A job is already booked on Cell 1 8 am to 4 pm — nothing to change.",
       );
     }
   });
@@ -1008,7 +1008,7 @@ describe("commandResolve: brief §5 worked examples", () => {
         productId: "ha",
         target: { kind: "retime_run", runId: "run1" },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
-        readout: `${RB1_READOUT} · changing Housing A 08:00–16:00`,
+        readout: `${RB1_READOUT} Changing the job that ran Housing A 8 am to 4 pm.`,
       },
     });
   });
@@ -1021,12 +1021,12 @@ describe("commandResolve: brief §5 worked examples", () => {
         kind: "job_in_the_way",
         product: "Housing A",
         cell: "Cell 1",
-        other: "Cover 08:00–16:00",
+        other: "Cover 8 am to 4 pm",
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Cell 1 already runs Cover 08:00–16:00; a cell runs one job at a time. Pick other hours, or change that job on the board.",
+        "Cell 1 already runs Cover 8 am to 4 pm; a cell runs one job at a time. Pick other hours, or change that job on the board.",
       );
     }
   });
@@ -1042,8 +1042,8 @@ describe("commandResolve: brief §5 worked examples", () => {
       productId: "ha",
       startMin: 3 * 1440 + 840, // 14:00 -- exactly where bookCmd()'s span ends
       endMin: 3 * 1440 + 960,
-      label: "Housing A 14:00–16:00",
-      span: "14:00–16:00",
+      label: "Housing A 2 pm to 4 pm",
+      span: "2 pm to 4 pm",
       productName: "Housing A",
       headcount: null,
     };
@@ -1119,8 +1119,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         person: "Operator 1",
         product: "Housing A",
         cell: "Cell 1",
-        span: "10:00–15:00",
-        blocks: [{ id: "blk1", label: "10:00–14:00", word: "" }],
+        span: "10 am to 3 pm",
+        blocks: [{ id: "blk1", label: "10 am to 2 pm", word: "" }],
         same: false,
       },
     });
@@ -1140,13 +1140,13 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         kind: "remove_which",
         person: "Operator 1",
         cell: "Cell 1",
-        when: "10:00–14:00",
-        blocks: [{ id: "blk1", label: "Housing A 10:00–14:00", word: "", part: "Housing A" }],
+        when: "10 am to 2 pm",
+        blocks: [{ id: "blk1", label: "Housing A 10 am to 2 pm", word: "", part: "Housing A" }],
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?",
+        "Remove Operator 1's Housing A block on Cell 1, 10 am to 2 pm?",
       );
     }
   });
@@ -1160,7 +1160,7 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         intent: "unassign",
         assignmentId: "blk1",
         readout:
-          "Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00",
+          "Operator 1 is off Cell 1 in Line 1 2026-09-03; that was 10 am to 2 pm, making Housing A.",
       },
     });
   });
@@ -1175,8 +1175,8 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         cell: "Cell 1",
         when: "2026-09-03",
         blocks: [
-          { id: "blk1", label: "Housing A 10:00–14:00", word: "", part: "Housing A" },
-          { id: "blk2", label: "Housing A 14:00–16:00", word: "", part: "Housing A" },
+          { id: "blk1", label: "Housing A 10 am to 2 pm", word: "", part: "Housing A" },
+          { id: "blk2", label: "Housing A 2 pm to 4 pm", word: "", part: "Housing A" },
         ],
       },
     });
@@ -1207,11 +1207,11 @@ describe("commandResolve: S41-b unassign worked examples", () => {
     const withHours = resolveCommand(unassignCmd(), withBlocks([]));
     expect(withHours).toEqual({
       ok: false,
-      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10:00–14:00" },
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10 am to 2 pm" },
     });
     if (!withHours.ok) {
       expect(describeQuestion(withHours.question)).toBe(
-        "Operator 1 has no block on Cell 1 10:00–14:00.",
+        "Operator 1 has no block on Cell 1 10 am to 2 pm.",
       );
     }
   });
@@ -1223,7 +1223,7 @@ describe("commandResolve: S41-b unassign worked examples", () => {
     );
     expect(res).toEqual({
       ok: false,
-      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "14:00–16:00" },
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "2 pm to 4 pm" },
     });
   });
 
@@ -1231,7 +1231,7 @@ describe("commandResolve: S41-b unassign worked examples", () => {
     const bySp = resolveCommand(unassignCmd(), withBlocks([blkSp]));
     expect(bySp).toEqual({
       ok: false,
-      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10:00–14:00" },
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10 am to 2 pm" },
     });
     // Until S49 this half pinned `no_block` for the person's OWN block on
     // Cell 2 -- the refusal F-144 was about. The contract changed (R-397):
@@ -1335,13 +1335,13 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         kind: "remove_which",
         person: "Operator 1",
         cell: "Cell 1",
-        when: "10:00–14:00",
-        blocks: [{ id: "blkUnknown", label: "block 10:00–14:00", word: "", part: null }],
+        when: "10 am to 2 pm",
+        blocks: [{ id: "blkUnknown", label: "block 10 am to 2 pm", word: "", part: null }],
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Remove Operator 1's block on Cell 1, 10:00–14:00?",
+        "Remove Operator 1's block on Cell 1, 10 am to 2 pm?",
       );
     }
   });
@@ -1352,8 +1352,14 @@ describe("commandResolve: S41-b unassign worked examples", () => {
  * s41-c-move-brief.md §5's worked examples (RM1-RM10).
  */
 describe("commandResolve: S41-c move worked examples", () => {
-  const MOVE_READOUT_PREFIX =
-    "Moving Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00";
+  // R-459: a move-in-time readout ("now runs <day> from <hours>") and a
+  // move-to-another-cell readout ("is moving from <cell> to <cell>, <day>
+  // from <hours>") are two different sentences (`resolveMoveCommand`'s own
+  // `destCellName !== null` branch) -- one constant per shape, not one
+  // shared prefix that only fit the OLD arrow-suffix format.
+  const MOVE_IN_TIME_PREFIX = "Operator 1's Housing A block on Cell 1 in Line 1";
+  const MOVE_TO_CELL_PREFIX =
+    "Operator 1 is moving from Cell 1 in Line 1 to Cell 2, 2026-09-03 from";
 
   it("RM1: the move in time -- retime, readout with the arrow naming the hours", () => {
     const res = resolveCommand(
@@ -1373,7 +1379,7 @@ describe("commandResolve: S41-c move worked examples", () => {
         productId: "ha",
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         target: { kind: "retime" },
-        readout: `${MOVE_READOUT_PREFIX} → 10:00–15:00`,
+        readout: `${MOVE_IN_TIME_PREFIX} now runs 2026-09-03 from 10 am to 3 pm.`,
       },
     });
   });
@@ -1390,7 +1396,7 @@ describe("commandResolve: S41-c move worked examples", () => {
         productId: "ha",
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         target: { kind: "move_cell" },
-        readout: `${MOVE_READOUT_PREFIX} → Cell 2 · 10:00–14:00`,
+        readout: `${MOVE_TO_CELL_PREFIX} 10 am to 2 pm.`,
       },
     });
   });
@@ -1413,7 +1419,7 @@ describe("commandResolve: S41-c move worked examples", () => {
         productId: "ha",
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         target: { kind: "move_cell" },
-        readout: `${MOVE_READOUT_PREFIX} → Cell 2 · 10:00–15:00`,
+        readout: `${MOVE_TO_CELL_PREFIX} 10 am to 3 pm.`,
       },
     });
   });
@@ -1447,8 +1453,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         cell: "Cell 1",
         when: "2026-09-03",
         blocks: [
-          { id: "blk1", label: "Housing A 10:00–14:00", word: "", part: "Housing A" },
-          { id: "blk2", label: "Housing A 14:00–16:00", word: "", part: "Housing A" },
+          { id: "blk1", label: "Housing A 10 am to 2 pm", word: "", part: "Housing A" },
+          { id: "blk2", label: "Housing A 2 pm to 4 pm", word: "", part: "Housing A" },
         ],
       },
     });
@@ -1505,7 +1511,7 @@ describe("commandResolve: S41-c move worked examples", () => {
         productId: "ha",
         range: { startMin: 3 * 1440 + 960, endMin: 3 * 1440 + 1080 },
         target: { kind: "retime" },
-        readout: `${MOVE_READOUT_PREFIX} → 16:00–18:00`,
+        readout: `${MOVE_IN_TIME_PREFIX} now runs 2026-09-03 from 4 pm to 6 pm.`,
       },
     });
   });
@@ -1548,7 +1554,7 @@ describe("commandResolve: S41-c move worked examples", () => {
         intent: "unassign",
         assignmentId: "blk1",
         readout:
-          "Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 · 10:00–14:00",
+          "Operator 1 is off Cell 1 in Line 1 2026-09-03; that was 10 am to 2 pm, making Housing A.",
       },
     });
   });
@@ -1568,15 +1574,15 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         kind: "remove_which",
         person: "Operator 1",
         cell: "Cell 1",
-        when: "10:00–14:00",
+        when: "10 am to 2 pm",
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10:00–14:00",
+            label: "Cell 2 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
         elsewhere: true,
@@ -1584,7 +1590,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Operator 1 has no block on Cell 1 10:00–14:00, but has one on Cell 2: Housing A 10:00–14:00. Remove that one?",
+        "Operator 1 has no block on Cell 1 10 am to 2 pm, but has one on Cell 2: Housing A 10 am to 2 pm. Remove that one?",
       );
     }
   });
@@ -1601,11 +1607,11 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10:00–14:00",
+            label: "Cell 2 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
         elsewhere: true,
@@ -1613,7 +1619,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Operator 1 has no block on Cell 1 2026-09-03, but has one on Cell 2: Housing A 10:00–14:00. Remove that one?",
+        "Operator 1 has no block on Cell 1 2026-09-03, but has one on Cell 2: Housing A 10 am to 2 pm. Remove that one?",
       );
     }
   });
@@ -1626,23 +1632,23 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         kind: "remove_which",
         person: "Operator 1",
         cell: "Cell 1",
-        when: "10:00–14:00",
+        when: "10 am to 2 pm",
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10:00–14:00",
+            label: "Cell 2 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
           {
             id: "blkC1b",
-            label: "Cell 1 · Housing A 10:00–14:00",
+            label: "Cell 1 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
         elsewhere: true,
@@ -1650,7 +1656,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Operator 1 has no block on Cell 1 10:00–14:00, but has 2 elsewhere. Remove which?",
+        "Operator 1 has no block on Cell 1 10 am to 2 pm, but has 2 elsewhere. Remove which?",
       );
     }
   });
@@ -1659,7 +1665,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
     const res = resolveCommand(unassignCmd(), withBlocks([blkSp]));
     expect(res).toEqual({
       ok: false,
-      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10:00–14:00" },
+      question: { kind: "no_block", person: "Operator 1", cell: "Cell 1", when: "10 am to 2 pm" },
     });
   });
 
@@ -1671,8 +1677,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
       resolved: {
         intent: "unassign",
         assignmentId: "blkC2",
-        readout:
-          "Removing Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 2 · 2026-09-03 · 10:00–14:00",
+        readout: "Operator 1 is off Cell 2 2026-09-03; that was 10 am to 2 pm, making Housing A.",
       },
     });
   });
@@ -1686,15 +1691,15 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         kind: "remove_which",
         person: "Operator 1",
         cell: "Cell 1",
-        when: "10:00–14:00",
+        when: "10 am to 2 pm",
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10:00–14:00",
+            label: "Cell 2 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
         elsewhere: true,
@@ -1726,20 +1731,20 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10:00–14:00",
+            label: "Cell 2 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
         elsewhere: true,
-        destination: "10:00–14:00",
+        destination: "10 am to 2 pm",
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Operator 1 has no block on Cell 1 2026-09-03, but has one on Cell 2: Housing A 10:00–14:00. Move that one to 10:00–14:00?",
+        "Operator 1 has no block on Cell 1 2026-09-03, but has one on Cell 2: Housing A 10 am to 2 pm. Move that one to 10 am to 2 pm?",
       );
     }
   });
@@ -1756,7 +1761,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
     if (!res.ok) {
       expect(res.question.kind).toBe("move_which");
       if (res.question.kind === "move_which") {
-        expect(res.question.destination).toBe("Cell 2 in Line 1 · 12:00–16:00");
+        expect(res.question.destination).toBe("Cell 2 in Line 1 from noon to 4 pm");
       }
     }
   });
@@ -1781,8 +1786,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         productId: "ha",
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         target: { kind: "retime" },
-        readout:
-          "Moving Operator 1's Housing A block · Plant 1 › Assembly › Line 1 › Cell 2 · 2026-09-03 · 10:00–14:00 → 10:00–15:00",
+        readout: "Operator 1's Housing A block on Cell 2 now runs 2026-09-03 from 10 am to 3 pm.",
       },
     });
   });
@@ -1799,19 +1803,19 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10:00–14:00",
+            label: "Cell 2 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
           {
             id: "blkC1b",
-            label: "Cell 1 · Housing A 10:00–14:00",
+            label: "Cell 1 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
         elsewhere: true,
@@ -1828,22 +1832,22 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         kind: "remove_which",
         person: "Operator 1",
         cell: null,
-        when: "10:00–14:00",
+        when: "10 am to 2 pm",
         blocks: [
           {
             id: "blk1",
-            label: "Cell 1 · Housing A 10:00–14:00",
+            label: "Cell 1 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
       },
     });
     if (!one.ok) {
       expect(describeQuestion(one.question)).toBe(
-        "Remove Operator 1's Housing A block on Cell 1, 10:00–14:00?",
+        "Remove Operator 1's Housing A block on Cell 1, 10 am to 2 pm?",
       );
     }
 
@@ -1857,17 +1861,17 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         expect(several.question.blocks.map((b) => b.id)).toEqual(["blk1", "blkC2"]);
       }
       expect(describeQuestion(several.question)).toBe(
-        "Operator 1 has 2 blocks 10:00–14:00. Remove which?",
+        "Operator 1 has 2 blocks 10 am to 2 pm. Remove which?",
       );
     }
 
     const none = resolveCommand(unassignCmd({ place: [] }), withBlocks([blkSp]));
     expect(none).toEqual({
       ok: false,
-      question: { kind: "no_block", person: "Operator 1", cell: null, when: "10:00–14:00" },
+      question: { kind: "no_block", person: "Operator 1", cell: null, when: "10 am to 2 pm" },
     });
     if (!none.ok) {
-      expect(describeQuestion(none.question)).toBe("Operator 1 has no block 10:00–14:00.");
+      expect(describeQuestion(none.question)).toBe("Operator 1 has no block 10 am to 2 pm.");
     }
   });
 
@@ -1926,11 +1930,11 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10:00–14:00",
+            label: "Cell 2 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
         elsewhere: true,
@@ -1973,7 +1977,7 @@ describe("commandResolve: S50 a several is read but not yet run", () => {
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "Several commands in one sentence are read but not yet run; say them one at a time for now.",
+        "I can only run one thing at a time from a typed sentence; say them one at a time for now.",
       );
     }
   });
@@ -2086,8 +2090,8 @@ describe("commandResolve: S52 a shift by name", () => {
         field: "shift",
         text: "day",
         candidates: [
-          { id: "Day A", label: "Day A 06:00–14:00", word: "Day A" },
-          { id: "Day B", label: "Day B 14:00–22:00", word: "Day B" },
+          { id: "Day A", label: "Day A 6 am to 2 pm", word: "Day A" },
+          { id: "Day B", label: "Day B 2 pm to 10 pm", word: "Day B" },
         ],
       },
     });
@@ -2111,7 +2115,7 @@ describe("commandResolve: S52 a shift by name", () => {
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.resolved.range).toEqual({ startMin: 3 * 1440 + 1320, endMin: 4 * 1440 + 360 });
-      expect(res.resolved.readout).toContain("22:00–06:00");
+      expect(res.resolved.readout).toContain("10 pm to 6 am");
     }
   });
 
@@ -2137,7 +2141,7 @@ describe("commandResolve: S52 a shift by name", () => {
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.resolved.range).toEqual({ startMin: 3 * 1440 + 1320, endMin: 4 * 1440 + 360 });
-      expect(res.resolved.readout).toContain("22:00–06:00");
+      expect(res.resolved.readout).toContain("10 pm to 6 am");
     }
   });
 
@@ -2159,23 +2163,23 @@ describe("commandResolve: S52 a shift by name", () => {
         kind: "remove_which",
         person: "Operator 1",
         cell: null,
-        when: "06:00–14:00",
+        when: "6 am to 2 pm",
         blocks: [
           {
             id: "blk1",
-            label: "Cell 1 · Housing A 10:00–14:00",
+            label: "Cell 1 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10:00–14:00",
+            label: "Cell 2 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
       },
@@ -2212,7 +2216,7 @@ describe("commandResolve: S52 a shift by name", () => {
       expect(res.resolved.assignmentId).toBe("blk1");
       expect(res.resolved.nodeId).toBe("c1a");
       expect(res.resolved.range).toEqual({ startMin: 3 * 1440 + 1320, endMin: 4 * 1440 + 360 });
-      expect(res.resolved.readout).toContain("22:00–06:00");
+      expect(res.resolved.readout).toContain("10 pm to 6 am");
     }
 
     const none = resolveCommand(
@@ -2240,23 +2244,23 @@ describe("commandResolve: S52 a shift by name", () => {
         kind: "remove_which",
         person: "Operator 1",
         cell: null,
-        when: "06:00–14:00",
+        when: "6 am to 2 pm",
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10:00–14:00",
+            label: "Cell 2 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
           {
             id: "blk1",
-            label: "Cell 1 · Housing A 10:00–14:00",
+            label: "Cell 1 · Housing A 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
-            when: "10:00–14:00",
+            when: "10 am to 2 pm",
           },
         ],
       },
@@ -2404,7 +2408,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       productName: "Housing A",
       startMin: 2 * 1440 + 600, // day 2, 10:00
       endMin: 2 * 1440 + 840, // day 2, 14:00
-      label: "10:00–14:00",
+      label: "10 am to 2 pm",
       runId: null,
       ...overrides,
     };
@@ -2417,8 +2421,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       productId: "zha",
       startMin: 2 * 1440 + 480,
       endMin: 2 * 1440 + 960,
-      label: "Housing A 08:00–16:00",
-      span: "08:00–16:00",
+      label: "Housing A 8 am to 4 pm",
+      span: "8 am to 4 pm",
       productName: "Housing A",
       headcount: 3,
       ...overrides,
@@ -2491,7 +2495,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
     );
     expect(res).toEqual({
       ok: false,
-      question: { kind: "no_shift_at", cell: "Cell 1", time: "23:00" },
+      question: { kind: "no_shift_at", cell: "Cell 1", time: "11 pm" },
     });
   });
 
@@ -2557,7 +2561,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
     if (!removalRes.ok) {
       expect(removalRes.question.kind).toBe("remove_which");
       if (removalRes.question.kind === "remove_which") {
-        expect(removalRes.question.when).toBe("00:00–22:00"); // whole day, to end of day's own end
+        expect(removalRes.question.when).toBe("midnight to 10 pm"); // whole day, to end of day's own end
       }
     }
   });
@@ -2693,7 +2697,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         operatorId: "zsam",
         startMin: 2 * 1440 + 600,
         endMin: 2 * 1440 + 720,
-        label: "10:00–12:00",
+        label: "10 am to noon",
       });
       const blkB = zBlk({
         id: "blkB",
@@ -2785,7 +2789,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       });
       if (!res.ok) {
         expect(describeQuestion(res.question)).toBe(
-          "There is no Cell 1 in Line 5. Cell 1 is in Line 1 — Plant Z.",
+          "There is no Cell 1 in Line 5. Cell 1 is in Line 1.",
         );
       }
     });
@@ -2794,7 +2798,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       const straddle = zBlk({
         startMin: 2 * 1440 + 480,
         endMin: 2 * 1440 + 960,
-        label: "08:00–16:00",
+        label: "8 am to 4 pm",
       });
       const command: UnassignCommand = {
         intent: "unassign",
@@ -2833,7 +2837,11 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
     });
 
     it("EX4: a block across BOTH edges -- split_needed, nothing built", () => {
-      const wide = zBlk({ startMin: 2 * 1440 + 480, endMin: 2 * 1440 + 960, label: "08:00–16:00" });
+      const wide = zBlk({
+        startMin: 2 * 1440 + 480,
+        endMin: 2 * 1440 + 960,
+        label: "8 am to 4 pm",
+      });
       const command: UnassignCommand = {
         intent: "unassign",
         operator: "everyone",
@@ -2851,8 +2859,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           kind: "split_needed",
           person: "Sam",
           cell: "Cell 1",
-          block: "Housing A 08:00–16:00",
-          span: "10:00–12:00",
+          block: "Housing A 8 am to 4 pm",
+          span: "10 am to noon",
         },
       });
     });
@@ -2917,7 +2925,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         operatorId: "zsam",
         startMin: 2 * 1440 + 600,
         endMin: 2 * 1440 + 720,
-        label: "10:00–12:00",
+        label: "10 am to noon",
       });
       const blkB = zBlk({
         id: "blkB",
@@ -2953,7 +2961,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           intent: "remove_run",
           runId: "zrun",
           readout:
-            "Removing the Housing A job · Plant Z › Line 1 › Cell 1 · 2026-09-03 · 08:00–16:00 · 3 people",
+            "The Housing A job is off Cell 1 2026-09-03; that was 8 am to 4 pm, for 3 people.",
         });
       } else {
         throw new Error("expected a several");
@@ -2979,7 +2987,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         expect(res.runRemovals).toHaveLength(1);
         expect(res.runRemovals?.[0].runId).toBe("zrun2");
         expect(res.runRemovals?.[0].readout).toBe(
-          "Removing the Housing A job · Plant Z › Line 1 › Cell 1 · 2026-09-03 · 08:00–16:00 · 3 people",
+          "The Housing A job is off Cell 1 2026-09-03; that was 8 am to 4 pm, for 3 people.",
         );
       } else {
         throw new Error("expected a several (the job alone)");
@@ -3002,7 +3010,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       expect(res.ok).toBe(true);
       if (res.ok && res.command.intent === "several") {
         expect(res.runRemovals?.[0].readout).toBe(
-          "Removing the Housing A job · Plant Z › Line 1 › Cell 1 · 2026-09-03 · 08:00–16:00",
+          "The Housing A job is off Cell 1 2026-09-03; that was 8 am to 4 pm.",
         );
       } else {
         throw new Error("expected a several (the job alone)");
@@ -3072,7 +3080,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       expect(res.ok).toBe(true);
       if (res.ok && res.command.intent === "several") {
         expect(res.runRemovals?.[0].readout).toBe(
-          "Removing the job · Plant Z › Line 1 › Cell 1 · 2026-09-03 · 08:00–16:00 · 3 people",
+          "The job is off Cell 1 2026-09-03; that was 8 am to 4 pm, for 3 people.",
         );
       } else {
         throw new Error("expected a several (the job alone)");
@@ -3136,8 +3144,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         expect(resolved.resolved).toEqual({
           intent: "unassign",
           assignmentId: "blkMid",
-          readout:
-            "Removing Sam's Housing A block · Plant Z › Line 1 › Cell 1 · 2026-09-03 · 14:00–00:00",
+          readout: "Sam is off Cell 1 2026-09-03; that was 2 pm to midnight, making Housing A.",
         });
       }
     });
@@ -3150,7 +3157,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         productName: "Housing B",
         startMin: 2 * 1440 + 600,
         endMin: 2 * 1440 + 720,
-        label: "10:00–12:00",
+        label: "10 am to noon",
       });
       const midnightBlk = zBlk({
         id: "blkMid",
@@ -3217,8 +3224,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         expect(resolved.resolved).toEqual({
           intent: "unassign",
           assignmentId: "blkMid",
-          readout:
-            "Removing Sam's Housing A block · Plant Z › Line 1 › Cell 1 · 2026-09-03 · 14:00–00:00",
+          readout: "Sam is off Cell 1 2026-09-03; that was 2 pm to midnight, making Housing A.",
         });
       }
     });
@@ -3259,8 +3265,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           expect(resolved.resolved).toEqual({
             intent: "unassign",
             assignmentId: "blkMid",
-            readout:
-              "Removing Sam's Housing A block · Plant Z › Line 1 › Cell 1 · 2026-09-03 · 14:00–00:00",
+            readout: "Sam is off Cell 1 2026-09-03; that was 2 pm to midnight, making Housing A.",
           });
           expect(resolved.resolved).not.toHaveProperty("span");
           expect(resolved.resolved).not.toHaveProperty("range");
@@ -4029,6 +4034,42 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       }
     });
 
+    it('AJ3b (S72-d review, R-459/F-146): "end ... at midnight" -- an explicit DAY_END target ({23, 59}, parse.ts\'s own literal) reads as "midnight" in the sentence, never "11:59 pm"', () => {
+      // `adjust.at` holds parse.ts's DAY_END constant LITERALLY for a
+      // spoken "midnight"/"12 am"/"24:00" end (resolve.ts's own comment on
+      // `resolveMoveCommand`'s `adjustReadout.newClock`), never normalized
+      // through `clockOfOffset`'s 1440-wraps-to-0 the way a plain range clip
+      // is. `spokenClock` (resolve.ts) special-cased only literal {0, 0}
+      // before this pin -- {23, 59} fell through to the ordinary am/pm
+      // branch and printed "11:59 pm", contradicting both this function's
+      // own doc comment ("DAY_END included, reads back as 'midnight'") and
+      // parse.ts's OWN twin special case (`formatClock`, parse.ts ~4089).
+      const res = resolveCommand(
+        adjustMove({ adjust: { edge: "end", at: { hour: 23, minute: 59 } } }),
+        zCtx({ assignments: [zBlk()] }),
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.resolved.readout).toBe("Sam's block on Cell 1 now ends midnight; it was 2 pm.");
+      }
+    });
+
+    it('AJ3c (S72-d review, R-459): a minute-precision hour reads "10:30 am", not "10:0 am"/"10:3 am" -- `spokenClock`\'s own zero-padded minute, pinned end to end', () => {
+      // Bar-sentences.md's own R-459 doc names "10:30 am" as the worked
+      // example of a non-zero-minute clock (CLAUDE.md §0/the brief's own
+      // register), and no pin anywhere in this suite or `commandBar.test.tsx`
+      // exercised a non-zero minute through `spokenClock` before this one --
+      // every existing readout/adjust fixture happens to land on the hour.
+      const res = resolveCommand(
+        adjustMove({ adjust: { edge: "end", at: { hour: 10, minute: 30 } } }),
+        zCtx({ assignments: [zBlk()] }),
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.resolved.readout).toBe("Sam's block on Cell 1 now ends 10:30 am; it was 2 pm.");
+      }
+    });
+
     it("AJ4: start at -- the start is set to a wall-clock time", () => {
       const res = resolveCommand(
         adjustMove({ adjust: { edge: "start", at: { hour: 9, minute: 0 } } }),
@@ -4072,7 +4113,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         question: {
           kind: "adjust_inverts",
           person: "Sam",
-          block: "Housing A 10:00–14:00",
+          block: "Housing A 10 am to 2 pm",
         },
       });
     });
@@ -4098,7 +4139,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         question: {
           kind: "adjust_off_day",
           person: "Sam",
-          block: "Housing A 10:00–14:00",
+          block: "Housing A 10 am to 2 pm",
         },
       });
     });
@@ -4114,7 +4155,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "b",
         startMin: 2 * 1440 + 720,
         endMin: 2 * 1440 + 840,
-        label: "12:00–14:00",
+        label: "noon to 2 pm",
       });
       const res = resolveCommand(
         adjustMove({ adjust: { edge: "end", by: 30 } }),
@@ -4208,8 +4249,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         question: {
           kind: "split_outside",
           person: "Sam",
-          at: "07:00",
-          blocks: ["Housing A 10:00–14:00"],
+          at: "7 am",
+          blocks: ["Housing A 10 am to 2 pm"],
         },
       });
     });
@@ -4356,7 +4397,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           person: "Sam",
           product: "Housing A",
           cell: "Cell 1",
-          span: "12:00–14:00",
+          span: "noon to 2 pm",
           blocks: [{ id: "zblk2", label: "13:00–15:00", word: "" }],
           same: false,
         },
@@ -4422,7 +4463,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         operatorId: "zana",
         startMin: zWallToOffset(2, 600), // today 10:00
         endMin: zWallToOffset(2, 720), // today 12:00
-        label: "10:00–12:00",
+        label: "10 am to noon",
       });
       const command: UnassignCommand = {
         intent: "unassign",
@@ -4475,7 +4516,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn2",
         startMin: zWallToOffset(2, 1320), // today 22:00
         endMin: zWallToOffset(3, 360), // tomorrow (index 3) 06:00
-        label: "22:00–06:00",
+        label: "10 pm to 6 am",
       });
       const command: UnassignCommand = {
         intent: "unassign",
@@ -4518,7 +4559,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn3",
         startMin: zWallToOffset(1, 1320), // yesterday 22:00
         endMin: zWallToOffset(3, 120), // tomorrow 02:00
-        label: "22:00–02:00",
+        label: "10 pm to 2 am",
       });
       const command: UnassignCommand = {
         intent: "unassign",
@@ -4537,8 +4578,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           kind: "across_midnight",
           person: "Sam",
           cell: "Cell 1",
-          block: "Housing A 22:00–02:00",
-          hours: "22:00–02:00", // the block's OWN real hours, never the window's
+          block: "Housing A 10 pm to 2 am",
+          hours: "10 pm to 2 am", // the block's OWN real hours, never the window's
         },
       });
     });
@@ -4591,7 +4632,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn5",
         startMin: zWallToOffset(2, 600),
         endMin: zWallToOffset(2, 720),
-        label: "10:00–12:00",
+        label: "10 am to noon",
       });
       const command: UnassignCommand = {
         intent: "unassign",
@@ -4624,7 +4665,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn6",
         startMin: zWallToOffset(1, 1320), // 2026-09-02 (index 1) 22:00
         endMin: zWallToOffset(2, 360), // 2026-09-03 (index 2) 06:00
-        label: "22:00–06:00",
+        label: "10 pm to 6 am",
       });
       const command: UnassignCommand = {
         intent: "unassign",
@@ -4653,7 +4694,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn7",
         startMin: zWallToOffset(1, 1320), // yesterday 22:00
         endMin: zWallToOffset(2, 360), // today 06:00
-        label: "22:00–06:00",
+        label: "10 pm to 6 am",
       });
       const command: SplitCommand = {
         intent: "split",
@@ -4669,8 +4710,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           kind: "split_needed",
           person: "Sam",
           cell: "Cell 1",
-          block: "Housing A 22:00–06:00",
-          span: "22:00–06:00",
+          block: "Housing A 10 pm to 6 am",
+          span: "10 pm to 6 am",
         },
       });
     });
@@ -4680,7 +4721,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn8",
         startMin: zWallToOffset(1, 1320), // yesterday 22:00
         endMin: zWallToOffset(2, 360), // today 06:00
-        label: "22:00–06:00",
+        label: "10 pm to 6 am",
       });
       const command: ReplaceCommand = {
         intent: "replace",
@@ -4698,8 +4739,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           kind: "across_midnight",
           person: "Sam",
           cell: "Cell 1",
-          block: "Housing A 22:00–06:00",
-          hours: "22:00–06:00",
+          block: "Housing A 10 pm to 6 am",
+          hours: "10 pm to 6 am",
         },
       });
     });
@@ -4709,14 +4750,14 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn9a",
         startMin: zWallToOffset(1, 1320), // yesterday 22:00
         endMin: zWallToOffset(2, 360), // today 06:00
-        label: "22:00–06:00",
+        label: "10 pm to 6 am",
       });
       const anaBlock = zBlk({
         id: "mn9b",
         operatorId: "zana",
         startMin: zWallToOffset(2, 600),
         endMin: zWallToOffset(2, 720),
-        label: "10:00–12:00",
+        label: "10 am to noon",
       });
       const command: SwapCommand = {
         intent: "swap",
@@ -4734,8 +4775,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           kind: "across_midnight",
           person: "Sam",
           cell: "Cell 1",
-          block: "Housing A 22:00–06:00",
-          hours: "22:00–06:00",
+          block: "Housing A 10 pm to 6 am",
+          hours: "10 pm to 6 am",
         },
       });
     });
@@ -4767,7 +4808,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn10",
         startMin: zWallToOffset(1, 1320), // yesterday 22:00 -- exactly Shift 3's own start
         endMin: zWallToOffset(2, 360), // today 06:00 -- exactly Shift 3's own end
-        label: "22:00–06:00",
+        label: "10 pm to 6 am",
       });
       const command: ReplaceCommand = {
         intent: "replace",
@@ -4808,14 +4849,14 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn11a",
         startMin: zWallToOffset(1, 1320), // yesterday 22:00, exactly Shift 3
         endMin: zWallToOffset(2, 360), // today 06:00
-        label: "22:00–06:00",
+        label: "10 pm to 6 am",
       });
       const anaBlock = zBlk({
         id: "mn11b",
         operatorId: "zana",
         startMin: zWallToOffset(2, 600), // today 10:00, an ordinary same-day block
         endMin: zWallToOffset(2, 720), // today 12:00
-        label: "10:00–12:00",
+        label: "10 am to noon",
       });
       const command: SwapCommand = {
         intent: "swap",
@@ -4873,7 +4914,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         id: "mn12",
         startMin: zWallToOffset(1, 1260), // yesterday 21:00 -- an hour off Shift 3's own 22:00
         endMin: zWallToOffset(2, 360), // today 06:00
-        label: "21:00–06:00",
+        label: "9 pm to 6 am",
       });
       const command: ReplaceCommand = {
         intent: "replace",
@@ -4894,8 +4935,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           kind: "across_midnight",
           person: "Sam",
           cell: "Cell 1",
-          block: "Housing A 21:00–06:00",
-          hours: "21:00–06:00",
+          block: "Housing A 9 pm to 6 am",
+          hours: "9 pm to 6 am",
         },
       });
     });
@@ -4987,7 +5028,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         operatorId: "zjohn",
         startMin: 1320,
         endMin: 1800,
-        label: "22:00–06:00",
+        label: "10 pm to 6 am",
       });
       const command: UnassignCommand = {
         intent: "unassign",
@@ -5175,7 +5216,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         operatorId: "zsamp",
         startMin: 480, // 08:00, an ordinary same-day block
         endMin: 960, // 16:00
-        label: "08:00–16:00",
+        label: "8 am to 4 pm",
       });
       const command: CopyCommand = {
         intent: "copy",
@@ -5336,7 +5377,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           runId: "zrun",
           nodeId: "zc1",
           headcount: 5,
-          readout: "Housing A · Plant Z › Line 1 › Cell 1 · 2026-09-03 · 08:00–16:00 · 5 people",
+          readout:
+            "The Housing A job on Cell 1 now takes 5 people; it runs 2026-09-03 from 8 am to 4 pm.",
         },
       });
     });
@@ -6886,5 +6928,25 @@ describe("commandResolve: S61-b training before the yes (R-425, F-155, F-156)", 
 
     // Blank/whitespace-only is "no reason given" -- still asks.
     expect(resolveCommand(cmd(), ctx, { overrideReason: "   " }).ok).toBe(false);
+  });
+
+  it('NC10 (S72-d review, R-459/R-449): a "block"-policy gap INSIDE A LOT still says nothing changed -- inLot is checked before policy', () => {
+    // Untested combination before this pin: NC2 covers policy "block" alone
+    // (inLot: false) and NC6/NC5/NC7 cover inLot: true alone (policy
+    // "warn"). Merging CommandBar.tsx's own wording into this one builder
+    // (R-459) briefly checked `policy === "block"` before `inLot`, which
+    // silently dropped the "Nothing changed." suffix for exactly this
+    // combination -- the old CommandBar.tsx copy checked `inLot` first and
+    // never had the bug.
+    expect(
+      describeQuestion({
+        kind: "not_certified",
+        person: "Operator 1",
+        cell: "Cell 1",
+        missing: ["Welding"],
+        policy: "block",
+        inLot: true,
+      }),
+    ).toBe("Not done: Operator 1 is not certified for Cell 1, missing Welding. Nothing changed.");
   });
 });
