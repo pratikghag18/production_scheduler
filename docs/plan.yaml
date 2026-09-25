@@ -18454,8 +18454,7 @@ sessions:
     with the reviewer's four breaks fixed and both typed walks green twice against the new words and the
     board's own move (4854fc3). The Whisper matrix on the round's clips, all with the hint, on 49 clips:
     tiny.en 38 words wrong per hundred at 1.1 s a clip, base.en 24 at 1.9 s, medium.en-q5_0 14 at 16.7 s,
-    large-v3-turbo-q5_0 20 at 25.1 s, small.en 16 at 6.7 s on its 44 (the rerun on 49 pending the swap
-    back). The hint is worth a third of the errors on every size. Medium is the only model more accurate
+    large-v3-turbo-q5_0 20 at 25.1 s, small.en 19 at 6.2 s (16 on its own 44). The hint is worth a third of the errors on every size. Medium is the only model more accurate
     than small.en and it takes seventeen seconds a sentence; small.en stays. The developer told the
     maintainer the tester's stack was running when it was not, from a day-old note, and was corrected.
 - id: 190

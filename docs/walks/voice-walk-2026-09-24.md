@@ -127,6 +127,8 @@ round pushed the scorer's window, so every later model is scored on all 49 clips
 | Model | Hint | Words wrong per 100 | Names heard right | Word-perfect clips | Seconds to answer | In short |
 |---|---|---|---|---|---|---|
 | small.en (today's default) | yes | 16 | 83 of 88 | 17 of 44 | 6.7 | The one to beat |
+| small.en (49 clips, rerun) | yes | 19 | 86 of 93 | 17 of 49 | 6.2 | The same clips as the other models: the fair row |
+| small.en (49 clips, rerun) | no | 28 | 56 of 93 | 11 of 49 | 4.5 |  |
 | small.en | no | 26 | 55 of 88 | 11 of 44 | 4.8 | The hint is worth a third of the errors and a third of the names |
 | small.en, yesterday's clips | yes | 19 | 69 of 78 | 11 of 36 | 5.7 | Yesterday's round, for comparison; the mic was quieter |
 | tiny.en (49 clips) | yes | 38 | 76 of 93 | 5 of 49 | 1.1 | Six times faster, twice the errors; out |
@@ -137,6 +139,13 @@ round pushed the scorer's window, so every later model is scored on all 49 clips
 | medium.en-q5_0 (49 clips) | no | 24 | 62 of 93 | 10 of 49 | 19.5 |  |
 | large-v3-turbo-q5_0 (49 clips) | yes | 20 | 79 of 93 | 18 of 49 | 25.1 | Behind small.en and medium, and the slowest of all; out (same verdict as 23 Sept) |
 | large-v3-turbo-q5_0 (49 clips) | no | 25 | 58 of 93 | 12 of 49 | 22.6 |  |
+
+**The verdict (24 Sept, all five models on the same 49 clips, the hint on).** small.en stays. Medium is the
+only model that hears better, by five words per hundred, and it makes a person wait seventeen seconds a
+sentence against six; turbo is both less accurate than small.en and four times slower; base and tiny
+are fast and wrong too often. Every size loses a third of its accuracy without the hint, so the hint
+stays too. The remaining gains are not in the ear: they are in the board asking about the first word
+(built tonight) and in teaching the sentence model the ear's habits (the next training run).
 
 **Where the 16 words per 100 went.** Nearly all of them are the first word of the sentence: "end" came
 back as "and" four times out of five, "swap" as "show up", "assign" as "sign" or "a sign", "split ...
