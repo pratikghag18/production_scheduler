@@ -18457,6 +18457,10 @@ sessions:
     large-v3-turbo-q5_0 20 at 25.1 s, small.en 19 at 6.2 s (16 on its own 44). The hint is worth a third of the errors on every size. Medium is the only model more accurate
     than small.en and it takes seventeen seconds a sentence; small.en stays. The developer told the
     maintainer the tester's stack was running when it was not, from a day-old note, and was corrected.
+    TOMORROW (the maintainer resumes fresh): push, then a tester run; a fourth spoken round on the new words;
+    the training run that teaches the sentence model the ear's habits on both bases; the trace's readout
+    decision. The container is back on small.en. The board holds what the third round and the maintainer's
+    own clears left on 24 Sept (Plant A); the developer cleans it before the round.
 - id: 190
   date: 2026-09-23
   title: "The second spoken walk answered: the two bugs that stopped it fixed, a Ctrl+M mic shortcut, the demo seeded inside each person's shift, and a clip harness so the recogniser is measured instead of walked"
@@ -26634,11 +26638,42 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S57
-  text: "The third round's 41 clips (24 Sept, the second list) scored on every model on disk: small.en first (no swap), then tiny.en, base.en, medium.en-q5_0 and large-v3-turbo-q5_0 at the maintainer's swap; the references file maps each clip to the list's sentence; the winner becomes the default"
+  text: "Push. The branch is 19 commits ahead of origin after 24 Sept; the tester has not seen any of them"
   why: >-
-    The maintainer, 24 Sept: "I want to retest all whisper models, that is the goal." The clips are on disk
-    under data/voice/trace/clips with the round's hints; the scorer's --references row is the yardstick. Each
-    swap is the maintainer's hand (the session cannot stop a container); the scoring is the developer's.
+    Everything from the third round --- R-455 to R-459, F-218 to F-224, the wording rewrite, the week clear ---
+    is committed and unpushed. The maintainer pushes; then a tester run (node scripts/tester-run.mjs --sql --e2e
+    in the tester's worktree) judges the day from outside the code, R-459 in particular, before anything new.
+- kind: task
+  stage: S57
+  text: "A fourth spoken round on the new words: the second list again (docs/walks/voice-walk-2026-09-24.md), small.en, the board cleaned first, to hear the verb question, the week clear, the automatic move and the plain sentences live"
+  why: >-
+    Every piece of 24 Sept is proved by pins and by the typed walk; none of it has been SPOKEN to yet. The
+    round is short (22 sentences) and the clips it leaves are the fourth table row for the same references
+    file. The developer cleans the board (Plant A, 24 Sept to 2 Oct) and hands the list over; the maintainer
+    reads and speaks; the trace and the clips say what happened. Before it starts: run the gated voice e2e
+    ($env:VITE_VOICE_URL='/voice'; $env:VOICE_E2E='1'; npx playwright test e2e/voiceBar.spec.ts) once --- the reviewer changed its suffix assertion
+    without being able to run it.
+- kind: task
+  stage: S43
+  text: "The next training run: the sentence model taught the ear's habits (misheard verbs, a dropped first word, a clear or absence over a week), on Qwen3 1.7B and on Qwen3.5 2B side by side, the scorer picking"
+  why: >-
+    The maintainer, 24 Sept: "if whisper doesn't hear it right, qwen doesn't even have a chance to make it
+    right, no matter how good the training is?" --- it can, if it has seen the mistakes. The training set
+    generator (scripts/voice/lib/templates.mjs) gains a perturbation pass that rewrites a sentence the way
+    small.en does (VERB_CONFUSIONS in src/lib/voice/verbGuess.ts is the list; "and" for end, "show up" for
+    swap, "sign" for assign, a dropped first word, Whisper's commas) with the CLEAN form as the answer, and an
+    unassign template with the week words (F-224's shapes). Then the Colab notebook runs twice, once per base
+    (Qwen3.5-0.8B/2B/4B/9B shipped 2 March 2026, Apache 2.0; check llama.cpp serves the Qwen3.5 architecture
+    as GGUF before the run, and the container's memory at 2B), and the held-out score decides. The maintainer
+    presses run on Colab; the developer prepares the data and the two settings cells.
+- kind: task
+  stage: S57
+  text: "The trace's compact readouts: the thread's sentences and the trace's ran/outcome are one builder now (R-459); decide whether the trace keeps a compact form of its own or the sentence, and make the scorer and the walk's DB cross-check read whichever it is"
+  why: >-
+    The wording lane kept ONE builder (R-449) so the trace now carries the plain sentence; the typed walk's
+    cross-check was updated to parse "Ready to do N things". Anything else that read the old "commands ready"
+    or arrow form is a grep away (scripts/, e2e/, src/test); the reviewer found none, but the decision is
+    not written down yet.
 - kind: task
   text: "The board's bare pixels: BOARD_PX_LEGACY in src/test/scaleAudit.ts names sixteen board stylesheets with about two hundred px lengths outside calc(px * --ui-scale); shrink the list a file at a time, whenever a board piece is next touched"
   why: >-
