@@ -180,8 +180,14 @@ Each is also a `requirements` row in `docs/plan.yaml`. Three duties come with th
 - **Nothing offered that the server refuses (R-431).** Every button the bar offers and every readout
   it prints as done is decided by the check the server runs: certificates, the area rule, capacity,
   absence. A refusal that arrives after the yes is a defect. §4's screen rule, applied to words.
-- **A lot is all or nothing (R-432).** Several writes from one sentence land together or not at all;
-  on a refusal the written ones are reverted and the thread says Refused and nothing changed.
+- **A lot says what it did and what it did not (R-432, restated 28 Sept).** Several writes from one
+  sentence make the ones they can; on a refusal the written ones stay, and the answer names every
+  change in two groups, done and not done: the refused one with its reason in the plant's words, and
+  every one after it that was never tried. No count-only line, no raw error text. The 17 Sept form
+  (all or nothing, with a revert) was never built and is retired.
+- **A local tool listens locally (R-460).** Every server a project script starts for local work (a
+  recording page, a model container, a dev endpoint) binds the loopback interface only, and the
+  address it prints is the address it listens on.
 - **A walk is a spec first (R-433).** No sentence list is handed to the maintainer before it runs
   green twice as an e2e spec over the same data file (`e2e/typedWalk.spec.ts` is the first).
 - **Every bar feature traces (R-434).** Anything the bar hears, asks, offers, writes or refuses is a

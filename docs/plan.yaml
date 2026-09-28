@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-24'
-  tip: '4854fc3'
+  updated: '2026-09-28'
+  tip: 'f84fbd3'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -11662,7 +11662,7 @@ requirements:
   - §19.101 (D130)
   stated_by: maintainer
   claim: >-
-    "Sam is off today", "Sam is out", "Sam is sick", "Ana is on leave till Friday" and "Ana is away until Friday" are a removal with no place over one day, or over every day from the first to the named one when until is said (a removal's new field, null otherwise); the resolver expands it into one removal per block per day, in board order, with existing filled in; a person with nothing on the board over those days is a plain answer. The board's window must hold the days (the day-off-board question names the first missing one). No absence record is written — the app has none; the blocks go, and that is what the sentence asked.
+    "Sam is off today", "Sam is out", "Sam is sick", "Ana is on leave till Friday" and "Ana is away until Friday" are a removal with no place over one day, or over every day from the first to the named one when until is said (a removal's new field, null otherwise); the resolver expands it into one removal per block per day, in board order, with existing filled in; a person with nothing on the board over those days is a plain answer. The board's window must hold the days (the day-off-board question names the first missing one). AMENDED 28 Sept (session 194): the one-day form takes every block the person has that day with one yes, never a which-block question, and the same yes records the absence through set_absence, the server function the absence form uses, so the bar and the form write one fact one way (R-449) and a person the server would refuse is refused before the yes (R-431). The 14 Sept sentence "No absence record is written — the app has none" is retired; the app has had them since R-357.
   verified_by:
   - kind: vitest
     file: src/test/commandParse.test.ts
@@ -11681,7 +11681,14 @@ requirements:
     cases: "V4 and V6 after the held-out removals carry until: null (114 rows migrated, no sentence changed but one verb)"
   status: contradicted
   note: >-
-    STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 item 2).
+    STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 item 2). AMENDED
+    28 Sept (session 194) by the maintainer, answering DEF-0048's question (remove the blocks only, or
+    record the absence too): "I agree with your recommendations" --- the recommendation being to record
+    it through the function the absence form uses. Unbuilt; DEF-0048 is open against it.
+    AMENDED AGAIN the same day: an absence over a week ("Sam is off this week") records the absence for
+    those days as the one-day form does --- one absence covering the span, from the first day the
+    sentence covers to the last, not one per day. Asked because the first build cleared the week's
+    blocks and recorded nothing ("I agree with your recommendations").
 - id: R-410
   title: A lot the board writes has a ceiling and the same one yes; the model is taught all of it in one run
   source:
@@ -12256,14 +12263,26 @@ requirements:
     is still on Cell 1." It is one of R-459's sentences: no count-only line ("Did 1 of 3 things"), no raw
     error text, no internal word. AMENDED 28 Sept: this replaces the 17 Sept form (every write lands or
     none does, with a revert), which was never built; the board no longer undoes the changes it made.
-  verified_by: []
+  verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-lot-3, CR-1, CB-lot-fail-1 to CB-lot-fail-4, CB-t-15, CB-432-1 to CB-432-4 (done, not done with the reason in the plant's words, not tried; a lot holding one of each step kind; the runner's rejection caught), CB-iso-5"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "every resolved step kind carries who and where and what stays (27 cases gained the two fields)"
   status: contradicted
   note: >-
-    STATED 17 Sept (session 178): "3. Yes". RESTATED 28 Sept by the maintainer when shown the two
+    BUILT 28 Sept (session 194, 504a74b), DEF-0052 fix-claimed. STATED 17 Sept (session 178): "3. Yes". RESTATED 28 Sept by the maintainer when shown the two
     columns side by side (the revert the rule asked for, and what the app does). Today's answer is "Did k
     of N things; the next failed: <error>. What was already done stayed: ..." and never names the
     changes after the failure, which are never tried (DEF-0052). CB-lot-3 and CB-lot-fail-1 pin today's
-    wording, not this claim. CLAUDE.md §7 still states the 17 Sept form; the developer owns that file.
+    wording, not this claim. CLAUDE.md §7 was restated in session 194. HOW IT READS, chosen by the
+    maintainer on 28 Sept (session 194) from two candidates drawn side by side (one paragraph, or
+    separate lines): SEPARATE LINES. A first line with the count ("I made 1 of the 3 changes."), then
+    one labelled line per group that has anything in it --- "Done:", "Not done:" (the refused change and
+    its reason in the plant's words), "Not tried:" (every change after the refusal, said as what stays:
+    "Tom Baker stays on Cell 1."). A refused change and a change never tried are two different facts
+    and are never folded into one line.
 - id: R-433
   title: A walk is a spec first --- no sentence list is handed to the maintainer before it runs green twice as an end-to-end spec
   source:
@@ -12341,6 +12360,12 @@ requirements:
     clear lists names the jobs beside the people ("Removing the Bracket A job · Cell 3 · 13:00-17:00") and runs
     delete_run for each; the undo waits for the activity-log piece.
     BUILT 22 Sept (session 188, 40d2561): the first half. The second (the undo) still waits.
+    AMENDED 28 Sept (session 194) by the maintainer, from two candidates drawn side by side (trim the
+    job, or remove it whole): A CLEAR OF PART OF A DAY CLEARS ONLY THAT PART OF A JOB TOO. "Clear Cell 1
+    after 1 pm" with a job running 10 am to 4 pm leaves the job 10 am to 1 pm with its crew trimmed to
+    match; the morning is not touched. It is R-461's rule at an edge the sentence named instead of at
+    midnight, and it asks no question, because the sentence said where the edge is. Until then the job
+    went whole, morning crew with it ("I agree with your recommendations").
 - id: R-437
   title: Enter empties the box --- a sent sentence lives in the thread, never in the input
   source:
@@ -13033,17 +13058,26 @@ requirements:
   title: A tool the project runs on this machine listens on this machine only --- a recording page, a model server or a dev endpoint is never reachable from the network
   source:
   - 'tester session 192t (28 Sept): the voice recording page (scripts/voice/clips/record.mjs) printed 127.0.0.1 and answered on the LAN address; DEF-0039'
-  stated_by: agent
+  - 'session 194 conversation (the maintainer, 28 Sept, asked whether to keep the tester''s rule as a standard): "I agree with your recommendations"'
+  - CLAUDE.md §7
+  stated_by: maintainer
   claim: >-
     Every server a project script starts for local work --- the clip recording page, the Whisper and model
     containers serve.mjs publishes, the Vite dev endpoints --- binds the loopback interface only, so a
     person on the same network cannot read or overwrite what it holds (recorded speech, clips, traces).
     The address a tool prints is the address it listens on.
-  verified_by: []
+  verified_by:
+  - kind: vitest
+    file: src/test/localToolsListenLocally.test.ts
+    cases: "record.mjs listens on the loopback host; serve.mjs has exactly two publishes and each begins 127.0.0.1, short or long spelling of the flag"
+  - kind: manual
+    steps: "node scripts/voice/clips/record.mjs --port 18097 --out <scratch>; netstat -ano | findstr :18097 reads 127.0.0.1:18097, not 0.0.0.0"
   status: contradicted
   note: >-
-    Added by the tester with DEF-0039 so the defect has a rule to stand against; the maintainer may
-    restate or retire it. The Vite dev server already binds loopback (no server.host anywhere).
+    BUILT 28 Sept (session 194, f84fbd3), DEF-0039 fix-claimed. Added by the tester with DEF-0039 so the defect has a rule to stand against; KEPT AS A STANDARD by
+    the maintainer on 28 Sept (session 194) and written into CLAUDE.md §7. The Vite dev server already
+    binds loopback (no server.host anywhere). The hits at the time it was set: record.mjs listens with no
+    host, and serve.mjs publishes the model container on every interface; both are lane C's (DEF-0039).
 - id: R-461
   title: A night shift is split at midnight --- each day is its own bucket; clearing a day clears that day's part, and the board asks, yes or no, whether to clear the part on the day before or the day after too
   source:
@@ -13065,15 +13099,165 @@ requirements:
     No keeps the other day's part; Yes removes the whole shift. The readout then says exactly which parts
     went and which stayed, and nothing the readout says stayed may be removed by any other step of the same
     clear.
-  verified_by: []
+  verified_by:
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "ND1 to ND14 (the question per direction, both answers, several people in one question, a job with no crew, the invariant that nothing kept or trimmed sits under a removal), MIN1 to MIN5, MN1 to MN4, MN13, MN14, MN18 rewritten for the changed contract"
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-mid-2, CB-mid-2b, CB-night-1 to CB-night-4 (Yes and No as one pair, both questions in one trace entry, no is an answer here, the answers survive the board moving)"
+  - kind: vitest
+    file: src/test/s194bReview.test.ts
+    cases: "the week clear over a night block, one removal, in the weeks of the clock change in Chicago and Berlin"
+  - kind: e2e
+    file: e2e/typedWalk.spec.ts
+    cases: "entries 1b to 1e: a night block placed, the day cleared, No leaves the next day's part in the database, Yes removes the whole block"
   status: contradicted
   note: >-
-    Recorded by the tester in the turns the maintainer decided it (the previous day first, then the next
+    BUILT 28 Sept (session 194, 504a74b), DEF-0040 fix-claimed. Recorded by the tester in the turns the maintainer decided it (the previous day first, then the next
     day when asked). Today the clear trims the person's block at midnight and then deletes the whole job,
     which takes the kept part with it, and it asks nothing (DEF-0040). Decided in three steps the same day:
     the previous day's part asked about; the next day's part too; one question per direction for all the
-    shifts a clear touches, never one per shift, and never both directions folded into one.
+    shifts a clear touches, never one per shift, and never both directions folded into one. HOW THE
+    QUESTION READS, chosen by the maintainer on 28 Sept (session 194) from two candidates drawn side by
+    side (naming the people and the hours, or naming the shift only): IT NAMES THE PEOPLE AND THE HOURS.
+    "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight?";
+    "Maria Lopez's night shift runs into Tuesday. Clear Tuesday's part too, midnight to 6 am?"; with
+    several people, the first by board order and the count of the rest ("Priya Shah and 2 others
+    started their night shift Sunday at 10 pm. Clear Sunday's part too?"). Yes and No are the buttons.
+    The build lane for this requirement runs on Opus by the maintainer's word the same day ("use opus
+    for lane D"), a named exception to the every-subagent-on-Sonnet rule for this one lane.
+- id: R-462
+  title: A shift with nobody on it says so --- the rail reads "Nobody on Shift 1", and the demo plant has people on every shift
+  source:
+  - 'session 194 conversation (the maintainer, 28 Sept, answering DEF-0045''s two questions --- spread the seed, and have the rail say so): "I agree with your recommendations"'
+  stated_by: maintainer
+  claim: >-
+    When a shift covers the plant's clock now and nobody is homed on it, the operator rail says so in
+    words ("Nobody on Shift 1 on this board") under its heading, never an empty list under "On shift now". The demo
+    seed homes Plant A's people across all three shifts, so the plant can be walked at any hour, and a
+    spec that drags a roster chip holds at any hour it runs.
+  verified_by:
+  - kind: vitest
+    file: src/test/operatorPanel.test.tsx
+    cases: "R-462a, R-462b (one shift, two shifts), R-462c (the no-band sentence unchanged)"
+  - kind: sql
+    file: supabase/tests/dev_demo_test.sql
+    cases: "D15 (every shift of every plant has someone homed on it), D16 (a seeded block ends at its shift's end)"
+  - kind: e2e
+    file: e2e/touch.spec.ts
+    cases: "T3, which held with the browser clock frozen at 10 am, 3 pm and 11 pm Chicago"
+  status: covered
+  note: >-
+    BUILT 28 Sept (session 194, a381b01 and f84fbd3). STATED 28 Sept (session 194). DEF-0045 is the defect it answers: from 06:00 to 14:00 Chicago the
+    demo rail was empty and touch T3 failed. The sentence sits where the rail's existing "No one on shift
+    now" sits (the same slot, the other empty case), so no new placement is chosen. HOW IT READS, chosen
+    by the maintainer the same day from two candidates, after the reviewer showed the short form is true
+    of the supervisor's rail and not of the plant: "Nobody on Shift 1 on this board" (and "Nobody on
+    Shift 1 or Shift 2 on this board"). The rail lists the people of the board's own place; the "show
+    other people" control under it still brings in the rest of the plant.
 findings:
+- id: F-231
+  title: A scratch database was left inside the developer's database container when a deliberately broken seed failed to build
+  tag: A cleanup that runs only on success
+  status: open
+  found_by: reviewer
+  refs:
+  - DEF-0044
+  story: >-
+    28 Sept (session 194). The reviewer of the seed lane mutated dev_demo.sql to test the new end-edge check;
+    one mutation made the seed fail on an exclusion constraint part-way, and scripts/run-sql-test.sh --demo
+    drops its scratch database (sql_demo_db) only after a successful build. The reviewer's two attempts to drop
+    it were refused by the session's permission rules and it did not work round them; the main session did not
+    drop it on its behalf and handed the maintainer the command. It is separate from the app's data and
+    nothing reads it. The script should drop the scratch database in a trap, whatever the build did.
+- id: F-230
+  title: The server has no minimum length for a job --- the 15 minutes is the app's own, so a write from anywhere else can make a shorter one
+  tag: A rule only the client holds
+  status: open
+  found_by: agent
+  refs:
+  - R-436
+  - DEF-0040
+  story: >-
+    28 Sept (session 194). Building the job trim, the lane looked for the server's rule to transcribe and found
+    none: runs (migration 0003) carries no minimum duration and no later migration adds one. The bar now asks
+    before leaving a job remnant under 15 minutes, as it does for a block, but the number is the client's
+    (ctx.minDurationMinutes). CLAUDE.md §4 says what the client refuses should be what the server refuses; here
+    the server refuses nothing. Queued for a decision: a constraint on runs, or the rule written down as the
+    client's alone.
+- id: F-229
+  title: '"Assign Priya to Cell 5 for shift 3 tomorrow" reads the day as part of the shift''s name'
+  tag: A grammar gap read as a name
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-435
+  - F-223
+  story: >-
+    28 Sept (session 194), found when the typed walk's new night shift entries were first run. The shift clause
+    takes up to two words after "shift" and no day word stops it, so "for shift 3 tomorrow" and "for shift 3
+    2026-10-05" give shift "3 tomorrow" and no day. With the day first ("tomorrow for shift 3") it reads right.
+    The bar does ask ("I heard ... but read it as today. Did you mean ...?") so nothing is written wrongly, but a
+    supervisor would say it either way round. The walk's sentences were reordered; the parser was not changed.
+- id: F-228
+  title: A person called "Lin On" cannot be named in a sentence --- the "On" of the name is read as the start of "on Cell 1"
+  tag: A grammar gap read as a name
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-430
+  story: >-
+    28 Sept (session 194). A fixture person in the bar's tests. "assign Lin On to Housing A on Cell 1" parses as
+    the person "Lin"; "remove Lin On today" the same; in a list of several changes the sentence fails outright.
+    The parser has no names to match against, so the fix is not small: the board's names handed to the parser
+    (every caller, the voice oracle included) or a quoted name. A real person could carry such a name (On, In,
+    At, To are surnames).
+- id: F-227
+  title: Seven ways of saying "clear the board" are read only through the voice model, never when typed
+  tag: Two readers, two vocabularies
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - DEF-0041
+  story: >-
+    28 Sept (session 194). The grounding guard now accepts "empty the board", "wipe the board", "get everyone
+    off", "send everyone home", "everybody out" and "everyone off" as removal phrases when the MODEL reads them
+    as a clear. The rules parser reads none of them (no_time). Typed, they are not understood. Left as it is;
+    the maintainer was told and may want them added to the grammar.
+- id: F-226
+  title: The bar's trace file is never trimmed, and now grows faster --- every question posts a line and every answer a correction
+  tag: Debt, not a defect
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-434
+  - DEF-0049
+  story: >-
+    28 Sept (session 194). To keep a question left open when the page closes, the trace entry is posted at the
+    ask and posted again, as a correction, at each answer. traceServer appends every line to bar.jsonl and has
+    no cap (the cap of 500 the reviewer remembered is the clip manifest's). Readers take the last line per
+    entry, so nothing reads wrongly; the file is simply larger per turn than it was.
+- id: F-225
+  title: The certificate refusal reads two ways --- the question says "missing Welding", the answer after a write says "is not certified for Welding, which Cell 1 needs"
+  tag: One fact, two sentences
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-459
+  - R-432
+  story: >-
+    28 Sept (session 194), read off the typed walk's own output. The refusal that arrives from a write is
+    rewritten in the plant's words since R-432's answer was built. The resolver's own refusal, the one a
+    supervisor meets far more often, still reads "Not done: Tom Baker is not certified for Cell 1, missing
+    Welding." The walk pins the older sentence in five places. Also seen in the same output: a long lot's
+    listing ends "... and 3 more Say yes to do them, or no." with no full stop before "Say", and the
+    which-block buttons still carry 24-hour spans (DEF-0043's developer note).
 - id: F-224
   title: '"Clear Cell 5 for the remainder of the week" clears today only, or nothing --- the week phrase is dropped by the model and kept inside the place name by the rules, and neither reader says so'
   tag: A silent drop
@@ -18446,6 +18630,66 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: '194'
+  date: 2026-09-28
+  title: "The tester's sixteen defects, fix-claimed the day they were filed: a night shift split at midnight, an absence recorded from the bar, a lot that says what it did and did not, the New pop-up on the plant's clock, and the typed walk green on a fresh seed (DEF-0037 to DEF-0052)"
+  shipped: []
+  commits: ['504a74b', 'a381b01', 'f84fbd3']
+  numbers:
+    app_tests: 4642
+    app_test_files: 184
+    tsc: 0
+    eslint: 0
+    db_checks: 904
+    migrations: 84
+    e2e: 55
+  confirmed: true
+  numbers_note: >-
+    npm run test copied from the runner on the developer's own run, after the last lane and after formatting:
+    `Test Files  3 failed | 181 passed (184)`, `Tests  3 failed | 4642 passed (4645)`. The three failures are
+    known and named: DEF-0040's pin and DEF-0043's headcount pin, neither of which can reach its assertion now
+    that a clear across midnight asks a question first (each defect file carries a developer note), and
+    DEF-0020's live pin, which needs the invite edge function and the developer's stack has no edge runtime
+    container running. So the count the next session should expect is 4642 passing with those three red until
+    the tester rewrites the two pins. tsc -b and eslint clean; no migration, so tsc is conclusive. db_checks is
+    CARRIED from 193t's measured 904 and is out of date by two: dev_demo_test gained D15 and D16 (17 passed on
+    the lane's scratch run) but the SQL suite was not re-run whole, because a scratch database was left in the
+    container (F-231). e2e: four entries were added to the typed walk; on the tester's stack, rebuilt from this
+    tree, the developer ran both typed walk lists (`1 passed` each; the lane ran each twice over the same
+    database, R-433), the touch spec and the role walk (`13 passed`), and the two absence specs. The rest of
+    the e2e suite was not run this session.
+  summary: >-
+    The tester filed sixteen defects against sessions 186 to 191; all sixteen are fix-claimed. Five build lanes
+    and four reviewers, every one from a brief under docs/agent-briefs (s194-*); Sonnet throughout except the
+    night shift lane, which the maintainer put on Opus by name. Every lane was broken by a different agent
+    before it was called done, and the reviewers earned their place.
+    WHAT THE REVIEWERS CAUGHT THAT THE PINS DID NOT. DEF-0047's pin went green while the sentence in the defect
+    still failed: the pin covers a named person, the sentence takes the everyone branch. DEF-0046's fix had no
+    case of its own; a second guard hid its removal. The Absences tab replaced its whole table with an error
+    when the permission read failed. The scorer's second path still reported success over a failed clip. The
+    network test missed the long spelling of the publish flag. DEF-0041's first fix still passed "clear skies
+    today" and "everyone is out to lunch" as a clear of the whole board. An absence over several days showed
+    its second date raw. A job could be trimmed to ten minutes. The done / not done answer, as first built,
+    said a refused change had happened.
+    DECIDED BY THE MAINTAINER, each from two candidates drawn side by side, each written into its requirement
+    the turn it was said: the night shift questions name the people and the hours (R-461); the done / not done
+    answer is separate labelled lines (R-432); "is off" records the absence, and so does an absence over a week
+    (R-409); a clear of part of a day trims the job (R-436); the rail reads "Nobody on Shift 1 on this board"
+    and the seed has people on every shift (R-462); a local tool listens locally is a standard (R-460, CLAUDE.md
+    §7). DECIDED BY THE DEVELOPER, in the safe direction, and told to the maintainer: a clear of the whole board
+    from a spoken sentence needs a removal phrase, not a removal word; the parser marks an absence itself so the
+    tester's pin passes as written.
+    NOT A STANDARD, asked and not raised: nothing this session repeated a choice that no standard covers.
+    STILL WITH THE MAINTAINER. Whether the night shift question should say how to stop the whole clear ("no"
+    there keeps the other day's part and goes on; cancel and Escape stop). Dropping the scratch database sql_demo_db
+    (F-231).
+    LEFT RED ON PURPOSE. The two pins above. REQUIREMENTS: R-462 is covered. R-461, R-432 and R-460 now carry
+    their proofs and stay contradicted, because a defect that is fix-claimed is still open until the tester
+    verifies it (the validator holds this, and it is right). The others the tester set contradicted (R-350, R-357, R-360, R-407, R-409, R-426, R-430, R-431, R-433,
+    R-434, R-435, R-436, R-450, R-452, R-453, R-455, R-456, R-459) are left contradicted for the tester to restore
+    when it verifies each defect by its own reproduction; the developer does not mark its own work verified.
+    FOUND ON THE WAY, queued as findings: F-225 to F-231. NOT RUN: the scorer against the real Whisper (the
+    container is the maintainer's to start); the whole SQL suite; the e2e specs not named above.
 - id: 193t
   date: 2026-09-28
   title: "Tester second pass over sessions 186 to 191: the gaps 192t left, closed --- the bar as Ana, the served model, the invite specs, a frozen clock; six more defects, and a typed sentence that crashes the bar (DEF-0046 to DEF-0051)"
@@ -26827,11 +27071,20 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S57
-  text: "Push. The branch is 19 commits ahead of origin after 24 Sept; the tester has not seen any of them"
+  text: "Push, then the tester verifies DEF-0037 to DEF-0052 by its own reproductions and rewrites two pins"
   why: >-
-    Everything from the third round --- R-455 to R-459, F-218 to F-224, the wording rewrite, the week clear ---
-    is committed and unpushed. The maintainer pushes; then a tester run (node scripts/tester-run.mjs --sql --e2e
-    in the tester's worktree) judges the day from outside the code, R-459 in particular, before anything new.
+    Session 194 fix-claimed all sixteen. The maintainer pushes; the tester merges Development, rebuilds its
+    stack (the seed changed: home shifts are a round-robin now) and re-runs each defect's Reproduction. Two pins
+    cannot go green as written and their defect files say why and what to change (DEF-0040, DEF-0043's
+    headcount pin); DEF-0047's pin should be widened to the sentence in its own reproduction. The requirements
+    the tester set contradicted are the tester's to restore.
+- kind: task
+  stage: S57
+  text: "The findings session 194 left open: F-225 to F-231 --- the certificate refusal's two wordings and the 24-hour spans on the which-block buttons, the trace file's growth, the seven spoken clears the typed grammar does not read, a person called Lin On, a day said after the shift, a minimum length for a job on the server, the scratch database's cleanup"
+  why: >-
+    None blocks the walk. F-229 (the day after the shift) and F-225 (the wording) are the two a supervisor meets
+    first; F-230 is a decision for the maintainer (a constraint, or the rule written down as the client's); the
+    SQL suite should be run whole once F-231's scratch database is dropped, and db_checks read from the runner.
 - kind: task
   stage: S57
   text: "A fourth spoken round on the new words: the second list again (docs/walks/voice-walk-2026-09-24.md), small.en, the board cleaned first, to hear the verb question, the week clear, the automatic move and the plain sentences live"
