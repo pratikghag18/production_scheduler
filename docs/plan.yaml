@@ -13049,13 +13049,15 @@ requirements:
   source:
   - 'tester session 193t conversation (the maintainer, 28 Sept, answering DEF-0040''s question): "The night shift, each day is its own bucket, what we can do though is when we clear Monday for example, the board can ask the user if they want to clear the portion of the shift for the previous day."'
   - 'the same conversation, on the shift that starts on the cleared day: "That is a good point, we should ask a question in this case as well and let the user choose to answer yes or no."'
+  - 'the same conversation, when several night shifts are touched by one clear: "one question for all of them"'
   stated_by: maintainer
   claim: >-
     A block or a job that runs across midnight belongs to two days: the part before midnight to the day it
     starts, the part after midnight to the next day. Clearing a day removes only that day's part of every
     block and job on the place, for the people and for the job alike. For each shift that crosses into or
     out of the cleared day, the board asks before anything is written, with Yes and No as the answers,
-    whether to clear the other day's part too: clearing Monday, a Sunday 22:00 to Monday 06:00 shift asks
+    whether to clear the other day's part too --- ONE question for the whole clear, however many shifts it
+    touches, naming each other-day part it would remove, answered once. Clearing Monday, a Sunday 22:00 to Monday 06:00 shift asks
     about Sunday 22:00-24:00, and a Monday 22:00 to Tuesday 06:00 shift asks about Tuesday 00:00-06:00.
     No keeps the other day's part; Yes removes the whole shift. The readout then says exactly which parts
     went and which stayed, and nothing the readout says stayed may be removed by any other step of the same
@@ -13065,8 +13067,9 @@ requirements:
   note: >-
     Recorded by the tester in the turns the maintainer decided it (the previous day first, then the next
     day when asked). Today the clear trims the person's block at midnight and then deletes the whole job,
-    which takes the kept part with it, and it asks nothing (DEF-0040). How the two questions read when
-    one clear touches several such shifts (one question per shift, or one for all) is not decided.
+    which takes the kept part with it, and it asks nothing (DEF-0040). One question for all the shifts a clear
+    touches was decided when asked; the tester reads that as one question even when the clear touches
+    both a previous-day part and a next-day part, and says so to the maintainer.
 findings:
 - id: F-224
   title: '"Clear Cell 5 for the remainder of the week" clears today only, or nothing --- the week phrase is dropped by the model and kept inside the place name by the rules, and neither reader says so'
