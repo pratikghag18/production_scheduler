@@ -9,9 +9,44 @@ land at `data/voice/clips/<nn>.wav`, `manifest.json` beside them (gitignored).
 voice:serve -- --whisper-model small.en --whisper-decode beam`, then `npm run
 voice:clips:score -- --whisper http://127.0.0.1:8090 --prompt-file
 scripts/voice/clips/prompts/words-53.txt --label small-en-beam-words-53` (or
-`--no-prompt`). Read the summary line -- mean WER, names heard, exact count, wall
-time per clip -- not a feeling. The full run is written to
-`data/voice/clips/results/<label>.json`.
+`--no-prompt`). Read the summary line -- not a feeling. A real run, four listed
+clips, one missing on disk and one that got a 500 from Whisper:
+
+    01  wer=1.250  names=0/1  heard="fake transcript for request 1"
+    02  MISSING  data/voice/clips/02.wav
+    03  wer=1.000  names=0/2  heard="fake transcript for request 2"
+    04  FAILED  score.mjs: http://127.0.0.1:8090/inference -> 500 Internal Server Error
+
+    2 of 4 scored, 1 missing, 1 failed -- mean WER over scored clips 1.125  names 0/3  exact 0/2  wall/clip 12ms
+    wrote data/voice/clips/results/small-en-beam-words-53.json
+
+**One clip's own failure never loses the run** (DEF-0050): a `MISSING` clip
+(no file on disk for that entry) or a `FAILED` one (Whisper answered
+something other than 200, or never answered at all) is its own row, printed
+and kept, and the run carries on to the next clip. The mean WER/names/exact/
+wall-time figures beside the summary line are over the SCORED clips only --
+the line says so ("mean WER over scored clips") rather than silently
+excluding the rest. `--timeout <seconds>` (default 60, since small.en
+measured about 4s a clip on the maintainer's machine) bounds each clip's own
+fetch with `AbortSignal.timeout`, so a Whisper that stops answering fails
+that ONE clip within the given time instead of hanging the whole run
+forever; a timed-out clip's own `FAILED` message says
+`no response within <ms>ms`.
+
+`data/voice/clips/results/<label>.json` always gets written -- even when the
+run above had failures in it, even if something later in the run throws --
+and every row now carries its own `status`: `"scored"`, `"missing"`, or
+`"failed"` (a failed row also carries `message`, the same text the console
+line printed). The file's own `summary` block gives the same count the
+console line does: `{ "listed": 4, "scored": 2, "missing": 1, "failed": 1,
+"meanWer": ..., ... }` -- `meanWer`/`meanWallMs`/the names and exact counts
+are over `scored` rows only, matching the console line.
+
+**The exit code says whether anything needs a human**, checked AFTER the
+table has printed and the results file has been written: 0 when every listed
+clip scored, 1 when anything was missing or failed. A script or a CI step
+that only wants to know "is this setting worth trusting" can check the exit
+code without parsing the summary line at all.
 
 The matrix, one whisper restart per row: `base.en`/greedy/words-53 (today),
 `base.en`/beam/words-53, `small.en`/beam/words-53, `small.en`/beam/words-34,
@@ -75,6 +110,30 @@ selected lines by `at` before printing: the sentence's own clip prints first
 (`bar.jsonl`'s `heard` as its "then"), then any answer clip, labelled
 `answer`, `bar.jsonl`'s own `answered` printed as ITS "then" instead --
 `heard` never repeats on an answer's row.
+
+**This path fails a clip exactly the same way the recorded-set path does**
+(DEF-0050): a `MISSING` line (no file for that manifest entry) or a `FAILED`
+one (a non-200 from Whisper, or `--timeout` running out) is its own row, and
+the run keeps going. A real run over four clips, one clean, one 500, one that
+never answered (`--timeout 2`), and one missing on disk:
+
+    2026-09-28T10:03:00.000Z  MISSING  data/voice/trace/clips/d.wav
+    2026-09-28T10:02:00.000Z  900ms  silence  peak=0.090  wer=1.000  5ms  prompt=none
+        then    : ""
+        now     : "fake transcript for request 1"
+    2026-09-28T10:01:00.000Z  FAILED  score.mjs: http://127.0.0.1:8090/inference -> 500 Internal Server Error
+    2026-09-28T10:00:00.000Z  FAILED  score.mjs: http://127.0.0.1:8090/inference -> no response within 2000ms
+
+    1 of 4 scored, 1 missing, 2 failed across 4 entries -- mean then-vs-now WER over scored clips 1.000; mean wall 5 ms per clip
+
+With `--label`, `results/<label>.json` is written even when the run above had
+failures in it (a `finally`, not "only if nothing went wrong"), each row
+carrying its own `status` (`"scored"`, `"missing"`, or `"failed"`, the
+failed ones also carrying `message`) and a `summary` block with the same
+`listed`/`scored`/`missing`/`failed` counts the console line printed. The
+exit code is 0 only when every clip in the run scored -- 1 whenever anything
+was missing or failed, checked after the table and the file are both
+written, exactly as the recorded-set path above.
 
 ### Against what was actually said (24 Sept, R-453)
 

@@ -292,8 +292,13 @@ function main() {
       "--rm",
       "--name",
       CONTAINER_NAME,
+      // DEF-0039 / R-460 (a local tool listens on this machine only): this
+      // used to publish on every interface (Docker's default when the bind
+      // address is omitted) while the Whisper container just below binds
+      // 127.0.0.1 deliberately -- no comment ever defended the asymmetry.
+      // Loopback-only, matching Whisper's own `-p`.
       "-p",
-      `${HOST_PORT}:${CONTAINER_PORT}`,
+      `127.0.0.1:${HOST_PORT}:${CONTAINER_PORT}`,
       "-v",
       `${bindDir}:/models:ro`,
       IMAGE,

@@ -65,6 +65,11 @@ const TRACE_CLIPS_DIR = "data/voice/trace/clips";
 const TRACE_BAR_FILE = "data/voice/trace/bar.jsonl";
 const FROM_TRACE_DEFAULT_N = 20;
 const DEFAULT_PEAK_TARGET = 0.5;
+// DEF-0050 (R-453): small.en measured about 4s a clip on the maintainer's
+// machine; 60s gives a slow clip (a bigger model, a cold container) real
+// room while still failing a genuinely hung Whisper in a bounded time
+// instead of hanging the whole run forever.
+const DEFAULT_TIMEOUT_SECONDS = 60;
 
 function parseGainArg(raw) {
   if (raw === undefined) throw new Error("score.mjs: --gain requires a value");
@@ -100,6 +105,8 @@ function parseArgs(argv) {
     // R-453 (24 Sept): a JSON file of what was actually said per clip, so a
     // replay is scored against the truth, not against last time's transcript.
     references: null,
+    // DEF-0050: seconds, not ms -- a plain, human-typed flag value.
+    timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -110,7 +117,14 @@ function parseArgs(argv) {
     else if (a === "--label") out.label = argv[++i];
     else if (a === "--gain") out.gain = parseGainArg(argv[++i]);
     else if (a === "--references") out.references = argv[++i];
-    else if (a === "--from-trace") {
+    else if (a === "--timeout") {
+      const raw = argv[++i];
+      const seconds = Number(raw);
+      if (!Number.isFinite(seconds) || seconds <= 0) {
+        throw new Error(`score.mjs: --timeout <seconds> must be a positive number, got "${raw}"`);
+      }
+      out.timeoutSeconds = seconds;
+    } else if (a === "--from-trace") {
       // The N is optional -- only consumed when the next argument is a bare
       // number, so `--from-trace` as the last flag (default N) never eats
       // the next unrelated argument.
@@ -159,8 +173,14 @@ function applyGainIfRequested(rawBytes, gainSpec) {
  *  string never appends a `prompt` field, matching the app's own
  *  "an absent hint, or one that returns '', sends no prompt field at all".
  *  S71-k: takes the bytes to post directly (never re-reads the file) so a
- *  `--gain`-scaled buffer can be sent without a second file on disk. */
-async function scoreOne(whisperUrl, bytes, promptText) {
+ *  `--gain`-scaled buffer can be sent without a second file on disk.
+ *
+ *  DEF-0050: `timeoutMs` bounds the fetch with `AbortSignal.timeout` -- a
+ *  Whisper that stops answering (a wedged container, a crashed model load)
+ *  used to hang this call, and so the whole run, forever. The caller
+ *  (`scoreClip` below) is what turns THIS throwing into a per-clip "failed"
+ *  row rather than losing every already-scored clip with it. */
+async function scoreOne(whisperUrl, bytes, promptText, timeoutMs) {
   const form = new FormData();
   form.append("file", new Blob([bytes], { type: "audio/wav" }), "clip.wav");
   form.append("response_format", "json");
@@ -169,7 +189,19 @@ async function scoreOne(whisperUrl, bytes, promptText) {
   if (promptText !== "") form.append("prompt", promptText);
 
   const start = Date.now();
-  const res = await fetch(`${whisperUrl}/inference`, { method: "POST", body: form });
+  let res;
+  try {
+    res = await fetch(`${whisperUrl}/inference`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new Error(`score.mjs: ${whisperUrl}/inference -> no response within ${timeoutMs}ms`);
+    }
+    throw err;
+  }
   const wallMs = Date.now() - start;
   if (!res.ok) {
     throw new Error(`score.mjs: ${whisperUrl}/inference -> ${res.status} ${res.statusText}`);
@@ -177,6 +209,55 @@ async function scoreOne(whisperUrl, bytes, promptText) {
   const payload = await res.json();
   const text = typeof payload?.text === "string" ? payload.text.trim() : "";
   return { text, wallMs };
+}
+
+/** DEF-0050: wraps `scoreOne` so ONE clip's failure (a non-OK status, a
+ *  timed-out fetch, a bad JSON body) is a row, never a thrown exception that
+ *  loses every clip already scored before it. Returns `{ ok: true, ... }` or
+ *  `{ ok: false, message }`; the caller decides how to print and tally it. */
+async function scoreClip(whisperUrl, bytes, promptText, timeoutMs) {
+  try {
+    const { text, wallMs } = await scoreOne(whisperUrl, bytes, promptText, timeoutMs);
+    return { ok: true, text, wallMs };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** DEF-0050, the other half (reviewer, S194-C follow-up): BOTH scoring paths
+ *  push one row per clip attempted, carrying its own `status` -- "scored",
+ *  "missing", or "failed" -- so this one function counts either path's rows
+ *  the same way, instead of each path keeping its own `missingCount`/
+ *  `failedCount` running tally (a column list that appears twice is a bug
+ *  with a delay on it: `runFromTrace` used to log a FAILED/MISSING line and
+ *  `continue` with no row and no count at all, which is exactly how it kept
+ *  reporting success -- exit 0 -- on a run that had a failed clip in it). */
+function countRowStatuses(rows) {
+  let scored = 0;
+  let missing = 0;
+  let failed = 0;
+  for (const r of rows) {
+    if (r.status === "scored") scored++;
+    else if (r.status === "missing") missing++;
+    else if (r.status === "failed") failed++;
+  }
+  return { scored, missing, failed };
+}
+
+/** DEF-0050: the shared opening both scoring paths' final summary line uses
+ *  -- `listed` is the total clips attempted (never re-derived a second way
+ *  from either caller's own rows; each caller already knows its own count
+ *  before scoring starts). The caller appends its own metric-specific tail
+ *  (recorded-set: mean WER against each clip's own sentence; `--from-trace`:
+ *  mean WER against what was said, or then-vs-now when nothing was said) --
+ *  the two paths compare against genuinely different references, so only
+ *  the counting and this opening are shared, not the whole line. */
+function scoredSummaryLine(rows, listed) {
+  const counts = countRowStatuses(rows);
+  return {
+    counts,
+    prefix: `${counts.scored} of ${listed} scored, ${counts.missing} missing, ${counts.failed} failed`,
+  };
 }
 
 /** S71-f (brief §1.D): reads `data/voice/trace/bar.jsonl` (the bar's own
@@ -326,106 +407,163 @@ async function runFromTrace(args, override) {
     ? JSON.parse(readFileSync(resolve(args.references), "utf8"))
     : { references: {}, answers: {} };
   const rows = [];
-  for (const at of order) {
-    const clipsForEntry = groups.get(at);
-    const bar = barByAt.get(at) ?? { heard: "", answered: null };
-    for (let i = 0; i < clipsForEntry.length; i++) {
-      const clip = clipsForEntry[i];
-      const isAnswer = i > 0;
-      const roleTag = isAnswer ? "answer  " : "";
-      const wavPath = join(clipsDir, clip.file);
-      if (!existsSync(wavPath)) {
-        console.log(`${clip.at}  ${roleTag}MISSING  ${wavPath}`);
-        continue;
+  // DEF-0050, the other half (reviewer): this used to log a MISSING/FAILED
+  // line and `continue` with NO row and no count kept anywhere, so the final
+  // summary only ever averaged the clips that happened to succeed and never
+  // said a word about the rest -- "1 clip(s) scored across 2 entries" read
+  // as a complete, healthy run even with a 500 in it, and the exit code
+  // stayed 0. The `try`/`finally` below is the same shape as the
+  // recorded-set path's own fix: every clip attempted gets a row with a
+  // `status`, and the summary/write/exit-code logic runs from the finally so
+  // it always sees whatever rows exist, however the loop above ends.
+  try {
+    for (const at of order) {
+      const clipsForEntry = groups.get(at);
+      const bar = barByAt.get(at) ?? { heard: "", answered: null };
+      for (let i = 0; i < clipsForEntry.length; i++) {
+        const clip = clipsForEntry[i];
+        const isAnswer = i > 0;
+        const roleTag = isAnswer ? "answer  " : "";
+        const wavPath = join(clipsDir, clip.file);
+        if (!existsSync(wavPath)) {
+          console.log(`${clip.at}  ${roleTag}MISSING  ${wavPath}`);
+          rows.push({
+            at: clip.at,
+            postedAt: clip.postedAt,
+            role: isAnswer ? "answer" : "sentence",
+            status: "missing",
+          });
+          continue;
+        }
+        // S71-h: `clip.hint` is `undefined` on a manifest line written before
+        // that change and `null` on one written after it for a recogniser
+        // that had no hint to send -- both mean "no prompt". S71-h review:
+        // `clip.hintDropped` is a THIRD, distinct reason for no prompt.
+        const promptText = override !== null ? override.text : (clip.hint ?? "");
+        const promptLabel =
+          override !== null
+            ? "override"
+            : clip.hintDropped
+              ? "dropped"
+              : clip.hint
+                ? "hint"
+                : "none";
+        const rawBytes = readFileSync(wavPath);
+        const { bytes, gainUsed } = applyGainIfRequested(rawBytes, args.gain);
+        const scored = await scoreClip(args.whisper, bytes, promptText, args.timeoutSeconds * 1000);
+        if (!scored.ok) {
+          console.log(`${clip.at}  ${roleTag}FAILED  ${scored.message}`);
+          rows.push({
+            at: clip.at,
+            postedAt: clip.postedAt,
+            role: isAnswer ? "answer" : "sentence",
+            status: "failed",
+            message: scored.message,
+          });
+          continue;
+        }
+        const { text: now, wallMs } = scored;
+        // S71-k: `heard` (the sentence's own transcript) joins the FIRST clip
+        // only; an answer's row compares against `answered` instead -- never
+        // both, and never `heard` repeated on the answer's own row.
+        const said = isAnswer
+          ? (refs.answers?.[clip.postedAt ?? ""] ?? null)
+          : (refs.references?.[at] ?? refs.references?.[clip.postedAt ?? ""] ?? null);
+        const reference = said ?? (isAnswer ? (bar.answered ?? "") : bar.heard);
+        const wer = wordErrorRate(reference, now);
+        const names = said !== null ? nameHits(reference, now) : null;
+        const exact = said !== null ? isExact(reference, now) : null;
+        rows.push({
+          at: clip.at,
+          postedAt: clip.postedAt,
+          role: isAnswer ? "answer" : "sentence",
+          status: "scored",
+          durationMs: clip.durationMs,
+          endedBy: clip.endedBy,
+          peakRms: clip.peakRms,
+          prompt: promptLabel,
+          gain: gainUsed,
+          reference,
+          referenceIs: said !== null ? "said" : "then",
+          now,
+          wer,
+          namesHit: names ? names.hits : null,
+          namesTotal: names ? names.total : null,
+          exact,
+          wallMs,
+        });
+        const gainTag = gainUsed !== null ? `  gain=${gainUsed.toFixed(3)}` : "";
+        console.log(
+          `${clip.at}  ${roleTag}${Math.round(clip.durationMs)}ms  ${clip.endedBy}  ` +
+            `peak=${clip.peakRms.toFixed(3)}  wer=${wer.toFixed(3)}` +
+            (names ? `  names=${names.hits}/${names.total}` : "") +
+            `  ${wallMs}ms  prompt=${promptLabel}${gainTag}`,
+        );
+        console.log(
+          `    ${said !== null ? "said    " : isAnswer ? "answered" : "then    "}: "${reference}"`,
+        );
+        console.log(`    now     : "${now}"`);
       }
-      // S71-h: `clip.hint` is `undefined` on a manifest line written before
-      // that change and `null` on one written after it for a recogniser
-      // that had no hint to send -- both mean "no prompt". S71-h review:
-      // `clip.hintDropped` is a THIRD, distinct reason for no prompt.
-      const promptText = override !== null ? override.text : (clip.hint ?? "");
-      const promptLabel =
-        override !== null ? "override" : clip.hintDropped ? "dropped" : clip.hint ? "hint" : "none";
-      const rawBytes = readFileSync(wavPath);
-      const { bytes, gainUsed } = applyGainIfRequested(rawBytes, args.gain);
-      const { text: now, wallMs } = await scoreOne(args.whisper, bytes, promptText);
-      // S71-k: `heard` (the sentence's own transcript) joins the FIRST clip
-      // only; an answer's row compares against `answered` instead -- never
-      // both, and never `heard` repeated on the answer's own row.
-      const said = isAnswer
-        ? (refs.answers?.[clip.postedAt ?? ""] ?? null)
-        : (refs.references?.[at] ?? refs.references?.[clip.postedAt ?? ""] ?? null);
-      const reference = said ?? (isAnswer ? (bar.answered ?? "") : bar.heard);
-      const wer = wordErrorRate(reference, now);
-      const names = said !== null ? nameHits(reference, now) : null;
-      const exact = said !== null ? isExact(reference, now) : null;
-      rows.push({
-        at: clip.at,
-        postedAt: clip.postedAt,
-        role: isAnswer ? "answer" : "sentence",
-        durationMs: clip.durationMs,
-        endedBy: clip.endedBy,
-        peakRms: clip.peakRms,
-        prompt: promptLabel,
-        gain: gainUsed,
-        reference,
-        referenceIs: said !== null ? "said" : "then",
-        now,
-        wer,
-        namesHit: names ? names.hits : null,
-        namesTotal: names ? names.total : null,
-        exact,
-        wallMs,
-      });
-      const gainTag = gainUsed !== null ? `  gain=${gainUsed.toFixed(3)}` : "";
-      console.log(
-        `${clip.at}  ${roleTag}${Math.round(clip.durationMs)}ms  ${clip.endedBy}  ` +
-          `peak=${clip.peakRms.toFixed(3)}  wer=${wer.toFixed(3)}` +
-          (names ? `  names=${names.hits}/${names.total}` : "") +
-          `  ${wallMs}ms  prompt=${promptLabel}${gainTag}`,
-      );
-      console.log(
-        `    ${said !== null ? "said    " : isAnswer ? "answered" : "then    "}: "${reference}"`,
-      );
-      console.log(`    now     : "${now}"`);
     }
-  }
+  } finally {
+    const scoredRows = rows.filter((r) => r.status === "scored");
+    const n = scoredRows.length;
+    const meanWer = n ? scoredRows.reduce((s, r) => s + r.wer, 0) / n : 0;
+    const scoredAgainstSaid = scoredRows.filter((r) => r.referenceIs === "said");
+    const namesHit = scoredAgainstSaid.reduce((s, r) => s + (r.namesHit ?? 0), 0);
+    const namesTotal = scoredAgainstSaid.reduce((s, r) => s + (r.namesTotal ?? 0), 0);
+    const exactCount = scoredAgainstSaid.filter((r) => r.exact).length;
+    const meanWall = n ? Math.round(scoredRows.reduce((s, r) => s + r.wallMs, 0) / n) : 0;
+    const { counts, prefix } = scoredSummaryLine(rows, selected.length);
 
-  const n = rows.length;
-  const meanWer = n ? rows.reduce((s, r) => s + r.wer, 0) / n : 0;
-  const scoredAgainstSaid = rows.filter((r) => r.referenceIs === "said");
-  const namesHit = scoredAgainstSaid.reduce((s, r) => s + (r.namesHit ?? 0), 0);
-  const namesTotal = scoredAgainstSaid.reduce((s, r) => s + (r.namesTotal ?? 0), 0);
-  const exactCount = scoredAgainstSaid.filter((r) => r.exact).length;
-  const meanWall = n ? Math.round(rows.reduce((s, r) => s + r.wallMs, 0) / n) : 0;
-  console.log(
-    `\n${n} clip(s) scored across ${order.length} entr${order.length === 1 ? "y" : "ies"}, ` +
-      (scoredAgainstSaid.length
-        ? `${scoredAgainstSaid.length} against what was said: mean WER ${(
-            scoredAgainstSaid.reduce((s, r) => s + r.wer, 0) / scoredAgainstSaid.length
-          ).toFixed(3)}, names ${namesHit}/${namesTotal}, exact ${exactCount}; `
-        : `mean then-vs-now WER ${meanWer.toFixed(3)}; `) +
-      `mean wall ${meanWall} ms per clip`,
-  );
-  if (args.label) {
-    const resultsDir = join(clipsDir, "results");
-    mkdirSync(resultsDir, { recursive: true });
-    const resultsPath = join(resultsDir, `${args.label}.json`);
-    writeFileSync(
-      resultsPath,
-      JSON.stringify(
-        {
-          label: args.label,
-          mode: "from-trace",
-          whisper: args.whisper,
-          gain: args.gain,
-          references: args.references,
-          rows,
-        },
-        null,
-        2,
-      ) + "\n",
+    console.log(
+      `\n${prefix} across ${order.length} entr${order.length === 1 ? "y" : "ies"} -- ` +
+        (scoredAgainstSaid.length
+          ? `${scoredAgainstSaid.length} against what was said: mean WER ${(
+              scoredAgainstSaid.reduce((s, r) => s + r.wer, 0) / scoredAgainstSaid.length
+            ).toFixed(3)}, names ${namesHit}/${namesTotal}, exact ${exactCount}; `
+          : `mean then-vs-now WER over scored clips ${meanWer.toFixed(3)}; `) +
+        `mean wall ${meanWall} ms per clip`,
     );
-    console.log(`wrote ${resultsPath}`);
+
+    if (args.label) {
+      const resultsDir = join(clipsDir, "results");
+      mkdirSync(resultsDir, { recursive: true });
+      const resultsPath = join(resultsDir, `${args.label}.json`);
+      writeFileSync(
+        resultsPath,
+        JSON.stringify(
+          {
+            label: args.label,
+            mode: "from-trace",
+            whisper: args.whisper,
+            gain: args.gain,
+            references: args.references,
+            rows,
+            summary: {
+              listed: selected.length,
+              scored: counts.scored,
+              missing: counts.missing,
+              failed: counts.failed,
+              meanWer,
+              namesHitTotal: namesHit,
+              namesTotal,
+              exactCount,
+              meanWallMs: meanWall,
+            },
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      console.log(`wrote ${resultsPath}`);
+    }
+
+    // DEF-0050, the other half: non-zero exit whenever any clip was missing
+    // or failed -- AFTER the table and the file are written, the same order
+    // the recorded-set path already uses, so the exit code is never the
+    // reason a scored run's own evidence goes missing.
+    if (counts.missing > 0 || counts.failed > 0) process.exitCode = 1;
   }
 }
 
@@ -487,66 +625,116 @@ async function main() {
         : `gain: peak-normalise to ${args.gain.target}`,
     );
   }
-  console.log(`clips: ${clipsDir} (${clips.length} listed)\n`);
-
-  const rows = [];
-  for (const clip of clips) {
-    const wavPath = join(clipsDir, clip.file);
-    if (!existsSync(wavPath)) {
-      console.log(`${String(clip.n).padStart(2, "0")}  MISSING  ${wavPath}`);
-      continue;
-    }
-    const rawBytes = readFileSync(wavPath);
-    const { bytes, gainUsed } = applyGainIfRequested(rawBytes, args.gain);
-    const { text, wallMs } = await scoreOne(args.whisper, bytes, promptText);
-    const wer = wordErrorRate(clip.sentence, text);
-    const names = nameHits(clip.sentence, text);
-    const exact = isExact(clip.sentence, text);
-    rows.push({
-      n: clip.n,
-      sentence: clip.sentence,
-      heard: text,
-      wer,
-      names,
-      exact,
-      wallMs,
-      gain: gainUsed,
-    });
-
-    const tail = exact ? "exact" : `heard="${text}"`;
-    const gainTag = gainUsed !== null ? `  gain=${gainUsed.toFixed(3)}` : "";
-    console.log(
-      `${String(clip.n).padStart(2, "0")}  wer=${wer.toFixed(3)}  names=${names.hits}/${names.total}  ${tail}${gainTag}`,
-    );
-  }
-
-  const n = rows.length;
-  const meanWer = n ? rows.reduce((s, r) => s + r.wer, 0) / n : 0;
-  const namesHitTotal = rows.reduce((s, r) => s + r.names.hits, 0);
-  const namesTotal = rows.reduce((s, r) => s + r.names.total, 0);
-  const exactCount = rows.filter((r) => r.exact).length;
-  const meanWallMs = n ? rows.reduce((s, r) => s + r.wallMs, 0) / n : 0;
-
   console.log(
-    `\nmean WER ${meanWer.toFixed(3)}  names ${namesHitTotal}/${namesTotal}  ` +
-      `exact ${exactCount}/${n}  wall/clip ${meanWallMs.toFixed(0)}ms`,
+    `clips: ${clipsDir} (${clips.length} listed, timeout ${args.timeoutSeconds}s per clip)\n`,
   );
+  const timeoutMs = args.timeoutSeconds * 1000;
 
-  const label = args.label ?? defaultLabel();
-  const resultsDir = join(clipsDir, "results");
-  mkdirSync(resultsDir, { recursive: true });
-  const resultsPath = join(resultsDir, `${label}.json`);
-  const results = {
-    label,
-    whisper: args.whisper,
-    promptFile: args.noPrompt ? null : resolve(args.promptFile),
-    gain: args.gain,
-    clipsDir,
-    rows,
-    summary: { clips: n, meanWer, namesHitTotal, namesTotal, exactCount, meanWallMs },
-  };
-  writeFileSync(resultsPath, JSON.stringify(results, null, 2) + "\n");
-  console.log(`wrote ${resultsPath}`);
+  // DEF-0050 (R-453): "one failed clip does not lose the run." Before this,
+  // `scoreOne` threw straight out of this loop on any non-OK reply (a single
+  // 500 among the clips) or hung forever on a Whisper that stopped
+  // answering, so `main().catch` printed a stack trace, no summary line
+  // printed, and -- because the results were written ONCE, after the loop --
+  // the clips already scored before the failure were thrown away too, along
+  // with the results file that would have recorded them. The `try`/`finally`
+  // below writes whatever was scored regardless of what happens to a later
+  // clip; the per-clip `scoreClip` catch is what stops one bad clip from
+  // reaching this function at all.
+  const rows = [];
+  try {
+    for (const clip of clips) {
+      const label = String(clip.n).padStart(2, "0");
+      const wavPath = join(clipsDir, clip.file);
+      if (!existsSync(wavPath)) {
+        console.log(`${label}  MISSING  ${wavPath}`);
+        rows.push({ n: clip.n, sentence: clip.sentence, status: "missing" });
+        continue;
+      }
+      const rawBytes = readFileSync(wavPath);
+      const { bytes, gainUsed } = applyGainIfRequested(rawBytes, args.gain);
+      const scored = await scoreClip(args.whisper, bytes, promptText, timeoutMs);
+      if (!scored.ok) {
+        console.log(`${label}  FAILED  ${scored.message}`);
+        rows.push({
+          n: clip.n,
+          sentence: clip.sentence,
+          status: "failed",
+          message: scored.message,
+        });
+        continue;
+      }
+      const { text, wallMs } = scored;
+      const wer = wordErrorRate(clip.sentence, text);
+      const names = nameHits(clip.sentence, text);
+      const exact = isExact(clip.sentence, text);
+      rows.push({
+        n: clip.n,
+        sentence: clip.sentence,
+        status: "scored",
+        heard: text,
+        wer,
+        names,
+        exact,
+        wallMs,
+        gain: gainUsed,
+      });
+
+      const tail = exact ? "exact" : `heard="${text}"`;
+      const gainTag = gainUsed !== null ? `  gain=${gainUsed.toFixed(3)}` : "";
+      console.log(
+        `${label}  wer=${wer.toFixed(3)}  names=${names.hits}/${names.total}  ${tail}${gainTag}`,
+      );
+    }
+  } finally {
+    // DEF-0050: the means below are computed over SCORED clips only (missing
+    // and failed rows carry no `wer`/`names`/`wallMs` to average), and the
+    // summary line says so plainly rather than silently excluding them.
+    const scoredRows = rows.filter((r) => r.status === "scored");
+    const n = scoredRows.length;
+    const meanWer = n ? scoredRows.reduce((s, r) => s + r.wer, 0) / n : 0;
+    const namesHitTotal = scoredRows.reduce((s, r) => s + r.names.hits, 0);
+    const namesTotal = scoredRows.reduce((s, r) => s + r.names.total, 0);
+    const exactCount = scoredRows.filter((r) => r.exact).length;
+    const meanWallMs = n ? scoredRows.reduce((s, r) => s + r.wallMs, 0) / n : 0;
+    const { counts, prefix } = scoredSummaryLine(rows, clips.length);
+
+    console.log(
+      `\n${prefix} -- mean WER over scored clips ${meanWer.toFixed(3)}  ` +
+        `names ${namesHitTotal}/${namesTotal}  exact ${exactCount}/${n}  wall/clip ${meanWallMs.toFixed(0)}ms`,
+    );
+
+    const label = args.label ?? defaultLabel();
+    const resultsDir = join(clipsDir, "results");
+    mkdirSync(resultsDir, { recursive: true });
+    const resultsPath = join(resultsDir, `${label}.json`);
+    const results = {
+      label,
+      whisper: args.whisper,
+      promptFile: args.noPrompt ? null : resolve(args.promptFile),
+      gain: args.gain,
+      timeoutSeconds: args.timeoutSeconds,
+      clipsDir,
+      rows,
+      summary: {
+        listed: clips.length,
+        scored: counts.scored,
+        missing: counts.missing,
+        failed: counts.failed,
+        meanWer,
+        namesHitTotal,
+        namesTotal,
+        exactCount,
+        meanWallMs,
+      },
+    };
+    writeFileSync(resultsPath, JSON.stringify(results, null, 2) + "\n");
+    console.log(`wrote ${resultsPath}`);
+
+    // DEF-0050: non-zero exit whenever any clip failed or was missing --
+    // AFTER the table and the file are written, so the exit code is never
+    // the reason a scored run's own evidence goes missing.
+    if (counts.missing > 0 || counts.failed > 0) process.exitCode = 1;
+  }
 }
 
 main().catch((err) => {

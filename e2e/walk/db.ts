@@ -13,6 +13,7 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { supabaseUrl, supabaseAnonKey } from "../env";
+import { addDaysToIso } from "./time";
 
 export const PASSWORD = "devpassword";
 /** The plant admin the role walk uses for Plant A (`dana@example.test`,
@@ -342,5 +343,126 @@ export async function waitForAssignmentGone(
       );
     }
     await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
+/**
+ * S194-C follow-up (28 Sept): "<person> is off <day>" now RECORDS the
+ * absence, through `set_absence` (`resolve.ts`'s `absenceOutcome`), rather
+ * than only removing the day's blocks -- so a spec that types this sentence
+ * leaves a row in `absences`, not just an empty board. `absences` has no
+ * `timerange`/`node_id` column `clearWindow`'s own filter could reuse (its
+ * own span is a `daterange`, per operator, not per node), so this is its own
+ * small door: read one operator's own rows, and delete the ones on or after
+ * a given day. Both used by the walk's setup AND teardown, the same reason
+ * `clearWindow` is: an absence a run leaves behind is invisible to the next
+ * run's own `set_absence` call until it collides with it -- `absence_overlap`,
+ * "this person already has an absence over some of those days" -- which
+ * would turn R-433's own "green twice over the same data" into "green once,
+ * then a different refusal the second time."
+ */
+export interface AbsenceRow {
+  id: string;
+  operator_id: string;
+  daterange: string;
+  reason: string;
+}
+
+const ABSENCE_COLUMNS = "id, operator_id, daterange, reason";
+
+/** Postgres's own daterange text, e.g. `"[2026-10-05,2026-10-06)"` --
+ *  `set_absence` always writes with `'[]'` bounds, but Postgres stores (and
+ *  PostgREST returns) every range in its own canonical half-open form, so a
+ *  one-day absence (`p_from = p_to = <iso>`) always reads back as
+ *  `[<iso>,<iso+1>)`. Not a general range parser, the same restraint
+ *  `parseTimerange` states for its own case -- this walk's own rows are
+ *  always finite and always this shape. */
+export function parseDaterange(raw: string): { fromIso: string; toIso: string } {
+  const inner = raw.slice(1, -1);
+  const [a, b] = inner.split(",");
+  return { fromIso: a, toIso: b };
+}
+
+/** Every absence for `operatorId`, whole table for that one person -- small
+ *  enough (a handful of rows at most, in this demo world) to fetch whole and
+ *  filter in JS, the same restraint `plantAAssignments` states for its own
+ *  unfiltered read. */
+export async function absencesForOperator(
+  dana: SupabaseClient,
+  operatorId: string,
+): Promise<AbsenceRow[]> {
+  const { data, error } = await dana
+    .from("absences")
+    .select(ABSENCE_COLUMNS)
+    .eq("operator_id", operatorId);
+  if (error) throw new Error(`reading absences for operator ${operatorId}: ${error.message}`);
+  return (data ?? []) as unknown as AbsenceRow[];
+}
+
+/** Waits for a ONE-DAY absence covering `iso` (`[iso, iso+1)`, exactly what
+ *  a one-day `set_absence(..., iso, iso, ...)` call produces) to exist for
+ *  `operatorId` -- the same polling shape and the same reason
+ *  `waitForAssignment` uses: the bar's own Done line appears the moment the
+ *  lot is told to run, before the write has necessarily reached the server
+ *  (CLAUDE.md section 4, "a write that reports success can have changed
+ *  nothing"). */
+export async function waitForAbsence(
+  dana: SupabaseClient,
+  params: { operatorId: string; iso: string },
+  timeoutMs = ROW_TIMEOUT_MS,
+): Promise<AbsenceRow> {
+  const wantTo = addDaysToIso(params.iso, 1);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const rows = await absencesForOperator(dana, params.operatorId);
+    const hit = rows.find((r) => {
+      const { fromIso, toIso } = parseDaterange(r.daterange);
+      return fromIso === params.iso && toIso === wantTo;
+    });
+    if (hit) return hit;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `no absence for operator ${params.operatorId} covering ${params.iso} appeared within ` +
+          `${timeoutMs}ms (absences on that operator: ${JSON.stringify(rows.map((r) => r.daterange))})`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
+/** Removes every absence, for each of `operatorIds`, whose own range starts
+ *  on or after `sinceIso` -- the walk's own window (the walk day onward),
+ *  the same half of the calendar `clearWindow` never reads before either.
+ *  Called by both setup and teardown (`clearWindow`'s own doc: "afterAll
+ *  deletes the same again") so a leftover absence from a run that died
+ *  mid-way, or the run just finished, is gone before the NEXT `set_absence`
+ *  call ever has to ask `absence_overlap` about it.
+ *
+ *  S194-C follow-up (28 Sept): `absences` grants `authenticated` SELECT
+ *  only (`20260907000066_absences.sql`) -- every write goes through a
+ *  SECURITY DEFINER RPC, `set_absence` for a write and, extracted from that
+ *  same migration (its own last and only definition), `remove_absence(p_id
+ *  uuid)` for a delete. A first version of this function tried
+ *  `dana.from("absences").delete()...` directly and the server answered
+ *  "permission denied for table absences" -- proved live against the
+ *  tester's stack, not guessed -- so this now calls the RPC per row, the
+ *  same door `remove_absence`'s own gate (`app_can_edit_node` on the
+ *  person's home) expects every caller to use. */
+export async function clearAbsencesSince(
+  dana: SupabaseClient,
+  operatorIds: readonly string[],
+  sinceIso: string,
+): Promise<void> {
+  const ids: string[] = [];
+  for (const operatorId of operatorIds) {
+    const rows = await absencesForOperator(dana, operatorId);
+    for (const r of rows) {
+      const { fromIso } = parseDaterange(r.daterange);
+      if (fromIso >= sinceIso) ids.push(r.id);
+    }
+  }
+  for (const id of ids) {
+    const { error } = await dana.rpc("remove_absence", { p_id: id });
+    if (error) throw new Error(`clearing absence ${id}: ${error.message}`);
   }
 }

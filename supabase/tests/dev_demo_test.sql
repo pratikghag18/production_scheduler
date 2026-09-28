@@ -376,3 +376,70 @@ BEGIN
   ELSE RAISE NOTICE 'FAIL D14: % of % seeded blocks have a minute outside their operator''s home band (want 0)',
                     v_ot, v_rows; END IF;
 END $$;
+
+\echo 'D15: every shift of every seeded plant has at least one person homed on it (R-462, DEF-0045)'
+DO $$
+DECLARE v_shifts int; v_covered int; v_empty text;
+BEGIN
+  -- R-462 (28 Sept, DEF-0045): the maintainer, on being shown the rail blank
+  -- all of Shift 1's hours -- "spread Plant A's people across all three
+  -- shifts." Before the fix, a hash of the employee ref could (and for Plant
+  -- A did) land nobody at all on one shift: the rail read "On shift now:
+  -- Shift 1" over an empty roster because a band covered "now" but nobody was
+  -- homed on it. This asks from OUTSIDE dev_demo.sql's own round-robin --
+  -- every shift row the three plants build has at least one operator whose
+  -- `home_shift_id` names it, by a plain count rather than by re-deriving the
+  -- round-robin here (which would just prove the seed agrees with itself).
+  SELECT count(*) INTO v_shifts
+    FROM shifts s
+    JOIN shift_templates st ON st.id = s.template_id
+   WHERE st.org_id = '10000000-0000-0000-0000-000000000001';
+  SELECT count(DISTINCT o.home_shift_id) INTO v_covered
+    FROM operators o
+    JOIN shifts s ON s.id = o.home_shift_id
+    JOIN shift_templates st ON st.id = s.template_id
+   WHERE o.org_id = '10000000-0000-0000-0000-000000000001'
+     AND st.org_id = '10000000-0000-0000-0000-000000000001';
+  SELECT string_agg(root.name || '/' || s.name, ', ' ORDER BY root.name, s.start_min) INTO v_empty
+    FROM shifts s
+    JOIN shift_templates st ON st.id = s.template_id
+    JOIN nodes root ON root.id = st.site_node_id
+   WHERE st.org_id = '10000000-0000-0000-0000-000000000001'
+     AND NOT EXISTS (SELECT 1 FROM operators o WHERE o.home_shift_id = s.id);
+  IF v_shifts > 0 AND v_shifts = v_covered THEN RAISE NOTICE 'PASS D15';
+  ELSE RAISE NOTICE 'FAIL D15: % of % shifts have nobody homed on them (%)',
+                    v_shifts - v_covered, v_shifts, coalesce(v_empty, 'none'); END IF;
+END $$;
+
+\echo 'D16: each seeded block also ENDS at its own operator''s home-shift minute (R-452, DEF-0044 item 3)'
+DO $$
+DECLARE v_rows int; v_at_end int;
+BEGIN
+  -- DEF-0044 item 3: D13 pins the block's START minute against the home
+  -- shift and D14 pins "no minute falls outside the band" -- both PASS for a
+  -- block that stops SHORT of its own band (an hour early, say), because a
+  -- range that ends before the band's own end is still entirely INSIDE it.
+  -- This asks the other edge directly: the upper bound's own wall-clock
+  -- minute (in the plant's zone), modulo 1440, against the shift's own
+  -- end_min, also modulo 1440 -- Shift 3 (1320-1800) crosses midnight, so its
+  -- end_min is 1800 (30:00), which reads back as 06:00 the NEXT calendar day
+  -- on the block's own upper bound; both sides take the same modulo so the
+  -- comparison holds for every shift, night one included, without a special
+  -- case. Proved to fail by the tester's own mutation (`v_to := v_from +
+  -- interval '7 hours'`, every seeded block an hour short of its 8-hour
+  -- shift): D13 and D14 both still pass that mutation, D16 does not.
+  SELECT count(*),
+         count(*) FILTER (
+           WHERE ((extract(hour   FROM upper(a.timerange) AT TIME ZONE 'America/Chicago') * 60
+                + extract(minute FROM upper(a.timerange) AT TIME ZONE 'America/Chicago'))::int
+                  % 1440) = (s.end_min % 1440)
+         )
+    INTO v_rows, v_at_end
+    FROM assignments a
+    JOIN operators o ON o.id = a.operator_id
+    JOIN shifts s ON s.id = o.home_shift_id
+   WHERE a.org_id = '10000000-0000-0000-0000-000000000001';
+  IF v_rows > 0 AND v_at_end = v_rows THEN RAISE NOTICE 'PASS D16';
+  ELSE RAISE NOTICE 'FAIL D16: % of % seeded blocks end at their operator''s home-shift minute (want all)',
+                    v_at_end, v_rows; END IF;
+END $$;

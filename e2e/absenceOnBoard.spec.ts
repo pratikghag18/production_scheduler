@@ -102,8 +102,10 @@ test("Ana records an absence and the board marks the person on leave", async ({ 
   // 3. The operator panel marks whoever is away this week. Since R-448 the
   //    rail lists the people on shift NOW by default and keeps the other
   //    bands behind a chip each; the person just recorded may be on any band
-  //    (Sam Patel is on Shift 2 after the 21 Sept seed), so press every chip
-  //    that is off before looking, as linePeople.spec.ts does (F-189).
+  //    (Sam Patel is on Shift 1 under the round-robin home-shift pick,
+  //    R-462, 28 Sept -- was Shift 2 under the 21 Sept seed's hash, DEF-0045),
+  //    so press every chip that is off before looking, as linePeople.spec.ts
+  //    does (F-189) -- this case never depends on WHICH band a person is on.
   const panel = page.getByRole("complementary", { name: "Operators" });
   await expect(panel).toBeVisible({ timeout: 15_000 });
   const offChips = panel.getByRole("button", { name: /^Shift \d+$/, pressed: false });

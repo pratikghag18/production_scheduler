@@ -183,6 +183,62 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       expect: /^Cell 4 has nobody on it .+\.$/,
     },
 
+    // 1b/1c and 1d/1e -- R-461's own end-to-end proof (28 Sept, S194-C
+    // follow-up), placed here rather than near the end: R-461 needs a block
+    // that actually crosses the WALK DAY's own midnight into the day after,
+    // and nothing else in this walk (or the seed it starts from) leaves one
+    // standing -- DEF-0042's own fix trims the seed's Sunday-night spill to
+    // end EXACTLY at that midnight, on purpose, so it no longer crosses it
+    // at all. So the walk makes its own crossing block, clears it, and
+    // proves both of R-461's answers -- Cell 5 and Cell 6 are still wholly
+    // untouched this early (entries 8 and 14 below are the first to reach
+    // them, both on ordinary daytime hours that never overlap a 10 pm-6 am
+    // block or its day-after remnant), so each pair is a lot of exactly ONE
+    // change and never disturbs anything after it.
+    //
+    // 1b. Setup: Priya's own Shift 3 block on Cell 5, 10 pm to 6 am the day
+    // after -- an ordinary single assign (S47), no question.
+    {
+      say: `Assign Priya Shah to Area 2 Frame A on Cell 5 in Line 3 ${dates.day} for shift 3`,
+      note: "setup for 1c: R-461's own proof needs a block that crosses the walk day's midnight; the seed no longer leaves one (DEF-0042), so this makes one. The DAY WORD COMES BEFORE THE SHIFT CLAUSE -- confirmed live (28 Sept, S194-C): 'for shift 3 <day>' reads the day as part of the shift's own NAME (`extractShiftClause`'s `SHIFT_NAME` takes up to two words with no day/date word in its stop list, parse.ts), so the bar answered a Did-you-mean for a shift literally named \"3 2026-10-05\" and no block was ever written. `<day> for shift 3` parses cleanly (the same order RW3, commandParse.test.ts, already pins: 'weekdays next week for shift 2').",
+      expect: assignReadoutRe("Priya Shah", "Area 2 Frame A", "Cell 5", "22:00", "06:00"),
+    },
+
+    // 1c. R-461 (DEF-0040), answered No: clearing Cell 5 for the walk day
+    // finds ONE block whose part after the walk day's own midnight belongs
+    // to the NEXT day -- the bar asks before touching it, previous/next
+    // question shape, before any "Ready to do N things" (there is only one
+    // change here, so a No/Yes answer runs it directly, S47 again -- no lot
+    // question follows). No keeps the other day's part: the block is
+    // TRIMMED (an edge move, R-461's `keep_after` fate), never deleted,
+    // which the DB read below proves by its new range starting exactly at
+    // that day's own midnight.
+    {
+      say: `clear Cell 5 ${dates.day}`,
+      answer: "no",
+      note: "R-461: a whole-day clear of a cell whose one block crosses the NEXT midnight asks first; No keeps the other day's part (a trim, not a delete) -- the DB read after asserts the block's new range starts that day's midnight, proving the OTHER day's part (10 pm to midnight) was cleared and this one survived, not the reverse.",
+      expect: /^Priya Shah's night shift runs into \w+\. Clear \w+'s part too, midnight to 6 am\?$/,
+    },
+
+    // 1d. Setup: Maria's own Shift 3 block on Cell 6 -- the symmetric case,
+    // answered the other way next.
+    {
+      say: `Assign Maria Lopez to Area 2 Frame A on Cell 6 in Line 3 ${dates.day} for shift 3`,
+      note: "setup for 1e: the other half of R-461's proof, answered Yes this time -- day before the shift clause, see 1b's own note.",
+      expect: assignReadoutRe("Maria Lopez", "Area 2 Frame A", "Cell 6", "22:00", "06:00"),
+    },
+
+    // 1e. R-461, answered Yes: the SAME question, this time the other day's
+    // part is cleared TOO, so the whole night-shift block is removed --
+    // proved by its absence below, both days' worth, not merely trimmed.
+    {
+      say: `clear Cell 6 ${dates.day}`,
+      answer: "yes",
+      note: "R-461's other answer: Yes clears the other day's part too, so the whole crossing block is removed rather than trimmed -- the DB read after asserts no row at all remains for it.",
+      expect:
+        /^Maria Lopez's night shift runs into \w+\. Clear \w+'s part too, midnight to 6 am\?$/,
+    },
+
     // 2. Assign with a part -- an ordinary single sentence, runs on its own
     // readout, no yes (S47).
     {

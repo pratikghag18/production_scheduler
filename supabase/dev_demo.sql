@@ -418,7 +418,6 @@ BEGIN
 
   -- R-441 (18 Sept, session 179; the maintainer: "assign shifts to all operators
   -- randomly"): every demo person gets a band of the pattern their plant runs,
-  -- picked by a hash of the employee ref so the spread is random-looking but
   -- the same on every seed -- the walks and the tester can name who is on
   -- which shift.
   -- ⚠️ 21 Sept (F-187): the pattern is the PLANT's, found by walking up from
@@ -427,17 +426,52 @@ BEGIN
   -- one person per plant owned at Line 1 (EMP-x001, Sam Patel on Plant A)
   -- joined nothing and kept `home_shift_id` NULL, so the walk's own person
   -- showed "No shift" while R-441 promises every operator a home shift.
+  -- ⭐ R-462 (DEF-0045, the maintainer, 28 Sept: "spread Plant A's people
+  -- across all three shifts"). A hash of the employee ref (`abs(hashtext(...))
+  -- % count(*)`) landed all six of Plant A's people on Shift 2 or 3, so the
+  -- rail Ana (Line 1's supervisor) sees stood empty all of Shift 1's hours
+  -- (06:00-14:00 Chicago) even though a band did cover "now" -- DEF-0045.
+  -- Round-robin by EACH PLANT'S OWN employee-ref order is still deterministic
+  -- (no `random()`, R-441's own promise) and covers every shift of every
+  -- plant whenever a plant has at least as many people as shifts (6 and 3
+  -- here): rank 1 gets the first shift by `start_min`, rank 2 the second, and
+  -- so on, wrapping. `EMP-<n>001` -- the one person per plant owned at Line 1
+  -- (Sam Patel on Plant A) -- sorts first within its own plant by
+  -- construction (`lpad(i::text, 3, '0')`, i starting at 1), so this ALSO
+  -- guarantees that person lands on the plant's own first shift (Shift 1)
+  -- with no separate rule naming them -- exactly what Ana's rail needs.
   UPDATE operators o SET home_shift_id = pick.shift_id
     FROM (
-      SELECT o2.id AS operator_id,
-             (array_agg(s.id ORDER BY s.start_min))[1 + (abs(hashtext(o2.employee_ref)) % count(*))::int] AS shift_id
-        FROM operators o2
-        JOIN nodes own ON own.id = o2.site_node_id
-        JOIN nodes root ON root.org_id = own.org_id AND root.parent_id IS NULL AND root.path @> own.path
-        JOIN shift_templates st ON st.org_id = o2.org_id AND st.site_node_id = root.id
-        JOIN shifts s ON s.template_id = st.id
-       WHERE o2.org_id = v_org
-       GROUP BY o2.id
+      WITH ranked AS (
+        -- ⚠️ Reviewer note (S194-C follow-up, 28 Sept): this ranks by
+        -- `employee_ref` TEXT order, not by anything that names a person as
+        -- "already placed" -- adding a demo operator whose ref SORTS BEFORE
+        -- an existing one (an `EMP-<n>000`, say, or any ref that is not the
+        -- next unused `EMP-<n>NNN` in sequence) re-ranks every person after
+        -- it and moves them onto a DIFFERENT shift, silently, the next reset.
+        -- A new demo operator's `employee_ref` must APPEND (the next unused
+        -- number for its plant), never be inserted ahead of an existing one,
+        -- or this comment's own promise about Sam Patel (EMP-<n>001, always
+        -- rank 1, always Shift 1) stops being reliable for whoever reads it.
+        SELECT o2.id AS operator_id, root.id AS root_id,
+               row_number() OVER (PARTITION BY root.id ORDER BY o2.employee_ref) AS rnk
+          FROM operators o2
+          JOIN nodes own ON own.id = o2.site_node_id
+          JOIN nodes root ON root.org_id = own.org_id AND root.parent_id IS NULL AND root.path @> own.path
+         WHERE o2.org_id = v_org
+      ),
+      shifts_by_root AS (
+        SELECT root.id AS root_id, array_agg(s.id ORDER BY s.start_min) AS shift_ids
+          FROM nodes root
+          JOIN shift_templates st ON st.org_id = v_org AND st.site_node_id = root.id
+          JOIN shifts s ON s.template_id = st.id
+         WHERE root.org_id = v_org AND root.parent_id IS NULL
+         GROUP BY root.id
+      )
+      SELECT r.operator_id,
+             sbr.shift_ids[1 + ((r.rnk - 1) % array_length(sbr.shift_ids, 1))] AS shift_id
+        FROM ranked r
+        JOIN shifts_by_root sbr ON sbr.root_id = r.root_id
     ) AS pick
    WHERE o.id = pick.operator_id;
 END $$;
@@ -487,13 +521,15 @@ BEGIN
 
         -- ⭐ R-452 (23 Sept; the maintainer: "why is each and every assignment
         -- tagged as OT?"). The fixed 06:00-14:00 window below used to be
-        -- Shift 1's hours for every cell, but R-441 hashes each person onto
-        -- Shift 1, 2 or 3 of the plant's pattern -- Plant A's six people all
-        -- landed on Shift 2 or 3, so every seeded block sat entirely outside
-        -- its own operator's home band and `overtimeMinutes()` (read by
-        -- AssignmentChip/DirectBlock) tagged all of it OT. The board was
-        -- reading the seed correctly; the seed was contradicting itself. Each
-        -- block now runs in the SEEDED OPERATOR's own home band instead.
+        -- Shift 1's hours for every cell, but R-441 puts each person onto
+        -- Shift 1, 2 or 3 of the plant's pattern (a hash at the time; R-462,
+        -- 28 Sept, replaced the hash with a round-robin, see §5 above) --
+        -- Plant A's six people all landed on Shift 2 or 3 under that first
+        -- hash, so every seeded block sat entirely outside its own operator's
+        -- home band and `overtimeMinutes()` (read by AssignmentChip/
+        -- DirectBlock) tagged all of it OT. The board was reading the seed
+        -- correctly; the seed was contradicting itself. Each block now runs
+        -- in the SEEDED OPERATOR's own home band instead.
         SELECT o.id, s.start_min, s.end_min INTO v_op, v_start, v_end
           FROM operators o
           JOIN shifts s ON s.id = o.home_shift_id

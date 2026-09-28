@@ -440,7 +440,12 @@ async function main() {
     }
   });
 
-  server.listen(args.port, () => {
+  // DEF-0039 / R-460 (a local tool listens on this machine only): the banner
+  // below already prints 127.0.0.1, but `server.listen(port, cb)` with no
+  // host binds every interface -- LAN-reachable with no authentication on
+  // `/clip/<n>` and `/manifest.json`, both read and write. The explicit host
+  // makes the banner true.
+  server.listen(args.port, "127.0.0.1", () => {
     console.log(`recording page: http://127.0.0.1:${args.port}/`);
     console.log(`clips written under: ${outDir}`);
   });

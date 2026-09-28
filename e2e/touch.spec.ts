@@ -417,10 +417,43 @@ test("T3: a finger drags a roster chip onto a track and the create pop-up opens 
 
   const panel = page.getByRole("complementary", { name: "Operators" });
   await expect(panel).toBeVisible({ timeout: 20_000 });
-  // The first roster chip — a div carrying `touch-action: none` inline, wired to
-  // beginPanelDrag on pointerdown.
-  const chip = panel.locator('[class*="chip"]').first();
+  // R-448 lists the people on shift NOW by default and keeps the other bands
+  // behind a chip each — since DEF-0045 the demo seed spreads every plant's
+  // people across all three shifts, so the rail is never empty, but which
+  // named person shows first still depends on the hour the walk runs. Press
+  // every off shift-chip first, the way absenceOnBoard.spec.ts does (F-189),
+  // so this test finds a roster chip whatever hour it runs at rather than
+  // depending on "now" landing inside a particular band.
+  const offChips = panel.getByRole("button", { name: /^Shift \d+$/, pressed: false });
+  for (let i = (await offChips.count()) - 1; i >= 0; i--) await offChips.nth(i).click();
+  // A roster chip — a div carrying `touch-action: none` inline, wired to
+  // beginPanelDrag on pointerdown. Tom Baker's, by name, never "the first":
+  // the seed gives him a home shift and no block at all (dev_demo.sql only
+  // seeds Cells 1-4's own operators a weekly schedule), so his chip can be
+  // dropped at any hour with no risk of a genuine double-booking refusal.
+  //
+  // PROVEN CAUSE of the failure this replaces (S194-C, diagnosed live
+  // against the tester's stack, 28 Sept — instrumented with
+  // `document.elementFromPoint` and a `.ghost`/`.dropHint`/`.dragging`
+  // probe mid-drag, both removed once the cause was confirmed, not guessed):
+  // with all three shift chips pressed the rail lists all six people, and
+  // the Galaxy Tab S4 landscape viewport this project drives (712px tall)
+  // is shorter than that six-person list — the last chip sits BELOW THE
+  // FOLD. `boundingBox()` still reports its true LAYOUT position (Playwright
+  // does not require on-screen visibility for that), but a coordinate past
+  // the viewport's own bottom edge hits nothing under a real touch dispatch
+  // — confirmed directly: `document.elementFromPoint` at that exact point
+  // returned null. So the touch landed nowhere, no drag ever started (no
+  // `.ghost`, no `.dropHint`, no `.dragging`, confirmed the same way, both
+  // right after touchstart and after every touchmove), and `endPanelDrag`'s
+  // own "not a valid drop" cancel (useDragGesture.ts) never even ran —
+  // nothing in `src/` is at fault here. `scrollIntoViewIfNeeded()` is the
+  // fix: a real finger would have to scroll the panel to reach an
+  // off-screen chip too, so this is what the gesture actually requires, not
+  // a workaround around it.
+  const chip = panel.locator('[class*="chip"]').filter({ hasText: "Tom Baker" }).first();
   await expect(chip).toBeVisible({ timeout: 20_000 });
+  await chip.scrollIntoViewIfNeeded();
   const cb = (await chip.boundingBox())!;
 
   // Drop onto clear track at the end of the window.

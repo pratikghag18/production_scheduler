@@ -125,9 +125,23 @@ export function todayInZone(zone: string): string {
  * The walk's own day (F-182): the Monday of the week AFTER the one today
  * falls in, on the plant's clock. Never the day the board opens on, so the
  * clears the walk ends with never empty the day a person is using; "next
- * week" in the repeat entry is this very week by construction; and the demo
- * seed, anchored on the current week, never writes here. On a Sunday that is
- * tomorrow -- still a day nobody is scheduling by hand while the walk runs.
+ * week" in the repeat entry is this very week by construction. On a Sunday
+ * that is tomorrow -- still a day nobody is scheduling by hand while the
+ * walk runs.
+ *
+ * ⚠️ DEF-0042 (28 Sept): this comment used to end "and the demo seed,
+ * anchored on the current week, never writes here" -- true until R-452 (23
+ * Sept, 1d8d82c) started seeding every block inside its OWN OPERATOR'S home
+ * band instead of a fixed 06:00-14:00 window. Shift 3 is 22:00-06:00, so the
+ * seed's own Sunday-night block, on the LAST day of "the current week" the
+ * seed anchors on, runs from Sunday 22:00 into Monday 06:00 -- and this
+ * function's OWN Monday is that very next day, on EVERY run in the same
+ * week as the seed. The seed does write here now, for the first six hours;
+ * `typedWalk.spec.ts`'s own `trimSpillIntoWalkDay` (DEF-0042) is what keeps
+ * this function's OWN promise ("the walk's Monday starts empty") true again
+ * -- it TRIMS that spillover back to this function's own midnight rather
+ * than moving the day, so the "next week" dependency two paragraphs up
+ * still holds.
  */
 export function walkDayInZone(zone: string): string {
   const today = todayInZone(zone);
@@ -141,8 +155,20 @@ export function walkDayInZone(zone: string): string {
  * (F-182: the walk's own week and the Monday after it, which `far` lands
  * on) -- half-open `[start, end)` in UTC, where `start` is midnight of the
  * walk day and `end` is midnight of (walk day + 9), one past the last day
- * the window names, so "+ 8" is included whole. Nothing before the walk day
- * is touched: the day a person is using is never in this window.
+ * the window names, so "+ 8" is included whole.
+ *
+ * Nothing BEFORE the walk day is DELETED by this window, on purpose: the day
+ * before it may be one a person is using right now, exactly as this
+ * function's own `start` (never earlier) already promised. DEF-0042 (28
+ * Sept) found the gap that promise leaves open: a row that STARTS before
+ * `start` and ENDS after it (the seed's own Sunday-night block, since
+ * R-452) is invisible to a delete keyed on where a row starts, and spills
+ * through untouched. `typedWalk.spec.ts`'s own `trimSpillIntoWalkDay` is the
+ * other half this window was never meant to be -- it TRIMS such a row's
+ * upper bound back to exactly `startUtc` instead of deleting it, so the part
+ * before the walk day (Sunday's own 22:00-24:00) survives and the part
+ * inside this window does not, without moving `start` itself earlier and
+ * without this window ever reading or writing before the walk day.
  */
 export function cleanupWindow(zone: string): { startUtc: Date; endUtc: Date } {
   const day = walkDayInZone(zone);

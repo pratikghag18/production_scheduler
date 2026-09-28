@@ -15,9 +15,14 @@ import {
   assignmentsStartingInWindow,
   runsStartingInWindow,
   parseTimerange,
+  plantAAssignments,
+  plantARuns,
+  clearAbsencesSince,
+  waitForAbsence,
   PASSWORD,
   PLANT_A_ADMIN,
   plantZone,
+  type Db,
 } from "./walk/db";
 import { walkDayInZone, addDaysToIso, clockMsInZone } from "./walk/time";
 import { fillWindowStart } from "./boardWindow";
@@ -106,6 +111,85 @@ async function signIn(page: Page, email: string, path_ = "/"): Promise<void> {
 
 function statusLine(page: Page): Locator {
   return page.locator('p[aria-live="polite"]');
+}
+
+/**
+ * DEF-0042 (S194-C fix): R-452 (23 Sept, 1d8d82c) seeds every block inside
+ * its OWN OPERATOR'S home band, and Shift 3 is 22:00-06:00 -- so the demo
+ * seed's own Sunday night block, on the last day of "the current week" the
+ * seed anchors on, runs from Sunday 22:00 to Monday 06:00, and the walk's
+ * own day is, by construction (`walkDayInZone`), the very next Monday. The
+ * walk's first sentence expects Cell 4 already empty and instead finds
+ * Priya Shah's spilled-over block; the same spill inflated the "what the
+ * walk left on the walk day" count from 10 to 14 (DEF-0042's own repro).
+ *
+ * `clearWindow` above only DELETES rows whose range STARTS inside [walk day,
+ * walk day + 9) -- deliberately: nothing before the walk day is ever read or
+ * cleared (F-182), because that earlier day may be one a person is using
+ * right now. A spillover row's range STARTS the day before that window, so
+ * `clearWindow` never sees it, and deleting it anyway would be wrong besides
+ * -- Sunday's 22:00-24:00 part is real, seeded, in-band time nobody asked to
+ * remove. So this TRIMS instead: every assignment and run on the walk's own
+ * places whose range starts before the walk day's midnight and ends after it
+ * has its UPPER bound moved back to exactly that midnight. Sunday keeps its
+ * 22:00-24:00; the walk's Monday starts empty; nothing before midnight is
+ * touched at all -- the same three database tables (`assignments`, `runs`)
+ * and the same authenticated `dana` door the rest of this file's setup uses,
+ * never a second copy of "what counts as this plant's own places."
+ *
+ * Read migration 20260911000079 before worrying this refuses: "a run can
+ * legitimately be shrunk with its crew left outside it ... so 'inside its
+ * run' is NOT an invariant of the table today" -- trimming a run's own upper
+ * bound independently of its assignments' is an accepted shape already, not
+ * a new one. `assignments_resize_guard` (0082) re-asks `supervisor_shift_
+ * allows`, `check_eligibility` and `absence_overlap` on any authenticated
+ * UPDATE that moves a `timerange` -- `supervisor_shift_allows` returns true
+ * unconditionally for an admin grant (no `plans_shift_id`, `app_planning_
+ * grant_for`), and the demo's own `eligibility_policy` is `warn` (silent,
+ * never refused) for the other two, so this shrink-only write goes through
+ * for `dana` (`PLANT_A_ADMIN`) exactly as `clearWindow`'s own deletes do.
+ */
+async function trimSpillIntoWalkDay(
+  dana: Db,
+  nodeIds: string[],
+  walkDayStartMs: number,
+): Promise<{ assignments: number; runs: number }> {
+  const walkDayStartIso = new Date(walkDayStartMs).toISOString();
+  const spills = <T extends { timerange: string }>(rows: T[]): T[] =>
+    rows.filter((r) => {
+      const { startMs, endMs } = parseTimerange(r.timerange);
+      return startMs < walkDayStartMs && endMs > walkDayStartMs;
+    });
+
+  const spillingAssignments = spills(await plantAAssignments(dana, nodeIds));
+  for (const a of spillingAssignments) {
+    const { startMs } = parseTimerange(a.timerange);
+    const { error } = await dana
+      .from("assignments")
+      .update({ timerange: `[${new Date(startMs).toISOString()},${walkDayStartIso})` })
+      .eq("id", a.id);
+    if (error) {
+      throw new Error(
+        `DEF-0042: trimming spilled assignment ${a.id} at the walk day's midnight: ${error.message}`,
+      );
+    }
+  }
+
+  const spillingRuns = spills(await plantARuns(dana, nodeIds));
+  for (const r of spillingRuns) {
+    const { startMs } = parseTimerange(r.timerange);
+    const { error } = await dana
+      .from("runs")
+      .update({ timerange: `[${new Date(startMs).toISOString()},${walkDayStartIso})` })
+      .eq("id", r.id);
+    if (error) {
+      throw new Error(
+        `DEF-0042: trimming spilled run ${r.id} at the walk day's midnight: ${error.message}`,
+      );
+    }
+  }
+
+  return { assignments: spillingAssignments.length, runs: spillingRuns.length };
 }
 
 /**
@@ -483,9 +567,32 @@ async function runEntry(page: Page, entry: Sentence): Promise<EntryResult> {
   } catch {
     return recordMismatch(page, entry, "the bar answered this sentence with something else");
   }
-  const barSaid = await currentStatusText(page);
-  const written = await answerIfAny(page, entry, barSaid);
-  return { say: entry.say, barSaid, written, note: entry.note };
+  const liveBarSaid = await currentStatusText(page);
+  const written = await answerIfAny(page, entry, liveBarSaid);
+  // S194-C follow-up (28 Sept): CP-5/S63-a's own doc on `expectAnswered`
+  // above says the live status line "goes back to empty the SAME tick the
+  // write settles" for a plain readout with no further `answer` -- exactly
+  // this branch's own no-`answer` shape (S47's "runs on its own readout, no
+  // yes", and every `nothing_to_do`). `expectAnswered` already proved the
+  // answer through the FILED thread turn in that case, never the live line.
+  // An empty `barSaid` here does NOT mean the bar said nothing (R-434/R-459:
+  // the bar always answers); it means the walk's own report asked the wrong
+  // place. Falls back to the same filed text `expectAnswered` itself already
+  // trusted -- only when there is no `answer` to wait on, since an entry
+  // THAT has one is waiting on a STANDING question, which never auto-files
+  // (nothing has answered it yet) and so is never empty here for that
+  // reason. `answerIfAny` above already ran on the RAW live value, unchanged,
+  // so this fallback affects only what is reported, never the wait logic.
+  const barSaid =
+    liveBarSaid !== "" || entry.answer !== undefined
+      ? liveBarSaid
+      : ((await lastFiledTexts(page)).at(-1) ?? liveBarSaid);
+  return {
+    say: entry.say,
+    barSaid,
+    written: entry.answer === undefined ? barSaid : written,
+    note: entry.note,
+  };
 }
 
 /** Types `entry.answer`, if it has one, and waits for the turn to be over.
@@ -511,11 +618,14 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
   test("every sentence in the catalogue runs on the real bar, its writes prove out in the database, and the trace records it", async ({
     page,
   }) => {
-    // Twenty-one sentences, each a real round trip to the local model
-    // container at roughly 15-20s a turn, plus the database polls between
-    // them: the walk's own floor is about ten minutes on this machine and a
-    // single slow turn (`ENTRY_TIMEOUT_MS`) can add two more. 540s was under
-    // the floor and timed the test out mid-walk.
+    // Around two dozen sentences (26 for WALK_SET 1 since the R-461 proof
+    // pair, S194-C follow-up, added four), each a real round trip to the
+    // local model container at roughly 15-20s a turn, plus the database
+    // polls between them: the walk's own floor is about ten minutes on this
+    // machine and a single slow turn (`ENTRY_TIMEOUT_MS`) can add two more.
+    // 540s was under the floor and timed the test out mid-walk; the four new
+    // entries add well under two more minutes, still comfortably inside the
+    // existing ceiling below.
     test.setTimeout(2_400_000);
 
     // ------------------------------------------------------------------
@@ -535,6 +645,15 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
     const allCellIds = [...nodes.cellIdByName.values()];
 
     await clearWindow(dana, nodes.allNodeIds, CLEAN_FROM_MS, CLEAN_TO_MS);
+    // DEF-0042: the seed's own Sunday-night block (Shift 3, 22:00-06:00) can
+    // run into the walk's own Monday -- trimmed here, not deleted, and never
+    // reaching before the walk day's own midnight (see the function's own
+    // comment for why `clearWindow`'s delete-only window cannot do this).
+    const spillTrim = await trimSpillIntoWalkDay(dana, nodes.allNodeIds, WALK_DAY_START_MS);
+    console.log(
+      `trimmed ${spillTrim.assignments} assignment(s) and ${spillTrim.runs} run(s) that spilled ` +
+        `from before ${WALK_DAY} into it (DEF-0042)`,
+    );
 
     const opId = {
       sam: await operatorId(dana, "Sam Patel"),
@@ -544,6 +663,14 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       tom: await operatorId(dana, "Tom Baker"),
       lena: await operatorId(dana, "Lena Novak"),
     };
+    // S194-C follow-up (28 Sept): "<person> is off <day>" now RECORDS the
+    // absence (R-409 amended); a leftover row from a previous run (this one
+    // died mid-way, or simply finished) would make the SAME sentence answer
+    // `absence_overlap` ("already has an absence recorded") on the next run
+    // instead of recording cleanly -- breaking R-433's own "green twice over
+    // the same data." Cleared here, before any sentence runs, the same
+    // reason `clearWindow` runs first; and again in the teardown below.
+    await clearAbsencesSince(dana, Object.values(opId), WALK_DAY);
     const prodId = {
       housingA: await productId(dana, "Housing A"),
       bracketA: await productId(dana, "Bracket A"),
@@ -585,6 +712,10 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       if (WALK_SET === 1) {
         const [
           clearEmptyCell,
+          nightSetupKeep,
+          nightClearKeep,
+          nightSetupRemove,
+          nightClearRemove,
           assignWithPart,
           pluralNearMiss,
           realNearMiss,
@@ -612,6 +743,55 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
 
         // 1. Clear of an empty cell.
         table.push(await runEntry(page, clearEmptyCell));
+
+        // 1b-1e. R-461's own end-to-end proof (28 Sept, S194-C follow-up):
+        // Cell 5 and Cell 6 are still wholly untouched here (entries 8/14
+        // below are the first to reach them, both daytime hours that never
+        // overlap a 10 pm-6 am block or its day-after remnant), so each
+        // setup+clear pair is a lot of exactly one change -- the other_day_
+        // part question's own Yes/No answer runs it directly (S47), no
+        // second "Ready to do N things" to wait on.
+        //
+        // 1b. Setup: Priya's own Shift 3 block, Cell 5.
+        table.push(await runEntry(page, nightSetupKeep));
+        await waitForAssignment(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 22, 0),
+          endMs: wallMs(TOMORROW, 6, 0),
+        });
+
+        // 1c. Answered No: the block survives, TRIMMED to the day-after's
+        // own part -- its new range starts exactly at that day's midnight
+        // (R-461's `keep_after` fate, an edge move never a delete). Proves
+        // the OTHER day's part (10 pm to midnight) was the one cleared.
+        table.push(await runEntry(page, nightClearKeep));
+        await waitForAssignment(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(TOMORROW, 0, 0),
+          endMs: wallMs(TOMORROW, 6, 0),
+        });
+
+        // 1d. Setup: Maria's own Shift 3 block, Cell 6 -- the symmetric
+        // case, answered the other way next.
+        table.push(await runEntry(page, nightSetupRemove));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 22, 0),
+          endMs: wallMs(TOMORROW, 6, 0),
+        });
+
+        // 1e. Answered Yes: the other day's part is cleared TOO, so the
+        // whole crossing block is gone -- both days' worth, not trimmed.
+        table.push(await runEntry(page, nightClearRemove));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 22, 0),
+          endMs: wallMs(TOMORROW, 6, 0),
+        });
 
         // 2. Assign with a part.
         table.push(await runEntry(page, assignWithPart));
@@ -1278,7 +1458,10 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         // written.
         table.push(await runEntry(page, everyWeekdayNo2));
 
-        // 19. An absence -- Maria Lopez's own Cell 5 block is removed.
+        // 19. An absence (R-409 amended, S194-C follow-up) -- Maria Lopez's
+        // own Cell 5 block is removed AND an absence is recorded for her,
+        // one lot, one yes. Both halves proved: the block gone, and the
+        // absence row present, covering exactly this day.
         table.push(await runEntry(page, absenceMaria2));
         await waitForAssignmentGone(dana, {
           operatorId: opId.maria,
@@ -1286,6 +1469,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           startMs: wallMs(WALK_DAY, 8, 0),
           endMs: wallMs(WALK_DAY, 10, 0),
         });
+        await waitForAbsence(dana, { operatorId: opId.maria, iso: WALK_DAY });
 
         // 20. A cover -- Priya Shah's own Cell 1 block becomes Sam Patel's.
         table.push(await runEntry(page, coverSam2));
@@ -1406,12 +1590,39 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           await new Promise((r) => setTimeout(r, 300));
         }
       })();
-      const traceLines = allLines.slice(-nonVoice.length);
+      // S194-C follow-up (28 Sept): an entry that needs a SECOND interaction
+      // -- a typed `answer`, or a pressed candidate button -- posts TWO
+      // trace lines, same `heard`, the second one carrying `revises: true`
+      // (`trace.ts`'s own doc, quoted on `readBarByAt` in
+      // `scripts/voice/clips/score.mjs`: "a write that lands after the
+      // person has already said something else posts a SECOND line, same
+      // `at`, correcting the first"). A plain `allLines.slice(-nonVoice.
+      // length)` counts LINES, not SENTENCES, so any walk with enough
+      // two-line entries (this list has nine: 1c, 1e, the split, both
+      // swaps, the copy, the declined repeat, Tom's override, both area
+      // clears) drops that many lines off the FRONT of the run's own tail --
+      // proved live (28 Sept): with a 26-sentence run and 9 revised entries
+      // (35 lines), `slice(-26)` started at this run's own 10th sentence,
+      // not its first, and "trace line 1" was entry 10's "book Bracket A
+      // ...", never entry 1's "clear Cell 4 ...". This collapses each
+      // consecutive same-`heard` `revises: true` line INTO the line it
+      // revises first, so the walk asserts one settled trace ENTRY per
+      // SENTENCE, the fact `nonVoice.length` actually counts.
+      const collapsed: Record<string, unknown>[] = [];
+      for (const raw of allLines) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const prev = collapsed[collapsed.length - 1];
+        if (prev && parsed.revises === true && prev.heard === parsed.heard) {
+          collapsed[collapsed.length - 1] = parsed;
+        } else {
+          collapsed.push(parsed);
+        }
+      }
+      const parsedTrace = collapsed.slice(-nonVoice.length);
       expect(
-        traceLines.length,
-        `expected at least ${nonVoice.length} trace lines in ${traceFile}`,
+        parsedTrace.length,
+        `expected at least ${nonVoice.length} settled trace entries (collapsed) in ${traceFile}`,
       ).toBe(nonVoice.length);
-      const parsedTrace = traceLines.map((l) => JSON.parse(l) as Record<string, unknown>);
       for (let i = 0; i < nonVoice.length; i++) {
         const entry = parsedTrace[i];
         expect(entry.heard, `trace line ${i + 1}'s heard`).toBe(nonVoice[i].say);
@@ -1472,6 +1683,9 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       // afterAll deletes the same again (brief §1) -- done here, in the same
       // try/finally, since this whole walk is one test.
       await clearWindow(dana, nodes.allNodeIds, CLEAN_FROM_MS, CLEAN_TO_MS);
+      // S194-C follow-up: the same reason as the setup's own call -- an
+      // absence THIS run recorded must not still be there for the next one.
+      await clearAbsencesSince(dana, Object.values(opId), WALK_DAY);
     }
   });
 });

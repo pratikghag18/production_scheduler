@@ -5,10 +5,16 @@
  * `typedWalk.spec.ts`. The regex builders (`assignReadoutRe`,
  * `bookReadoutRe`, `adjustReadoutRe`, `headcountReadoutRe`) are
  * `sentences.ts`'s own exports, reused verbatim -- not retyped (CLAUDE.md
- * §4, "extract, never retype"). This file adds two small readout builders
- * of its own for two shapes the first list never used at all (a swap's
- * certificate refusal already exists as a literal string there, reused
- * below; a plain-day absence's own "remove_which" question/write do not).
+ * §4, "extract, never retype").
+ *
+ * ⚠️ S194-C follow-up (28 Sept): entry 19's own `removeWhichQuestionRe`/
+ * `removedReadoutRe` builders (a plain-day absence's own `remove_which`
+ * question/write, "one candidate still asks") are GONE -- "<person> is off
+ * <day>" stopped being a removal that asks which block the moment R-409 was
+ * amended again: it is now an ABSENCE, taking every block that day with ONE
+ * yes and recording the absence itself in the same lot (`resolve.ts`'s
+ * `absenceOutcome`), never asking which. Entry 19 below is `LOT_RE` like any
+ * other multi-command turn.
  *
  * Two shapes named in the brief's own §1 were tried and DROPPED rather than
  * forced (brief: "If a shape ... turns out not to be supported by the
@@ -52,26 +58,6 @@ import {
  *  below allow either. */
 function cellPhrase(cell: string): string {
   return `${cell}(?: in [^,.;]+)?`;
-}
-
-/** `Remove <who>'s <part> block on <cell>, <when>? — say or type yes to do
- *  it, no to leave it.` -- the absence grammar's own `remove_which`
- *  question, one candidate (S49/R-409, `resolve.ts`'s `describeQuestion`,
- *  the `q.cell === null` branch: an absence names no cell of its own, so
- *  the ONE candidate names its own), with `CommandBar.tsx`'s own
- *  `YES_SUFFIX` appended for exactly one candidate (`withBlockHighlight`).
- *  `when` is spoken ("8 am to 10 am"), the same as every other hour this
- *  file names (R-459) -- never the raw "HH:MM–HH:MM" a board label carries. */
-function removeWhichQuestionRe(who: string, part: string, cell: string, when: string): RegExp {
-  return new RegExp(
-    `^Remove ${who}'s ${part} block on ${cell}, ${when}\\? — say or type yes to do it, no to leave it\\.$`,
-  );
-}
-
-/** `<who> is off <cell>[ in <line>] <day>; that was <when>, making <part>.`
- *  -- the same question answered (`finishRemoval`'s own readout, R-459). */
-function removedReadoutRe(who: string, part: string, cell: string, when: string): RegExp {
-  return new RegExp(`^${who} is off ${cellPhrase(cell)} .+; that was ${when}, making ${part}\\.$`);
 }
 
 /** Any "Ready to do N things: ..." lot listing (R-459) -- the generic shape
@@ -283,27 +269,29 @@ export function buildSentences2(dates: WalkDates): Sentence[] {
       expect: LOT_RE,
     },
 
-    // 19. An absence -- R-409's shape, pinned as it actually behaves rather
-    // than assumed: "<person> is off <day>" is an UNASSIGN with no cell of
-    // its own (whole day, every cell), which asks `remove_which` even for
-    // ONE candidate (S49: a removal always asks, `resolve.ts`'s own
-    // comment) rather than writing silently. Maria Lopez holds exactly one
-    // block at this point (Cell 5, 08:00-10:00, crossed to her by entry
-    // 14's swap) -- John Kim, by contrast, now holds two (entry 16 gave him
-    // a second), which is why Maria is the one named here.
+    // 19. An absence -- R-409 amended again (28 Sept, S194-C follow-up):
+    // "<person> is off <day>" is no longer a removal that asks which block
+    // (the old `remove_which` shape this entry used to pin) -- it is an
+    // ABSENCE, taking EVERY block the person has that day with one yes and
+    // recording the absence itself, last, in the SAME lot (`resolve.ts`'s
+    // `absenceOutcome`: "the record rides beside the removals ... even of no
+    // removal at all", so this is always a lot, never a silent auto-run,
+    // even here where Maria holds exactly one block). Maria Lopez holds
+    // exactly one block at this point (Cell 5, 08:00-10:00, crossed to her
+    // by entry 14's swap) -- John Kim, by contrast, now holds two (entry 16
+    // gave him a second), which is why Maria is still the one named here:
+    // one block removed plus one absence recorded is "Ready to do 2
+    // things." The walk runs as the company admin (`dana`), recordable for
+    // everyone, so the record always goes through; the DB read after this
+    // entry proves BOTH halves -- the block gone AND an absence row for
+    // Maria covering this day -- and the walk's own setup/teardown
+    // (`clearAbsencesSince`, `typedWalk.spec.ts`) remove that row again so a
+    // second run of this same walk finds nothing already recorded.
     {
       say: `Maria Lopez is off ${dates.day}`,
-      note: "R-409: the absence grammar is an unassign with no cell of its own -- pinned here as remove_which (one candidate still asks, never a silent whole-day wipe): press the one button, then the DB read proves the row gone.",
-      expect: {
-        button: "Remove it",
-        question: removeWhichQuestionRe(
-          "Maria Lopez",
-          "Common Fastener",
-          "Cell 5",
-          "8 am to 10 am",
-        ),
-        then: removedReadoutRe("Maria Lopez", "Common Fastener", "Cell 5", "8 am to 10 am"),
-      },
+      answer: "yes",
+      note: 'R-409 amended: "is off" is now an absence -- it clears every block that day (just the one, Cell 5) with no "which block" question, and records the absence in the same lot ("Ready to do 2 things"). The DB read after asserts the block gone and an absence row present for Maria on this day; the walk\'s own cleanup removes that row afterwards.',
+      expect: LOT_RE,
     },
 
     // 20. A cover -- the S-series shape, pinned the same way. Priya Shah's
