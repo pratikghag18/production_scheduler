@@ -75,7 +75,9 @@ describe("trace: renderLine (S59-e, R-421)", () => {
       "written",
       "refused: That person does not belong to this part of the structure.",
       "popup: the create pop-up",
-      "Did 3 of 4; the next failed: That person does not belong to this part of the structure.",
+      // DEF-0052 / R-432 (CONTRACT CHANGED, 28 Sept): SEPARATE LINES,
+      // replacing the old count-only "Did 3 of 4; the next failed: ...".
+      "I made 3 of the 4 changes.\nDone: a\nNot done: b That person does not belong to this part of the structure.",
     ]) {
       const entry = baseEntry({ outcome });
       expect((JSON.parse(renderLine(entry)) as TraceEntry).outcome).toBe(outcome);

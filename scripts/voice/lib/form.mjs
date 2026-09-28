@@ -24,7 +24,34 @@ export function canonical(form) {
   return JSON.stringify(sortKeysDeep(form));
 }
 
-/** Structural equality of two forms, independent of key order. */
+/**
+ * DEF-0048 / R-409 (28 Sept): the one key the grammar's output may carry that
+ * the model's recorded forms never do. `parseCommand` marks an absence
+ * ("Sam Patel is off tomorrow") with `absence: "off"` on the unassign; the
+ * mark is DERIVED FROM THE WORDS (the rules read them, and the bar marks the
+ * model's reading from the heard words with `markAbsence`), and the model is
+ * NOT taught it -- no retrain, no change to the decoder's schema, no
+ * regenerated data file. So the oracle ignores this key, by name, on an
+ * unassign form only. Nothing else is loosened: every other key, at every
+ * depth, still compares exactly.
+ */
+const DERIVED_UNASSIGN_KEYS = new Set(["absence"]);
+
+function withoutDerivedKeys(value) {
+  if (Array.isArray(value)) return value.map(withoutDerivedKeys);
+  if (value !== null && typeof value === "object") {
+    const out = {};
+    for (const key of Object.keys(value)) {
+      if (value.intent === "unassign" && DERIVED_UNASSIGN_KEYS.has(key)) continue;
+      out[key] = withoutDerivedKeys(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** Structural equality of two forms, independent of key order -- and of the
+ *  one derived key above. */
 export function equalForms(a, b) {
-  return canonical(a) === canonical(b);
+  return canonical(withoutDerivedKeys(a)) === canonical(withoutDerivedKeys(b));
 }

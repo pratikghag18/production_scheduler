@@ -51,6 +51,16 @@
   min-height: 1.2em;
   font-size: calc(12px * var(--chrome-scale, 1));
   color: var(--ink);
+  /* DEF-0052 / R-432 (28 Sept, SEPARATE LINES): a lot's partial-failure
+     answer is several `\n`-joined sentences ("I made 1 of 3 changes." /
+     "Done: ..." / "Not done: ..." / "Not tried: ..."), built once in
+     `CommandBar.tsx`'s own `buildLotOutcome` and shown both here (live,
+     before the turn is filed) and in `.turnResult` below (filed) -- the
+     SAME string either way. `pre-line` is the plain-text way to respect
+     those breaks: no new element, no wrapping markup, just the newlines
+     the string already carries rendering as line breaks instead of being
+     collapsed to spaces (ordinary CSS `white-space: normal` behaviour). */
+  white-space: pre-line;
 }
 
 /* R-427: the conversation area above the input -- the finished turns of the
@@ -197,6 +207,14 @@
   overflow-wrap: anywhere;
 }
 
+/* DEF-0052 / R-432: see `.statusLine`'s own comment above -- the FILED copy
+   of the same `\n`-joined lot answer needs the same treatment, or it reads
+   as one run-together line the instant the turn is posted to the thread
+   even though it showed as separate lines a moment before. */
+.turnResult {
+  white-space: pre-line;
+}
+
 .turnChips {
   display: flex;
   flex-wrap: wrap;
@@ -261,6 +279,25 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* S194-D (R-461, R-447): the night shift question's Yes and No are ONE group,
+   so they are ONE width -- two equal grid tracks sized to the wider label,
+   with a floor, so nothing shifts between "Yes" and "No". The bar's other
+   candidate strips are data (names, blocks) and stay the free-width flex row
+   above (R-447's written exception). */
+.answerPair {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(4em, 1fr);
+  width: max-content;
+}
+
+/* R-434 (S194-D): one sentence can ask two questions in a row; the filed
+   turn keeps both asks and both answers, newline-joined. */
+.turnBoard,
+.bubble {
+  white-space: pre-line;
 }
 
 /* Same visually-hidden shape as `NodeTreeEditor.module.css`'s `.srOnly` --

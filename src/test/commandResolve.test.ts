@@ -15,7 +15,9 @@ import type {
   BoardDay,
   Candidate,
 } from "@/lib/command/resolve";
-import { formatCommand } from "@/lib/command/parse";
+import { formatCommand, markAbsence, parseCommand } from "@/lib/command/parse";
+import type { Expansion, ResolveOptions } from "@/lib/command/resolve";
+import { buildDayAxis, wallOf as wallOfAxis, zonedTimeToInstant } from "@/features/board/lib/time";
 import type {
   AssignCommand,
   BookCommand,
@@ -218,8 +220,8 @@ function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
 function certGapsFixture(
   entries: [string, string, { skill: string; state: "never-trained" | "lapsed" }[]][],
 ): ResolveContext["certificateGaps"] {
-  const map = new Map(entries.map(([opId, nodeId, gaps]) => [`${opId} ${nodeId}`, gaps]));
-  return (operatorId, nodeId) => map.get(`${operatorId} ${nodeId}`) ?? [];
+  const map = new Map(entries.map(([opId, nodeId, gaps]) => [`${opId} ${nodeId}`, gaps]));
+  return (operatorId, nodeId) => map.get(`${operatorId} ${nodeId}`) ?? [];
 }
 
 function withRuns(runs: ContextRun[], overrides: Partial<ResolveContext> = {}): ResolveContext {
@@ -355,6 +357,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
+        attempted: "Operator 1 on Cell 1 in Line 1",
+        notTried: "Operator 1 is not on Cell 1 in Line 1.",
       },
     });
   });
@@ -695,6 +699,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "run", runId: "run1" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: `${R1_READOUT} Joining the Housing A 8 am to 4 pm job already there.`,
+        attempted: "Operator 1 on Cell 1 in Line 1",
+        notTried: "Operator 1 is not on Cell 1 in Line 1.",
       },
     });
   });
@@ -712,6 +718,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
+        attempted: "Operator 1 on Cell 1 in Line 1",
+        notTried: "Operator 1 is not on Cell 1 in Line 1.",
       },
     });
   });
@@ -825,6 +833,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "retime", assignmentId: "blk1" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         readout: `${R1_READOUT.replace("10 am to 2 pm", "10 am to 3 pm")} Changing the block that ran 10 am to 2 pm.`,
+        attempted: "Operator 1's block on Cell 1 in Line 1",
+        notTried: "Operator 1's block on Cell 1 in Line 1 stays as it was, 10 am to 2 pm.",
       },
     });
   });
@@ -943,6 +953,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "run_create", productId: "ha", headcount: null },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
         readout: RB1_READOUT,
+        attempted: "The Housing A job on Cell 1 in Line 1",
+        notTried: "No Housing A job is booked on Cell 1 in Line 1.",
       },
     });
   });
@@ -1009,6 +1021,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "retime_run", runId: "run1" },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
         readout: `${RB1_READOUT} Changing the job that ran Housing A 8 am to 4 pm.`,
+        attempted: "The Housing A job on Cell 1 in Line 1",
+        notTried: "The Housing A job on Cell 1 in Line 1 stays as it was, 8 am to 4 pm.",
       },
     });
   });
@@ -1108,6 +1122,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
+        attempted: "Operator 1 on Cell 1 in Line 1",
+        notTried: "Operator 1 is not on Cell 1 in Line 1.",
       },
     });
 
@@ -1161,6 +1177,8 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         assignmentId: "blk1",
         readout:
           "Operator 1 is off Cell 1 in Line 1 2026-09-03; that was 10 am to 2 pm, making Housing A.",
+        attempted: "Operator 1's block on Cell 1 in Line 1",
+        notTried: "Operator 1 stays on Cell 1 in Line 1.",
       },
     });
   });
@@ -1279,6 +1297,8 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
+        attempted: "Operator 1 on Cell 1 in Line 1",
+        notTried: "Operator 1 is not on Cell 1 in Line 1.",
       },
     });
 
@@ -1296,6 +1316,8 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         target: { kind: "run_create", productId: "ha", headcount: null },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
         readout: RB1_READOUT,
+        attempted: "The Housing A job on Cell 1 in Line 1",
+        notTried: "No Housing A job is booked on Cell 1 in Line 1.",
       },
     });
 
@@ -1380,6 +1402,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         target: { kind: "retime" },
         readout: `${MOVE_IN_TIME_PREFIX} now runs 2026-09-03 from 10 am to 3 pm.`,
+        attempted: "Operator 1's block on Cell 1 in Line 1",
+        notTried: "Operator 1's block on Cell 1 in Line 1 stays as it was, 10 am to 2 pm.",
       },
     });
   });
@@ -1397,6 +1421,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         target: { kind: "move_cell" },
         readout: `${MOVE_TO_CELL_PREFIX} 10 am to 2 pm.`,
+        attempted: "Operator 1 on Cell 2",
+        notTried: "Operator 1 stays on Cell 1 in Line 1.",
       },
     });
   });
@@ -1420,6 +1446,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         target: { kind: "move_cell" },
         readout: `${MOVE_TO_CELL_PREFIX} 10 am to 3 pm.`,
+        attempted: "Operator 1 on Cell 2",
+        notTried: "Operator 1 stays on Cell 1 in Line 1.",
       },
     });
   });
@@ -1512,6 +1540,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         range: { startMin: 3 * 1440 + 960, endMin: 3 * 1440 + 1080 },
         target: { kind: "retime" },
         readout: `${MOVE_IN_TIME_PREFIX} now runs 2026-09-03 from 4 pm to 6 pm.`,
+        attempted: "Operator 1's block on Cell 1 in Line 1",
+        notTried: "Operator 1's block on Cell 1 in Line 1 stays as it was, 10 am to 2 pm.",
       },
     });
   });
@@ -1528,6 +1558,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
+        attempted: "Operator 1 on Cell 1 in Line 1",
+        notTried: "Operator 1 is not on Cell 1 in Line 1.",
       },
     });
 
@@ -1541,6 +1573,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         target: { kind: "run_create", productId: "ha", headcount: null },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
         readout: RB1_READOUT,
+        attempted: "The Housing A job on Cell 1 in Line 1",
+        notTried: "No Housing A job is booked on Cell 1 in Line 1.",
       },
     });
 
@@ -1555,6 +1589,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         assignmentId: "blk1",
         readout:
           "Operator 1 is off Cell 1 in Line 1 2026-09-03; that was 10 am to 2 pm, making Housing A.",
+        attempted: "Operator 1's block on Cell 1 in Line 1",
+        notTried: "Operator 1 stays on Cell 1 in Line 1.",
       },
     });
   });
@@ -1678,6 +1714,8 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         intent: "unassign",
         assignmentId: "blkC2",
         readout: "Operator 1 is off Cell 2 2026-09-03; that was 10 am to 2 pm, making Housing A.",
+        attempted: "Operator 1's block on Cell 2",
+        notTried: "Operator 1 stays on Cell 2.",
       },
     });
   });
@@ -1787,6 +1825,8 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         target: { kind: "retime" },
         readout: "Operator 1's Housing A block on Cell 2 now runs 2026-09-03 from 10 am to 3 pm.",
+        attempted: "Operator 1's block on Cell 2",
+        notTried: "Operator 1's block on Cell 2 stays as it was, 10 am to 2 pm.",
       },
     });
   });
@@ -2566,6 +2606,27 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
     }
   });
 
+  it("DEF-0044 item 5 (mutation-provable): no start, TODAY, 'now' exactly on a quarter hour -- stays exactly there, never rounds a full 15 minutes past", () => {
+    // BN7 above only proves the ROUND-UP half (10:07 -> 10:15). This proves
+    // the on-the-quarter short-circuit in `roundUpToQuarterHour` (`m % 15
+    // === 0 ? m : ...`) by itself: with `nowMinuteOfDay` sitting exactly on
+    // :00/:15/:30/:45, deleting that short-circuit (`return m + (15 - r)`
+    // unconditionally, `r` computed as `m % 15 || 15`) would push the start
+    // a full 15 minutes late even though nothing needed rounding. Frozen
+    // clock via `nowMinuteOfDay`, no real `Date`/`Intl` involved (R-426 is
+    // not in play here -- this is minute-of-day arithmetic, not a calendar
+    // day or an instant).
+    const res = resolveCommand(
+      zAssign({ day: { kind: "today" }, shift: "end of day" }),
+      zCtx({ nowMinuteOfDay: 600 }), // exactly 10:00
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // 10:00 stays 10:00 (600); end of day with a pattern -> last band's end.
+      expect(res.resolved.range).toEqual({ startMin: 1 * 1440 + 600, endMin: 1 * 1440 + 1320 });
+    }
+  });
+
   it("BN9: a removal's span end at 23:59 reads as midnight (1440), never 1439", () => {
     // A block sitting exactly in the last minute of the day (23:59-00:00) --
     // matched only when the window's end is read as midnight, never a
@@ -2962,6 +3023,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           runId: "zrun",
           readout:
             "The Housing A job is off Cell 1 2026-09-03; that was 8 am to 4 pm, for 3 people.",
+          attempted: "The Housing A job on Cell 1",
+          notTried: "The Housing A job on Cell 1 stays as it was, 8 am to 4 pm.",
         });
       } else {
         throw new Error("expected a several");
@@ -3030,7 +3093,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
     // the null-product wording bug the same review found alongside it.
     // -------------------------------------------------------------------
 
-    it("EX10 (reviewer fix): a crew block on the removed run that falls entirely outside a narrower span is still listed as its own command, never silently swept up by cascade", () => {
+    it("EX10 (R-436 amended 28 Sept, CONTRACT CHANGED -- the job used to go whole and take this crew block with it): a clear of the afternoon keeps the job's morning, and the crew block wholly in the morning is untouched and said to stay", () => {
       const job = zRun({ id: "zrunB", startMin: 2 * 1440 + 480, endMin: 2 * 1440 + 960 });
       const morningBlk = zBlk({
         id: "morningBlk",
@@ -3053,12 +3116,21 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       const res = expandCommand(command, zCtx({ assignments: [morningBlk], runs: [job] }));
       expect(res.ok).toBe(true);
       if (res.ok && res.command.intent === "several") {
-        expect(res.command.commands).toHaveLength(1);
-        const [c1] = res.command.commands as UnassignCommand[];
-        expect(c1.operator).toBe("Sam");
-        expect(c1.existing).toEqual({ kind: "remove", assignmentId: "morningBlk" });
-        expect(res.runRemovals).toHaveLength(1);
-        expect(res.runRemovals?.[0].runId).toBe("zrunB");
+        // Sam's morning block is not touched at all -- no command names it.
+        expect(res.command.commands).toHaveLength(0);
+        expect(res.runRemovals).toBeUndefined();
+        expect(res.runTrims).toEqual([
+          {
+            intent: "trim_run",
+            runId: "zrunB",
+            nodeId: "zc1",
+            range: { startMin: 2 * 1440 + 480, endMin: 2 * 1440 + 780 },
+            readout:
+              "The Housing A job on Cell 1 keeps 8 am to 1 pm, and Sam is still on it; the part from 1 pm to 4 pm is cleared.",
+            attempted: "The Housing A job on Cell 1",
+            notTried: "The Housing A job on Cell 1 stays as it was, 8 am to 4 pm.",
+          },
+        ]);
       } else {
         throw new Error("expected a several");
       }
@@ -3145,6 +3217,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           intent: "unassign",
           assignmentId: "blkMid",
           readout: "Sam is off Cell 1 2026-09-03; that was 2 pm to midnight, making Housing A.",
+          attempted: "Sam's block on Cell 1",
+          notTried: "Sam stays on Cell 1.",
         });
       }
     });
@@ -3225,6 +3299,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           intent: "unassign",
           assignmentId: "blkMid",
           readout: "Sam is off Cell 1 2026-09-03; that was 2 pm to midnight, making Housing A.",
+          attempted: "Sam's block on Cell 1",
+          notTried: "Sam stays on Cell 1.",
         });
       }
     });
@@ -3266,6 +3342,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
             intent: "unassign",
             assignmentId: "blkMid",
             readout: "Sam is off Cell 1 2026-09-03; that was 2 pm to midnight, making Housing A.",
+            attempted: "Sam's block on Cell 1",
+            notTried: "Sam stays on Cell 1.",
           });
           expect(resolved.resolved).not.toHaveProperty("span");
           expect(resolved.resolved).not.toHaveProperty("range");
@@ -3974,7 +4052,10 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         ok: false,
         question: {
           kind: "nothing_to_do",
-          text: "Sam has no block from 2026-09-02 to 2026-09-04.",
+          // S194-D (item 8 of the bar's half, CONTRACT CHANGED): an absence with the
+          text:
+            // recordable set unknown says it was not recorded, and why.
+            "Sam has no block from 2026-09-02 to 2026-09-04; the absence is not recorded, because I could not check whether you may record it.",
         },
       });
     });
@@ -4476,7 +4557,15 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         until: null,
       };
       const ctx = zCtx({ assignments: [overnight, sameDay] });
-      const res = expandCommand(command, ctx);
+      // R-461 (28 Sept, CONTRACT CHANGED): the block crosses today's first
+      // midnight, so the clear asks about yesterday's part before anything
+      // is built; the trim below is the answer No ("keep").
+      const asked = expandCommand(command, ctx);
+      expect(asked).toMatchObject({
+        ok: false,
+        question: { kind: "other_day_part", direction: "previous" },
+      });
+      const res = expandCommand(command, ctx, { previousDayPart: "keep" });
       expect(res.ok).toBe(true);
       if (res.ok && res.command.intent === "several") {
         expect(res.command.commands).toHaveLength(2);
@@ -4529,7 +4618,13 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         until: null,
       };
       const ctx = zCtx({ assignments: [overnight] });
-      const res = expandCommand(command, ctx);
+      // R-461 (CONTRACT CHANGED): tomorrow's part is asked about first; the
+      // trim below is the answer No ("keep").
+      expect(expandCommand(command, ctx)).toMatchObject({
+        ok: false,
+        question: { kind: "other_day_part", direction: "next" },
+      });
+      const res = expandCommand(command, ctx, { nextDayPart: "keep" });
       expect(res.ok).toBe(true);
       if (res.ok && res.command.intent !== "several") {
         const move = res.command as MoveCommand;
@@ -4571,7 +4666,19 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         existing: null,
         until: null,
       };
-      const res = expandCommand(command, zCtx({ assignments: [wide] }));
+      // R-461 (CONTRACT CHANGED): a block across BOTH of the day's midnights
+      // asks both questions, previous first; only when BOTH answers keep a
+      // part is it the hole the app cannot make -- the same refusal as before.
+      const c = zCtx({ assignments: [wide] });
+      expect(expandCommand(command, c)).toMatchObject({
+        ok: false,
+        question: { kind: "other_day_part", direction: "previous" },
+      });
+      expect(expandCommand(command, c, { previousDayPart: "keep" })).toMatchObject({
+        ok: false,
+        question: { kind: "other_day_part", direction: "next" },
+      });
+      const res = expandCommand(command, c, { previousDayPart: "keep", nextDayPart: "keep" });
       expect(res).toEqual({
         ok: false,
         question: {
@@ -4602,7 +4709,12 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         until: null,
       };
       const ctx = zCtx({ assignments: [overnight] });
-      const res = expandCommand(command, ctx);
+      // R-461 (CONTRACT CHANGED): asked first; the trim is the answer No.
+      expect(expandCommand(command, ctx)).toMatchObject({
+        ok: false,
+        question: { kind: "other_day_part", direction: "previous", day: "Monday" },
+      });
+      const res = expandCommand(command, ctx, { previousDayPart: "keep" });
       expect(res.ok).toBe(true);
       if (res.ok && res.command.intent !== "several") {
         const move = res.command as MoveCommand;
@@ -4994,7 +5106,27 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         until: null,
       };
       const ctx = edgeCtx({ assignments: [john, sam] });
-      const res = expandCommand(command, ctx);
+      // R-461 (CONTRACT CHANGED): John's block crosses today's first
+      // midnight -- asked first (naming him and his own real start, read
+      // off the clamped axis without trusting its day); the trim is No.
+      const asked = expandCommand(command, ctx);
+      expect(asked).toEqual({
+        ok: false,
+        question: {
+          kind: "other_day_part",
+          direction: "previous",
+          day: "Wednesday",
+          first: { kind: "person", name: "John Kim" },
+          others: 0,
+          at: "2 am",
+          hours: "2 am to midnight",
+          answers: [
+            { id: "clear", label: "Yes", word: "yes" },
+            { id: "keep", label: "No", word: "no" },
+          ],
+        },
+      });
+      const res = expandCommand(command, ctx, { previousDayPart: "keep" });
       expect(res.ok).toBe(true);
       if (!res.ok || res.command.intent !== "several") throw new Error("expected a several of two");
       expect(res.command.commands).toHaveLength(2);
@@ -5041,7 +5173,13 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         until: null,
       };
       const ctx = edgeCtx({ assignments: [block] });
-      const res = expandCommand(command, ctx);
+      // R-461 (CONTRACT CHANGED): tomorrow (off this one-day board) is named
+      // by its weekday, never a read of a day the board does not have.
+      expect(expandCommand(command, ctx)).toMatchObject({
+        ok: false,
+        question: { kind: "other_day_part", direction: "next", day: "Friday", at: "6 am" },
+      });
+      const res = expandCommand(command, ctx, { nextDayPart: "keep" });
       expect(res.ok).toBe(true);
       if (!res.ok || res.command.intent === "several") throw new Error("expected a single move");
       const move = res.command as MoveCommand;
@@ -5134,7 +5272,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       });
     });
 
-    it("MN18: an absence over John Kim's block that starts before the board -- day_off_board, never a negative span", () => {
+    it("MN18 (R-461, CONTRACT CHANGED -- was day_off_board): an absence over John Kim's block that starts before the board asks about yesterday's part; Yes removes it by id with no clock pair, No trims it -- never a negative span, never a read of the day off the board", () => {
       const john = zBlk({
         id: "mn18",
         operatorId: "zjohn",
@@ -5152,10 +5290,28 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         existing: null,
         until: { kind: "date", iso: "2026-09-03" },
       };
-      const res = expandCommand(command, edgeCtx({ assignments: [john] }));
-      expect(res).toEqual({
+      const ctx = edgeCtx({ assignments: [john] });
+      expect(expandCommand(command, ctx)).toMatchObject({
         ok: false,
-        question: { kind: "day_off_board", text: "2026-09-02" },
+        question: {
+          kind: "other_day_part",
+          direction: "previous",
+          first: { kind: "person", name: "John Kim" },
+        },
+      });
+      const yes = expandCommand(command, ctx, { previousDayPart: "clear" });
+      if (!yes.ok || yes.command.intent !== "unassign") throw new Error("expected one removal");
+      expect(yes.command.existing).toEqual({ kind: "remove", assignmentId: "mn18" });
+      expect(yes.command.day).toEqual({ kind: "date", iso: "2026-09-03" });
+      expect(yes.command.span).toBeNull();
+      expect(resolveCommand(yes.command, ctx).ok).toBe(true);
+      const no = expandCommand(command, ctx, { previousDayPart: "keep" });
+      if (!no.ok || no.command.intent !== "move") throw new Error("expected one trim");
+      expect(no.command.adjust).toEqual({ edge: "end", at: { hour: 0, minute: 0 } });
+      const trimmed = resolveCommand(no.command, ctx);
+      expect(trimmed.ok && trimmed.resolved.intent === "move" && trimmed.resolved.range).toEqual({
+        startMin: -1320,
+        endMin: 0,
       });
     });
 
@@ -5379,6 +5535,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           headcount: 5,
           readout:
             "The Housing A job on Cell 1 now takes 5 people; it runs 2026-09-03 from 8 am to 4 pm.",
+          attempted: "The Housing A job on Cell 1",
+          notTried: "The Housing A job on Cell 1 stays at 3 people.",
         },
       });
     });
@@ -5808,6 +5966,85 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           ]);
         } else {
           throw new Error("expected a several of two same-day removals");
+        }
+      });
+
+      it("DEF-0044 item 2 (mutation-provable): a week clear whose removals exceed LOT_CEILING answers lot_too_big, not a silent partial write", () => {
+        // A cell full of short, non-overlapping blocks across all seven days
+        // of next_week: 15 blocks/day is well under `expandEveryoneUnassign`'s
+        // OWN per-day ceiling (CP6 already covers that check on `expandCopy`),
+        // but the week's total (105) crosses `expandRepeatUnassign`'s own
+        // `total > LOT_CEILING` -- this is the one the tester's mutation
+        // (deleting that refusal) found no fixture holds.
+        const many: ContextAssignment[] = [];
+        for (let d = 7; d <= 13; d++) {
+          for (let i = 0; i < 15; i++) {
+            many.push(
+              zBlk({
+                id: `lotBlk_${d}_${i}`,
+                nodeId: "zc1",
+                operatorId: "zsam",
+                startMin: d * 1440 + 480 + i * 20,
+                endMin: d * 1440 + 480 + i * 20 + 10,
+              }),
+            );
+          }
+        }
+        const command: UnassignCommand = {
+          intent: "unassign",
+          operator: "everyone",
+          place: ["Cell 1"],
+          day: { kind: "every_day", week: "next_week" },
+          span: null,
+          existing: null,
+          shift: null,
+          until: null,
+        };
+        const res = expandCommand(
+          command,
+          zCtx({ days: rwDays, todayIndex: 2, assignments: many }),
+        );
+        expect(res).toEqual({
+          ok: false,
+          question: { kind: "lot_too_big", count: 105, max: 100 },
+        });
+      });
+
+      it("DEF-0044 item 6 (mutation-provable): a block edge sitting exactly on the board's own last midnight is ON the board, not day_off_board", () => {
+        // The board's own last day is rwDays' index 13 (2026-09-13);
+        // `wallToOffset(13, 1440)` is that day's own midnight -- the exact
+        // boundary `edgeOnBoard`'s `<=` allows. A block ending exactly there
+        // (Sun 22:00 to the board's last midnight) must be found and removed
+        // by 'clear Sam next week', never asked `day_off_board`.
+        const edgeBlk = zBlk({
+          id: "uwEdge",
+          nodeId: "zc1",
+          operatorId: "zsam",
+          startMin: 13 * 1440 + 1320, // Sun 2026-09-13, 22:00
+          endMin: 13 * 1440 + 1440, // exactly the board's own last midnight
+        });
+        const command: UnassignCommand = {
+          intent: "unassign",
+          operator: "Sam",
+          place: ["Cell 1"],
+          day: { kind: "every_day", week: "next_week" },
+          span: null,
+          existing: null,
+          shift: null,
+          until: null,
+        };
+        const res = expandCommand(
+          command,
+          zCtx({ days: rwDays, todayIndex: 2, assignments: [edgeBlk] }),
+        );
+        expect(res.ok).toBe(true);
+        if (res.ok && res.command.intent !== "several") {
+          expect((res.command as UnassignCommand).existing).toEqual({
+            kind: "remove",
+            assignmentId: "uwEdge",
+          });
+        } else {
+          throw new Error("expected exactly one removal (the edge block)");
         }
       });
     });
@@ -6922,6 +7159,8 @@ describe("commandResolve: S61-b training before the yes (R-425, F-155, F-156)", 
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
+        attempted: "Operator 1 on Cell 1 in Line 1",
+        notTried: "Operator 1 is not on Cell 1 in Line 1.",
         override: { reason: "Covering a call-out, supervisor approved" },
       },
     });
@@ -6948,5 +7187,1207 @@ describe("commandResolve: S61-b training before the yes (R-425, F-155, F-156)", 
         inLot: true,
       }),
     ).toBe("Not done: Operator 1 is not certified for Cell 1, missing Welding. Nothing changed.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ND1-ND12 (S194-D, DEF-0040, R-461 -- the maintainer, 28 Sept: "each day is
+// its own bucket"): a clear of a day removes only that day's part of every
+// block AND every job across midnight, and asks first, Yes or No, whether the
+// other day's part goes too -- one question per direction, previous first.
+// The invariant (DEF-0040's pin, stated as a property and run over every
+// case): nothing the lot keeps or trims is removed by another step of it, and
+// no job removed whole by cascade has a crew block the lot does not itself
+// remove.
+// ---------------------------------------------------------------------------
+
+describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-0040)", () => {
+  const ndDays: BoardDay[] = [
+    { index: 0, iso: "2026-10-11", weekday: 0 }, // Sun
+    { index: 1, iso: "2026-10-12", weekday: 1 }, // Mon (today)
+    { index: 2, iso: "2026-10-13", weekday: 2 }, // Tue
+    { index: 3, iso: "2026-10-14", weekday: 3 }, // Wed
+  ];
+  const line2 = { id: "line2", name: "Line 2", path: "line2" };
+  const cell4 = { id: "cell4", name: "Cell 4", path: "line2.cell4" };
+  const cell2 = { id: "cell2", name: "Cell 2", path: "line2.cell2" };
+  const cell5 = { id: "cell5", name: "Cell 5", path: "line2.cell5" };
+  const priya = { id: "priya", displayName: "Priya Shah", employeeRef: null, active: true };
+  const maria = { id: "maria", displayName: "Maria Lopez", employeeRef: null, active: true };
+  const ahmed = { id: "ahmed", displayName: "Ahmed Ali", employeeRef: null, active: true };
+  const linC = { id: "linc", displayName: "Lin Chen", employeeRef: null, active: true };
+  const w = (d: number, m: number): number => d * 1440 + m;
+
+  function ndCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
+    return {
+      cells: [cell4, cell2, cell5],
+      nodeById: new Map([line2, cell4, cell2, cell5].map((n) => [n.id, n])),
+      operators: [priya, maria, ahmed, linC],
+      products: [{ id: "ha", sku: "HA", name: "Housing A" }],
+      offeredAt: () => [{ id: "ha" }],
+      days: ndDays,
+      todayIndex: 1,
+      todayIso: "2026-10-12",
+      wallToOffset: w,
+      runs: [],
+      fitsRun: (a, r) => a.startMin >= r.startMin && a.endMin <= r.endMin,
+      minDurationMinutes: 15,
+      assignments: [],
+      overlaps: (a, b) => a.startMin < b.endMin && b.startMin < a.endMin,
+      findRunOverlap: () => null,
+      shiftsAt: () => [],
+      nowMinuteOfDay: null,
+      wallOf: clampedWallOf(ndDays),
+      certificateGaps: () => [],
+      eligibilityPolicy: () => "warn",
+      settled: true,
+      ...overrides,
+    } as ResolveContext;
+  }
+  function blk(
+    id: string,
+    operatorId: string,
+    startMin: number,
+    endMin: number,
+    over: Partial<ContextAssignment> = {},
+  ): ContextAssignment {
+    return {
+      id,
+      nodeId: "cell4",
+      operatorId,
+      productId: "ha",
+      productName: "Housing A",
+      startMin,
+      endMin,
+      label: "",
+      runId: null,
+      ...over,
+    };
+  }
+  function job(
+    id: string,
+    startMin: number,
+    endMin: number,
+    span: string,
+    over: Partial<ContextRun> = {},
+  ): ContextRun {
+    return {
+      id,
+      nodeId: "cell4",
+      productId: "ha",
+      startMin,
+      endMin,
+      label: `Housing A ${span}`,
+      span,
+      productName: "Housing A",
+      headcount: 1,
+      ...over,
+    };
+  }
+  function clear(iso: string, place: string[] = ["Cell 4"]): UnassignCommand {
+    return {
+      intent: "unassign",
+      operator: "everyone",
+      place,
+      day: { kind: "date", iso },
+      span: null,
+      shift: null,
+      existing: null,
+      until: null,
+    };
+  }
+  function flat(res: Expansion): SingleCommand[] {
+    if (!res.ok) return [];
+    if (res.command.intent === "several") return res.command.commands;
+    return res.command.intent === "headcount" ? [] : [res.command];
+  }
+  const removedIds = (res: Expansion): string[] =>
+    flat(res).flatMap((c) =>
+      c.intent === "unassign" && c.existing?.kind === "remove" ? [c.existing.assignmentId] : [],
+    );
+  const trimmedIds = (res: Expansion): string[] =>
+    flat(res).flatMap((c) =>
+      c.intent === "move" && c.existing?.kind === "move" ? [c.existing.assignmentId] : [],
+    );
+  /** DEF-0040's invariant, as a property: every block is named at most once;
+   *  no job is both trimmed and removed; every crew block of a job removed by
+   *  cascade is itself a listed removal (so nothing kept, trimmed or left
+   *  alone is swept away by the cascade). */
+  function holdsInvariant(res: Expansion, ctx: ResolveContext): void {
+    if (!res.ok) return;
+    const named = [...removedIds(res), ...trimmedIds(res)];
+    expect(new Set(named).size, `a block named twice: ${named.join(", ")}`).toBe(named.length);
+    const removedRuns = (res.runRemovals ?? []).map((r) => r.runId);
+    const trimmedRuns = (res.runTrims ?? []).map((r) => r.runId);
+    for (const id of removedRuns) expect(trimmedRuns).not.toContain(id);
+    const removed = new Set(removedIds(res));
+    for (const runId of removedRuns) {
+      for (const x of ctx.assignments) {
+        if (x.runId !== runId) continue;
+        expect(removed.has(x.id), `crew ${x.id} of cascaded ${runId} is not a listed removal`).toBe(
+          true,
+        );
+      }
+    }
+  }
+  const yesNo = [
+    { id: "clear", label: "Yes", word: "yes" },
+    { id: "keep", label: "No", word: "no" },
+  ];
+
+  // The DEF-0040 fixture: Priya and her Housing A job, Sun 22:00 to Mon 06:00.
+  const priyaNight = blk("priyaBlk", "priya", w(0, 1320), w(1, 360), {
+    runId: "run1",
+    label: "10 pm to 6 am",
+  });
+  const run1 = job("run1", w(0, 1320), w(1, 360), "10 pm to 6 am");
+  // The tester's second pass: Maria and her job, Mon 22:00 to Tue 06:00.
+  const mariaNight = blk("mariaBlk", "maria", w(1, 1320), w(2, 360), {
+    runId: "run2",
+    label: "10 pm to 6 am",
+  });
+  const run2 = job("run2", w(1, 1320), w(2, 360), "10 pm to 6 am");
+
+  it("ND1: clear Monday over Priya's Sunday night job -- asks about Sunday's part; No trims her block AND the job to end at midnight, nothing removed whole; Yes removes both whole, no trim", () => {
+    const ctx = ndCtx({ assignments: [priyaNight], runs: [run1] });
+    const asked = expandCommand(clear("2026-10-12"), ctx);
+    expect(asked).toEqual({
+      ok: false,
+      question: {
+        kind: "other_day_part",
+        direction: "previous",
+        day: "Sunday",
+        first: { kind: "person", name: "Priya Shah" },
+        others: 0,
+        at: "10 pm",
+        hours: "10 pm to midnight",
+        answers: yesNo,
+      },
+    });
+    if (asked.ok) return;
+    expect(describeQuestion(asked.question)).toBe(
+      "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight?",
+    );
+
+    const no = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: "keep" });
+    holdsInvariant(no, ctx);
+    if (!no.ok) throw new Error("expected a lot");
+    expect(removedIds(no)).toEqual([]);
+    expect(trimmedIds(no)).toEqual(["priyaBlk"]);
+    expect(no.runRemovals).toBeUndefined();
+    expect(no.runTrims).toEqual([
+      {
+        intent: "trim_run",
+        runId: "run1",
+        nodeId: "cell4",
+        range: { startMin: w(0, 1320), endMin: w(1, 0) },
+        readout:
+          "The Housing A job on Cell 4 keeps its Sunday part, 10 pm to midnight; Monday's part, midnight to 6 am, is cleared.",
+        attempted: "The Housing A job on Cell 4",
+        notTried: "The Housing A job on Cell 4 stays as it was, 10 pm to 6 am.",
+      },
+    ]);
+    const move = flat(no)[0] as MoveCommand;
+    expect(move.adjust).toEqual({ edge: "end", at: { hour: 0, minute: 0 } });
+    const moved = resolveCommand(move, ctx);
+    expect(moved.ok).toBe(true);
+    if (moved.ok && moved.resolved.intent === "move") {
+      expect(moved.resolved.range).toEqual({ startMin: w(0, 1320), endMin: w(1, 0) });
+      expect(moved.resolved.readout).toBe(
+        "Priya Shah's night shift on Cell 4 keeps its Sunday part, 10 pm to midnight; Monday's part, midnight to 6 am, is cleared.",
+      );
+    }
+
+    const yes = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: "clear" });
+    holdsInvariant(yes, ctx);
+    if (!yes.ok) throw new Error("expected a lot");
+    expect(trimmedIds(yes)).toEqual([]);
+    expect(removedIds(yes)).toEqual(["priyaBlk"]);
+    expect(yes.runTrims).toBeUndefined();
+    expect(yes.runRemovals).toEqual([
+      {
+        intent: "remove_run",
+        runId: "run1",
+        readout:
+          "The Housing A job is off Cell 4 2026-10-12; that was 10 pm to 6 am, for 1 person.",
+        attempted: "The Housing A job on Cell 4",
+        notTried: "The Housing A job on Cell 4 stays as it was, 10 pm to 6 am.",
+      },
+    ]);
+    const removal = flat(yes)[0] as UnassignCommand;
+    expect(removal.span).toBeNull(); // 10 pm to 6 am is no one-day clock pair
+    expect(resolveCommand(removal, ctx).ok).toBe(true);
+  });
+
+  it("ND2: clear Monday over Maria's Monday night job -- asks about Tuesday's part; No keeps Tuesday's part of her block and the job, Yes removes both whole", () => {
+    const ctx = ndCtx({ assignments: [mariaNight], runs: [run2] });
+    const asked = expandCommand(clear("2026-10-12"), ctx);
+    if (asked.ok) throw new Error("expected the question");
+    expect(describeQuestion(asked.question)).toBe(
+      "Maria Lopez's night shift runs into Tuesday. Clear Tuesday's part too, midnight to 6 am?",
+    );
+    expect(asked.question).toMatchObject({ direction: "next", day: "Tuesday", at: "6 am" });
+
+    const no = expandCommand(clear("2026-10-12"), ctx, { nextDayPart: "keep" });
+    holdsInvariant(no, ctx);
+    if (!no.ok) throw new Error("expected a lot");
+    expect(trimmedIds(no)).toEqual(["mariaBlk"]);
+    expect(removedIds(no)).toEqual([]);
+    expect(no.runRemovals).toBeUndefined();
+    expect(no.runTrims?.map((t) => [t.runId, t.range, t.readout])).toEqual([
+      [
+        "run2",
+        { startMin: w(2, 0), endMin: w(2, 360) },
+        "The Housing A job on Cell 4 keeps its Tuesday part, midnight to 6 am; Monday's part, 10 pm to midnight, is cleared.",
+      ],
+    ]);
+    const moved = resolveCommand(flat(no)[0], ctx);
+    expect(moved.ok && moved.resolved.intent === "move" && moved.resolved.readout).toBe(
+      "Maria Lopez's night shift on Cell 4 keeps its Tuesday part, midnight to 6 am; Monday's part, 10 pm to midnight, is cleared.",
+    );
+
+    const yes = expandCommand(clear("2026-10-12"), ctx, { nextDayPart: "clear" });
+    holdsInvariant(yes, ctx);
+    if (!yes.ok) throw new Error("expected a lot");
+    expect(removedIds(yes)).toEqual(["mariaBlk"]);
+    expect(trimmedIds(yes)).toEqual([]);
+    expect(yes.runRemovals?.map((r) => r.runId)).toEqual(["run2"]);
+    expect(yes.runTrims).toBeUndefined();
+  });
+
+  it("ND3: both at once -- the previous question first, then the next one, each answered on its own; all four answer pairs give the lot they say", () => {
+    const ctx = ndCtx({ assignments: [priyaNight, mariaNight], runs: [run1, run2] });
+    const first = expandCommand(clear("2026-10-12"), ctx);
+    expect(first).toMatchObject({
+      ok: false,
+      question: { kind: "other_day_part", direction: "previous" },
+    });
+    for (const prev of ["keep", "clear"] as const) {
+      const second = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: prev });
+      expect(second).toMatchObject({
+        ok: false,
+        question: { kind: "other_day_part", direction: "next" },
+      });
+      for (const next of ["keep", "clear"] as const) {
+        const res = expandCommand(clear("2026-10-12"), ctx, {
+          previousDayPart: prev,
+          nextDayPart: next,
+        });
+        holdsInvariant(res, ctx);
+        if (!res.ok) throw new Error(`expected a lot for ${prev}/${next}`);
+        expect(trimmedIds(res).includes("priyaBlk"), `${prev}/${next}`).toBe(prev === "keep");
+        expect(removedIds(res).includes("priyaBlk"), `${prev}/${next}`).toBe(prev === "clear");
+        expect(trimmedIds(res).includes("mariaBlk"), `${prev}/${next}`).toBe(next === "keep");
+        expect(removedIds(res).includes("mariaBlk"), `${prev}/${next}`).toBe(next === "clear");
+        const trimmedRuns = (res.runTrims ?? []).map((t) => t.runId);
+        const removedRuns = (res.runRemovals ?? []).map((r) => r.runId);
+        expect(trimmedRuns.includes("run1")).toBe(prev === "keep");
+        expect(removedRuns.includes("run1")).toBe(prev === "clear");
+        expect(trimmedRuns.includes("run2")).toBe(next === "keep");
+        expect(removedRuns.includes("run2")).toBe(next === "clear");
+      }
+    }
+  });
+
+  it("ND4: three night blocks in one direction -- ONE question naming the first by board order and '2 others'; the hours are left out when their starts differ", () => {
+    const three = [
+      blk("a", "priya", w(0, 1320), w(1, 360)),
+      blk("b", "maria", w(0, 1320), w(1, 360), { nodeId: "cell2" }),
+      blk("c", "ahmed", w(0, 1320), w(1, 360), { nodeId: "cell5" }),
+    ];
+    const same = expandCommand(clear("2026-10-12", ["Line 2"]), ndCtx({ assignments: three }));
+    if (same.ok) throw new Error("expected the question");
+    expect(same.question).toMatchObject({ others: 2, at: "10 pm", hours: null });
+    expect(describeQuestion(same.question)).toBe(
+      "Priya Shah and 2 others started their night shift Sunday at 10 pm. Clear Sunday's part too?",
+    );
+    const differ = [three[0], three[1], { ...three[2], startMin: w(0, 1260) }];
+    const mixed = expandCommand(clear("2026-10-12", ["Line 2"]), ndCtx({ assignments: differ }));
+    if (mixed.ok) throw new Error("expected the question");
+    expect(describeQuestion(mixed.question)).toBe(
+      "Priya Shah and 2 others started their night shift Sunday. Clear Sunday's part too?",
+    );
+    // The other direction's several-people wording.
+    const outs = [
+      blk("d", "maria", w(1, 1320), w(2, 360)),
+      blk("e", "linc", w(1, 1380), w(2, 360), { nodeId: "cell2" }),
+    ];
+    const next = expandCommand(clear("2026-10-12", ["Line 2"]), ndCtx({ assignments: outs }));
+    if (next.ok) throw new Error("expected the question");
+    expect(describeQuestion(next.question)).toBe(
+      "Maria Lopez and 1 other have night shifts running into Tuesday until 6 am. Clear Tuesday's part too?",
+    );
+    // One answer covers all three.
+    const ctx = ndCtx({ assignments: three });
+    const res = expandCommand(clear("2026-10-12", ["Line 2"]), ctx, { previousDayPart: "keep" });
+    holdsInvariant(res, ctx);
+    expect(trimmedIds(res)).toEqual(["a", "b", "c"]);
+  });
+
+  it("ND5: a direct block with no job -- the question, then a trim on No and a removal on Yes, never a job step", () => {
+    const direct = blk("direct", "priya", w(0, 1320), w(1, 360));
+    const ctx = ndCtx({ assignments: [direct] });
+    expect(expandCommand(clear("2026-10-12"), ctx)).toMatchObject({
+      ok: false,
+      question: {
+        kind: "other_day_part",
+        direction: "previous",
+        first: { kind: "person", name: "Priya Shah" },
+      },
+    });
+    const no = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: "keep" });
+    if (!no.ok || no.command.intent !== "move") throw new Error("expected one trim");
+    expect(no.runTrims).toBeUndefined();
+    expect(no.runRemovals).toBeUndefined();
+    const yes = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: "clear" });
+    if (!yes.ok || yes.command.intent !== "unassign") throw new Error("expected one removal");
+    expect(yes.command.existing).toEqual({ kind: "remove", assignmentId: "direct" });
+  });
+
+  it("ND6: a job with no crew is named as the job -- No trims it, Yes removes it", () => {
+    const ctx = ndCtx({ runs: [run1] });
+    const asked = expandCommand(clear("2026-10-12"), ctx);
+    if (asked.ok) throw new Error("expected the question");
+    expect(asked.question).toMatchObject({
+      first: { kind: "job", product: "Housing A", cell: "Cell 4" },
+      others: 0,
+    });
+    expect(describeQuestion(asked.question)).toBe(
+      "The Housing A job on Cell 4 started Sunday at 10 pm. Clear Sunday's part too?",
+    );
+    const no = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: "keep" });
+    if (!no.ok || no.command.intent !== "several") throw new Error("expected the job alone");
+    expect(no.command.commands).toEqual([]);
+    expect(no.runTrims?.map((t) => t.runId)).toEqual(["run1"]);
+    expect(no.runRemovals).toBeUndefined();
+    const yes = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: "clear" });
+    if (!yes.ok) throw new Error("expected the job alone");
+    expect(yes.runRemovals?.map((r) => r.runId)).toEqual(["run1"]);
+    expect(yes.runTrims).toBeUndefined();
+    // The other direction, a crewless job running into Tuesday.
+    const out = expandCommand(clear("2026-10-12"), ndCtx({ runs: [run2] }));
+    if (out.ok) throw new Error("expected the question");
+    expect(describeQuestion(out.question)).toBe(
+      "The Housing A job on Cell 4 runs into Tuesday until 6 am. Clear Tuesday's part too?",
+    );
+  });
+
+  it("ND7: a crew member whose block sits wholly on Sunday (the S70-d reviewer's case) is never touched and is said to stay -- on No the job keeps Sunday's part; on Yes too, because someone is still on it", () => {
+    const run = job("runA", w(0, 1200), w(1, 360), "8 pm to 6 am", { headcount: 3 });
+    const ahmedSunday = blk("ahmedSun", "ahmed", w(0, 1200), w(0, 1320), { runId: "runA" });
+    const priyaCross = blk("priyaX", "priya", w(0, 1320), w(1, 360), { runId: "runA" });
+    const linMonday = blk("linMon", "linc", w(1, 0), w(1, 360), { runId: "runA" });
+    const ctx = ndCtx({ assignments: [ahmedSunday, priyaCross, linMonday], runs: [run] });
+    const asked = expandCommand(clear("2026-10-12"), ctx);
+    if (asked.ok) throw new Error("expected the question");
+    // Only Priya's part goes on a Yes -- Ahmed is not named, and the job's
+    // own 8 pm start does not muddle her hours.
+    expect(describeQuestion(asked.question)).toBe(
+      "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight?",
+    );
+    for (const answer of ["keep", "clear"] as const) {
+      const res = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: answer });
+      holdsInvariant(res, ctx);
+      if (!res.ok) throw new Error("expected a lot");
+      expect([...removedIds(res), ...trimmedIds(res)]).not.toContain("ahmedSun");
+      expect(removedIds(res)).toContain("linMon");
+      expect(res.runRemovals).toBeUndefined();
+      expect(res.runTrims?.map((t) => [t.runId, t.range])).toEqual([
+        ["runA", { startMin: w(0, 1200), endMin: w(1, 0) }],
+      ]);
+      expect(res.runTrims?.[0].readout).toBe(
+        answer === "keep"
+          ? "The Housing A job on Cell 4 keeps its Sunday part, 8 pm to midnight, and Ahmed Ali is still on it; Monday's part, midnight to 6 am, is cleared."
+          : "The Housing A job on Cell 4 keeps its Sunday part, 8 pm to midnight, because Ahmed Ali is still on it; Monday's part, midnight to 6 am, is cleared.",
+      );
+      expect(trimmedIds(res).includes("priyaX")).toBe(answer === "keep");
+      expect(removedIds(res).includes("priyaX")).toBe(answer === "clear");
+    }
+  });
+
+  it("ND8 (R-436 amended 28 Sept, CONTRACT CHANGED -- the job used to go whole and its crew with it): the invariant over a narrower window -- 'after 1 pm' keeps the job's morning, the crew block across the edge is trimmed with it, the block on no job keeps its part too", () => {
+    const run = job("runN", w(1, 480), w(1, 960), "8 am to 4 pm");
+    const crew = blk("crewN", "priya", w(1, 480), w(1, 960), { runId: "runN" });
+    const direct = blk("directN", "maria", w(1, 480), w(1, 960));
+    const ctx = ndCtx({ assignments: [crew, direct], runs: [run] });
+    const res = expandCommand(afterOnePm(), ctx);
+    holdsInvariant(res, ctx);
+    if (!res.ok) throw new Error("expected a lot, never a question for a narrower window");
+    expect(removedIds(res)).toEqual([]);
+    expect(trimmedIds(res)).toEqual(["crewN", "directN"]);
+    expect(res.runRemovals).toBeUndefined();
+    expect(res.runTrims?.map((t) => [t.runId, t.range])).toEqual([
+      ["runN", { startMin: w(1, 480), endMin: w(1, 780) }],
+    ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // NW1-NW5 (S194-D second pass, R-436 as amended 28 Sept): a clear of PART
+  // of a day clears only that part of a job -- R-461's rule at an edge the
+  // sentence named, so no question is asked. Crew first, then the job.
+  // -------------------------------------------------------------------------
+
+  function spanOf(fromH: number, toH: number): UnassignCommand {
+    return {
+      ...clear("2026-10-12"),
+      span: {
+        start: { hour: fromH, minute: 0 },
+        end: toH === 24 ? { hour: 23, minute: 59 } : { hour: toH, minute: 0 },
+      },
+    };
+  }
+  function afterOnePm(): UnassignCommand {
+    return spanOf(13, 24);
+  }
+  const dayJob = job("dayJob", w(1, 600), w(1, 960), "10 am to 4 pm", { headcount: 2 });
+  const crossCrew = blk("cross", "priya", w(1, 600), w(1, 960), { runId: "dayJob" });
+  const morningCrew = blk("morning", "ahmed", w(1, 600), w(1, 720), { runId: "dayJob" });
+
+  it("NW1: 'clear Cell 4 after 1 pm' over a 10 am to 4 pm job -- no question; the job keeps 10 am to 1 pm, the crew block across the edge is trimmed to match, the morning crew is untouched and said to stay", () => {
+    const ctx = ndCtx({ assignments: [crossCrew, morningCrew], runs: [dayJob] });
+    const res = expandCommand(afterOnePm(), ctx);
+    holdsInvariant(res, ctx);
+    if (!res.ok) throw new Error("expected a lot, no question");
+    expect(trimmedIds(res)).toEqual(["cross"]);
+    expect(removedIds(res)).toEqual([]);
+    expect(res.runRemovals).toBeUndefined();
+    expect(res.runTrims).toEqual([
+      {
+        intent: "trim_run",
+        runId: "dayJob",
+        nodeId: "cell4",
+        range: { startMin: w(1, 600), endMin: w(1, 780) },
+        readout:
+          "The Housing A job on Cell 4 keeps 10 am to 1 pm, and Ahmed Ali is still on it; the part from 1 pm to 4 pm is cleared.",
+        attempted: "The Housing A job on Cell 4",
+        notTried: "The Housing A job on Cell 4 stays as it was, 10 am to 4 pm.",
+      },
+    ]);
+    const moved = resolveCommand(flat(res)[0], ctx);
+    expect(moved.ok && moved.resolved.intent === "move" && moved.resolved.range).toEqual({
+      startMin: w(1, 600),
+      endMin: w(1, 780),
+    });
+  });
+
+  it("NW2: across the window's END ('clear Cell 4 before 1 pm', midnight to 1 pm) -- the job keeps 1 pm to 4 pm", () => {
+    const ctx = ndCtx({ runs: [dayJob] });
+    const res = expandCommand(spanOf(0, 13), ctx);
+    holdsInvariant(res, ctx);
+    if (!res.ok) throw new Error("expected a lot");
+    expect(res.runTrims?.map((t) => [t.range, t.readout])).toEqual([
+      [
+        { startMin: w(1, 780), endMin: w(1, 960) },
+        "The Housing A job on Cell 4 keeps 1 pm to 4 pm; the part from 10 am to 1 pm is cleared.",
+      ],
+    ]);
+  });
+
+  it("NW3 (S194-D third pass, CONTRACT CHANGED -- R-430: this was a plain refusal with nothing to choose): a window INSIDE a job would leave it in two pieces -- the two windows that WOULD work are offered, each reaching one end of the job", () => {
+    const res = expandCommand(spanOf(13, 14), ndCtx({ runs: [dayJob] }));
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "job_hole",
+        text: "The Housing A job on Cell 4 runs from 10 am to 4 pm, so clearing 1 pm to 2 pm would leave a hole in it; one job cannot be in two pieces. Clear to one end of it instead?",
+        spans: [
+          {
+            label: "Clear 1 pm to 4 pm",
+            start: { hour: 13, minute: 0 },
+            end: { hour: 16, minute: 0 },
+          },
+          {
+            label: "Clear 10 am to 2 pm",
+            start: { hour: 10, minute: 0 },
+            end: { hour: 14, minute: 0 },
+          },
+        ],
+      },
+    });
+    // Each offered window is a clear the job CAN take: no hole, one trim.
+    for (const [from, to] of [
+      [13, 16],
+      [10, 14],
+    ]) {
+      const again = expandCommand(spanOf(from, to), ndCtx({ runs: [dayJob] }));
+      expect(again.ok, `${from} to ${to}`).toBe(true);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // MIN1-MIN5 (S194-D third pass): a job kept to a remnant under the minimum
+  // asks exactly as a block's does (`too_short`), the job named. The server
+  // enforces no minimum on a run; the minimum is the client's own D31 value.
+  // -------------------------------------------------------------------------
+
+  it("MIN1: 'after 10:10 am' on a 10 am to 4 pm job would keep ten minutes -- too_short, the job named", () => {
+    const res = expandCommand(
+      {
+        ...clear("2026-10-12"),
+        span: { start: { hour: 10, minute: 10 }, end: { hour: 23, minute: 59 } },
+      },
+      ndCtx({ runs: [dayJob] }),
+    );
+    expect(res).toEqual({
+      ok: false,
+      question: {
+        kind: "too_short",
+        minutes: 10,
+        min: 15,
+        subject: "the Housing A job on Cell 4",
+      },
+    });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "That would leave the Housing A job on Cell 4 10 minutes; a job is at least 15 minutes.",
+      );
+    }
+  });
+
+  it("MIN2: a job that ENDS exactly at the window's start is untouched -- no step at all", () => {
+    const morning = job("am", w(1, 600), w(1, 780), "10 am to 1 pm");
+    const res = expandCommand(afterOnePm(), ndCtx({ runs: [morning] }));
+    expect(res).toMatchObject({ ok: false, question: { kind: "nothing_to_do" } });
+  });
+
+  it("MIN3: a job that STARTS exactly at the window's start goes whole", () => {
+    const pm = job("pm", w(1, 780), w(1, 960), "1 pm to 4 pm");
+    const res = expandCommand(afterOnePm(), ndCtx({ runs: [pm] }));
+    if (!res.ok) throw new Error("expected a lot");
+    expect(res.runRemovals?.map((r) => r.runId)).toEqual(["pm"]);
+    expect(res.runTrims).toBeUndefined();
+  });
+
+  it("MIN4: crew 12:30 to 3 on a job 10 to 4, after 1 pm -- the crew keeps 12:30 to 1 (thirty minutes, fine) and the job 10 to 1; a crew remnant under the minimum asks as a block always has", () => {
+    const crew = blk("c1230", "priya", w(1, 750), w(1, 900), { runId: "dayJob" });
+    const ctx = ndCtx({ assignments: [crew], runs: [dayJob] });
+    const res = expandCommand(afterOnePm(), ctx);
+    holdsInvariant(res, ctx);
+    if (!res.ok) throw new Error("expected a lot");
+    const moved = resolveCommand(flat(res)[0], ctx);
+    expect(moved.ok && moved.resolved.intent === "move" && moved.resolved.range).toEqual({
+      startMin: w(1, 750),
+      endMin: w(1, 780),
+    });
+    expect(res.runTrims?.[0].range).toEqual({ startMin: w(1, 600), endMin: w(1, 780) });
+
+    const late = blk("c1250", "priya", w(1, 770), w(1, 900), { runId: "dayJob" });
+    const ctx2 = ndCtx({ assignments: [late], runs: [dayJob] });
+    const res2 = expandCommand(afterOnePm(), ctx2);
+    if (!res2.ok) throw new Error("expected a lot");
+    expect(resolveCommand(flat(res2)[0], ctx2)).toEqual({
+      ok: false,
+      question: { kind: "too_short", minutes: 10, min: 15 },
+    });
+  });
+
+  it("MIN5: the night of a clock change (America/Chicago, 8 March 2026) -- a job from Saturday 11:50 pm kept to its Saturday part would be ten minutes: too_short at midnight too", () => {
+    const march = realCtx(
+      "America/Chicago",
+      [2026, 3, 6],
+      ["2026-03-06", "2026-03-07", "2026-03-08", "2026-03-09"],
+      [5, 6, 0, 1],
+    );
+    const start = march.axis.wallToOffset(1, 23 * 60 + 50);
+    const end = march.axis.wallToOffset(2, 360);
+    const ctx = march.make({ runs: [job("late", start, end, "11:50 pm to 6 am")] });
+    const res = expandCommand(clear("2026-03-08"), ctx, { previousDayPart: "keep" });
+    expect(res).toMatchObject({
+      ok: false,
+      question: { kind: "too_short", minutes: 10, subject: "the Housing A job on Cell 4" },
+    });
+  });
+
+  it("NW4: a job wholly inside the window goes whole as before, its crew listed", () => {
+    const inner = job("inner1", w(1, 840), w(1, 900), "2 pm to 3 pm");
+    const crew = blk("innerCrew", "linc", w(1, 840), w(1, 900), { runId: "inner1" });
+    const ctx = ndCtx({ assignments: [crew], runs: [inner] });
+    const res = expandCommand(afterOnePm(), ctx);
+    holdsInvariant(res, ctx);
+    if (!res.ok) throw new Error("expected a lot");
+    expect(removedIds(res)).toEqual(["innerCrew"]);
+    expect(res.runRemovals?.map((r) => r.runId)).toEqual(["inner1"]);
+    expect(res.runTrims).toBeUndefined();
+  });
+
+  it("NW5: the invariant, as a property over every narrow-window fixture", () => {
+    const fixtures: ResolveContext[] = [
+      ndCtx({ assignments: [crossCrew, morningCrew], runs: [dayJob] }),
+      ndCtx({ runs: [dayJob] }),
+      ndCtx({
+        assignments: [blk("i1", "linc", w(1, 840), w(1, 900), { runId: "inner1" }), crossCrew],
+        runs: [job("inner1", w(1, 840), w(1, 900), "2 pm to 3 pm"), dayJob],
+      }),
+    ];
+    let lots = 0;
+    for (const ctx of fixtures) {
+      for (const c of [afterOnePm(), spanOf(0, 13), spanOf(15, 24)]) {
+        const res = expandCommand(c, ctx);
+        holdsInvariant(res, ctx);
+        if (res.ok) lots++;
+      }
+    }
+    expect(lots).toBeGreaterThan(5);
+  });
+
+  // -------------------------------------------------------------------------
+  // AW1-AW5 (S194-D second pass, R-409 as amended again 28 Sept): "Sam is off
+  // this week" records ONE absence over the span the sentence covers.
+  // -------------------------------------------------------------------------
+
+  const twoWeeks: BoardDay[] = Array.from({ length: 15 }, (_, i) => ({
+    index: i,
+    iso: `2026-10-${String(11 + i).padStart(2, "0")}`,
+    weekday: (i % 7) as BoardDay["weekday"],
+  }));
+  function weekCtx(over: Partial<ResolveContext> = {}): ResolveContext {
+    return ndCtx({ days: twoWeeks, wallOf: clampedWallOf(twoWeeks), ...over });
+  }
+  const tue = blk("tue", "priya", w(2, 480), w(2, 720));
+  const thu = blk("thu", "priya", w(4, 480), w(4, 720));
+
+  it("AW1: 'Priya Shah is off this week' (today Monday) -- the week's blocks go with one yes and ONE absence is recorded from today to Sunday, written last", () => {
+    const ctx = weekCtx({ assignments: [tue, thu], absenceRecordable: new Set(["priya"]) });
+    const res = expandCommand(absence("Priya Shah is off this week"), ctx);
+    holdsInvariant(res, ctx);
+    if (!res.ok || res.command.intent !== "several") throw new Error("expected a several");
+    expect(removedIds(res)).toEqual(["tue", "thu"]);
+    expect(res.absenceRecord).toMatchObject({
+      intent: "record_absence",
+      operatorId: "priya",
+      from: "2026-10-12",
+      to: "2026-10-18",
+      reason: "Off",
+      readout: "Priya Shah is recorded as off from 2026-10-12 to 2026-10-18.",
+      attempted: "An absence for Priya Shah from 2026-10-12 to 2026-10-18",
+    });
+    expect(res.summary).toBe(
+      "Priya Shah is off from 2026-10-12 to 2026-10-18. Their 2 blocks on Cell 4 are cleared and the absence is recorded.",
+    );
+  });
+
+  it("AW2: 'Priya Shah is on leave next week' -- the whole of next week, one record", () => {
+    const ctx = weekCtx({ absenceRecordable: new Set(["priya"]) });
+    const res = expandCommand(absence("Priya Shah is on leave next week"), ctx);
+    if (!res.ok) throw new Error("expected the record alone");
+    expect(res.absenceRecord).toMatchObject({
+      from: "2026-10-19",
+      to: "2026-10-25",
+      reason: "On leave",
+    });
+    expect(res.summary).toBe(
+      "Priya Shah has nothing on the board from 2026-10-19 to 2026-10-25; the absence is recorded.",
+    );
+  });
+
+  it("AW3: a whole-day absence already on ONE day of the span -- the server refuses any overlap, so nothing is offered to record, and the answer says some of the days", () => {
+    // The server's rule, transcribed (`absences_whole_day_excl`, 0069): any
+    // whole-day row whose days overlap the span at all.
+    const existing = { from: "2026-10-14", to: "2026-10-14" };
+    const ctx = weekCtx({
+      assignments: [tue, thu],
+      absenceRecordable: new Set(["priya"]),
+      hasWholeDayAbsence: (id, from, to) =>
+        id === "priya" && existing.from <= to && existing.to >= from,
+    });
+    const res = expandCommand(absence("Priya Shah is off this week"), ctx);
+    if (!res.ok) throw new Error("expected the blocks");
+    expect(res.absenceRecord).toBeUndefined();
+    expect(res.summary).toBe(
+      "Priya Shah already has an absence recorded on some of the days from 2026-10-12 to 2026-10-18; their 2 blocks on Cell 4 are cleared.",
+    );
+  });
+
+  it("AW4: not recordable for this caller -- the week's blocks go, nothing is recorded, said plainly", () => {
+    const ctx = weekCtx({ assignments: [tue], absenceRecordable: new Set() });
+    const res = expandCommand(absence("Priya Shah is off this week"), ctx);
+    if (!res.ok) throw new Error("expected the block");
+    expect(res.absenceRecord).toBeUndefined();
+    expect(res.summary).toBe(
+      "I cannot record an absence for Priya Shah from here; their block on Cell 4 is cleared.",
+    );
+  });
+
+  it("AW5: a night shift at the span's outer edge asks as the week clear asks -- into today from Sunday, out of the last Sunday into Monday", () => {
+    const into = blk("into", "priya", w(0, 1320), w(1, 360));
+    const out = blk("out", "priya", w(7, 1320), w(8, 360));
+    const ctx = weekCtx({ assignments: [into, out], absenceRecordable: new Set(["priya"]) });
+    expect(expandCommand(absence("Priya Shah is off this week"), ctx)).toMatchObject({
+      ok: false,
+      question: { kind: "other_day_part", direction: "previous", day: "Sunday" },
+    });
+    expect(
+      expandCommand(absence("Priya Shah is off this week"), ctx, { previousDayPart: "keep" }),
+    ).toMatchObject({
+      ok: false,
+      question: { kind: "other_day_part", direction: "next", day: "Monday" },
+    });
+    const res = expandCommand(absence("Priya Shah is off this week"), ctx, {
+      previousDayPart: "keep",
+      nextDayPart: "clear",
+    });
+    holdsInvariant(res, ctx);
+    if (!res.ok) throw new Error("expected a lot");
+    expect(trimmedIds(res)).toEqual(["into"]);
+    expect(removedIds(res)).toEqual(["out"]);
+    expect(res.absenceRecord).toMatchObject({ from: "2026-10-12", to: "2026-10-18" });
+  });
+
+  it("ND9: the invariant, as a property over every fixture above and every answer", () => {
+    const fixtures: ResolveContext[] = [
+      ndCtx({ assignments: [priyaNight], runs: [run1] }),
+      ndCtx({ assignments: [mariaNight], runs: [run2] }),
+      ndCtx({ assignments: [priyaNight, mariaNight], runs: [run1, run2] }),
+      ndCtx({ runs: [run1, run2] }),
+      ndCtx({
+        assignments: [
+          blk("s1", "ahmed", w(0, 1200), w(0, 1320), { runId: "runA" }),
+          blk("s2", "priya", w(0, 1320), w(1, 360), { runId: "runA" }),
+          blk("s3", "linc", w(1, 0), w(1, 360), { runId: "runA" }),
+          blk("s4", "maria", w(1, 1320), w(2, 360)),
+        ],
+        runs: [job("runA", w(0, 1200), w(1, 360), "8 pm to 6 am")],
+      }),
+    ];
+    const answers: ResolveOptions[] = [];
+    for (const p of [undefined, "keep", "clear"] as const) {
+      for (const n of [undefined, "keep", "clear"] as const) {
+        answers.push({
+          ...(p ? { previousDayPart: p } : {}),
+          ...(n ? { nextDayPart: n } : {}),
+        });
+      }
+    }
+    let lots = 0;
+    for (const ctx of fixtures) {
+      for (const a of answers) {
+        const res = expandCommand(clear("2026-10-12"), ctx, a);
+        holdsInvariant(res, ctx);
+        if (res.ok) lots++;
+      }
+    }
+    expect(lots).toBeGreaterThan(10); // the property actually ran over real lots
+  });
+
+  it("ND10: a week clear's inside midnights ask nothing -- only the span's outer edges ask (a named person's week follows the same rule)", () => {
+    const weekDays: BoardDay[] = [
+      { index: 0, iso: "2026-10-11", weekday: 0 }, // Sun (before the week)
+      { index: 1, iso: "2026-10-12", weekday: 1 }, // Mon (today)
+      { index: 2, iso: "2026-10-13", weekday: 2 },
+      { index: 3, iso: "2026-10-14", weekday: 3 },
+      { index: 4, iso: "2026-10-15", weekday: 4 },
+      { index: 5, iso: "2026-10-16", weekday: 5 },
+      { index: 6, iso: "2026-10-17", weekday: 6 },
+      { index: 7, iso: "2026-10-18", weekday: 0 }, // Sun (last day of the week)
+      { index: 8, iso: "2026-10-19", weekday: 1 }, // Mon (after the week)
+    ];
+    const inside = blk("in", "maria", w(3, 1320), w(4, 360));
+    const into = blk("into", "priya", w(0, 1320), w(1, 360));
+    const out = blk("out", "ahmed", w(7, 1320), w(8, 360));
+    const ctx = ndCtx({
+      days: weekDays,
+      wallOf: clampedWallOf(weekDays),
+      assignments: [inside, into, out],
+    });
+    const week: UnassignCommand = {
+      ...clear("", ["Cell 4"]),
+      day: { kind: "every_day", week: "this_week" },
+    };
+    const first = expandCommand(week, ctx);
+    if (first.ok) throw new Error("expected the previous question");
+    expect(first.question).toMatchObject({
+      direction: "previous",
+      day: "Sunday",
+      first: { name: "Priya Shah" },
+    });
+    const second = expandCommand(week, ctx, { previousDayPart: "keep" });
+    if (second.ok) throw new Error("expected the next question");
+    expect(second.question).toMatchObject({
+      direction: "next",
+      day: "Monday",
+      first: { name: "Ahmed Ali" },
+    });
+    const res = expandCommand(week, ctx, { previousDayPart: "keep", nextDayPart: "keep" });
+    holdsInvariant(res, ctx);
+    expect(removedIds(res)).toEqual(["in"]);
+    expect(trimmedIds(res)).toEqual(["into", "out"]);
+
+    // A named person's week: Ahmed's block out of the last day asks too.
+    const named: UnassignCommand = { ...week, operator: "Ahmed Ali", place: [] };
+    expect(expandCommand(named, ctx)).toMatchObject({
+      ok: false,
+      question: { kind: "other_day_part", direction: "next", first: { name: "Ahmed Ali" } },
+    });
+    const namedYes = expandCommand(named, ctx, { nextDayPart: "clear" });
+    if (!namedYes.ok || namedYes.command.intent !== "unassign")
+      throw new Error("expected one removal");
+    expect(namedYes.command.span).toBeNull();
+    expect(resolveCommand(namedYes.command, ctx).ok).toBe(true);
+  });
+
+  it("ND13: a job removed whole by a Yes whose crew block runs out the OTHER midnight (kept by a No) -- that block becomes a listed removal, never a trim the cascade would delete", () => {
+    // Not contained in its job (the server allows it): the job crosses
+    // Sunday's midnight, this crew block Monday's.
+    const odd = blk("odd", "maria", w(1, 1320), w(2, 120), { runId: "run1" });
+    const ctx = ndCtx({ assignments: [priyaNight, odd], runs: [run1] });
+    const res = expandCommand(clear("2026-10-12"), ctx, {
+      previousDayPart: "clear",
+      nextDayPart: "keep",
+    });
+    holdsInvariant(res, ctx);
+    if (!res.ok) throw new Error("expected a lot");
+    expect(res.runRemovals?.map((r) => r.runId)).toEqual(["run1"]);
+    expect(removedIds(res)).toEqual(["priyaBlk", "odd"]);
+    expect(trimmedIds(res)).toEqual([]);
+  });
+
+  it("ND14: a crew block across midnight on a job wholly inside the cleared day asks nothing -- the job goes whole and takes it, so it is a listed removal", () => {
+    const inner = job("inner", w(1, 0), w(1, 360), "midnight to 6 am");
+    const crossing = blk("cross", "priya", w(0, 1320), w(1, 360), { runId: "inner" });
+    const ctx = ndCtx({ assignments: [crossing], runs: [inner] });
+    const res = expandCommand(clear("2026-10-12"), ctx);
+    holdsInvariant(res, ctx);
+    if (!res.ok) throw new Error("expected a lot, no question");
+    expect(removedIds(res)).toEqual(["cross"]);
+    expect(res.runRemovals?.map((r) => r.runId)).toEqual(["inner"]);
+  });
+
+  // ---- ND11-ND12: the plant's midnight on the REAL axis, across a clock
+  // change (R-426), west and east of UTC -- `buildDayAxis`/`wallOf`, never
+  // d*1440.
+  function realCtx(
+    zone: string,
+    start: [number, number, number],
+    isos: string[],
+    weekdays: number[],
+  ): {
+    axis: ReturnType<typeof buildDayAxis>;
+    make: (o: Partial<ResolveContext>) => ResolveContext;
+  } {
+    const axis = buildDayAxis(
+      zonedTimeToInstant(zone, start[0], start[1], start[2], 0, 0),
+      isos.length,
+      zone,
+    );
+    const rdays: BoardDay[] = isos.map((iso, i) => ({
+      index: i,
+      iso,
+      weekday: weekdays[i] as BoardDay["weekday"],
+    }));
+    return {
+      axis,
+      make: (over) =>
+        ndCtx({
+          days: rdays,
+          todayIndex: 0,
+          todayIso: isos[0],
+          wallToOffset: axis.wallToOffset,
+          wallOf: (m: number) => wallOfAxis(axis, m),
+          ...over,
+        }),
+    };
+  }
+
+  it("ND11: America/Chicago, 8 March 2026 (spring forward) and 1 November 2026 (fall back) -- the split is the plant's own midnight, the hours its wall clock", () => {
+    // Fri 6 .. Mon 9 March; Saturday 22:00 to Sunday 06:00 is 7 real hours.
+    const march = realCtx(
+      "America/Chicago",
+      [2026, 3, 6],
+      ["2026-03-06", "2026-03-07", "2026-03-08", "2026-03-09"],
+      [5, 6, 0, 1],
+    );
+    const mStart = march.axis.wallToOffset(1, 1320);
+    const mEnd = march.axis.wallToOffset(2, 360);
+    expect(mEnd - mStart).toBe(7 * 60);
+    const mCtx = march.make({
+      assignments: [blk("dst", "priya", mStart, mEnd, { runId: "runD" })],
+      runs: [job("runD", mStart, mEnd, "10 pm to 6 am")],
+    });
+    // Clear Sunday: Saturday's part is asked about.
+    const sun = expandCommand(clear("2026-03-08"), mCtx);
+    if (sun.ok) throw new Error("expected the question");
+    expect(describeQuestion(sun.question)).toBe(
+      "Priya Shah's night shift started Saturday at 10 pm. Clear Saturday's part too, 10 pm to midnight?",
+    );
+    const sunNo = expandCommand(clear("2026-03-08"), mCtx, { previousDayPart: "keep" });
+    holdsInvariant(sunNo, mCtx);
+    if (!sunNo.ok) throw new Error("expected a lot");
+    const sunMidnight = march.axis.wallToOffset(2, 0);
+    expect(sunNo.runTrims?.[0].range).toEqual({ startMin: mStart, endMin: sunMidnight });
+    const trimmed = resolveCommand(flat(sunNo)[0], mCtx);
+    expect(trimmed.ok && trimmed.resolved.intent === "move" && trimmed.resolved.range).toEqual({
+      startMin: mStart,
+      endMin: sunMidnight,
+    });
+    expect(trimmed.ok && trimmed.resolved.readout).toBe(
+      "Priya Shah's night shift on Cell 4 keeps its Saturday part, 10 pm to midnight; Sunday's part, midnight to 6 am, is cleared.",
+    );
+    // Clear Saturday: Sunday's part is asked about, and kept from Sunday's own midnight.
+    const sat = expandCommand(clear("2026-03-07"), mCtx);
+    if (sat.ok) throw new Error("expected the question");
+    expect(describeQuestion(sat.question)).toBe(
+      "Priya Shah's night shift runs into Sunday. Clear Sunday's part too, midnight to 6 am?",
+    );
+    const satNo = expandCommand(clear("2026-03-07"), mCtx, { nextDayPart: "keep" });
+    if (!satNo.ok) throw new Error("expected a lot");
+    expect(satNo.runTrims?.[0].range).toEqual({ startMin: sunMidnight, endMin: mEnd });
+    const satMoved = resolveCommand(flat(satNo)[0], mCtx);
+    expect(satMoved.ok && satMoved.resolved.intent === "move" && satMoved.resolved.range).toEqual({
+      startMin: sunMidnight,
+      endMin: mEnd,
+    });
+
+    // Fri 30 Oct .. Mon 2 Nov; Saturday 22:00 to Sunday 06:00 is 9 real hours.
+    const nov = realCtx(
+      "America/Chicago",
+      [2026, 10, 30],
+      ["2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02"],
+      [5, 6, 0, 1],
+    );
+    const nStart = nov.axis.wallToOffset(1, 1320);
+    const nEnd = nov.axis.wallToOffset(2, 360);
+    expect(nEnd - nStart).toBe(9 * 60);
+    const nCtx = nov.make({ assignments: [blk("dstN", "priya", nStart, nEnd)] });
+    const nNo = expandCommand(clear("2026-11-01"), nCtx, { previousDayPart: "keep" });
+    if (!nNo.ok) throw new Error("expected a lot");
+    const nMoved = resolveCommand(flat(nNo)[0], nCtx);
+    expect(nMoved.ok && nMoved.resolved.intent === "move" && nMoved.resolved.range).toEqual({
+      startMin: nStart,
+      endMin: nov.axis.wallToOffset(2, 0),
+    });
+    // The kept Saturday part is the plain two wall-clock hours, 10 pm to midnight.
+    expect(nov.axis.wallToOffset(2, 0) - nStart).toBe(120);
+    expect(nMoved.ok && nMoved.resolved.readout).toBe(
+      "Priya Shah's night shift on Cell 4 keeps its Saturday part, 10 pm to midnight; Sunday's part, midnight to 6 am, is cleared.",
+    );
+  });
+
+  it("ND12: Europe/Berlin, 29 March 2026 (spring forward, east of UTC) -- clear Saturday, Sunday's part asked about and kept from the plant's own midnight", () => {
+    const berlin = realCtx(
+      "Europe/Berlin",
+      [2026, 3, 27],
+      ["2026-03-27", "2026-03-28", "2026-03-29", "2026-03-30"],
+      [5, 6, 0, 1],
+    );
+    const bStart = berlin.axis.wallToOffset(1, 1320);
+    const bEnd = berlin.axis.wallToOffset(2, 360);
+    expect(bEnd - bStart).toBe(7 * 60);
+    const bCtx = berlin.make({
+      assignments: [blk("dstB", "maria", bStart, bEnd, { runId: "runB" })],
+      runs: [job("runB", bStart, bEnd, "10 pm to 6 am")],
+    });
+    const asked = expandCommand(clear("2026-03-28"), bCtx);
+    if (asked.ok) throw new Error("expected the question");
+    expect(describeQuestion(asked.question)).toBe(
+      "Maria Lopez's night shift runs into Sunday. Clear Sunday's part too, midnight to 6 am?",
+    );
+    const no = expandCommand(clear("2026-03-28"), bCtx, { nextDayPart: "keep" });
+    holdsInvariant(no, bCtx);
+    if (!no.ok) throw new Error("expected a lot");
+    const sunMidnight = berlin.axis.wallToOffset(2, 0);
+    expect(no.runTrims?.[0]).toMatchObject({
+      range: { startMin: sunMidnight, endMin: bEnd },
+      readout:
+        "The Housing A job on Cell 4 keeps its Sunday part, midnight to 6 am; Saturday's part, 10 pm to midnight, is cleared.",
+    });
+    const yes = expandCommand(clear("2026-03-28"), bCtx, { nextDayPart: "clear" });
+    holdsInvariant(yes, bCtx);
+    if (!yes.ok) throw new Error("expected a lot");
+    expect(removedIds(yes)).toEqual(["dstB"]);
+    expect(yes.runRemovals?.map((r) => r.runId)).toEqual(["runB"]);
+  });
+
+  // -------------------------------------------------------------------------
+  // AD1-AD11 (S194-D, DEF-0048, R-409 amended 28 Sept): the one-day absence
+  // takes every block that day with one yes and records the absence.
+  // -------------------------------------------------------------------------
+
+  const early = blk("early", "priya", w(1, 480), w(1, 720), { label: "8 am to noon" });
+  const late = blk("late", "priya", w(1, 780), w(1, 1020), {
+    nodeId: "cell2",
+    label: "1 pm to 5 pm",
+  });
+  function absence(sentence: string): UnassignCommand {
+    const parsed = parseCommand(sentence);
+    if (!parsed.ok || parsed.command.intent !== "unassign")
+      throw new Error(`${sentence} must parse`);
+    return markAbsence(parsed.command, sentence);
+  }
+
+  it("AD1: 'Priya Shah is off today', two blocks, the recordable set unknown -- two removals with one yes, no which-block question, no record claimed", () => {
+    const ctx = ndCtx({ assignments: [early, late] });
+    const res = expandCommand(absence("Priya Shah is off today"), ctx);
+    if (!res.ok || res.command.intent !== "several") throw new Error("expected a several");
+    expect(removedIds(res)).toEqual(["early", "late"]);
+    expect(res.absenceRecord).toBeUndefined();
+    expect(res.summary).toBe(
+      "Priya Shah is off 2026-10-12. Their 2 blocks on Cell 4 and Cell 2 are cleared; the absence is not recorded, because I could not check whether you may record it.",
+    );
+    for (const c of res.command.commands) expect(resolveCommand(c, ctx).ok).toBe(true);
+  });
+
+  it("AD2: the same, recordable -- the absence is recorded LAST, whole-day, with the sentence's own word as the reason", () => {
+    const ctx = ndCtx({ assignments: [early, late], absenceRecordable: new Set(["priya"]) });
+    const res = expandCommand(absence("Priya Shah is off today"), ctx);
+    if (!res.ok || res.command.intent !== "several") throw new Error("expected a several");
+    expect(removedIds(res)).toEqual(["early", "late"]);
+    expect(res.absenceRecord).toEqual({
+      intent: "record_absence",
+      operatorId: "priya",
+      person: "Priya Shah",
+      from: "2026-10-12",
+      to: "2026-10-12",
+      reason: "Off",
+      readout: "Priya Shah is recorded as off 2026-10-12.",
+      attempted: "An absence for Priya Shah 2026-10-12",
+      notTried: "No absence is recorded for Priya Shah.",
+    });
+    expect(res.summary).toBe(
+      "Priya Shah is off 2026-10-12. Their 2 blocks on Cell 4 and Cell 2 are cleared and the absence is recorded.",
+    );
+  });
+
+  it("AD3: one block -- one removal plus the record", () => {
+    const ctx = ndCtx({ assignments: [early], absenceRecordable: new Set(["priya"]) });
+    const res = expandCommand(absence("Priya Shah is sick today"), ctx);
+    if (!res.ok || res.command.intent !== "several") throw new Error("expected a several");
+    expect(removedIds(res)).toEqual(["early"]);
+    expect(res.absenceRecord?.reason).toBe("Sick");
+    expect(res.summary).toBe(
+      "Priya Shah is off 2026-10-12. Their block on Cell 4 is cleared and the absence is recorded.",
+    );
+  });
+
+  it("AD4: nothing on the board that day -- the absence is still recorded, and the answer says so; unknown recordable is the plain answer", () => {
+    const res = expandCommand(
+      absence("Priya Shah is off today"),
+      ndCtx({ absenceRecordable: new Set(["priya"]) }),
+    );
+    if (!res.ok || res.command.intent !== "several") throw new Error("expected a several of none");
+    expect(res.command.commands).toEqual([]);
+    expect(res.absenceRecord?.from).toBe("2026-10-12");
+    expect(res.summary).toBe(
+      "Priya Shah has nothing on the board 2026-10-12; the absence is recorded.",
+    );
+    expect(expandCommand(absence("Priya Shah is off today"), ndCtx())).toEqual({
+      ok: false,
+      question: {
+        kind: "nothing_to_do",
+        text: "Priya Shah has no block 2026-10-12; the absence is not recorded, because I could not check whether you may record it.",
+      },
+    });
+  });
+
+  it("AD5: not recordable for this caller (R-431) -- the blocks go, nothing is recorded, and the answer says so plainly", () => {
+    const ctx = ndCtx({ assignments: [early, late], absenceRecordable: new Set(["maria"]) });
+    const res = expandCommand(absence("Priya Shah is off today"), ctx);
+    if (!res.ok) throw new Error("expected the blocks");
+    expect(removedIds(res)).toEqual(["early", "late"]);
+    expect(res.absenceRecord).toBeUndefined();
+    expect(res.summary).toBe(
+      "I cannot record an absence for Priya Shah from here; their 2 blocks on Cell 4 and Cell 2 are cleared.",
+    );
+    expect(
+      expandCommand(absence("Priya Shah is off today"), ndCtx({ absenceRecordable: new Set() })),
+    ).toEqual({
+      ok: false,
+      question: {
+        kind: "nothing_to_do",
+        text: "Priya Shah has no block 2026-10-12, and I cannot record an absence for them from here.",
+      },
+    });
+  });
+
+  it("AD6: already absent (set_absence's whole-day overlap refusal) -- known before the yes, never offered", () => {
+    const ctx = ndCtx({
+      assignments: [early],
+      absenceRecordable: new Set(["priya"]),
+      hasWholeDayAbsence: (id, from, to) =>
+        id === "priya" && from <= "2026-10-12" && to >= "2026-10-12",
+    });
+    const res = expandCommand(absence("Priya Shah is off today"), ctx);
+    if (!res.ok) throw new Error("expected the block");
+    expect(res.absenceRecord).toBeUndefined();
+    expect(res.summary).toBe(
+      "Priya Shah already has an absence recorded 2026-10-12; their block on Cell 4 is cleared.",
+    );
+  });
+
+  it("AD7: 'remove Priya Shah today' (no absence in the words) still asks which of the two", () => {
+    const parsed = parseCommand("remove Priya Shah today");
+    if (!parsed.ok) throw new Error("must parse");
+    const marked = markAbsence(parsed.command, "remove Priya Shah today");
+    expect(marked).toBe(parsed.command); // untouched, the same object
+    const ctx = ndCtx({ assignments: [early, late], absenceRecordable: new Set(["priya"]) });
+    const expanded = expandCommand(marked, ctx);
+    expect(expanded).toEqual({ ok: true, command: parsed.command });
+    const asked = resolveCommand(parsed.command as UnassignCommand, ctx);
+    expect(asked.ok === false && asked.question.kind).toBe("remove_which");
+  });
+
+  it("AD8: an absence of one day against a night shift follows R-461 -- the same question, then Yes removes it whole and No keeps Sunday's part", () => {
+    const ctx = ndCtx({ assignments: [priyaNight], absenceRecordable: new Set(["priya"]) });
+    const asked = expandCommand(absence("Priya Shah is off today"), ctx);
+    if (asked.ok) throw new Error("expected the question");
+    expect(describeQuestion(asked.question)).toBe(
+      "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight?",
+    );
+    const yes = expandCommand(absence("Priya Shah is off today"), ctx, {
+      previousDayPart: "clear",
+    });
+    if (!yes.ok) throw new Error("expected a lot");
+    expect(removedIds(yes)).toEqual(["priyaBlk"]);
+    expect(yes.absenceRecord?.from).toBe("2026-10-12");
+    const no = expandCommand(absence("Priya Shah is off today"), ctx, { previousDayPart: "keep" });
+    if (!no.ok) throw new Error("expected a lot");
+    expect(trimmedIds(no)).toEqual(["priyaBlk"]);
+    expect(no.absenceRecord?.to).toBe("2026-10-12");
+  });
+
+  it("AD9: the until form with the recordable set -- one record over every day, the word as the reason", () => {
+    const ctx = ndCtx({ assignments: [early, late], absenceRecordable: new Set(["priya"]) });
+    const res = expandCommand(absence("Priya Shah is on leave until Wednesday"), ctx);
+    if (!res.ok) throw new Error("expected a lot");
+    expect(res.absenceRecord).toMatchObject({
+      from: "2026-10-12",
+      to: "2026-10-14",
+      reason: "On leave",
+    });
+    expect(res.summary).toBe(
+      "Priya Shah is off from 2026-10-12 to 2026-10-14. Their 2 blocks on Cell 4 and Cell 2 are cleared and the absence is recorded.",
+    );
+  });
+
+  it("AD10: markAbsence reads the words the model heard -- the decoded removal gets the same mark the rules sentence gets", () => {
+    const decoded: UnassignCommand = {
+      intent: "unassign",
+      operator: "Priya Shah",
+      place: [],
+      day: { kind: "today" },
+      span: null,
+      existing: null,
+      shift: null,
+      until: null,
+    };
+    expect(markAbsence(decoded, "priya shah is out today")).toEqual({ ...decoded, absence: "out" });
+    expect(markAbsence(decoded, "Priya Shah is on  Leave")).toEqual({
+      ...decoded,
+      absence: "on leave",
+    });
+    expect(markAbsence(decoded, "take priya shah off cell 4 today")).toBe(decoded);
+  });
+
+  it("AD11: every sentence an absence adds is R-459's -- no 24-hour clock, no dash chain, no arrow", () => {
+    const ctx = ndCtx({ assignments: [early, late], absenceRecordable: new Set(["priya"]) });
+    const res = expandCommand(absence("Priya Shah is off today"), ctx);
+    if (!res.ok) throw new Error("expected a lot");
+    for (const s of [
+      res.summary ?? "",
+      res.absenceRecord?.readout ?? "",
+      res.absenceRecord?.notTried ?? "",
+    ]) {
+      expect(s).not.toMatch(/\d{1,2}:\d{2}/);
+      expect(s).not.toMatch(/ -- | – |->|→/);
+    }
   });
 });

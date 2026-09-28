@@ -8,7 +8,7 @@
  * to anything else, and `formatCommand` never prints it).
  */
 import { describe, it, expect } from "vitest";
-import { parseCommand, formatCommand, expectedShape } from "@/lib/command/parse";
+import { parseCommand, formatCommand, expectedShape, markAbsence } from "@/lib/command/parse";
 import { ASSIGN_VERBS, BOOK_VERBS, UNASSIGN_VERBS, MOVE_VERBS } from "@/lib/command/parse";
 import {
   REPLACE_VERBS,
@@ -3429,6 +3429,8 @@ describe("commandParse: S55 absence (R-409)", () => {
         existing: null,
         shift: null,
         until: null,
+        // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar marks the absence.
+        absence: "off",
       },
     });
   });
@@ -3445,6 +3447,8 @@ describe("commandParse: S55 absence (R-409)", () => {
         existing: null,
         shift: null,
         until: null,
+        // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar marks the absence.
+        absence: "out",
       },
     });
   });
@@ -3461,6 +3465,8 @@ describe("commandParse: S55 absence (R-409)", () => {
         existing: null,
         shift: null,
         until: null,
+        // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar marks the absence.
+        absence: "sick",
       },
     });
   });
@@ -3477,6 +3483,8 @@ describe("commandParse: S55 absence (R-409)", () => {
         existing: null,
         shift: null,
         until: { kind: "weekday", day: 5 },
+        // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar marks the absence.
+        absence: "on leave",
       },
     });
   });
@@ -3493,6 +3501,8 @@ describe("commandParse: S55 absence (R-409)", () => {
         existing: null,
         shift: null,
         until: { kind: "weekday", day: 5 },
+        // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar marks the absence.
+        absence: "away",
       },
     });
   });
@@ -3509,6 +3519,8 @@ describe("commandParse: S55 absence (R-409)", () => {
         existing: null,
         shift: null,
         until: { kind: "weekday", day: 3 },
+        // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar marks the absence.
+        absence: "off",
       },
     });
   });
@@ -3525,6 +3537,8 @@ describe("commandParse: S55 absence (R-409)", () => {
         existing: null,
         shift: null,
         until: null,
+        // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar marks the absence.
+        absence: "on holiday",
       },
     });
   });
@@ -3541,6 +3555,8 @@ describe("commandParse: S55 absence (R-409)", () => {
         existing: null,
         shift: null,
         until: { kind: "date", iso: "2026-09-18" },
+        // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar marks the absence.
+        absence: "off",
       },
     });
   });
@@ -3549,6 +3565,70 @@ describe("commandParse: S55 absence (R-409)", () => {
     const ab4 = parseCommand("Ana is on leave till Friday");
     if (!ab4.ok) throw new Error("AB4 must parse");
     expect(parseCommand(formatCommand(ab4.command))).toEqual(ab4);
+  });
+
+  // -------------------------------------------------------------------------
+  // MA1-MA5 (S194-D, DEF-0048, R-409 amended 28 Sept; option A, the main
+  // session's decision): the absence MARK. The grammar sets it itself (AB1-AB8
+  // above carry it); `markAbsence(command, sentence)` gives the MODEL'S reading
+  // (whose schema has no such key) the same mark from the words heard, and is
+  // a no-op on a typed absence that already carries it.
+  // -------------------------------------------------------------------------
+
+  it("MA1: every absence word marks its sentence in the grammar itself, lower case, one space; markAbsence then changes nothing", () => {
+    for (const [sentence, word] of [
+      ["Sam is off today", "off"],
+      ["Sam is out", "out"],
+      ["Sam is sick tomorrow", "sick"],
+      ["Ana is on leave till Friday", "on leave"],
+      ["Ana is On  Leave till Friday", "on leave"],
+      ["Ana is away until Friday", "away"],
+      ["Sam is on holiday", "on holiday"],
+      ["Sam Patel is ill", "ill"],
+    ] as const) {
+      const parsed = parseCommand(sentence);
+      if (!parsed.ok || parsed.command.intent !== "unassign")
+        throw new Error(`${sentence} must parse`);
+      expect(parsed.command.absence, sentence).toBe(word);
+      expect(markAbsence(parsed.command, sentence), sentence).toBe(parsed.command);
+    }
+  });
+
+  it("MA2: 'remove Sam Patel tomorrow' carries no mark, before or after markAbsence -- so it still asks which block", () => {
+    const parsed = parseCommand("remove Sam Patel tomorrow");
+    if (!parsed.ok || parsed.command.intent !== "unassign") throw new Error("must parse");
+    expect(parsed.command).not.toHaveProperty("absence");
+    expect(markAbsence(parsed.command, "remove Sam Patel tomorrow")).toBe(parsed.command);
+  });
+
+  it("MA3: only a removal is ever marked -- 'Sam is on Housing A on Cell 1 8 to 4' (AB10's assign) comes back untouched", () => {
+    const parsed = parseCommand("Sam is on Housing A on Cell 1 8 to 4");
+    if (!parsed.ok) throw new Error("must parse");
+    expect(markAbsence(parsed.command, "Sam is on Housing A on Cell 1 8 to 4")).toBe(
+      parsed.command,
+    );
+  });
+
+  it("MA4: an absence prints in its own grammar and round-trips with its mark (AB9's own round trip, now marked)", () => {
+    for (const sentence of [
+      "Sam Patel is off tomorrow",
+      "Ana is on leave till Friday",
+      "Sam is sick",
+    ]) {
+      const parsed = parseCommand(sentence);
+      if (!parsed.ok) throw new Error(`${sentence} must parse`);
+      expect(parseCommand(formatCommand(parsed.command)), sentence).toEqual(parsed);
+    }
+    const parsed = parseCommand("Sam Patel is off tomorrow");
+    if (!parsed.ok) throw new Error("must parse");
+    expect(formatCommand(parsed.command)).toBe("Sam Patel is off tomorrow");
+  });
+
+  it("MA5: an unmarked removal with an until (the model's reading, no mark) still prints the ordinary 'unassign ...' sentence", () => {
+    const ab4 = parseCommand("Ana is on leave till Friday");
+    if (!ab4.ok || ab4.command.intent !== "unassign") throw new Error("must parse");
+    const { absence: _mark, ...unmarked } = ab4.command;
+    expect(formatCommand(unmarked)).toBe("unassign Ana on today until fri");
   });
 
   it("AB10: Sam is on Housing A on Cell 1 8 to 4 -- stays WO2's assign reading (the absence pattern needs an ABSENCE_WORD right after 'is')", () => {
@@ -4576,6 +4656,8 @@ describe("commandParse: S58 grammar widening, group 2 (R-412 to R-416, D132)", (
       existing: null,
       shift: null,
       until: null,
+      // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar marks the absence.
+      absence: "off",
       ...overrides,
     };
   }
@@ -4588,7 +4670,8 @@ describe("commandParse: S58 grammar widening, group 2 (R-412 to R-416, D132)", (
       "Sam Patel is on leave this week",
     ];
     for (const text of shapes) {
-      expect(parseCommand(text)).toEqual({ ok: true, command: absenceRepeat() });
+      const absence = text.includes("on leave") ? "on leave" : "off";
+      expect(parseCommand(text)).toEqual({ ok: true, command: absenceRepeat({ absence }) });
     }
   });
 

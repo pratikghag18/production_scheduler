@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
-import { parseCommand } from "@/lib/command/parse";
+import { parseCommand, markAbsence } from "@/lib/command/parse";
 import { decodeCommand } from "@/lib/voice/decode";
 import { makeReader, SYSTEM_PROMPT } from "@/lib/voice/readSentence";
 import type { Reading } from "@/lib/voice/readSentence";
@@ -776,8 +776,17 @@ describe("VR17 (S55, R-409): unassign's until -- required, decodes, missing is g
     if (!parsed.ok) return;
     if (parsed.command.intent !== "unassign") return;
     expect(parsed.command.until).toEqual({ kind: "weekday", day: 5 });
+    // DEF-0048 (S194-D, CONTRACT CHANGED): the grammar now marks the absence
+    // (`absence: "on leave"`); the model's schema has no such key and is not
+    // taught it, so the decoder drops it (VR3's "an invented key is
+    // ignored"). Every OTHER field still round-trips exactly; the mark comes
+    // back from the heard words through `markAbsence`, asserted below.
+    expect(parsed.command.absence).toBe("on leave");
+    const { absence: _mark, ...modelForm } = parsed.command;
     const roundTripped: unknown = JSON.parse(JSON.stringify(parsed.command));
-    expect(decodeCommand(roundTripped)).toEqual(parsed.command);
+    const decoded = decodeCommand(roundTripped);
+    expect(decoded).toEqual(modelForm);
+    expect(decoded && markAbsence(decoded, "Ana is on leave till Friday")).toEqual(parsed.command);
   });
 
   it("VR17: an ordinary removal's until is null and round-trips through decodeCommand", () => {

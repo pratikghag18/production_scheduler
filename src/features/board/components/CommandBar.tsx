@@ -25,6 +25,7 @@ import {
   ADJUST_VERBS,
   SAME_AS_WORDS,
   DAY_GROUNDING_WORDS,
+  markAbsence,
 } from "@/lib/command/parse";
 import type {
   AssignCommand,
@@ -40,7 +41,12 @@ import type {
   ParseFailure,
 } from "@/lib/command/parse";
 import { groundReading, groundDays, type VerbLists } from "@/lib/command/grounded";
-import { guessVerbs, misheardVerbWord, describeVerbGuess } from "@/lib/voice/verbGuess";
+import {
+  guessVerbs,
+  misheardVerbWord,
+  describeVerbGuess,
+  spokenCommand,
+} from "@/lib/voice/verbGuess";
 import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
 import type {
   ResolveContext,
@@ -50,6 +56,8 @@ import type {
   ResolvedUnassign,
   ResolvedMove,
   ResolvedRunRemoval,
+  ResolvedRunTrim,
+  ResolvedAbsenceRecord,
   ResolvedHeadcount,
   Question,
   Candidate,
@@ -624,8 +632,25 @@ const EMPTY_THREAD_HINT =
   "Tell the board what to do. For example: clear Cell 1 today, or assign Sam Patel to Cell 1 from 8 to 12.";
 
 /** The readout's day is an ISO token (`resolve.ts` cannot import the date
- *  seam); this is the one place it is rendered through it (brief §3). */
-const ISO_DAY = /\d{4}-\d{2}-\d{2}/;
+ *  seam); this is the one place it is rendered through it (brief §3).
+ *  S194-D third pass: GLOBAL -- a string can carry two days ("from
+ *  2026-09-28 to 2026-10-02", an absence over a span), and a single replace
+ *  left the second one raw. */
+const ISO_DAY = /\d{4}-\d{2}-\d{2}/g;
+
+/**
+ * S194-D third pass: THE one renderer of the ISO days a resolver sentence
+ * carries -- every one of them, never only the first -- in the plant's zone
+ * and date format (R-426: `zonedTimeToInstant`, never a UTC midnight).
+ * Exported so a test renders exactly what the person reads, never a mirror
+ * of it (a mirror copied the single-replace bug and could not catch it).
+ */
+export function renderIsoDays(text: string, zone: string, dateFormat: DateFormat): string {
+  return text.replace(ISO_DAY, (iso) => {
+    const [yyyy, mm, dd] = iso.split("-").map(Number);
+    return formatDayLabel(zonedTimeToInstant(zone, yyyy, mm, dd, 0, 0), dateFormat, zone);
+  });
+}
 const FULL_ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** S60-b (the S59 reviewer, 15 Sept): `resolve.ts`'s own `WEEKDAY_FULL_NAMES`
@@ -775,9 +800,16 @@ function isTargetOnBoard(
  */
 function turnResultLine(turn: HistoryTurn): string {
   const outcome = turn.outcome;
-  // CP-7 (session 178): a LOT's last word is its own sentence -- "Done, N
-  // things." or "Did k of N things; the next failed: … What was already
-  // done stayed: …" (R-459) -- and it is the thread's result line, the
+  // DEF-0052 / R-432 (CONTRACT CHANGED, 28 Sept): a lot's PARTIAL failure is
+  // now `buildLotOutcome`'s own SEPARATE-LINES sentence, "I made k of N
+  // changes.\nDone: ...\nNot done: ...\nNot tried: ...". Its own "Done:"
+  // line already names every change that landed, so this returns it as-is
+  // -- appending " Written: <ran>" here too would repeat the same readouts
+  // a second time, exactly the redundancy R-459's plain-sentence register
+  // rules out.
+  if (outcome !== null && outcome.startsWith("I made ")) return outcome;
+  // CP-7 (session 178): a clean lot's last word is its own sentence --
+  // "Done, N things." (R-459) -- and it is the thread's result line, the
   // readouts that landed after it. Before this, `ran` won and a lot that
   // stopped at step two read "Written: <step one>" with nothing saying why
   // it stopped (F-154's lesson, lost again on the way from the live line to
@@ -837,6 +869,11 @@ const NON_ANSWER_SENTINELS = new Set(["auto", "escape"]);
  *  board to …" rerun waits for the new window's ctx before giving up rather
  *  than hanging silently -- see `armPendingRerun`'s own doc. */
 const PENDING_RERUN_TIMEOUT_MS = 15000;
+
+/** S194-D (R-430): how many of the caller's own people or parts a dead-end
+ *  person/part question offers -- the resolver's own cap for a place or part
+ *  list (`offeredSuggestions`/`trackCellSuggestions`, resolve.ts: eight). */
+const UNKNOWN_FALLBACK_CAP = 8;
 
 /**
  * F-162 (the maintainer, 17 Sept, two screenshots): THE ANSWER BOX.
@@ -912,6 +949,7 @@ function answerTakes(status: Status | null): string | null {
   // question wants a reason), so the placeholder never offers it.
   if (status.awaitingOverrideReason || status.awaitingAreaReason) return "the reason, or no";
   if (status.lot) return "yes or no";
+  if (status.yesNo) return "yes or no";
   if (status.candidates.length === 0) return null;
   if (status.candidates.every((c) => c.action.kind === "show_day")) return null;
   // S62-b reviewer fix (A): ONLY A YES-SHAPED QUESTION OFFERS "yes".
@@ -988,11 +1026,52 @@ function failureToStatus(failure: ParseFailure): Status {
 const CAP_REFUSAL =
   /^(.+) would reach (\d+)% \(cap (\d+)%\)\. Someone else changed their load — try the split again\.$/;
 
-function rewriteCapRefusal(message: string): string {
-  const m = CAP_REFUSAL.exec(message);
-  if (!m) return message;
-  const [, name, peak, cap] = m;
-  return `${name} would be over the cap today (${peak}% of ${cap}%). Nothing changed.`;
+/**
+ * S194-D (R-432 restated 28 Sept, R-459): widened from the one capacity shape
+ * to every refusal a writer answers the bar with in the plant's words -- the
+ * ONE rewriter (R-449), used by the single sentence's refusal (`settleWrite`,
+ * the pop-up reporter) and by a lot's "Not done:" line (`buildLotOutcome`)
+ * alike, so the two can never say the same refusal two ways. Matched on each
+ * message's SHAPE, as the capacity one always was; a message matching none
+ * passes through unchanged (the report lists which kinds still do).
+ */
+const NOT_CERTIFIED_REFUSAL = /^(.+) is not certified for (.+): missing (.+)\.$/;
+const NO_EDIT_RIGHTS_REFUSAL = /^You don't have permission to edit (.+)\.$/;
+const AREA_REFUSAL =
+  /^That person belongs to a different part of the structure, so it can't be used here\.$/;
+const ABSENCE_OVERLAP_REFUSAL =
+  /^This person already has an absence over some of those days(?: \(.*\))?\.$/;
+
+function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+function rewriteRefusal(message: string): string {
+  const cap = CAP_REFUSAL.exec(message);
+  if (cap) {
+    const [, name, peak, capPct] = cap;
+    return `${name} would be over the cap today (${peak}% of ${capPct}%). Nothing changed.`;
+  }
+  const cert = NOT_CERTIFIED_REFUSAL.exec(message);
+  if (cert) {
+    const [, name, cell, missing] = cert;
+    const skills = missing.split(", ").filter((x) => x !== "");
+    return `${name} is not certified for ${joinWithAnd(skills)}, which ${cell} needs.`;
+  }
+  const rights = NO_EDIT_RIGHTS_REFUSAL.exec(message);
+  if (rights) return `You cannot change ${rights[1]} from here.`;
+  if (message === "You don't have permission to change that.") {
+    return "You cannot change that from here.";
+  }
+  if (message === "You do not have edit rights on this cell.") {
+    return "You cannot change this cell from here.";
+  }
+  if (AREA_REFUSAL.test(message)) return "That person is not from this cell's area.";
+  if (ABSENCE_OVERLAP_REFUSAL.test(message)) {
+    return "An absence is already recorded on some of those days.";
+  }
+  return message;
 }
 
 export function CommandBar({
@@ -1227,8 +1306,26 @@ export function CommandBar({
       // actually answered; `null` means nothing was ever attempted.
       outcome: null,
     };
-    // R-427: a new sentence offers nothing yet.
-    store.getState().set({ offered: [] });
+    // R-427: a new sentence offers nothing yet. S194-D: and has asked nothing.
+    store.getState().set({ offered: [], traceCarry: null });
+  }
+
+  /**
+   * R-434 (S194-D): the entry's `asked` -- after whatever this sentence
+   * already asked and had answered (`traceCarry`, set when a night shift
+   * question is answered, R-461), so one sentence that asks two questions in
+   * a row is ONE entry holding both asks, in order, newline-joined. With no
+   * carry, byte for byte the plain assignment it replaces.
+   */
+  function setAsked(entry: TraceEntry, message: string): void {
+    const carry = store.getState().traceCarry;
+    entry.asked = carry ? `${carry.asked}\n${message}` : message;
+  }
+
+  /** R-434 (S194-D): the entry's `answered`, the twin of `setAsked`. */
+  function setAnswered(entry: TraceEntry, value: string): void {
+    const carry = store.getState().traceCarry;
+    entry.answered = carry ? `${carry.answered}\n${value}` : value;
   }
 
   /** S71-f (brief §1.B): call once the fresh trace entry for a clip's
@@ -1446,7 +1543,9 @@ export function CommandBar({
 
   function armPendingRerun(command: Command, target: string): void {
     clearPendingRerunTimer();
-    pendingRerunRef.current = { command, target };
+    // R-455 (S194-D): the answers already given to this sentence ride along,
+    // so the rerun after the board moves never asks them again.
+    pendingRerunRef.current = { command, target, options: { ...heldOptionsRef.current } };
     pendingRerunTimeoutRef.current = window.setTimeout(() => {
       pendingRerunTimeoutRef.current = null;
       // A no-op unless THIS SAME rerun is still the one standing -- a later
@@ -1509,9 +1608,9 @@ export function CommandBar({
       pendingRerunRef.current &&
       isTargetOnBoard(pendingRerunRef.current, ctx)
     ) {
-      const command = pendingRerunRef.current.command;
+      const { command, options } = pendingRerunRef.current;
       clearPendingRerun();
-      runCommand(command);
+      runCommand(command, undefined, options);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
@@ -1530,10 +1629,7 @@ export function CommandBar({
    * built on) rather than pin it to UTC and hope the zone is UTC too.
    */
   function renderReadout(readout: string): string {
-    return readout.replace(ISO_DAY, (iso) => {
-      const [yyyy, mm, dd] = iso.split("-").map(Number);
-      return formatDayLabel(zonedTimeToInstant(zone, yyyy, mm, dd, 0, 0), dateFormat, zone);
-    });
+    return renderIsoDays(readout, zone, dateFormat);
   }
 
   function anchorOfInput(): { x: number; y: number } {
@@ -1591,7 +1687,17 @@ export function CommandBar({
   function traceQuestionStatus(status: Status): void {
     if (!traceRef.current) return;
     if (status.kind === "question" || status.kind === "shape") {
-      traceRef.current.asked = status.message;
+      setAsked(traceRef.current, status.message);
+      // DEF-0049 (28 Sept, tester): posted the MOMENT the bar asks, not
+      // only once the sentence's life ends -- a question the tester's own
+      // page closed on (or a sentence that ended up refusing outright with
+      // no further answer) used to never reach `bar.jsonl` at all. Every
+      // later change to this same entry (an answer, a write, a refusal, or
+      // the teardown flush) posts again and revises this line (`postTrace`'s
+      // own doc) -- never a second, competing idea of "when is a turn worth
+      // recording" (R-434: "anything the bar ... asks ... is a trace
+      // entry").
+      postTrace(traceRef.current);
     } else if (status.kind === "readout") {
       if (traceRef.current.asked === null) traceRef.current.asked = status.message;
       if (traceRef.current.answered === null) traceRef.current.answered = "auto";
@@ -1642,7 +1748,7 @@ export function CommandBar({
           entry.ran.push(result.readout ?? readout);
           entry.outcome = "written";
         } else if (result.kind === "refused") {
-          entry.outcome = `refused: ${rewriteCapRefusal(result.message)}`;
+          entry.outcome = `refused: ${rewriteRefusal(result.message)}`;
         } else {
           entry.outcome = "cancelled";
         }
@@ -1679,7 +1785,7 @@ export function CommandBar({
    */
   function cancelStanding(value: string): void {
     if (traceRef.current) {
-      traceRef.current.answered = value;
+      setAnswered(traceRef.current, value);
       traceRef.current.outcome = "cancelled";
     }
     finishTrace();
@@ -1756,7 +1862,7 @@ export function CommandBar({
           entry.ran.push(readout);
           entry.outcome = "written";
         } else {
-          entry.outcome = `refused: ${rewriteCapRefusal(outcome.message)}`;
+          entry.outcome = `refused: ${rewriteRefusal(outcome.message)}`;
         }
       }
       if (entry) settleTurn(store, entry);
@@ -1771,116 +1877,167 @@ export function CommandBar({
   }
 
   function runCommand(command: Command, suffix?: string, options?: ResolveOptions): void {
-    // R-424: every functional read of the board's context goes through the
-    // last REAL ctx this component has seen, never the possibly-null prop
-    // directly (see `ctx`'s own doc and `lastCtxRef`'s). A `null` here means
-    // no board has ever loaded for this bar at all -- nothing to resolve
-    // against, so this is a no-op rather than a crash (belt and braces: a
-    // real caller never actually reaches this, since the bar is not even
-    // mounted until its first ctx lands).
-    const activeCtx = lastCtxRef.current;
-    if (activeCtx === null) return;
-    // S59-e (brief §3): what the bar read, regardless of how this resolves
-    // (a write, a question, or a several) -- `command` here, not whatever
-    // `expandCommand` turns it into below, since a lot's own numbered steps
-    // resolve their OWN commands through `resolveLotStep`, never this one.
-    if (traceRef.current) traceRef.current.read = formatCommand(command);
-    // S55 (R-406 to R-410, D130/brief §2): `expandCommand` runs FIRST, before
-    // the S51 several intercept below -- a board-answered sentence
-    // (`replace`/`swap`/`copy`, `everyone` on a removal/move, an absence's
-    // `until`) turns into an ordinary `several`/single here, and THIS is the
-    // one place both the rules path and the model path land
-    // (`fallbackToRules`/`applyReading` both call `runCommand`), so both
-    // expand the same way. `expandCommand` returns the SAME object for every
-    // ordinary form (an already-single command, or an already-several one),
-    // so the branch below is byte for byte the pre-S55 several intercept for
-    // every sentence that never needed expanding.
-    const expanded = expandCommand(command, activeCtx);
-    if (!expanded.ok) {
-      // `command` here, never `expanded.command` (there is none) -- the
-      // ORIGINAL sentence's command is what a candidate button must
-      // substitute a field into and re-run (see `pickCandidate`'s own S55
-      // comment below).
-      const next = questionToStatus(expanded.question, command);
+    // DEF-0046, the bar's half (28 Sept, tester): wraps the whole body --
+    // see `reportBarCrash`'s own doc, right after `runCandidateAction`,
+    // below, for why these four functions each catch at their own body
+    // rather than one shared try higher up. `wrote` tracks whether a writer
+    // prop was actually CALLED (and returned/threw synchronously without
+    // itself throwing) before the crash -- "only claim nothing was changed
+    // when that is known" (piece 2's own brief line): a crash before this is
+    // ever set is a genuine "nothing changed"; a crash after it names the
+    // one thing that was, the same vocabulary piece 1's `buildLotOutcome`
+    // uses ("Done:"/"Not done:"), never the fuller lot shape (nothing here
+    // is ever a real multi-item `Lot` write -- see `reportBarCrash`'s doc).
+    let wrote: { readout: string } | null = null;
+    try {
+      runCommandBody();
+    } catch (err) {
+      reportBarCrash(err, wrote);
+    }
+    return;
+
+    function runCommandBody(): void {
+      // R-424: every functional read of the board's context goes through the
+      // last REAL ctx this component has seen, never the possibly-null prop
+      // directly (see `ctx`'s own doc and `lastCtxRef`'s). A `null` here means
+      // no board has ever loaded for this bar at all -- nothing to resolve
+      // against, so this is a no-op rather than a crash (belt and braces: a
+      // real caller never actually reaches this, since the bar is not even
+      // mounted until its first ctx lands).
+      const activeCtx = lastCtxRef.current;
+      if (activeCtx === null) return;
+      // DEF-0048 / R-409 (S194-D): THE one place both paths meet -- the rules
+      // (`fallbackToRules`/`submitText`) and the model (`applyReading`) both
+      // land here. The grammar already marks a typed absence ("Sam Patel is
+      // off tomorrow"); the served model's reading carries no such key (its
+      // schema is not taught it), so the words that were heard mark it here.
+      // A no-op on a command already marked and on anything but a removal.
+      command = markAbsence(command, traceRef.current?.heard ?? "");
+      // DEF-0040 / R-461 (S194-D): the answers given so far to this sentence's
+      // night shift questions (and any reason), held for the NEXT question's
+      // buttons to carry forward -- see `answer_other_day_part`.
+      if (options !== undefined) heldOptionsRef.current = options;
+      // S59-e (brief §3): what the bar read, regardless of how this resolves
+      // (a write, a question, or a several) -- `command` here, not whatever
+      // `expandCommand` turns it into below, since a lot's own numbered steps
+      // resolve their OWN commands through `resolveLotStep`, never this one.
+      if (traceRef.current) traceRef.current.read = formatCommand(command);
+      // S55 (R-406 to R-410, D130/brief §2): `expandCommand` runs FIRST, before
+      // the S51 several intercept below -- a board-answered sentence
+      // (`replace`/`swap`/`copy`, `everyone` on a removal/move, an absence's
+      // `until`) turns into an ordinary `several`/single here, and THIS is the
+      // one place both the rules path and the model path land
+      // (`fallbackToRules`/`applyReading` both call `runCommand`), so both
+      // expand the same way. `expandCommand` returns the SAME object for every
+      // ordinary form (an already-single command, or an already-several one),
+      // so the branch below is byte for byte the pre-S55 several intercept for
+      // every sentence that never needed expanding.
+      const expanded = expandCommand(command, activeCtx, options);
+      if (!expanded.ok) {
+        // `command` here, never `expanded.command` (there is none) -- the
+        // ORIGINAL sentence's command is what a candidate button must
+        // substitute a field into and re-run (see `pickCandidate`'s own S55
+        // comment below).
+        const next = questionToStatus(expanded.question, command);
+        setStatus(next);
+        traceQuestionStatus(next);
+        return;
+      }
+      const resolvedCommand = expanded.command;
+      if (resolvedCommand.intent === "several") {
+        // S70-d (R-436): `expanded.runRemovals` -- an `everyone` clear's own
+        // run removals, ALREADY resolved -- rides beside `resolvedCommand`
+        // rather than inside its `commands` (see `ResolvedRunRemoval`'s own
+        // doc in `resolve.ts`); `startLot` holds them until every person
+        // command has resolved, then appends them to `done` after.
+        startLot(resolvedCommand.commands, {
+          runRemovals: expanded.runRemovals,
+          runTrims: expanded.runTrims,
+          absenceRecord: expanded.absenceRecord,
+          summary: expanded.summary,
+        });
+        return;
+      }
+      // DEF-0048: an absence that became ONE removal and records nothing says
+      // why after the removal's own readout (the summary's own words).
+      if (expanded.summary !== undefined) {
+        suffix = `${suffix ?? ""} ${renderReadout(expanded.summary)}`;
+      }
+      // `heldRef` keeps the ORIGINAL sentence's command (brief §2: "the one a
+      // re-parse after a button press must start from"), never the expanded
+      // form -- for an ordinary sentence the two are the SAME object
+      // (`expandCommand`'s own contract), so this is unchanged from before S55
+      // for every sentence that does not expand.
+      heldRef.current = command;
+      const resolution = resolveCommand(resolvedCommand, activeCtx, options);
+      if (resolution.ok) {
+        const resolved = resolution.resolved;
+        // F-164: every one of these may now ANSWER -- `written`, `refused:
+        // <message>` or `popup: <what it waits for>` -- and the trace records
+        // which. The pre-F-164 shape (the readout pushed straight into `ran`
+        // the instant the writer was called) is what let the maintainer's
+        // trace show "Sam Patel -> Housing A . Cell 3 . 08:00-12:00" under
+        // `ran` for a sentence the database never received a row for (F-165).
+        const readoutStatus: Status = {
+          kind: "readout",
+          message: renderReadout(resolved.readout) + (suffix ?? ""),
+        };
+        // F-167: built BEFORE the writer is called -- a pop-up that answers
+        // synchronously (a refusal it can see for itself) must have somewhere
+        // to answer INTO.
+        // S194-D third pass: the trace and the thread record the readout AS
+        // SPOKEN (every ISO day rendered) -- the lot path already did
+        // (DEF-0043 item 1); the single path handed the raw one on, so a
+        // single write's "Written:" line showed "2026-09-03".
+        const spoken = renderReadout(resolved.readout);
+        const report = popupReporterFor(traceRef.current, spoken);
+        let answer: WriteAnswer;
+        if (resolved.intent === "book") {
+          if (resolved.target.kind === "retime_run") {
+            answer = onRetimeRun(resolved, anchorOfInput(), report);
+          } else {
+            answer = onBook(resolved, anchorOfInput(), report);
+          }
+        } else if (resolved.intent === "unassign") {
+          answer = onUnassign(resolved, anchorOfInput(), report);
+        } else if (resolved.intent === "move") {
+          // S41-c: BOTH targets go through onMove -- the caller narrows on
+          // `resolved.target.kind` (keep the types honest: never build a
+          // ResolvedCommand-shaped call to reach onRetime from here).
+          answer = onMove(resolved, anchorOfInput(), report);
+        } else if (resolved.intent === "headcount") {
+          // S58 (R-415, D132 item 4): one existing write, never a create or a
+          // re-time -- see `onSetHeadcount`'s own doc above.
+          answer = onSetHeadcount(resolved, anchorOfInput(), report);
+        } else {
+          if (resolved.target.kind === "retime") {
+            answer = onRetime(resolved, anchorOfInput(), report);
+          } else {
+            answer = onOpen(resolved, anchorOfInput(), report);
+          }
+        }
+        // DEF-0046: the writer was called and did not itself throw -- from
+        // here on a crash names this readout as done, never "nothing
+        // changed" (see this function's own opening doc).
+        wrote = { readout: resolved.readout };
+        setStatus(readoutStatus);
+        // F-164: the entry is finished by `settleWrite` now, once (and only
+        // once) the writer has answered -- `resolved.readout` is the ONE
+        // command this run asked for (never the `+ suffix` UI annotation,
+        // which says WHY it was read, not what ran).
+        settleWrite(spoken, readoutStatus, answer);
+        return;
+      }
+      // `resolvedCommand`, not `command`: when `expandCommand` collapsed a
+      // board-answered sentence down to the ONE ordinary command it produced
+      // (brief §2: "a single: the existing path"), that is what was actually
+      // handed to `resolveCommand` and so what a candidate button must
+      // substitute a field into -- for an ordinary sentence the two are the
+      // same object, so this is unchanged from before S55 there.
+      const next = questionToStatus(resolution.question, resolvedCommand);
       setStatus(next);
       traceQuestionStatus(next);
-      return;
     }
-    const resolvedCommand = expanded.command;
-    if (resolvedCommand.intent === "several") {
-      // S70-d (R-436): `expanded.runRemovals` -- an `everyone` clear's own
-      // run removals, ALREADY resolved -- rides beside `resolvedCommand`
-      // rather than inside its `commands` (see `ResolvedRunRemoval`'s own
-      // doc in `resolve.ts`); `startLot` holds them until every person
-      // command has resolved, then appends them to `done` after.
-      startLot(resolvedCommand.commands, expanded.runRemovals);
-      return;
-    }
-    // `heldRef` keeps the ORIGINAL sentence's command (brief §2: "the one a
-    // re-parse after a button press must start from"), never the expanded
-    // form -- for an ordinary sentence the two are the SAME object
-    // (`expandCommand`'s own contract), so this is unchanged from before S55
-    // for every sentence that does not expand.
-    heldRef.current = command;
-    const resolution = resolveCommand(resolvedCommand, activeCtx, options);
-    if (resolution.ok) {
-      const resolved = resolution.resolved;
-      // F-164: every one of these may now ANSWER -- `written`, `refused:
-      // <message>` or `popup: <what it waits for>` -- and the trace records
-      // which. The pre-F-164 shape (the readout pushed straight into `ran`
-      // the instant the writer was called) is what let the maintainer's
-      // trace show "Sam Patel -> Housing A . Cell 3 . 08:00-12:00" under
-      // `ran` for a sentence the database never received a row for (F-165).
-      const readoutStatus: Status = {
-        kind: "readout",
-        message: renderReadout(resolved.readout) + (suffix ?? ""),
-      };
-      // F-167: built BEFORE the writer is called -- a pop-up that answers
-      // synchronously (a refusal it can see for itself) must have somewhere
-      // to answer INTO.
-      const report = popupReporterFor(traceRef.current, resolved.readout);
-      let answer: WriteAnswer;
-      if (resolved.intent === "book") {
-        if (resolved.target.kind === "retime_run") {
-          answer = onRetimeRun(resolved, anchorOfInput(), report);
-        } else {
-          answer = onBook(resolved, anchorOfInput(), report);
-        }
-      } else if (resolved.intent === "unassign") {
-        answer = onUnassign(resolved, anchorOfInput(), report);
-      } else if (resolved.intent === "move") {
-        // S41-c: BOTH targets go through onMove -- the caller narrows on
-        // `resolved.target.kind` (keep the types honest: never build a
-        // ResolvedCommand-shaped call to reach onRetime from here).
-        answer = onMove(resolved, anchorOfInput(), report);
-      } else if (resolved.intent === "headcount") {
-        // S58 (R-415, D132 item 4): one existing write, never a create or a
-        // re-time -- see `onSetHeadcount`'s own doc above.
-        answer = onSetHeadcount(resolved, anchorOfInput(), report);
-      } else {
-        if (resolved.target.kind === "retime") {
-          answer = onRetime(resolved, anchorOfInput(), report);
-        } else {
-          answer = onOpen(resolved, anchorOfInput(), report);
-        }
-      }
-      setStatus(readoutStatus);
-      // F-164: the entry is finished by `settleWrite` now, once (and only
-      // once) the writer has answered -- `resolved.readout` is the ONE
-      // command this run asked for (never the `+ suffix` UI annotation,
-      // which says WHY it was read, not what ran).
-      settleWrite(resolved.readout, readoutStatus, answer);
-      return;
-    }
-    // `resolvedCommand`, not `command`: when `expandCommand` collapsed a
-    // board-answered sentence down to the ONE ordinary command it produced
-    // (brief §2: "a single: the existing path"), that is what was actually
-    // handed to `resolveCommand` and so what a candidate button must
-    // substitute a field into -- for an ordinary sentence the two are the
-    // same object, so this is unchanged from before S55 there.
-    const next = questionToStatus(resolution.question, resolvedCommand);
-    setStatus(next);
-    traceQuestionStatus(next);
   }
 
   /** S51: starts a fresh lot from a several's inner commands and resolves
@@ -1888,10 +2045,37 @@ export function CommandBar({
    *  `expandEveryoneUnassign`'s own already-resolved run removals -- ride
    *  alongside `commands` and are appended to `done` once every one of
    *  `commands` has resolved (`resolveLotStep`'s own terminal branch),
-   *  never resolved themselves. */
-  function startLot(commands: SingleCommand[], runRemovals?: ResolvedRunRemoval[]): void {
-    lotRef.current = { commands, index: 0, done: [], runRemovals: runRemovals ?? [] };
-    resolveLotStep();
+   *  never resolved themselves.
+   *
+   *  DEF-0046, the bar's half: wrapped -- never writes anything itself
+   *  (only `resolveCommand`, pre-write), so a crash here is always
+   *  "nothing changed" (`reportBarCrash`'s own doc, below `runCandidateAction`). */
+  function startLot(
+    commands: SingleCommand[],
+    // DEF-0040 / DEF-0048 (S194-D): the steps the expansion built already
+    // resolved -- a clear's job trims and removals, an absence's record --
+    // and the absence sentence's own answer.
+    extras: {
+      runRemovals?: ResolvedRunRemoval[];
+      runTrims?: ResolvedRunTrim[];
+      absenceRecord?: ResolvedAbsenceRecord;
+      summary?: string;
+    } = {},
+  ): void {
+    try {
+      lotRef.current = {
+        commands,
+        index: 0,
+        done: [],
+        runRemovals: extras.runRemovals ?? [],
+        runTrims: extras.runTrims ?? [],
+        ...(extras.absenceRecord ? { absenceRecord: extras.absenceRecord } : {}),
+        ...(extras.summary !== undefined ? { summary: extras.summary } : {}),
+      };
+      resolveLotStep();
+    } catch (err) {
+      reportBarCrash(err, null);
+    }
   }
 
   /**
@@ -1902,8 +2086,25 @@ export function CommandBar({
    * "i of N: ..." with that question's own buttons and outline
    * (`questionToStatus`, unchanged); once every command has resolved, the
    * lot status is shown instead (brief §2 items 1-2).
+   *
+   * DEF-0046, the bar's half (28 Sept, tester): wrapped -- DEF-0046's own
+   * crash (`resolveMoveCommand` inside `resolveCommand`) reaches exactly
+   * here for a lot step, and this function recurses on its own name (a step
+   * that resolves calls itself for the next one), so wrapping its own body
+   * catches at whichever recursion depth actually threw, never a caller
+   * three steps back that has already moved on. Never writes anything
+   * itself (only `resolveCommand`, pre-write) -- a crash here is always
+   * "nothing changed" (`reportBarCrash`'s own doc, below `runCandidateAction`).
    */
   function resolveLotStep(): void {
+    try {
+      resolveLotStepBody();
+    } catch (err) {
+      reportBarCrash(err, null);
+    }
+  }
+
+  function resolveLotStepBody(): void {
     const lot = lotRef.current;
     if (!lot) return;
     if (lot.index >= lot.commands.length) {
@@ -1914,8 +2115,24 @@ export function CommandBar({
       // step, say -- never appends them twice). People first, jobs after:
       // brief §2, so a job's cascade delete never removes a block the lot
       // has already listed as its own earlier step.
-      if (lot.runRemovals && lot.runRemovals.length > 0) {
-        lotRef.current = { ...lot, done: [...lot.done, ...lot.runRemovals], runRemovals: [] };
+      // DEF-0040 / R-461 (S194-D): the job TRIMS first (the crew were trimmed
+      // or removed in the person steps just before them), then the job
+      // removals, then -- DEF-0048 -- the absence record, LAST, so nothing is
+      // recorded unless every block it was about went first. Each folded in
+      // ONCE and cleared, same as the removals always were.
+      const tail: ResolvedAny[] = [
+        ...(lot.runTrims ?? []),
+        ...(lot.runRemovals ?? []),
+        ...(lot.absenceRecord ? [lot.absenceRecord] : []),
+      ];
+      if (tail.length > 0) {
+        lotRef.current = {
+          ...lot,
+          done: [...lot.done, ...tail],
+          runRemovals: [],
+          runTrims: [],
+          absenceRecord: undefined,
+        };
       }
       showLotStatus();
       return;
@@ -1949,10 +2166,20 @@ export function CommandBar({
       // several the resolver refuses outright.
       if (resolution.resolved.intent === "headcount") {
         lotRef.current = null;
-        setStatus({
-          kind: "shape",
-          message: "I could not read that as more than one thing. Say them one at a time.",
-        });
+        const dropMessage = "I could not read that as more than one thing. Say them one at a time.";
+        // DEF-0049 (28 Sept, tester): this used to `setStatus` and return --
+        // a genuine terminal refusal that never touched the trace entry's
+        // `outcome` at all, so it read exactly like an open, unanswered
+        // question forever (R-434: every refusal is a trace entry, this one
+        // silently was not). Closed here the same way `refuseUngrounded`
+        // closes its own outright refusal.
+        if (traceRef.current) {
+          traceRef.current.asked = dropMessage;
+          traceRef.current.answered = "auto";
+          traceRef.current.outcome = `refused: ${dropMessage}`;
+        }
+        finishTrace();
+        setStatus({ kind: "shape", message: dropMessage });
         return;
       }
       lotRef.current = {
@@ -2008,7 +2235,12 @@ export function CommandBar({
     // S59-e (brief §3): a lot's own per-step question, numbered exactly as
     // shown -- the entry's single `asked` is the CURRENT question, same as
     // a single sentence's.
-    if (traceRef.current) traceRef.current.asked = next.message;
+    if (traceRef.current) {
+      setAsked(traceRef.current, next.message);
+      // DEF-0049: posted at the ask, same as `traceQuestionStatus`'s own
+      // branch -- see that function's doc.
+      postTrace(traceRef.current);
+    }
   }
 
   /**
@@ -2085,6 +2317,37 @@ export function CommandBar({
   }
 
   /**
+   * DEF-0043 item 3 (28 Sept, tester): "Those two lines (2 and 5) are about
+   * the same block; say them one at a time." answers a person who said ONE
+   * sentence -- there are no "lines" to point at (R-459: never an internal
+   * word/position no supervisor typed). Every lot today reaches
+   * `showLotStatus` from exactly one parsed sentence (`startLot`'s only
+   * caller is `runCommand`'s `intent === "several"` branch, itself only
+   * ever the expansion of ONE typed/spoken sentence -- there is no separate
+   * "typed list of several sentences" door in this file today); the brief's
+   * own allowance for keeping line numbers is for a door that does not
+   * exist yet, so this always uses the plain-sentence form. Names the block
+   * from the board's OWN facts (`ctx.assignments`/`ctx.operators`/
+   * `ctx.nodeById`), never a re-derivation of the readout's own words --
+   * falls back to "the same block" when the assignment or its operator/node
+   * cannot be found (a lot resolved against a since-stale ctx), which
+   * cannot happen in practice (the lot's own `done` was just resolved
+   * against this same ctx) but must never throw.
+   */
+  function describeDuplicateBlockRefusal(
+    done: readonly ResolvedAny[],
+    dup: [number, number],
+  ): string {
+    const id = namedAssignmentId(done[dup[0] - 1]);
+    const ctx = lastCtxRef.current;
+    const a = id !== null && ctx !== null ? ctx.assignments.find((x) => x.id === id) : undefined;
+    const person = a ? ctx?.operators.find((o) => o.id === a.operatorId)?.displayName : undefined;
+    const place = a ? ctx?.nodeById.get(a.nodeId)?.name : undefined;
+    const block = person && place ? `${person}'s block on ${place}` : "the same block";
+    return `I could not do that in one go: two of the changes are about ${block}. Say them one at a time.`;
+  }
+
+  /**
    * S51 (brief §2 item 2): every command has resolved -- show every readout
    * numbered, outline everything a removal or a move in the lot would
    * touch, and ask once. Only the universal confirm words confirm it
@@ -2103,10 +2366,25 @@ export function CommandBar({
     const dup = findDuplicateBlockPair(lot.done);
     if (dup) {
       lotRef.current = null;
-      setStatus({
-        kind: "shape",
-        message: `Those two lines (${dup[0]} and ${dup[1]}) are about the same block; say them one at a time.`,
-      });
+      const dupMessage = describeDuplicateBlockRefusal(lot.done, dup);
+      // DEF-0049 (28 Sept, tester): this used to `setStatus` and return with
+      // no trace bookkeeping at all -- a genuine terminal refusal (this lot
+      // never even reaches its own "Ready to do N things" question) that
+      // left the entry's `outcome` null forever, exactly the "moved-then-
+      // refused" shape of the same defect: "clear Line 1 for the rest of the
+      // week" moves the board, reruns, and the two-lines-collide refusal
+      // that followed was not in the entry either. Closed here the same way
+      // `refuseUngrounded` closes its own outright refusal (R-455: "the
+      // trace entry stays open across the move and the rerun's outcome
+      // closes it" -- this IS that rerun's own outcome, when the rerun
+      // lands on a lot).
+      if (traceRef.current) {
+        traceRef.current.asked = dupMessage;
+        traceRef.current.answered = "auto";
+        traceRef.current.outcome = `refused: ${dupMessage}`;
+      }
+      finishTrace();
+      setStatus({ kind: "shape", message: dupMessage });
       return;
     }
     const n = lot.done.length;
@@ -2135,13 +2413,20 @@ export function CommandBar({
     });
     // S59-e (brief §3): the lot's own single question, same as a per-step
     // one above.
-    if (traceRef.current) traceRef.current.asked = message;
+    if (traceRef.current) {
+      setAsked(traceRef.current, message);
+      // DEF-0049: posted at the ask -- see `traceQuestionStatus`'s own doc.
+      postTrace(traceRef.current);
+    }
   }
 
   /**
    * S51 (brief §2 item 3): the lot's single "yes" -- a busy status while
-   * `onRunLot` is in flight, then either "Done, N things." (input
-   * cleared) or "Did k of N things; the next failed: <error>" (input kept). The
+   * `onRunLot` is in flight, then either "Done, N things." (input cleared) or
+   * `buildLotOutcome`'s own SEPARATE-LINES failure sentence, "I made k of the
+   * N changes.\nDone: ...\nNot done: ...\nNot tried: ..." (input kept,
+   * DEF-0052 / R-432, 28 Sept -- replaces the old count-only "Did k of N
+   * things; the next failed: ..."). The
    * lot is dropped either way: a half-answered lot never lingers once its
    * one question has been answered.
    *
@@ -2160,6 +2445,80 @@ export function CommandBar({
    * this one settles -- the check is kept anyway, the same belt-and-braces
    * shape `readingSeqRef`/`recognitionSeqRef` already use elsewhere here.
    */
+  /**
+   * DEF-0052 / R-432 (restated 28 Sept by the maintainer, "SEPARATE LINES",
+   * `docs/plan.yaml`'s own R-432 note carries the exact layout she chose
+   * from two candidates): a lot's PARTIAL failure names every change, in
+   * three groups -- a person who never saw the app can tell from the answer
+   * alone what the board looks like now.
+   *
+   *   I made 1 of the 3 changes.
+   *   Done: Sam Patel is on Cell 2 today from 8 am to 4 pm.
+   *   Not done: Lena Novak on Cell 3. She is not certified for Welding,
+   *   which Cell 3 needs.
+   *   Not tried: Tom Baker stays on Cell 1.
+   *
+   * A clean sweep is unchanged: still the one plain sentence, "Done, N
+   * things." -- this shape is for the failure case only.
+   *
+   * DONE: each already-written change's own readout, `renderReadout`'d --
+   * the exact builder the success path and the question before it both use
+   * (DEF-0043 item 1: `runLotNow` used to push the RAW `r.readout` here and
+   * to the trace, `2026-10-12` and all, while the "Ready to do N things"
+   * question just before it rendered the same field through
+   * `renderReadout` -- same builder at both, now).
+   *
+   * NOT DONE: the refused change, named by its own `attempted` ("Lena
+   * Novak on Cell 3") -- S194-D: every resolved kind now carries `attempted`
+   * and `notTried` beside its `readout`, built by the resolver from the same
+   * facts (lane E's interim, which named the refused change by its READOUT
+   * and so said it happened, is gone) -- then the reason IN THE PLANT'S WORDS
+   * through `rewriteRefusal`, the one rewriter the single sentence uses too
+   * (R-449).
+   *
+   * NOT TRIED: every change after the refused one, each said as what stays
+   * (`notTried`: "Tom Baker stays on Cell 1.").
+   */
+  function buildLotOutcome(
+    n: number,
+    result: LotResult,
+    resolved: readonly ResolvedAny[],
+    summary?: string,
+  ): string {
+    // DEF-0048: an absence lot's clean sweep also says, in its own words,
+    // who is off and whether the absence is recorded.
+    if (result.error === null) {
+      return summary === undefined
+        ? `Done, ${n} things.`
+        : `Done, ${n} things. ${renderReadout(summary)}`;
+    }
+    const done = result.done;
+    const lines: string[] = [
+      `I made ${done === 0 ? "none" : done} of the ${n} ${n === 1 ? "change" : "changes"}.`,
+    ];
+    if (done > 0) {
+      const doneText = resolved
+        .slice(0, done)
+        .map((r) => renderReadout(r.readout))
+        .join(" ");
+      lines.push(`Done: ${doneText}`);
+    }
+    // S194-D (R-432 as the maintainer chose it, 28 Sept): the refused change
+    // is named by its OWN `attempted` -- who and where, never the readout,
+    // which said it happened -- and the reason in the plant's words through
+    // the one rewriter. Every change after it is said as what STAYS
+    // (`notTried`), each step's own sentence, built by the resolver.
+    const refused = resolved[done];
+    const reason = rewriteRefusal(result.error);
+    const notDoneText = refused ? `${renderReadout(refused.attempted)}. ${reason}` : reason;
+    lines.push(`Not done: ${notDoneText}`);
+    const notTried = resolved.slice(done + 1);
+    if (notTried.length > 0) {
+      lines.push(`Not tried: ${notTried.map((r) => renderReadout(r.notTried)).join(" ")}`);
+    }
+    return lines.join("\n");
+  }
+
   function runLotNow(): void {
     if (runningLotRef.current) return;
     const lot = lotRef.current;
@@ -2168,8 +2527,9 @@ export function CommandBar({
     const mySeq = ++lotRunSeqRef.current;
     const n = lot.done.length;
     const resolved = lot.done;
+    const summary = lot.summary;
     setStatus({ kind: "reading", message: "Working…" });
-    onRunLot(resolved).then((result) => {
+    const settle = (result: LotResult): void => {
       // A stale finish touches NOTHING -- not the flag, not the lot, not
       // the status -- exactly as if it had never arrived.
       if (lotRunSeqRef.current !== mySeq) return;
@@ -2180,9 +2540,13 @@ export function CommandBar({
       // clean sweep -- and the lot's run always ends the entry's life
       // either way (a busy "Working…" never itself opens a NEW entry, so
       // this is the same one the lot's own question set `asked` on).
+      // DEF-0043 item 1: `renderReadout`'d, same as the trace/thread do
+      // everywhere else a written readout is recorded.
       if (traceRef.current) {
         traceRef.current.ran.push(
-          ...resolved.slice(0, result.error === null ? n : result.done).map((r) => r.readout),
+          ...resolved
+            .slice(0, result.error === null ? n : result.done)
+            .map((r) => renderReadout(r.readout)),
         );
       }
       // F-164: the lot's own last word, recorded BEFORE the entry is
@@ -2191,37 +2555,7 @@ export function CommandBar({
       // four readouts and NOTHING said why the fourth stopped. `asked`
       // already holds the lot's "Ready to do N things" question, so the result
       // goes in `outcome` -- the same sentence the status line shows.
-      // CR-1 (reviewer fix, S63 review): `result.error` is "the same wording
-      // a toast would show" (`LotResult`'s own doc) -- the identical
-      // drag-borrowed capacity sentence `rewriteCapRefusal` exists to catch
-      // on the single-sentence path (brief §5) reaches the bar this way too,
-      // and was never rewritten here: a lot whose failing step was a
-      // capacity refusal showed "try the split again" verbatim, the same bug
-      // brief §5 named, just through the lot door instead of the single one.
-      const lotError = result.error === null ? null : rewriteCapRefusal(result.error);
-      // F-154 review fix: say what actually stood, never claim a revert
-      // that never happened -- the steps before the failure wrote for
-      // real and are still on the board, so they are named here.
-      // `result.error` no longer carries the drag's own "— reverted."
-      // wording at all (`useSchedulerToast.ts`'s own F-154 fix: that
-      // suffix is now appended only by a caller that genuinely reverted
-      // something, never baked into `buildSchedulerErrorToast`'s message
-      // itself), so this reads it verbatim -- nothing to strip here any
-      // more. CR-1: except the ONE shape `rewriteCapRefusal` rewrites
-      // (`lotError`, above) -- the bar has no split to offer here either.
-      const stayedReadouts = resolved.slice(0, result.done).map((r) => renderReadout(r.readout));
-      // R-459 (§0's own register): "Done, N things." on a clean sweep,
-      // "Nothing changed." never applies here (a lot's partial failure
-      // keeps what it already wrote, R-432's own "reverted" case is a
-      // different shape) -- what already ran is named, never claimed undone.
-      const stayed =
-        stayedReadouts.length > 0
-          ? ` What was already done stayed: ${stayedReadouts.join("; ")}.`
-          : "";
-      const lotOutcome =
-        lotError === null
-          ? `Done, ${n} things.`
-          : `Did ${result.done} of ${n} things; the next failed: ${lotError}${stayed}`;
+      const lotOutcome = buildLotOutcome(n, result, resolved, summary);
       if (traceRef.current) traceRef.current.outcome = lotOutcome;
       // CP-7 (session 178, found by the typed walk): the status is set
       // BEFORE the entry is finished, the same order `settleWrite` uses, so
@@ -2238,7 +2572,39 @@ export function CommandBar({
         setStatus({ kind: "shape", message: lotOutcome });
       }
       finishTrace();
-    });
+    };
+    // S194-D (lane E's open item): the runner's promise used to have no
+    // catch, so a REJECTION (a writer that threw past the runner's own
+    // try, a network fault in the runner itself) left "Working…" standing
+    // for ever with the trace entry open. Now: a rejection that still says
+    // how many were done (a `LotResult`-shaped value) is answered like any
+    // other partial failure, through `buildLotOutcome`; one that cannot say
+    // is `reportBarCrash`'s, which never claims nothing changed when that is
+    // not known. Traced either way (both close the entry with its outcome).
+    const fail = (err: unknown): void => {
+      if (lotRunSeqRef.current !== mySeq) return;
+      if (
+        typeof err === "object" &&
+        err !== null &&
+        typeof (err as { done?: unknown }).done === "number"
+      ) {
+        const e = err as { done: number; error?: unknown };
+        settle({
+          done: e.done,
+          error: typeof e.error === "string" && e.error !== "" ? e.error : "Something went wrong.",
+        });
+        return;
+      }
+      reportBarCrash(err, null, "lot");
+    };
+    let answer: Promise<LotResult>;
+    try {
+      answer = onRunLot(resolved);
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    answer.then(settle, fail);
   }
 
   /** R-459 (the maintainer, 24 Sept, this lane's decision on the wording
@@ -2375,6 +2741,20 @@ export function CommandBar({
     heldRef.current = null;
   }
 
+  // DEF-0043 item 2 (28 Sept, tester): `spokenCommand` (`@/lib/voice/
+  // verbGuess`, imported above) strips the quotes `formatCommand`'s own
+  // `quoteIfNeeded` puts around the reserved word "everyone" -- needed only
+  // for a round trip back through `parseCommand`, which `askUngrounded`/
+  // `askDayDropped` (just below) never do (their candidate reruns the
+  // COMMAND OBJECT). See that function's own doc for the full reasoning;
+  // shared with `verbGuess.ts`'s own candidate labels rather than a second,
+  // hand-synced copy (CLAUDE.md §4). The trace's own `read` field keeps
+  // `formatCommand`'s raw, quoted form unchanged (R-459: "the trace keeps
+  // its own compact form; this rule is about the thread"). Untouched:
+  // `pickCandidate`/`pickPartAsPlace`/`pickPlaceParent` (below), whose
+  // rendered text IS fed back into `parseCommand`, so the quoting there
+  // still matters.
+
   /**
    * S71-m (F-212, R-435): a single ungrounded reading is ASKED, never run
    * -- one candidate button, the model's own readout (`formatCommand`) as
@@ -2389,12 +2769,15 @@ export function CommandBar({
    */
   function askUngrounded(sentence: string, command: Command): void {
     const readout = formatCommand(command);
-    const message = `I heard "${sentence}". Did you mean: ${readout}?`;
+    // DEF-0043 item 2: the trace keeps `readout` (raw, quoted) below; the
+    // thread shows the spoken form (no quotes around "everyone").
+    const spoken = spokenCommand(command);
+    const message = `I heard "${sentence}". Did you mean: ${spoken}?`;
     const next: Status = {
       kind: "question",
       message,
       candidates: [
-        { key: "run_ungrounded", label: readout, action: { kind: "run_ungrounded", command } },
+        { key: "run_ungrounded", label: spoken, action: { kind: "run_ungrounded", command } },
       ],
     };
     if (traceRef.current) traceRef.current.read = readout;
@@ -2423,11 +2806,14 @@ export function CommandBar({
     const next: Status = reparsed.ok
       ? {
           kind: "question",
-          message: `${prefix} Did you mean: ${formatCommand(reparsed.command)}?`,
+          // DEF-0043 item 2: display-only, spoken form -- see `spokenCommand`'s
+          // own doc. `reparsed.command` is never re-parsed from this text (the
+          // candidate reruns the object directly), so quoting buys nothing here.
+          message: `${prefix} Did you mean: ${spokenCommand(reparsed.command)}?`,
           candidates: [
             {
               key: "run_ungrounded",
-              label: formatCommand(reparsed.command),
+              label: spokenCommand(reparsed.command),
               action: { kind: "run_ungrounded", command: reparsed.command },
             },
           ],
@@ -2805,6 +3191,42 @@ export function CommandBar({
         ...(!question.inLot ? { awaitingAreaReason: true } : {}),
       };
     }
+    // DEF-0040 / R-461 (S194-D): the night shift question -- Yes and No, one
+    // pair of the same width (R-447, `yesNo`), each carrying the answers
+    // already given to this sentence so the second question never loses the
+    // first's (`answer_other_day_part`).
+    if (question.kind === "other_day_part") {
+      const options: ResolveOptions = { ...heldOptionsRef.current };
+      return {
+        kind: "question",
+        message,
+        candidates: question.answers.map((a) => ({
+          key: a.id,
+          label: a.label,
+          action: {
+            kind: "answer_other_day_part",
+            command,
+            direction: question.direction,
+            answer: a.id === "clear" ? "clear" : "keep",
+            options,
+          },
+        })),
+        yesNo: true,
+      };
+    }
+    // R-430 (S194-D third pass): a window inside a job -- the windows that
+    // would work, as buttons (traced as any pick is).
+    if (question.kind === "job_hole") {
+      return {
+        kind: "question",
+        message,
+        candidates: question.spans.map((s) => ({
+          key: s.label,
+          label: s.label,
+          action: { kind: "pick_span", command, span: { start: s.start, end: s.end } },
+        })),
+      };
+    }
     if (question.kind === "ambiguous") {
       const field = question.field;
       const text = question.text;
@@ -2967,6 +3389,91 @@ export function CommandBar({
             action: { kind: "pick_candidate", command, field, candidate: c, text },
           })),
         };
+      }
+      // DEF-0051 / R-430 (28 Sept, tester): a dead end offers the nearest
+      // choices -- "No cell called ... on this board." with NO buttons was
+      // exactly that dead end for Ana, typing "clear Cell 3 today": Cell 3
+      // is a real cell in the plant, one line over, so `resolve.ts`'s own
+      // nearest-match suggestions (computed against HER ctx, which never
+      // heard of it) come back empty -- a name that exists is not the same
+      // as a name that is CLOSE, and only the second gets a suggestion from
+      // the server today. The fix is client-only, on purpose: the bar must
+      // not say WHERE Cell 3 really is (a line supervisor cannot read a
+      // place above her own grant, CLAUDE.md §4's "resolved by the server
+      // as a definer" standard applied to a REFUSAL's wording, not only a
+      // write) and must not learn it either -- so this never asks the
+      // server again or inspects the question for a hint. It offers her OWN
+      // board's cells instead (`ctx.cells`, already on the client for the
+      // toolbar), exactly the choices `resolveCellStep` would have let her
+      // pick from if she had typed a cell already on her board -- the
+      // "nearest" a client that cannot see past her grant can honestly
+      // offer. Only for `field === "place"`: a person/part with no
+      // suggestions keeps its own plain fallback just above, unchanged
+      // (not this defect's own reproduction; a candidate list this wide for
+      // every person or part in the plant is a different, unverified
+      // question this lane did not test).
+      if (question.field === "place") {
+        const ctx = lastCtxRef.current;
+        const cells = ctx?.cells ?? [];
+        if (cells.length > 0) {
+          const text = question.text;
+          return {
+            kind: "question",
+            message: `No cell called "${text}" on your board. Did you mean one of these?`,
+            candidates: cells.map((cell) => ({
+              key: cell.id,
+              label: cell.name,
+              action: {
+                kind: "pick_candidate",
+                command,
+                field: "place",
+                candidate: { id: cell.id, label: cell.name, word: cell.name },
+                text,
+              },
+            })),
+          };
+        }
+      }
+      // S194-D (R-430 for a person, the open item lane E left): a person the
+      // resolver found no near name for is the same dead end DEF-0051 was for
+      // a place. Offered here: the people the caller's OWN board already holds
+      // (`ctx.operators`, active only -- the create pop-up's own pool), in
+      // the board's order, capped at eight the way the resolver caps a place
+      // or part list, with "and more" past it -- never a guess at who was
+      // meant, never a name from outside what she can see.
+      //
+      // NOT for a part, on purpose: `resolvePartStep` answers a part with no
+      // near name by offering what the resolved CELL makes (R-422) -- it
+      // reaches this no-suggestions shape only when that cell makes nothing
+      // at all, and then every part on the board would be refused there
+      // (`not_offered`). Offering them would break R-431 to satisfy R-430.
+      if (question.field === "operator") {
+        const ctx = lastCtxRef.current;
+        const pool = (ctx?.operators ?? [])
+          .filter((o) => o.active)
+          .map((o) => ({ id: o.id, name: o.displayName }));
+        if (pool.length > 0) {
+          const text = question.text;
+          const field = question.field;
+          const noun = "person";
+          const shown = pool.slice(0, UNKNOWN_FALLBACK_CAP);
+          const tail = pool.length > UNKNOWN_FALLBACK_CAP ? ` … and more — say the ${noun}.` : "";
+          return {
+            kind: "question",
+            message: `No ${noun} called "${text}" on your board. Did you mean one of these?${tail}`,
+            candidates: shown.map((it) => ({
+              key: it.id,
+              label: it.name,
+              action: {
+                kind: "pick_candidate",
+                command,
+                field,
+                candidate: { id: it.id, label: it.name, word: it.name },
+                text,
+              },
+            })),
+          };
+        }
       }
       return { kind: "question", message, candidates: [] };
     }
@@ -3212,7 +3719,34 @@ export function CommandBar({
    * reopens; this is the CURRENTLY MOUNTED bar turning one of them into the
    * same call the old inline `onClick` closure made.
    */
+  /**
+   * DEF-0046, the bar's half (28 Sept, tester): "extend everyone on Cell 1
+   * by 30 minutes" -- typed, or the same reading offered as a button after a
+   * garbled model transcript -- throws inside `resolveMoveCommand`
+   * (`resolve.ts`), reached from here through `pick_candidate`'s/
+   * `run_ungrounded`'s own call into `pickCandidate`/`runCommand`. Before
+   * this, the throw reached `onClick` uncaught: nothing in the console but
+   * the browser's own unhandled-rejection style report, the question and its
+   * buttons frozen exactly as they were (React never re-rendered past the
+   * throw), no trace entry at all (R-434's own rule broken a fourth way,
+   * beside the three DEF-0049 lists). `runCommand`/`resolveLotStep`/
+   * `startLot` each already catch at their own body (their own doc,
+   * `reportBarCrash`'s doc, right below) -- most of this switch's own cases
+   * end up back in one of those (`pick_candidate` -> `pickCandidate` ->
+   * `runCommand`, `run_lot` -> `runLotNow`, and so on) and are covered
+   * there; this wraps the switch itself too, the backstop for a throw in a
+   * `pick*` helper's OWN code before it ever reaches one of the three
+   * (building the substituted command, say), or in the dispatch here.
+   */
   function runCandidateAction(action: CandidateAction): void {
+    try {
+      runCandidateActionBody(action);
+    } catch (err) {
+      reportBarCrash(err, null);
+    }
+  }
+
+  function runCandidateActionBody(action: CandidateAction): void {
     switch (action.kind) {
       case "pick_candidate":
         pickCandidate(action.command, action.field, action.candidate, action.text);
@@ -3248,7 +3782,99 @@ export function CommandBar({
       case "run_lot":
         runLotNow();
         return;
+      case "pick_span": {
+        // R-430 (S194-D third pass): the same sentence with the offered span,
+        // printed and re-read like every other pick, so the bubble and the
+        // trace say what was actually run.
+        const next = { ...(action.command as UnassignCommand), span: action.span };
+        const rendered = formatCommand(next);
+        store.getState().set({ sentence: rendered, text: "" });
+        const parsed = parseCommand(rendered);
+        if (!parsed.ok) {
+          if (traceRef.current) traceRef.current.read = parsed.failure.kind;
+          const status = failureToStatus(parsed.failure);
+          setStatus(status);
+          traceQuestionStatus(status);
+          return;
+        }
+        runCommand(parsed.command, undefined, { ...heldOptionsRef.current });
+        return;
+      }
+      case "answer_other_day_part": {
+        // DEF-0040 / R-461 (S194-D): the Yes or No of a night shift question.
+        // The entry already holds this ask and this answer (the button's
+        // onClick, or the typed yes/no) -- carried so a SECOND question
+        // lands after them in the same entry (R-434), never over them.
+        const entry = traceRef.current;
+        if (entry) {
+          store.getState().set({
+            traceCarry: { asked: entry.asked ?? "", answered: entry.answered ?? "" },
+          });
+        }
+        const next: ResolveOptions = {
+          ...action.options,
+          ...(action.direction === "previous"
+            ? { previousDayPart: action.answer }
+            : { nextDayPart: action.answer }),
+        };
+        runCommand(action.command, undefined, next);
+        return;
+      }
     }
+  }
+
+  /**
+   * DEF-0046, the bar's half (28 Sept, tester): the one place `runCommand`/
+   * `resolveLotStep`/`startLot`/`runCandidateAction` each land on a throw --
+   * never a second, hand-written copy of "what does a crash say" per
+   * function (R-449/CLAUDE.md §4). `wrote`, when given, is the one readout
+   * a caller already confirmed a writer prop was called for before the
+   * throw (see `runCommand`'s own doc) -- there is no real multi-item LOT
+   * write in scope for any of these four (a lot's own writes happen only
+   * inside `runLotNow`, which is not one of them; see this function's own
+   * report note), so this never builds `buildLotOutcome`'s fuller shape,
+   * only its same Done/Not-done vocabulary for the ONE thing that may have
+   * happened.
+   *
+   * R-434: recorded as a trace entry with its outcome, through the SAME
+   * `refused: <message>` shape every other refusal already uses
+   * (`turnResultLine` renders it "Not done: <message>", R-459's own prefix,
+   * never a second rendering rule for a fourth outcome kind). The question
+   * and its buttons never stay frozen: `lotRef.current` is dropped and a
+   * fresh `status` replaces whatever stood, the same as `cancelStanding`'s
+   * own "Left it." floor.
+   */
+  function reportBarCrash(
+    err: unknown,
+    wrote: { readout: string } | null,
+    // S194-D: "lot" -- the lot's own runner rejected without saying how many
+    // of its changes it made, so this cannot claim nothing changed.
+    during?: "lot",
+  ): void {
+    const detail = err instanceof Error ? err.message : String(err);
+    const message =
+      during === "lot"
+        ? "Something went wrong while making the changes; some may have been made. Check the board before saying it again."
+        : wrote
+          ? `${renderReadout(wrote.readout)} Something went wrong after that; check the board before saying it again.`
+          : "Something went wrong and nothing was changed. Say it again.";
+    if (traceRef.current) {
+      if (traceRef.current.answered === null) traceRef.current.answered = "auto";
+      traceRef.current.outcome = `refused: ${message}`;
+      finishTrace();
+    } else {
+      // R-434: no entry was open (belt and braces -- every real caller here
+      // starts one before it can reach a `resolve.ts` call at all) -- filed
+      // as its own standalone turn rather than the fault going unrecorded.
+      fileStandaloneTurn(message, "typed", `refused: ${message}`);
+    }
+    lotRef.current = null;
+    runningLotRef.current = false;
+    setStatus({ kind: "shape", message });
+    setText("");
+    heldRef.current = null;
+    heldOptionsRef.current = {};
+    console.error("CommandBar: caught while resolving/running a command:", detail, err);
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>): void {
@@ -3526,7 +4152,7 @@ export function CommandBar({
       // own three life-end triggers) and runs the parsed command as usual,
       // exactly as if no question had stood at all.
       if (!parseCommand(value).ok) {
-        if (traceRef.current) traceRef.current.answered = value;
+        if (traceRef.current) setAnswered(traceRef.current, value);
         const command = heldRef.current;
         if (command === null) {
           // Belt and braces: `heldRef` is always set the moment this
@@ -3564,6 +4190,33 @@ export function CommandBar({
         return;
       }
     }
+    // DEF-0040 / R-461 (S194-D): a night shift question is answered by a
+    // bare yes or no -- "no" here is the answer No (keep the other day's
+    // part), never the cancel it is at every other question; the other
+    // cancel words still drop the sentence. Pressed through the buttons' own
+    // actions, so a typed answer and a click are one path.
+    if (status?.kind === "question" && status.yesNo && (isConfirmCandidate || isCancel)) {
+      const yes = status.candidates.find((c) => c.key === "clear");
+      const no = status.candidates.find((c) => c.key === "keep");
+      if (UNIVERSAL_CONFIRM_WORDS.has(normalized) && yes) {
+        if (traceRef.current) setAnswered(traceRef.current, yes.label);
+        setText("");
+        runCandidateAction(yes.action);
+        return;
+      }
+      if (normalized === "no" && no) {
+        if (traceRef.current) setAnswered(traceRef.current, no.label);
+        setText("");
+        runCandidateAction(no.action);
+        return;
+      }
+      if (isCancel) {
+        cancelStanding(value);
+        return;
+      }
+      setStatus({ ...status, message: "Say yes or no." });
+      return;
+    }
     if (isConfirmCandidate || isCancel) {
       // S51 (brief §2 item 2): the LOT's own finished status, checked BEFORE
       // the generic block-question branch below (its `blockHighlight` is a
@@ -3580,7 +4233,7 @@ export function CommandBar({
           return;
         }
         if (UNIVERSAL_CONFIRM_WORDS.has(normalized)) {
-          if (traceRef.current) traceRef.current.answered = value;
+          if (traceRef.current) setAnswered(traceRef.current, value);
           runLotNow();
           return;
         }
@@ -3603,7 +4256,7 @@ export function CommandBar({
             // candidates' own `onClick` wrapper below), set here since this
             // calls the candidate's `onClick` directly rather than through
             // that wrapper.
-            if (traceRef.current) traceRef.current.answered = value;
+            if (traceRef.current) setAnswered(traceRef.current, value);
             runCandidateAction(status.candidates[0].action);
           } else {
             // Several candidates: a bare confirm is ambiguous (brief §2
@@ -3733,7 +4386,7 @@ export function CommandBar({
       // own one-button question (`isYesShapedQuestion`, above). Pressing it
       // is the same call the button's own `onClick` makes.
       if (isConfirmCandidate && isYesShapedQuestion(status)) {
-        if (traceRef.current) traceRef.current.answered = value;
+        if (traceRef.current) setAnswered(traceRef.current, value);
         runCandidateAction(status.candidates[0].action);
         return;
       }
@@ -3751,7 +4404,7 @@ export function CommandBar({
     if (status?.kind === "question" && answerTakes(status) !== null) {
       const picked = status.candidates.find((c) => normalizeWord(c.label) === normalized);
       if (picked) {
-        if (traceRef.current) traceRef.current.answered = picked.label;
+        if (traceRef.current) setAnswered(traceRef.current, picked.label);
         runCandidateAction(picked.action);
         return;
       }
@@ -4294,7 +4947,13 @@ export function CommandBar({
                     {status.message}
                   </p>
                   {status.kind === "question" && status.candidates.length > 0 && (
-                    <div className={styles.candidates}>
+                    <div
+                      className={
+                        status.yesNo
+                          ? `${styles.candidates} ${styles.answerPair}`
+                          : styles.candidates
+                      }
+                    >
                       {status.candidates.map((c) => (
                         <button
                           key={c.key}
@@ -4308,7 +4967,7 @@ export function CommandBar({
                             // "Show that day", the lot's own "Do all N", ...),
                             // rather than threading this through every action
                             // built in `questionToStatus` above.
-                            if (traceRef.current) traceRef.current.answered = c.label;
+                            if (traceRef.current) setAnswered(traceRef.current, c.label);
                             runCandidateAction(c.action);
                           }}
                         >

@@ -57,8 +57,12 @@ export interface TraceEntry {
    *
    * Written by `CommandBar.tsx` in the four words the writers answer in:
    * `"written"`, `"refused: <message>"`, `"popup: <what it waits for>"`, and
-   * a lot's own finished sentence (`"Done: N commands."` / `"Did k of N; the
-   * next failed: ..."`). `ran` now carries ONLY the readouts a writer
+   * a lot's own finished sentence (`"Done, N things."` on a clean sweep;
+   * DEF-0052 / R-432, 28 Sept: `buildLotOutcome`'s SEPARATE-LINES sentence,
+   * "I made k of the N changes.\nDone: ...\nNot done: ...\nNot tried: ...",
+   * on a partial failure -- replaces the old count-only "Did k of N; the
+   * next failed: ..." this doc used to name here). `ran` now carries ONLY
+   * the readouts a writer
    * actually confirmed.
    */
   outcome: string | null;

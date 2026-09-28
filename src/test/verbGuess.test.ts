@@ -190,6 +190,33 @@ describe("guessVerbs: the edge cases the brief names", () => {
     expect(guessVerbs("take Sam off Cell 1", VERBS)).toEqual([]);
     expect(guessVerbs("Sam is off today", VERBS)).toEqual([]);
   });
+
+  /**
+   * DEF-0044 item 1 (28 Sept, tester): "at most three" (R-456) has no
+   * fixture that actually produces a FOURTH sound-alike candidate that would
+   * survive `guessVerbs`' own parse-ok filter -- so the cap
+   * (`computeVerbGuess`'s `if (built.length >= 3) break;`) could be deleted
+   * (or raised, as this defect's own mutation does) and every existing case
+   * would still pass. "putn" sits at Levenshtein distance 1 from "put"
+   * (ASSIGN_VERBS) and distance 2 from "run"/"plan" (BOOK_VERBS) and "pull"
+   * (UNASSIGN_VERBS) -- four DIFFERENT verbs, all within this heard word's
+   * own threshold (`w1.length <= 3 ? 1 : 2`, "putn" is 4 letters so 2), and
+   * every one of the four candidate sentences this rest produces actually
+   * parses (confirmed directly: `parseCommand("put Tom Baker to Cell 3
+   * from 8 a.m. to 12 p.m. today.")`, `"run ..."`, `"plan ..."`, `"pull
+   * ..."` are all `{ ok: true }`) -- so without the cap, `guessVerbs` would
+   * return FOUR candidates in this declared order (put dist 1, then run,
+   * plan, pull tied at dist 2, `allVerbWords`' own iteration order for
+   * ties: book before unassign). The cap trims "pull" -- this pin asserts
+   * exactly that trim, by name, so DEF-0044's `>= 30` mutation goes red here.
+   */
+  it("VG-16 (DEF-0044 item 1): the sound-alike cap trims a real fourth candidate ('pull', UNASSIGN_VERBS) that would otherwise survive", () => {
+    const heard = "putn Tom Baker to Cell 3 from 8 a.m. to 12 p.m. today.";
+    const guesses = guessVerbs(heard, VERBS);
+    expect(guesses.map((g) => g.verb)).toEqual(["put", "run", "plan"]);
+    expect(guesses).toHaveLength(3);
+    expect(guesses.some((g) => g.verb === "pull")).toBe(false);
+  });
 });
 
 describe("guessVerbs: every VERB_CONFUSIONS entry, table-driven (a future addition is one line)", () => {

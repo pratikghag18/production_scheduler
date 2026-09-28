@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HierarchyLevel, ShiftTemplate } from "@/lib/api";
-import { describeSchedulerError, isSchedulerError } from "@/lib/api";
+import {
+  describeSchedulerError,
+  isSchedulerError,
+  fetchRecordableAbsencePeople,
+  type SchedulerError,
+} from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { absenceKeys as adminAbsenceKeys } from "@/features/admin/components/AbsencesImport";
 import { DevProfileSwitcher } from "@/features/auth/DevProfileSwitcher";
 import { useSession } from "@/features/auth/useSession";
 import { canQueryAsUser } from "@/features/auth/session";
@@ -323,6 +330,18 @@ export default function BoardPage() {
   // rows the server would. Gated identically to the board read.
   const absencesQuery = useAbsences(canQuery && rootPath !== null);
   const absences = useMemo<AbsenceRow[]>(() => absencesQuery.data ?? [], [absencesQuery.data]);
+  // DEF-0048 / R-409 / R-431 (S194-D): the people this caller may record an
+  // absence for, BY THE SERVER'S OWN ANSWER -- the SAME read and the SAME
+  // query key the Absences screens use (`AbsencesPanel.tsx`), so one cache
+  // serves all three. The command bar's absence sentence offers the record
+  // only when this has an answer; while it is loading or has failed, the set
+  // handed to the bar is `undefined` (unknown), and the bar records nothing
+  // and says so.
+  const recordableQuery = useQuery<string[], SchedulerError>({
+    queryKey: [...adminAbsenceKeys.all, "recordable"],
+    queryFn: fetchRecordableAbsencePeople,
+    enabled: canQuery && rootPath !== null,
+  });
 
   // T4: spinner only on "pending" with no cached data; keep rendering
   // stale data during a background refetch (isFetching), with a subtle
@@ -802,8 +821,35 @@ export default function BoardPage() {
       // never a reason for the bar to unmount or go null (R-424): the ctx
       // still carries a full, if stale, board.
       settled: !boardQuery.isPlaceholderData,
+      // DEF-0048 / R-431 (S194-D): known only once BOTH reads have answered --
+      // the server's recordable set, and the absences already there (for the
+      // overlap check below); either missing is "unknown", never a guess.
+      absenceRecordable:
+        recordableQuery.data !== undefined && absencesQuery.isSuccess
+          ? new Set(recordableQuery.data)
+          : undefined,
+      // The server's own rule, transcribed (`absences_whole_day_excl`,
+      // migration 0069): a whole-day absence is refused when ANY whole-day
+      // absence of the same person overlaps its days at all. A part-day row
+      // (`startsAt` set) never collides with a whole-day one.
+      hasWholeDayAbsence: (operatorId: string, fromIso: string, toIso: string) =>
+        (absencesQuery.data ?? []).some(
+          (a) =>
+            a.operatorId === operatorId &&
+            a.startsAt === undefined &&
+            a.from <= toIso &&
+            a.to >= fromIso,
+        ),
     };
-  }, [boardQuery.data, boardQuery.isPlaceholderData, index, operatorPool]);
+  }, [
+    boardQuery.data,
+    boardQuery.isPlaceholderData,
+    index,
+    operatorPool,
+    recordableQuery.data,
+    absencesQuery.data,
+    absencesQuery.isSuccess,
+  ]);
 
   /**
    * S59-c (brief §3, design-plan §19.104 / D133 item 4): the same four
@@ -1468,6 +1514,12 @@ export default function BoardPage() {
           nodeId={popover.nodeId}
           anchor={popover.anchor}
           initialRange={popover.range}
+          /* DEF-0038 / R-426: the plant's own zone, the same one the axis
+             behind this pop-up and every other pop-up this page mounts
+             already read (~l.1111, ~l.1377, ~l.1520, ~l.1609) -- left off
+             here, the chips and the "Planned headcount" line fell back to
+             CreatePopover's own UTC default. */
+          zone={zone}
           shiftChips={popover.shiftChips}
           defaultCreateMode={defaultCreateMode}
           products={offeredProducts}

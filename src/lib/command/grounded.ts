@@ -117,15 +117,186 @@ function isSingleKey(intent: string): intent is SingleKey {
   return (SINGLE_KEYS as readonly string[]).includes(intent);
 }
 
+/** DEF-0041 (28 Sept, tester) first fixed this by splitting the unassign
+ *  words into strong and everyday ones; the reviewer (S194-D) showed a strong
+ *  word alone and an everyday word beside "everyone"/"board" anywhere both
+ *  still grounded ordinary speech. THE RULE below replaces that split. */
+/** R-407's reserved operator word ("clear the whole board" parses with
+ *  `operator: "everyone"`) -- hardcoded, not imported: this file's purity
+ *  rule (header doc) forbids a runtime import of `parse.ts`'s own `EVERYONE`
+ *  export, the same reason `GROUNDING_VERBS` (`CommandBar.tsx`) hands the
+ *  verb lists in rather than this file importing them. */
+const SWEEPING_OPERATOR = "everyone";
+
+/** DEF-0041: a removal with no named person AND no named place -- "clear
+ *  everyone", "clear the board", the F-215/GR-1 shape (`unassignCmd()`'s own
+ *  default). Anything else (a named person, or a place the sentence
+ *  narrowed the removal to) is a NARROW removal and keeps today's looser
+ *  rule -- see `EVERYDAY_UNASSIGN_WORDS`' own doc above. */
+function isSweepingUnassign(command: { operator: string; place: string[] }): boolean {
+  return command.operator.trim().toLowerCase() === SWEEPING_OPERATOR && command.place.length === 0;
+}
+
+/**
+ * DEF-0041 / F-215, S194-D third pass (the main session's rule, in the safe
+ * direction): THE RULE. A sweeping clear read by the model (no named person,
+ * no named place -- one press from emptying the whole board) is grounded ONLY
+ * when the heard text holds a REMOVAL PHRASE: a removal word BOUND to a word
+ * for everyone or the board, never merely both present somewhere. Three
+ * shapes, and nothing else: (1) a removal verb with "everyone"/"everybody"
+ * starting within the next three words ("clear everyone", "remove
+ * everybody"), or with "the board"/"the whole board" DIRECTLY after it
+ * ("clear the board", "wipe the board", "empty the board"); (2) a verb that
+ * needs its particle, with "everyone"/"everybody" directly after it and the
+ * particle directly after that ("take everyone off", "get everyone off",
+ * "pull everyone off", "send everyone home"); (3) "everyone"/"everybody"
+ * directly followed by "out"/"off" ("everybody out", "everyone off") -- a
+ * word between them ("everyone IS out to lunch") makes it a statement about
+ * people, not an order, so it does not count. Each phrase must also END its
+ * clause: after it may come only the end of the sentence or a comma, "the
+ * board" ("take everyone off the board", "remove everyone from the board"),
+ * or a word that only says when ("today", "Monday"); "the board ROOM bins",
+ * "everyone off TO the canteen", "remove everyone FROM THE GROUP CHAT" are
+ * about something else. A possessive ("everyone's plates") is never the
+ * object, and no phrase reaches across a comma. A bare strong word ("clear
+ * skies today", "cancel my lunch") no longer grounds, nor does an everyday
+ * word beside a pairing word anywhere ("the board meeting is off"). Refusing
+ * more is the safe side: a refusal only asks the person to say it again.
+ * The narrow cases (a named person or place) keep the older rule unchanged.
+ * Data below, one small matcher (`hasRemovalPhrase`).
+ */
+const SWEEP_PEOPLE = ["everyone", "everybody"];
+/** Shape (1): a removal verb, then a people word within this many words. */
+const SWEEP_VERB_REACH = 3;
+const SWEEP_VERBS = ["clear", "remove", "unassign", "empty", "wipe", "delete"];
+/** Shape (1), the board: only these word sequences, directly after the verb. */
+const SWEEP_BOARD_OBJECTS = [
+  ["the", "board"],
+  ["the", "whole", "board"],
+];
+/** Shape (2): verb, then a people word, then its particle, each adjacent. */
+const SWEEP_PARTICLE_VERBS: ReadonlyArray<{ verb: string; particles: string[] }> = [
+  { verb: "take", particles: ["off", "out", "away"] },
+  { verb: "get", particles: ["off", "out"] },
+  { verb: "pull", particles: ["off", "out"] },
+  { verb: "send", particles: ["home"] },
+];
+/** Shape (3): a people word directly followed by one of these. */
+const SWEEP_ORDER_PARTICLES = ["out", "off"];
+/** What may FOLLOW a board object (shape 1), a particle (shape 2) or an
+ *  order (shape 3) for the phrase to still be the whole order: the end of
+ *  the clause, "the board" itself ("take everyone off the board"), or a
+ *  word that only says WHEN. Anything else ("the board ROOM bins", "out
+ *  FOR pizza", "off TO the canteen") makes it about something other than
+ *  the board. A people word followed by "s" is a possessive ("everyone's
+ *  old messages"), never the object. A comma, full stop or other clause
+ *  mark is a break the phrase may not reach across. */
+const SWEEP_TAIL_WORDS = [
+  "today",
+  "tomorrow",
+  "tonight",
+  "now",
+  "please",
+  "early",
+  "this",
+  "next",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+const BREAK = "|";
+
+function startsWithAt(tokens: readonly string[], at: number, seq: readonly string[]): boolean {
+  return seq.every((w, k) => tokens[at + k] === w);
+}
+
+/** True when the words from `at` on end the clause or only say when. */
+function endsClause(t: readonly string[], at: number): boolean {
+  const next = t[at];
+  if (next === undefined || next === BREAK || SWEEP_TAIL_WORDS.includes(next)) return true;
+  if (startsWithAt(t, at, ["the", "board"])) return endsClause(t, at + 2);
+  for (const lead of ["of", "from", "off"]) {
+    if (startsWithAt(t, at, [lead, "the", "board"])) return endsClause(t, at + 3);
+  }
+  return false;
+}
+
+/** The heard text as words, clause marks kept as a break token. */
+function sweepTokens(heard: string): string[] {
+  return heard
+    .toLowerCase()
+    .replace(/[.,;:!?]+/g, ` ${BREAK} `)
+    .replace(/[^a-z0-9|]+/g, " ")
+    .trim()
+    .split(/\s+/);
+}
+
+function isPeople(t: readonly string[], at: number): boolean {
+  return SWEEP_PEOPLE.includes(t[at]) && t[at + 1] !== "s";
+}
+
+/** The one matcher for the three shapes of THE RULE, over whole words. */
+function hasRemovalPhrase(heard: string): boolean {
+  const t = sweepTokens(heard);
+  for (let i = 0; i < t.length; i++) {
+    const w = t[i];
+    if (SWEEP_VERBS.includes(w)) {
+      for (let k = 1; k <= SWEEP_VERB_REACH && t[i + k] !== BREAK; k++) {
+        if (!isPeople(t, i + k)) continue;
+        // "clear everyone", "clear everyone out", "remove everyone from the
+        // board" -- never "remove everyone from the group chat".
+        const after = i + k + 1;
+        const tail =
+          SWEEP_ORDER_PARTICLES.includes(t[after]) || t[after] === "away" ? after + 1 : after;
+        if (endsClause(t, tail)) return true;
+      }
+      const board = SWEEP_BOARD_OBJECTS.find((seq) => startsWithAt(t, i + 1, seq));
+      if (board && endsClause(t, i + 1 + board.length)) return true;
+    }
+    const pv = SWEEP_PARTICLE_VERBS.find((p) => p.verb === w);
+    if (pv && isPeople(t, i + 1) && pv.particles.includes(t[i + 2]) && endsClause(t, i + 3)) {
+      return true;
+    }
+    if (isPeople(t, i) && SWEEP_ORDER_PARTICLES.includes(t[i + 1]) && endsClause(t, i + 2)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** DEF-0041's own stricter check for the sweeping case alone -- see THE RULE
+ *  just above. */
+function groundSweepingUnassign(heard: string, verbs: VerbLists): Grounding {
+  if (hasRemovalPhrase(heard)) return { ok: true };
+  return { ok: false, reason: "sweeping", intent: wordsPhrase(verbs.unassign) };
+}
+
 /**
  * One `SingleCommand`/board-command/headcount reading against its own verb
  * list. `unassign` is the one kind this piece's own reason rule (brief §1)
  * never lets ask: an ungrounded removal always refuses outright
  * (`"sweeping"`) rather than offering a button -- a write that deletes data
  * gets the stricter of the two, never a guess one press from running.
+ *
+ * DEF-0041: `command` (not just its `intent`) is needed to tell a SWEEPING
+ * unassign (`isSweepingUnassign`, above) from a narrow one -- the stricter
+ * word check applies only to the former.
  */
-function groundOne(normalized: string, intent: string, verbs: VerbLists): Grounding {
+function groundOne(
+  heard: string,
+  normalized: string,
+  command: Exclude<Command, { intent: "several" }>,
+  verbs: VerbLists,
+): Grounding {
+  const intent = command.intent;
   const list: readonly string[] = isSingleKey(intent) ? verbs[intent] : [];
+  if (intent === "unassign" && isSweepingUnassign(command)) {
+    return groundSweepingUnassign(heard, verbs);
+  }
   if (hasAnyWord(normalized, list)) return { ok: true };
   if (intent === "unassign") {
     return { ok: false, reason: "sweeping", intent: wordsPhrase(verbs.unassign) };
@@ -156,7 +327,7 @@ function groundOne(normalized: string, intent: string, verbs: VerbLists): Ground
 export function groundReading(heard: string, command: Command, verbs: VerbLists): Grounding {
   const normalized = normalize(heard);
   if (command.intent === "several") {
-    const results = command.commands.map((c) => groundOne(normalized, c.intent, verbs));
+    const results = command.commands.map((c) => groundOne(heard, normalized, c, verbs));
     const allUngrounded = results.every((r) => !r.ok);
     if (command.commands.length > 1 && allUngrounded) {
       return { ok: false, reason: "sweeping", intent: "run more than one command" };
@@ -172,7 +343,7 @@ export function groundReading(heard: string, command: Command, verbs: VerbLists)
     }
     return firstBad;
   }
-  return groundOne(normalized, command.intent, verbs);
+  return groundOne(heard, normalized, command, verbs);
 }
 
 /**

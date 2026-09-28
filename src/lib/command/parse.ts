@@ -172,6 +172,22 @@ export interface UnassignCommand {
    *  an `until` clause is `bad_day` at parse time (`applyRepeatDayToSingle`),
    *  never a guess at which one wins. */
   until: DayWord | null;
+  /**
+   * DEF-0048 / R-409 (amended 28 Sept): the absence word the sentence said
+   * ("off", "sick", "on leave", ...; lower case, one space between words) --
+   * set by the absence grammar ("Sam Patel is off tomorrow"), or on the
+   * model's reading by `markAbsence` from the words heard, and ABSENT (never
+   * `null`) on every other removal, so "remove Sam Patel tomorrow" and every
+   * fixture written before this field are byte for byte what they were. The
+   * resolver reads it to tell an absence (every block that day with one yes,
+   * and the absence recorded) from a plain removal (which block?).
+   *
+   * OPTIONAL, AND NOT IN THE MODEL'S SCHEMA: the served model's decoder and
+   * its training rows have a fixed shape for an unassign (`voiceRead.test.ts`
+   * VR8/VR17; no retrain, no regenerated data). The voice data's oracle
+   * ignores this one key by name (`scripts/voice/lib/form.mjs`).
+   */
+  absence?: string;
 }
 
 /**
@@ -3485,9 +3501,11 @@ const ABSENCE_WORD_ALTS = ABSENCE_WORDS.map((w) => w.replace(/ /g, "\\s+")).join
 const ABSENCE_RE = new RegExp(`^(.+?)\\s+is\\s+(${ABSENCE_WORD_ALTS})\\b(.*)$`, "i");
 
 /**
- * AB1-AB9: `namePart` and `tailRaw` are `ABSENCE_RE`'s own capture groups 1
- * and 3 (group 2, the absence word itself, is read but not stored -- the
- * resolver only needs "this person is out", never which word said so).
+ * AB1-AB9: `namePart`, `absenceWordRaw` and `tailRaw` are `ABSENCE_RE`'s own
+ * capture groups 1, 2 and 3. DEF-0048 (28 Sept): group 2, the absence word,
+ * is stored as `absence` -- the resolver tells "Sam is off tomorrow" (every
+ * block, one yes, the absence recorded) from "remove Sam tomorrow" (which
+ * block?) by it, and it becomes the recorded reason.
  * AB2's explicit default: no day at all means TODAY, not "the board's own
  * day" (`null`) -- an absence always names a day, even the unstated one.
  * S72-e (F-224): that default is SKIPPED when `extractRepeatDayClause`
@@ -3502,6 +3520,7 @@ const ABSENCE_RE = new RegExp(`^(.+?)\\s+is\\s+(${ABSENCE_WORD_ALTS})\\b(.*)$`, 
  */
 function parseAbsenceRest(
   namePart: string,
+  absenceWordRaw: string,
   tailRaw: string,
   quotes: string[],
   hasRepeat: boolean,
@@ -3551,8 +3570,44 @@ function parseAbsenceRest(
       existing: null,
       shift: null,
       until,
+      // DEF-0048 / R-409 amended (the main session's decision, 28 Sept,
+      // option A): the grammar marks the absence itself, so every caller of
+      // parseCommand -- the typed bar, the DEF-0048 pin -- gets it with no
+      // second step. The voice data compares this output with the model's
+      // recorded forms through `equalForms`, which ignores this ONE key by
+      // name (scripts/voice/lib/form.mjs): the mark is derived from the
+      // words, the model is not taught it.
+      absence: normalizeAbsenceWord(absenceWordRaw),
     },
   };
+}
+
+/** DEF-0048: an `ABSENCE_WORDS` match as the one spelling the command
+ *  carries -- lower case, one space between words ("On  Leave" -> "on
+ *  leave"). */
+function normalizeAbsenceWord(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * DEF-0048 / R-409: the absence mark for the MODEL'S reading. The grammar
+ * marks a typed absence itself (`parseAbsenceRest`), but the served model
+ * decodes "Sam Patel is off tomorrow" into an ordinary unassign -- its
+ * schema has no `absence` key and is not taught one -- so the heard words
+ * must mark it. The caller hands this the command AND the sentence it came
+ * from and gets the same command back with `absence` set exactly when the
+ * sentence says "<x> is <absence word>" -- the same `ABSENCE_TRIGGER_RE` the
+ * grammar's own `ABSENCE_RE` and `needsQuoting` are built from. Idempotent:
+ * any other command, an unassign that already carries the mark (every typed
+ * absence), or words that say no absence come back as the SAME object, so
+ * it is safe to call once where both paths meet.
+ */
+export function markAbsence<C extends Command>(command: C, heard: string): C {
+  if (command.intent !== "unassign") return command;
+  if (command.absence !== undefined) return command;
+  const m = heard.match(ABSENCE_TRIGGER_RE);
+  if (m === null) return command;
+  return { ...command, absence: normalizeAbsenceWord(m[1]) };
 }
 
 /** `assign <op> to <product> on <place1>...`, `book <product> on <place1>...`
@@ -3624,7 +3679,13 @@ export function parseCommand(text: string): ParseResult {
     // ABSENCE_WORD right after "is", this simply does not match.
     const absenceMatch = norm.match(ABSENCE_RE);
     if (absenceMatch) {
-      return parseAbsenceRest(absenceMatch[1], absenceMatch[3], quotes, repeat !== null);
+      return parseAbsenceRest(
+        absenceMatch[1],
+        absenceMatch[2],
+        absenceMatch[3],
+        quotes,
+        repeat !== null,
+      );
     }
 
     // S41-b: decided before the mandatory-time-clause path runs -- the
@@ -4237,6 +4298,22 @@ function formatBookCommand(command: BookCommand): string {
  * `place: []`, so the round trip still holds.
  */
 function formatUnassignCommand(command: UnassignCommand): string {
+  // DEF-0048: an absence prints in its own grammar ("Sam is off tomorrow"),
+  // the only sentence that reads the `absence` mark back -- an "unassign
+  // ..." sentence would lose it on the round trip (AB9). The absence grammar
+  // has no place, span or shift; a hand-built absence carrying one of those
+  // falls through to the ordinary removal sentence below instead.
+  if (
+    command.absence !== undefined &&
+    command.place.length === 0 &&
+    command.span === null &&
+    command.shift === null
+  ) {
+    const absenceParts: string[] = [quoteIfNeeded(command.operator), "is", command.absence];
+    if (command.day) absenceParts.push(dayToCanonicalText(command.day));
+    if (command.until !== null) absenceParts.push("until", dayToCanonicalText(command.until));
+    return absenceParts.join(" ");
+  }
   const parts: string[] = ["unassign", quoteIfNeeded(command.operator)];
   if (command.place.length > 0) {
     parts.push("from", quoteIfNeeded(command.place[0]));

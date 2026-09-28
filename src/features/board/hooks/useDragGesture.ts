@@ -37,7 +37,10 @@ import {
   toSchedulerError,
   probeCapacity,
   fromEfficiency,
+  setAbsence,
 } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import type { ResolvedLotStep, ResolvedRunTrim } from "@/lib/command/resolve";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "../lib/boardIndex";
 import { certificateGaps, policyForNode } from "../lib/boardIndex";
 import { ZOOMS, pxToMinutes, shiftSnapPoints, type ZoomIndex } from "../lib/geometry";
@@ -45,7 +48,7 @@ import type { DayAxis } from "../lib/time";
 import { formatClock, addMinutes } from "../lib/time";
 import { leaveLine } from "../lib/leave";
 import { absenceGaps, type AbsenceRow } from "@/lib/absence";
-import { useAbsences } from "./useAbsences";
+import { useAbsences, absenceKeys } from "./useAbsences";
 import type { DateFormat } from "@/lib/format/dates";
 import {
   MIN_DURATION_MINUTES,
@@ -79,11 +82,12 @@ import {
   buildSchedulerErrorToast,
   type ToastResolveCtx,
 } from "./useSchedulerToast";
-// S51 (R-400/D127): type-only -- `ResolvedAny`/`LotResult` are declared
+// S51 (R-400/D127): type-only -- `LotResult` (and the bar's `ResolvedAny`,
+// a subset of the `ResolvedLotStep` `runLot` takes since DEF-0040) are declared
 // beside the bar's own resolved-shape props (`CommandBar.tsx`) since the bar
 // is what hands them to `runLot` below; this hook holds no rule of the
 // bar's, only the writers a resolved lot item ends in.
-import type { ResolvedAny, LotResult, WriteOutcome, PopupReporter } from "../components/CommandBar";
+import type { LotResult, WriteOutcome, PopupReporter } from "../components/CommandBar";
 
 export type { DragMode };
 
@@ -671,6 +675,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const updateRunFields = useUpdateRunFields(rootPath, from, to);
   const deleteRun = useDeleteRun(rootPath, from, to);
   const moveRun = useMoveRun(rootPath, from, to); // D57 — first caller (brief §1 item 3)
+  // DEF-0048: the lot's absence record refreshes the absences reads after.
+  const queryClient = useQueryClient();
   const createAssignment = useCreateAssignment(rootPath, from, to);
   const updateAssignmentFields = useUpdateAssignmentFields(rootPath, from, to);
   const reassign = useReassignAssignment(rootPath, from, to); // R-343, first caller
@@ -1218,6 +1224,36 @@ export function useDragGesture(args: UseDragGestureArgs) {
         throw new LotStepRefused(
           `the re-time of ${r.readout} needs a decision the pop-up asks; do it on its own`,
         );
+      }
+      await updateRunFields.mutateAsync({ runId: run.id, edit: plan.edit });
+    },
+    [index, ctx, updateRunFields],
+  );
+
+  /**
+   * DEF-0040 / R-461: a clear's job trim -- the job keeps the OTHER day's
+   * part of a shift across midnight. The SAME run PATCH `retimeRunForLot`
+   * sends (`updateRunFields`, `planRunRetime`'s own edit and overlap refusal),
+   * with one difference, on purpose: the "N crew fall outside" ask is NOT
+   * raised. By the time this step runs, the lot has already trimmed or
+   * removed every crew block the clear touched (people first, `planClear` in
+   * `resolve.ts`), but this callback's `index` is the board as it was when
+   * the yes was given, so `planRunRetime` would still count the untrimmed
+   * crew as stranded and refuse a lot that is right. The server has no rule
+   * that crew lie inside their run (migration 0079: "a run can legitimately
+   * be shrunk with its crew left outside it"; only the node must match,
+   * 0003's `assignments_check_run_consistency`), so nothing it would refuse
+   * is let through here; the ask it skips is the drag's courtesy.
+   */
+  const trimRunForLot = useCallback(
+    async (r: ResolvedRunTrim): Promise<void> => {
+      const run = index.runById.get(r.runId);
+      if (!run) {
+        throw new LotStepRefused(`${r.readout} is no longer on the board.`);
+      }
+      const plan = planRunRetime(run, run.nodeId, r.range, index, ctx);
+      if (plan.overlapMessage !== null) {
+        throw new LotStepRefused(plan.overlapMessage);
       }
       await updateRunFields.mutateAsync({ runId: run.id, edit: plan.edit });
     },
@@ -2840,7 +2876,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
    * plain message is used verbatim (see its own doc comment above).
    */
   const runLot = useCallback(
-    async (resolved: ResolvedAny[]): Promise<LotResult> => {
+    // DEF-0040 / DEF-0048: `ResolvedLotStep` (resolve.ts) is `ResolvedAny`
+    // plus the two new already-resolved kinds, a job's trim and an absence's
+    // record -- a caller holding only `ResolvedAny[]` still fits.
+    async (resolved: ResolvedLotStep[]): Promise<LotResult> => {
       let done = 0;
       for (const r of resolved) {
         try {
@@ -2906,6 +2945,23 @@ export function useDragGesture(args: UseDragGestureArgs) {
             // here, never a background toast the lot's own "Done: N" text
             // contradicts.
             await deleteRun.mutateAsync({ runId: r.runId, mode: "cascade" });
+          } else if (r.intent === "trim_run") {
+            // DEF-0040 / R-461: the job keeps the other day's part.
+            await trimRunForLot(r);
+          } else if (r.intent === "record_absence") {
+            // DEF-0048 / R-409 amended: the absence, through the Absences
+            // form's own call (`setAbsence`, whole-day: no times) -- the one
+            // way this fact is written (R-449). Awaited, so a refusal (not
+            // permitted, already absent) is this step's own caught failure.
+            // The absences reads (the board's and the admin screen's, both
+            // under the "absences" key) are refreshed after.
+            await setAbsence({
+              operatorId: r.operatorId,
+              from: r.from,
+              to: r.to,
+              reason: r.reason,
+            });
+            void queryClient.invalidateQueries({ queryKey: [absenceKeys.all()[0]] });
           } else {
             // S58 (R-415, D132 item 4): `r` narrows to `never` here -- every
             // member of `ResolvedAny` is handled above, and `ResolvedHeadcount`
@@ -2934,6 +2990,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
       deleteRun,
       retimeAssignmentForLot,
       retimeRunForLot,
+      trimRunForLot,
+      queryClient,
       createFromCommand,
       createRunFromCommand,
       submitMove,

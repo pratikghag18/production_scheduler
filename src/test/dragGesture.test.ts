@@ -16,6 +16,7 @@ import type { BoardIndex, IndexedRun, IndexedAssignment } from "@/features/board
 import { DENSITIES } from "@/features/board/lib/geometry";
 import { buildDayAxis } from "@/features/board/lib/time";
 import type { ResolvedAny, LotResult } from "@/features/board/components/CommandBar";
+import type { ResolvedLotStep } from "@/lib/command/resolve";
 
 /**
  * Authored, not run in this container (no npm — see the agent report).
@@ -61,6 +62,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
     // never mocks this, still resolves the query instead of hanging on the
     // real network call.
     fetchAbsences: vi.fn(async () => ({ absences: [], skipped: 0 })),
+    // S194-D (DEF-0048): the lot's absence record goes through the Absences
+    // form's own `setAbsence`; mocked so the runner's call can be asserted.
+    setAbsence: vi.fn(),
   };
 });
 
@@ -2179,8 +2183,20 @@ describe("useDragGesture", () => {
       const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
 
       const lot: ResolvedAny[] = [
-        { intent: "unassign", assignmentId: "asg-1", readout: "Removing block 1" },
-        { intent: "unassign", assignmentId: "asg-2", readout: "Removing block 2" },
+        {
+          intent: "unassign",
+          assignmentId: "asg-1",
+          readout: "Removing block 1",
+          attempted: "the step",
+          notTried: "it stays.",
+        },
+        {
+          intent: "unassign",
+          assignmentId: "asg-2",
+          readout: "Removing block 2",
+          attempted: "the step",
+          notTried: "it stays.",
+        },
       ];
 
       let outcome: LotResult | undefined;
@@ -2209,6 +2225,8 @@ describe("useDragGesture", () => {
           range: { startMin: 360, endMin: 720 }, // past run-1's own end -- an attachment change
           target: { kind: "retime" },
           readout: "Moving Test Person's block",
+          attempted: "the step",
+          notTried: "it stays.",
         },
       ];
 
@@ -2249,6 +2267,8 @@ describe("useDragGesture", () => {
           target: { kind: "retime", assignmentId: "asg-direct" },
           range: { startMin: 360, endMin: 720 },
           readout: "Test Person → Widget · Cell 1 · 06:00–12:00",
+          attempted: "the step",
+          notTried: "it stays.",
         },
       ];
 
@@ -2267,6 +2287,190 @@ describe("useDragGesture", () => {
           end: new Date("2026-08-24T12:00:00.000Z"),
         },
       });
+    });
+  });
+
+  /**
+   * S194-D (DEF-0044 item 4, DEF-0040, DEF-0048): the lot's job and absence
+   * steps are held at the EXECUTION layer -- each asserts the writer was
+   * called with the step's own id and mode, so deleting the call turns a
+   * case red by name (it did not before: with `deleteRun.mutateAsync`
+   * removed, 664 cases stayed green).
+   */
+  describe("S194-D: runLot writes the job removal, the job trim and the absence record", () => {
+    it("RL-1: a remove_run step calls delete_run with that run id in cascade mode, and counts it done", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.deleteRun).mockResolvedValue({
+        deletedRunId: "run-1",
+        detachedAssignmentIds: [],
+      } as never);
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+      const lot: ResolvedAny[] = [
+        {
+          intent: "remove_run",
+          runId: "run-1",
+          readout: "The Housing A job is off Cell 1",
+          attempted: "the step",
+          notTried: "it stays.",
+        },
+      ];
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot(lot);
+      });
+      expect(outcome).toEqual({ done: 1, error: null });
+      expect(api.deleteRun).toHaveBeenCalledTimes(1);
+      expect(api.deleteRun).toHaveBeenCalledWith("run-1", "cascade");
+    });
+
+    it("RL-2: a trim_run step PATCHes that run's timerange to the kept part, even with its crew still reaching past it on the board the yes was given against", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.updateRunFields).mockResolvedValue({} as never);
+      // The crew block still runs 06:00-10:00 in this (stale) index -- the
+      // lot trimmed it in an earlier step; `retimeRunForLot` would refuse
+      // here with the drag's "fall outside" ask.
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([crewFixture()]))), {
+        wrapper,
+      });
+      const lot: ResolvedLotStep[] = [
+        {
+          intent: "trim_run",
+          runId: "run-1",
+          nodeId: "cell-1",
+          range: { startMin: 360, endMin: 480 },
+          readout: "The job on Cell 1 keeps its part",
+          attempted: "the step",
+          notTried: "The job on Cell 1 stays as it was.",
+        },
+      ];
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot(lot);
+      });
+      expect(outcome).toEqual({ done: 1, error: null });
+      expect(api.updateRunFields).toHaveBeenCalledTimes(1);
+      expect(api.updateRunFields).toHaveBeenCalledWith("run-1", {
+        timerange: {
+          start: new Date("2026-08-24T06:00:00.000Z"),
+          end: new Date("2026-08-24T08:00:00.000Z"),
+        },
+      });
+    });
+
+    it("RL-3: a trim_run step on a job no longer on the board writes nothing and stops the lot in plain words", async () => {
+      const api = await import("@/lib/api");
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+      const lot: ResolvedLotStep[] = [
+        {
+          intent: "trim_run",
+          runId: "gone-run",
+          nodeId: "cell-1",
+          range: { startMin: 360, endMin: 480 },
+          readout: "The Housing A job on Cell 1 keeps its Sunday part",
+          attempted: "the step",
+          notTried: "The Housing A job on Cell 1 stays as it was.",
+        },
+      ];
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot(lot);
+      });
+      expect(outcome).toEqual({
+        done: 0,
+        error: "The Housing A job on Cell 1 keeps its Sunday part is no longer on the board.",
+      });
+      expect(api.updateRunFields).not.toHaveBeenCalled();
+    });
+
+    it("RL-4: a record_absence step calls setAbsence (the Absences form's own call) whole-day, with the person, the days and the reason", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.setAbsence).mockResolvedValue({} as never);
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+      const lot: ResolvedLotStep[] = [
+        {
+          intent: "record_absence",
+          operatorId: "op-1",
+          person: "Sam Patel",
+          from: "2026-08-24",
+          to: "2026-08-25",
+          reason: "Sick",
+          readout: "Sam Patel is recorded as off from 2026-08-24 to 2026-08-25.",
+          attempted: "the step",
+          notTried: "No absence is recorded for Sam Patel.",
+        },
+      ];
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot(lot);
+      });
+      expect(outcome).toEqual({ done: 1, error: null });
+      expect(api.setAbsence).toHaveBeenCalledTimes(1);
+      expect(api.setAbsence).toHaveBeenCalledWith({
+        operatorId: "op-1",
+        from: "2026-08-24",
+        to: "2026-08-25",
+        reason: "Sick",
+      });
+    });
+
+    it("RL-5: people first, then the job, then the absence -- written in the lot's own order; a refused record is the lot's own caught failure after the rest are done", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.deleteAssignment).mockResolvedValue(undefined as never);
+      vi.mocked(api.updateRunFields).mockResolvedValue({} as never);
+      vi.mocked(api.deleteRun).mockResolvedValue({
+        deletedRunId: "run-2",
+        detachedAssignmentIds: [],
+      } as never);
+      vi.mocked(api.setAbsence).mockRejectedValueOnce({ kind: "WriteRefused" });
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+      const lot: ResolvedLotStep[] = [
+        {
+          intent: "unassign",
+          assignmentId: "asg-1",
+          readout: "Sam is off Cell 1",
+          attempted: "the step",
+          notTried: "it stays.",
+        },
+        {
+          intent: "trim_run",
+          runId: "run-1",
+          nodeId: "cell-1",
+          range: { startMin: 360, endMin: 480 },
+          readout: "The job keeps its part",
+          attempted: "the step",
+          notTried: "The job stays.",
+        },
+        {
+          intent: "remove_run",
+          runId: "run-2",
+          readout: "The other job is off Cell 1",
+          attempted: "the step",
+          notTried: "it stays.",
+        },
+        {
+          intent: "record_absence",
+          operatorId: "op-1",
+          person: "Sam",
+          from: "2026-08-24",
+          to: "2026-08-24",
+          reason: "Off",
+          readout: "Sam is recorded as off 2026-08-24.",
+          attempted: "the step",
+          notTried: "No absence is recorded for Sam.",
+        },
+      ];
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot(lot);
+      });
+      expect(outcome).toEqual({ done: 3, error: "You don't have permission to change that." });
+      const order = [
+        vi.mocked(api.deleteAssignment).mock.invocationCallOrder[0],
+        vi.mocked(api.updateRunFields).mock.invocationCallOrder[0],
+        vi.mocked(api.deleteRun).mock.invocationCallOrder[0],
+        vi.mocked(api.setAbsence).mock.invocationCallOrder[0],
+      ];
+      expect(order).toEqual([...order].sort((a, b) => a - b));
     });
   });
 });

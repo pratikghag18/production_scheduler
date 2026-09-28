@@ -51,6 +51,7 @@ import type {
   AssignCommand,
   Attach,
   BookCommand,
+  ClockTime,
   Command,
   Existing,
   HeadcountCommand,
@@ -65,6 +66,8 @@ import type {
   ResolvedCommand,
   ResolvedMove,
   ResolvedRunRemoval,
+  ResolvedRunTrim,
+  ResolvedAbsenceRecord,
   ResolvedUnassign,
 } from "@/lib/command/resolve";
 import type { Highlight } from "../lib/highlight";
@@ -85,7 +88,12 @@ export type ResolvedAny =
   // resolved by `expandEveryoneUnassign`, so they reach a lot's own `done`
   // the same way the other four do, never through `resolveCommand` (see
   // `ResolvedRunRemoval`'s own doc in `resolve.ts` for why).
-  | ResolvedRunRemoval;
+  | ResolvedRunRemoval
+  // DEF-0040 / R-461 (S194-D): a clear's job trim, and DEF-0048 / R-409 an
+  // absence sentence's record -- both already resolved by the expansion,
+  // riding the lot the same way a job removal does.
+  | ResolvedRunTrim
+  | ResolvedAbsenceRecord;
 
 /**
  * What pressing one of the bar's candidate buttons does. Data, never a
@@ -160,7 +168,27 @@ export type CandidateAction =
    */
   | { kind: "run_sentence"; sentence: string }
   /** S51: the lot's own "Do all N". */
-  | { kind: "run_lot" };
+  | { kind: "run_lot" }
+  /**
+   * DEF-0040 / R-461 (S194-D): the Yes or No of an `other_day_part`
+   * question. `options` are the answers ALREADY given to this sentence (the
+   * first question's, when this answers the second), so pressing this reruns
+   * `command` with every answer so far plus this one -- data, never a closure,
+   * like every other action here.
+   */
+  /**
+   * R-430 (S194-D third pass): a `job_hole` question's "Clear 1 pm to 4 pm"
+   * -- the same sentence with THIS span instead of the one that would have
+   * left a job in two pieces.
+   */
+  | { kind: "pick_span"; command: Command; span: { start: ClockTime; end: ClockTime } }
+  | {
+      kind: "answer_other_day_part";
+      command: Command;
+      direction: "previous" | "next";
+      answer: "clear" | "keep";
+      options: ResolveOptions;
+    };
 
 export interface CandidateButton {
   key: string;
@@ -196,6 +224,14 @@ export type Status =
        * doors), so the bar has to know which reason it is collecting.
        */
       awaitingAreaReason?: boolean;
+      /**
+       * DEF-0040 / R-461 (S194-D): set ONLY on a night shift question --
+       * its two buttons are Yes (key "clear") and No (key "keep"), drawn
+       * the same width (R-447), and a typed or spoken "yes"/"no" presses
+       * them (a bare "no" here is an ANSWER, never the cancel it is
+       * everywhere else).
+       */
+      yesNo?: true;
     }
   | {
       kind: "readout";
@@ -268,12 +304,25 @@ export interface Lot {
    *  `[]` mean the same thing, "no runs on this lot", and every reader
    *  treats them alike. */
   runRemovals?: ResolvedRunRemoval[];
+  /** DEF-0040 / R-461 (S194-D): the jobs this lot keeps part of, appended
+   *  after the person steps and BEFORE `runRemovals` (crew first, then the
+   *  job). Optional, like `runRemovals`. */
+  runTrims?: ResolvedRunTrim[];
+  /** DEF-0048 / R-409: the absence this lot records, appended LAST. */
+  absenceRecord?: ResolvedAbsenceRecord;
+  /** DEF-0048: the absence sentence's own answer (`Expansion.summary`),
+   *  said as the lot's last word -- or undefined for any other lot. */
+  summary?: string;
 }
 
 /** S59 (R-419): the command a "Show that day" press is waiting to re-run. */
 export interface PendingRerun {
   command: Command;
   target: string;
+  /** R-455 (S194-D): the answers already given to this sentence -- the
+   *  night shift questions' (R-461) and any reason -- so the rerun after the
+   *  board moves never asks them again. Absent means none. */
+  options?: ResolveOptions;
 }
 
 /**
@@ -370,6 +419,14 @@ export interface ConversationValues {
    * thread still works for the session; it is simply not kept).
    */
   historyKey: string | null;
+  /**
+   * R-434 (S194-D): the questions already asked and answered for the CURRENT
+   * entry when one sentence asks more than one in a row (R-461's two night
+   * shift questions) -- `asked`/`answered` are single fields, so each later
+   * ask and answer is written AFTER these, newline-joined, and the entry ends
+   * with every ask and every answer in order. Reset with every new entry.
+   */
+  traceCarry: { asked: string; answered: string } | null;
 }
 
 export interface ConversationState extends ConversationValues {
@@ -412,6 +469,7 @@ const EMPTY: ConversationValues = {
   history: [],
   filedTurnAt: null,
   historyKey: null,
+  traceCarry: null,
 };
 
 /**
@@ -618,18 +676,35 @@ export function storeRef<K extends keyof ConversationValues>(
  *  sentence was superseded can never post the same line twice (F-164). */
 const POSTED = new WeakSet<TraceEntry>();
 
-/** Posts `entry` to the dev server's `/__trace`, fire-and-forget, errors
- *  swallowed, only when `import.meta.env.DEV` (R-421: "a build without it
- *  changes nothing in the bar"). */
-export function postTrace(entry: TraceEntry, options?: { revise?: boolean }): void {
+/**
+ * Posts `entry` to the dev server's `/__trace`, fire-and-forget, errors
+ * swallowed, only when `import.meta.env.DEV` (R-421: "a build without it
+ * changes nothing in the bar").
+ *
+ * DEF-0049 (28 Sept, tester): "a question left open when the page closes...
+ * went missing" -- before this, an entry was posted exactly once, when the
+ * sentence's life ENDED (a readout, a cancel, a new sentence), so a
+ * question still standing when the tab closed had never been sent at all;
+ * `postTraceOnTeardown` (F-157) only flushes whatever `traceRef.current`
+ * holds at that instant, which was nothing to flush until this. The fix
+ * (`CommandBar.tsx`'s own `traceQuestionStatus`/`resolveLotStep`/
+ * `showLotStatus`) now calls this the MOMENT the bar asks, not only once it
+ * is answered -- so this function's own de-dup (`POSTED`, S62-b's original
+ * "a deferred write outcome settling after the sentence was superseded can
+ * never post the same line twice") has to change shape: a SECOND post of
+ * the same entry is no longer ever silently dropped, it is ALWAYS sent as a
+ * correction (`revises: true`, same `at`) -- the ask-time line and the
+ * finish-time line are two real, different facts about the one entry, and
+ * the file is append-only (`TraceEntry.revises`' own doc: "take the LAST
+ * line for each `at`"), so every existing reader already knows to prefer
+ * the newest. `options.revise` is kept (a caller may still say so
+ * explicitly) but no longer changes the outcome -- posting twice always
+ * means the second one revises the first now, whether or not the caller
+ * knew that in advance.
+ */
+export function postTrace(entry: TraceEntry, _options?: { revise?: boolean }): void {
   if (!import.meta.env.DEV) return;
   const alreadyPosted = POSTED.has(entry);
-  // S62-b reviewer fix (D): a WRITE THAT LANDED LATE gets a corrected line
-  // rather than nothing. The file is append-only, so the correction carries
-  // the same `at` and `revises: true`; a reader takes the last line per `at`
-  // (`TraceEntry.revises`' own doc). Without `revise`, a second post of the
-  // same entry is still the no-op it has always been.
-  if (alreadyPosted && options?.revise !== true) return;
   POSTED.add(entry);
   const line = renderLine(alreadyPosted ? { ...entry, revises: true } : entry);
   try {
@@ -648,12 +723,23 @@ export function postTrace(entry: TraceEntry, options?: { revise?: boolean }): vo
  * is most likely to still be open, and an in-flight `fetch` is free to be
  * cancelled then. `navigator.sendBeacon` is built for this; where it is
  * unavailable (or refuses the payload) this falls back to a keepalive fetch.
+ *
+ * DEF-0049 (28 Sept): used to skip outright once `postTrace` had already
+ * sent this entry once (`POSTED.has(entry)`), back when a second post was
+ * always a no-op -- now that the ask-time post (`postTrace`, called the
+ * moment the bar asks, `CommandBar.tsx`'s own `traceQuestionStatus`/
+ * `resolveLotStep`/`showLotStatus`) means MOST entries reaching teardown
+ * were already sent once, this always sends the CURRENT state too, as a
+ * correction when needed (`postTrace`'s own new rule) -- a page closing
+ * between the ask and the answer is exactly the gap DEF-0049 named, and the
+ * teardown line is the one chance to record whatever changed since the ask
+ * (an `answered` that arrived a tick before the tab closed, say).
  */
 export function postTraceOnTeardown(entry: TraceEntry): void {
   if (!import.meta.env.DEV) return;
-  if (POSTED.has(entry)) return;
+  const alreadyPosted = POSTED.has(entry);
   POSTED.add(entry);
-  const line = renderLine(entry);
+  const line = renderLine(alreadyPosted ? { ...entry, revises: true } : entry);
   try {
     // A plain string, not a `Blob` -- `traceServer.ts`'s own handler reads
     // the raw body regardless of content type.

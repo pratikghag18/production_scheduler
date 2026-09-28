@@ -247,6 +247,32 @@ export interface ResolveContext {
    * sets this `true`.
    */
   settled: boolean;
+  /**
+   * DEF-0048 / R-409 amended (28 Sept) and R-431: the people this caller may
+   * record an absence for, BY THE SERVER'S OWN ANSWER --
+   * `absence_recordable_people()` (migration 0084, SECURITY DEFINER, the same
+   * `app_can_edit_node(coalesce(home_node_id, site_node_id))` `set_absence`
+   * gates on), fetched by `fetchRecordableAbsencePeople` (`src/lib/api/
+   * absences.ts`), the same read the Absences form is built from. Never a
+   * client preview (DEF-0035: a supervisor has no path for a person homed on
+   * a line she cannot read).
+   *
+   * OPTIONAL, and `undefined` means UNKNOWN, never "everyone": an absence
+   * sentence then clears the blocks and records nothing (and says nothing
+   * about recording), so a bar that has not wired this field can never
+   * offer a write the server would refuse. A set that does not name the
+   * person clears the blocks and says plainly the absence was not recorded.
+   */
+  absenceRecordable?: ReadonlySet<string>;
+  /**
+   * DEF-0048 / R-431: true when the person already has a WHOLE-DAY absence
+   * overlapping `fromIso`..`toIso` (inclusive, the plant's calendar days) --
+   * `set_absence` refuses that insert (`absence_overlap`, the whole-day
+   * exclusion of migration 0069; a part-day row never collides with a
+   * whole-day one). Fed from the board's own absences read (`useAbsences`,
+   * rows with no `startsAt`). Optional; `undefined` is read as "none known".
+   */
+  hasWholeDayAbsence?: (operatorId: string, fromIso: string, toIso: string) => boolean;
 }
 
 /**
@@ -273,6 +299,14 @@ export interface ResolvedCommand {
    *  (+ " Joining the <run label> job already there." for a run target). The
    *  ISO day is a token the bar re-renders through `formatDayLabel(_, dateFormat, zone)`. */
   readout: string;
+  /** R-432 (restated 28 Sept): who and where, with no verb of completion --
+   *  the "Not done:" line's subject when this step is refused ("Lena Novak on
+   *  Cell 3"). Built beside `readout`, from the same facts, by the same
+   *  builder; names only, never a pronoun. */
+  attempted: string;
+  /** R-432: what stays as it was when this step is never tried ("Tom Baker
+   *  stays on Cell 1.") -- one plain sentence, the "Not tried:" line's. */
+  notTried: string;
   /** S61-b (R-425, F-155): set ONLY when a `not_certified` "warn" question
    *  was suppressed by a re-resolve carrying `{ overrideReason }` (never by
    *  a clean resolve, and never under `policy: "block"`, which offers no
@@ -307,6 +341,14 @@ export interface ResolvedBook {
    *  (+ " For N people." only when the sentence said a number; + " Changing
    *  the job that ran <hours>." for a retime). */
   readout: string;
+  /** R-432 (restated 28 Sept): who and where, with no verb of completion --
+   *  the "Not done:" line's subject when this step is refused ("Lena Novak on
+   *  Cell 3"). Built beside `readout`, from the same facts, by the same
+   *  builder; names only, never a pronoun. */
+  attempted: string;
+  /** R-432: what stays as it was when this step is never tried ("Tom Baker
+   *  stays on Cell 1.") -- one plain sentence, the "Not tried:" line's. */
+  notTried: string;
 }
 
 /**
@@ -322,6 +364,14 @@ export interface ResolvedUnassign {
   /** R-459: "Sam Patel is off Cell 1 2026-09-03; that was 10 am to 2 pm,
    *  making Housing A." */
   readout: string;
+  /** R-432 (restated 28 Sept): who and where, with no verb of completion --
+   *  the "Not done:" line's subject when this step is refused ("Lena Novak on
+   *  Cell 3"). Built beside `readout`, from the same facts, by the same
+   *  builder; names only, never a pronoun. */
+  attempted: string;
+  /** R-432: what stays as it was when this step is never tried ("Tom Baker
+   *  stays on Cell 1.") -- one plain sentence, the "Not tried:" line's. */
+  notTried: string;
 }
 
 /**
@@ -345,6 +395,75 @@ export interface ResolvedRunRemoval {
    *  pm, for 3 people." (the trailing ", for N people" only when the run has
    *  a headcount). */
   readout: string;
+  /** R-432 (restated 28 Sept): who and where, with no verb of completion --
+   *  the "Not done:" line's subject when this step is refused ("Lena Novak on
+   *  Cell 3"). Built beside `readout`, from the same facts, by the same
+   *  builder; names only, never a pronoun. */
+  attempted: string;
+  /** R-432: what stays as it was when this step is never tried ("Tom Baker
+   *  stays on Cell 1.") -- one plain sentence, the "Not tried:" line's. */
+  notTried: string;
+}
+
+/**
+ * DEF-0040 / R-461 (the maintainer, 28 Sept: "each day is its own bucket"):
+ * a clear of one day keeps the OTHER day's part of a job that runs across
+ * midnight -- the job is RE-TIMED to that part, never removed whole. Built
+ * already resolved by the clear's own expansion (like `ResolvedRunRemoval`,
+ * it rides beside the lot's commands on `Expansion.runTrims`, never inside
+ * them), and written by the lot runner AFTER every person step, through the
+ * SAME run PATCH a job's edge-drag resize sends (`updateRunFields`, no new
+ * RPC, no migration -- see `planClear`'s own comment for why that order
+ * never passes through a state the server refuses).
+ */
+export interface ResolvedRunTrim {
+  intent: "trim_run";
+  runId: string;
+  nodeId: string;
+  /** The part KEPT, real minutes from the window's origin. */
+  range: { startMin: number; endMin: number };
+  /** R-459/R-461: "The Housing A job on Cell 4 keeps its Sunday part, 10 pm
+   *  to midnight; Monday's part, midnight to 6 am, is cleared." */
+  readout: string;
+  /** R-432 (restated 28 Sept): who and where, with no verb of completion --
+   *  the "Not done:" line's subject when this step is refused ("Lena Novak on
+   *  Cell 3"). Built beside `readout`, from the same facts, by the same
+   *  builder; names only, never a pronoun. */
+  attempted: string;
+  /** R-432 (restated 28 Sept): what stays when this step is never tried --
+   *  "The Housing A job on Cell 4 stays as it was, 10 pm to 6 am." */
+  notTried: string;
+}
+
+/**
+ * DEF-0048 / R-409 amended (28 Sept): "Sam Patel is off tomorrow" records the
+ * absence through `set_absence`, the server function the Absences form
+ * uses, with the SAME client call (`setAbsence`, whole-day: `from`/`to`
+ * only). Built only when `ctx.absenceRecordable` names the person and
+ * `ctx.hasWholeDayAbsence` does not already find one (R-431); rides on
+ * `Expansion.absenceRecord` and is written LAST in the lot.
+ */
+export interface ResolvedAbsenceRecord {
+  intent: "record_absence";
+  operatorId: string;
+  /** The person's display name, for the bar's own sentences. */
+  person: string;
+  /** The plant's calendar days, inclusive, `YYYY-MM-DD`. */
+  from: string;
+  to: string;
+  /** The absence word the sentence said, as the recorded reason ("Off",
+   *  "Sick", "On leave"); "Absent" when no word is known. */
+  reason: string;
+  /** R-459: "Sam Patel is recorded as off 2026-09-29." (the ISO day is the
+   *  bar's usual token, re-rendered by `renderReadout`). */
+  readout: string;
+  /** R-432 (restated 28 Sept): who and where, with no verb of completion --
+   *  the "Not done:" line's subject when this step is refused ("Lena Novak on
+   *  Cell 3"). Built beside `readout`, from the same facts, by the same
+   *  builder; names only, never a pronoun. */
+  attempted: string;
+  /** R-432: "No absence is recorded for Sam Patel." */
+  notTried: string;
 }
 
 /**
@@ -371,6 +490,14 @@ export interface ResolvedMove {
    *  1 now runs 2026-09-03 from 10 am to 2 pm." for a move in time; "Sam
    *  Patel's block on Cell 1 now ends 2 pm; it was 10 am." for an adjust. */
   readout: string;
+  /** R-432 (restated 28 Sept): who and where, with no verb of completion --
+   *  the "Not done:" line's subject when this step is refused ("Lena Novak on
+   *  Cell 3"). Built beside `readout`, from the same facts, by the same
+   *  builder; names only, never a pronoun. */
+  attempted: string;
+  /** R-432: what stays as it was when this step is never tried ("Tom Baker
+   *  stays on Cell 1.") -- one plain sentence, the "Not tried:" line's. */
+  notTried: string;
   /** S61-b (R-425, F-155): the same field `ResolvedCommand` carries, for a
    *  `move_cell` target only (a `retime` target never asks -- same cell,
    *  same person). The writer's own input is `submitMove`'s 4th/5th
@@ -492,7 +619,23 @@ export type Question =
    */
   | { kind: "outside_area"; person: string; cell: string; inLot: boolean }
   | { kind: "day_off_board"; text: string }
-  | { kind: "too_short"; minutes: number; min: number }
+  /** S194-D third pass: `subject`, set only for a JOB a clear would trim
+   *  to a remnant under the minimum ("The Housing A job on Cell 1"), names
+   *  what would be too short; absent, it is a block, byte for byte as before. */
+  | { kind: "too_short"; minutes: number; min: number; subject?: string }
+  /**
+   * R-436 amended / R-430 (S194-D third pass): a narrower window INSIDE a
+   * job would leave it in two pieces, which one job cannot be. `text` says
+   * so; `spans` are the windows that WOULD work -- the sentence's own edge
+   * to each end of the job, "Clear 1 pm to 4 pm" / "Clear 10 am to 2 pm" --
+   * each a button that reruns the sentence with that span (only the ones
+   * that fit on the sentence's own day are offered).
+   */
+  | {
+      kind: "job_hole";
+      text: string;
+      spans: Array<{ label: string; start: ClockTime; end: ClockTime }>;
+    }
   /** R-383: the span sits inside one or more jobs for this part on this cell,
    *  and `command.attach` is still null. `runs` are the candidates, board order. */
   | { kind: "run_exists"; product: string; cell: string; runs: Candidate[] }
@@ -665,7 +808,38 @@ export type Question =
    *  produces one there (parse.ts's own `bad_day` ParseFailure catches it
    *  first); a caller's bug, never a crash. `text` is the day word's own
    *  plain-language name (`dayWordLabel`). */
-  | { kind: "bad_repeat_day"; text: string };
+  | { kind: "bad_repeat_day"; text: string }
+  /**
+   * DEF-0040 / R-461 (the maintainer, 28 Sept): a clear of a day touches a
+   * shift that runs across midnight into it (`direction: "previous"`, the
+   * part before the cleared day's first midnight) or out of it
+   * (`direction: "next"`, the part after its last midnight). Asked BEFORE
+   * anything is written, Yes or No, ONE question per direction however many
+   * shifts it covers, previous first; each answered on its own. The answer
+   * comes back on the rerun as `ResolveOptions.previousDayPart` /
+   * `nextDayPart` ("clear" for Yes, "keep" for No) -- `answers` are the two
+   * buttons, their `id` that option's value.
+   *
+   * The sentence names the people and the hours (the maintainer's choice of
+   * two candidates, 28 Sept): `first` is the first person by board order
+   * (or, when no person's block crosses that midnight, the first job, named
+   * as the job); `others` counts the rest; `at` is the shared start clock
+   * (previous) or end clock (next) of every part, null when they differ --
+   * then the hours are left out rather than listed; `hours` is the one
+   * part's own hours, set only when there is exactly one.
+   */
+  | {
+      kind: "other_day_part";
+      direction: "previous" | "next";
+      /** The other day's weekday, "Sunday". */
+      day: string;
+      first:
+        { kind: "person"; name: string } | { kind: "job"; product: string | null; cell: string };
+      others: number;
+      at: string | null;
+      hours: string | null;
+      answers: Candidate[];
+    };
 
 export interface ResolvedHeadcount {
   intent: "headcount";
@@ -675,6 +849,14 @@ export interface ResolvedHeadcount {
   /** "Housing A · Plant 1 › Assembly › Line 1 › Cell 1 · 2026-09-03 ·
    *  08:00–16:00 · 4 people" */
   readout: string;
+  /** R-432 (restated 28 Sept): who and where, with no verb of completion --
+   *  the "Not done:" line's subject when this step is refused ("Lena Novak on
+   *  Cell 3"). Built beside `readout`, from the same facts, by the same
+   *  builder; names only, never a pronoun. */
+  attempted: string;
+  /** R-432: what stays as it was when this step is never tried ("Tom Baker
+   *  stays on Cell 1.") -- one plain sentence, the "Not tried:" line's. */
+  notTried: string;
 }
 
 export type Resolution =
@@ -724,6 +906,13 @@ const DAY_END_MINUTE = 59;
 /** S55 (R-410): `expandCommand` never writes more than this many commands --
  *  counted before building, never truncated (`lot_too_big`). */
 const LOT_CEILING = 100;
+
+/** DEF-0043 (R-459): "1 people" is not a sentence a supervisor would say --
+ *  every readout that names a headcount goes through this one place so a
+ *  fourth site never re-hardcodes the plural. */
+function peopleCount(n: number): string {
+  return n === 1 ? "1 person" : `${n} people`;
+}
 
 type Node = { id: string; name: string; path: string };
 type ProductLike = ResolveContext["products"][number];
@@ -1414,6 +1603,13 @@ export interface ResolveOptions {
    *  second door), so it is a different field here; a sentence that raised
    *  both questions carries both. */
   areaReason?: string;
+  /** DEF-0040 / R-461: the answer to the `other_day_part` question for the
+   *  PREVIOUS day's parts -- "clear" (Yes: the whole shift goes) or "keep"
+   *  (No: that day's part stays). Read only by `expandCommand`'s clears and
+   *  absences; absent until asked. */
+  previousDayPart?: "clear" | "keep";
+  /** DEF-0040 / R-461: the same, for the NEXT day's parts. */
+  nextDayPart?: "clear" | "keep";
 }
 
 function usableReason(raw: string | undefined): string | null {
@@ -2413,6 +2609,15 @@ function resolveAssignCommand(
     readout += ` Changing the block that ran ${retime.label}.`;
   }
   readout = spokenizeSpans(readout);
+  // R-432: the same facts, said as the change never made or never tried.
+  const ownBlock = target.kind === "retime";
+  const attempted = ownBlock
+    ? `${operator.displayName}'s block on ${cellName}`
+    : `${operator.displayName} on ${cellName}`;
+  const notTried =
+    ownBlock && retime !== null
+      ? spokenizeSpans(`${attempted} stays as it was, ${retime.label}.`)
+      : `${operator.displayName} is not on ${cellName}.`;
 
   return {
     ok: true,
@@ -2424,6 +2629,8 @@ function resolveAssignCommand(
       target,
       range: { startMin, endMin },
       readout,
+      attempted,
+      notTried,
       ...(override ? { override } : {}),
       ...(areaOverride ? { areaOverride } : {}),
     },
@@ -2523,11 +2730,16 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
   const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
   let readout = `${cellName} is booked ${iso} from ${timeText}, making ${product.name}.`;
   if (target.kind === "run_create" && command.headcount !== null) {
-    readout += ` For ${command.headcount} people.`;
+    readout += ` For ${peopleCount(command.headcount)}.`;
   } else if (target.kind === "retime_run" && retimeHit !== null) {
     readout += ` Changing the job that ran ${retimeHit.label}.`;
   }
   readout = spokenizeSpans(readout);
+  const attempted = `The ${product.name} job on ${cellName}`;
+  const notTried =
+    target.kind === "retime_run" && retimeHit !== null
+      ? spokenizeSpans(`${attempted} stays as it was, ${retimeHit.span}.`)
+      : `No ${product.name} job is booked on ${cellName}.`;
 
   return {
     ok: true,
@@ -2538,6 +2750,8 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
       target,
       range: { startMin, endMin },
       readout,
+      attempted,
+      notTried,
     },
   };
 }
@@ -2686,7 +2900,16 @@ function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): 
     const readout = spokenizeSpans(
       `${operator.displayName} is off ${cellName} ${iso}; that was ${hit.label}${productPhrase}.`,
     );
-    return { ok: true, resolved: { intent: "unassign", assignmentId: hit.id, readout } };
+    return {
+      ok: true,
+      resolved: {
+        intent: "unassign",
+        assignmentId: hit.id,
+        readout,
+        attempted: `${operator.displayName}'s block on ${cellName}`,
+        notTried: `${operator.displayName} stays on ${cellName}.`,
+      },
+    };
   };
 
   if (command.existing === null) {
@@ -2881,6 +3104,31 @@ function resolveMoveCommand(
     blk = hit;
   }
 
+  // S72-e/DEF-0046: a move that names no new cell, no span, no shift and no
+  // adjust has nothing left to change -- the block was found (or taken as
+  // the one elsewhere), but the sentence said no destination at all (the
+  // "everyone" expansion that dropped `adjust` used to reach this point and
+  // then read `.start` off a null span, below). `nothing_to_do` is the
+  // resolver's existing shape for "found the target, nothing to act on";
+  // reused here rather than a new question kind. A `TypeError` is never an
+  // acceptable answer to a parsed command.
+  if (
+    command.adjust === null &&
+    command.toPlace === null &&
+    command.span === null &&
+    command.shift === null
+  ) {
+    const blkCellNode = ctx.nodeById.get(blk.nodeId) ?? null;
+    const blkCellName = blkCellNode ? cellDisplayName(blkCellNode, ctx, byPath) : blk.nodeId;
+    return {
+      ok: false,
+      question: {
+        kind: "nothing_to_do",
+        text: `${operator.displayName}'s block on ${blkCellName} has nothing to change.`,
+      },
+    };
+  }
+
   // 4. The destination. S52-b (R-402): a shift name resolves to a band on
   // whichever cell the block ends up on -- the block's OWN cell for a move
   // in time, the NEW cell when one was also said (reviewer, blocker 3: a
@@ -3067,12 +3315,33 @@ function resolveMoveCommand(
   // is genuinely on a different calendar day (the edge-adjust
   // `expandEveryoneUnassign` now builds), and is no plainer even for an
   // ordinary same-day "shorten by 6 hours".
+  // DEF-0040 / R-461: an adjust that lands EXACTLY on this day's own
+  // midnight, cutting a block that ran across it, is a clear keeping the
+  // OTHER day's part of a night shift -- said as which part went and which
+  // stayed ("Priya Shah's night shift on Cell 4 keeps its Sunday part, 10 pm
+  // to midnight; Monday's part, midnight to 6 am, is cleared."), never "now
+  // ends midnight", which does not say which midnight or what was lost.
+  // Every hour off the real axis (`clockOfOffset`), every day off
+  // `weekdayNameOfIndex` (R-426).
+  let midnightReadout: string | null = null;
+  if (adjustReadout !== null) {
+    const midStart = ctx.wallToOffset(dayIndex, 0);
+    const midEnd = ctx.wallToOffset(dayIndex, 1440);
+    const shift = `${operator.displayName}'s night shift on ${blkCellName}`;
+    if (adjustReadout.edge === "end" && endMin === midStart && blk.startMin < midStart) {
+      midnightReadout = `${shift} keeps its ${weekdayNameOfIndex(dayIndex - 1, ctx)} part, ${spokenClock(clockOfOffset(blk.startMin, ctx))} to midnight; ${weekdayNameOfIndex(dayIndex, ctx)}'s part, midnight to ${spokenClock(clockOfOffset(blk.endMin, ctx))}, is cleared.`;
+    } else if (adjustReadout.edge === "start" && startMin === midEnd && blk.endMin > midEnd) {
+      midnightReadout = `${shift} keeps its ${weekdayNameOfIndex(dayIndex + 1, ctx)} part, midnight to ${spokenClock(clockOfOffset(blk.endMin, ctx))}; ${weekdayNameOfIndex(dayIndex, ctx)}'s part, ${spokenClock(clockOfOffset(blk.startMin, ctx))} to midnight, is cleared.`;
+    }
+  }
   const readout = spokenizeSpans(
-    adjustReadout !== null
-      ? `${operator.displayName}'s block on ${blkCellName} now ${adjustReadout.edge}s ${formatClockTime(adjustReadout.newClock)}; it was ${formatClockTime(adjustReadout.oldClock)}.`
-      : destCellName !== null
-        ? `${operator.displayName} is moving from ${blkCellName} to ${destCellName}, ${whenText} from ${arrow}.`
-        : `${operator.displayName}'s ${blk.productName ?? "block"} block on ${blkCellName} now runs ${whenText} from ${arrow}.`,
+    midnightReadout !== null
+      ? midnightReadout
+      : adjustReadout !== null
+        ? `${operator.displayName}'s block on ${blkCellName} now ${adjustReadout.edge}s ${formatClockTime(adjustReadout.newClock)}; it was ${formatClockTime(adjustReadout.oldClock)}.`
+        : destCellName !== null
+          ? `${operator.displayName} is moving from ${blkCellName} to ${destCellName}, ${whenText} from ${arrow}.`
+          : `${operator.displayName}'s ${blk.productName ?? "block"} block on ${blkCellName} now runs ${whenText} from ${arrow}.`,
   );
 
   return {
@@ -3086,6 +3355,15 @@ function resolveMoveCommand(
       range: { startMin, endMin },
       target,
       readout,
+      // R-432: who and where; and what stays if this is never tried.
+      attempted:
+        destCellName !== null
+          ? `${operator.displayName} on ${destCellName}`
+          : `${operator.displayName}'s block on ${blkCellName}`,
+      notTried:
+        destCellName !== null
+          ? `${operator.displayName} stays on ${blkCellName}.`
+          : `${operator.displayName}'s block on ${blkCellName} stays as it was, ${formatSpan(clockOfOffset(blk.startMin, ctx), clockOfBlockEnd(blk.startMin, blk.endMin, ctx))}.`,
       ...(override ? { override } : {}),
       ...(areaOverride ? { areaOverride } : {}),
     },
@@ -3135,7 +3413,7 @@ function resolveHeadcountCommand(command: HeadcountCommand, ctx: ResolveContext)
 
   const cellName = cellDisplayName(cell, ctx, byPath);
   const readout = spokenizeSpans(
-    `The ${product.name} job on ${cellName} now takes ${command.headcount} people; it runs ${whenIso} from ${run.span}.`,
+    `The ${product.name} job on ${cellName} now takes ${peopleCount(command.headcount)}; it runs ${whenIso} from ${run.span}.`,
   );
 
   return {
@@ -3146,6 +3424,11 @@ function resolveHeadcountCommand(command: HeadcountCommand, ctx: ResolveContext)
       nodeId: cell.id,
       headcount: command.headcount,
       readout,
+      attempted: `The ${product.name} job on ${cellName}`,
+      notTried:
+        run.headcount !== null
+          ? `The ${product.name} job on ${cellName} stays at ${peopleCount(run.headcount)}.`
+          : `The ${product.name} job on ${cellName} stays as it was.`,
     },
   };
 }
@@ -3257,8 +3540,41 @@ export type Expansion =
        *  "absent" and "empty" the same, so either is fine to produce, but an
        *  absent field is the honest one when there is nothing to say. */
       runRemovals?: ResolvedRunRemoval[];
+      /** DEF-0040 / R-461: the jobs a clear keeps the other day's part of,
+       *  ALREADY resolved, in board order. The lot writes them after every
+       *  person command (the crew trimmed first) and before `runRemovals`.
+       *  Undefined when there are none, like `runRemovals`. */
+      runTrims?: ResolvedRunTrim[];
+      /** DEF-0048 / R-409: the absence an absence sentence records, written
+       *  LAST in the lot. Undefined when the sentence is not an absence, or
+       *  the caller may not record it (see `summary`). */
+      absenceRecord?: ResolvedAbsenceRecord;
+      /** DEF-0048 / R-459: the whole absence sentence's answer, one or two
+       *  plain sentences with the bar's ISO day token -- "Sam Patel is off
+       *  2026-09-29. Their 2 blocks on Cell 1 are cleared and the absence is
+       *  recorded." -- including the plain reason when the absence is NOT
+       *  recorded ("I cannot record an absence for John Kim from here; their
+       *  blocks are cleared."). Set on every absence expansion, never on any
+       *  other. */
+      summary?: string;
     }
   | { ok: false; question: Question };
+
+/**
+ * DEF-0040 / DEF-0048: every step a lot can hold -- the four resolved single
+ * shapes, and the three a board-answered sentence builds already resolved
+ * (a job's removal, a job's trim, an absence's record). The lot runner
+ * (`useDragGesture`'s `runLot`) takes this; `commandConversation.ts`'s
+ * `ResolvedAny` is its subset until the bar carries the two new kinds.
+ */
+export type ResolvedLotStep =
+  | ResolvedCommand
+  | ResolvedBook
+  | ResolvedUnassign
+  | ResolvedMove
+  | ResolvedRunRemoval
+  | ResolvedRunTrim
+  | ResolvedAbsenceRecord;
 
 /** R-407: the reserved operator word, matched the same case/whitespace-blind
  *  way every other word in this module is (`normalizeForMatch`) -- the
@@ -3708,6 +4024,13 @@ function resolveWindowForCell(
  * standing: "we talked about this." No blocks and no runs at all is
  * `nothing_to_do`.
  *
+ * DEF-0040 / R-461 (S194-D, 28 Sept): all of the above is now decided by
+ * `planClear` (below), which adds the midnight rule -- a block or a job
+ * across the cleared day's own midnight asks, Yes or No, about the other
+ * day's part (one question per direction), a job is TRIMMED to the part a No
+ * keeps, and a job removed whole lists every crew block on it as a removal,
+ * never a trim. See `planClear`'s own comment.
+ *
  * R-436's own second clause -- a sentence that NAMES A PART, or says "the
  * operators" / "take everyone off", keeps removing only the people, never
  * the jobs -- is not reachable here: `UnassignCommand` (`parse.ts`) carries
@@ -3721,181 +4044,928 @@ function resolveWindowForCell(
  * no sentence to apply to yet; it needs a `parse.ts` field (out of this
  * lane's boundary) before it can be checked here.
  */
-function expandEveryoneUnassign(command: UnassignCommand, ctx: ResolveContext): Expansion {
+function expandEveryoneUnassign(
+  command: UnassignCommand,
+  ctx: ResolveContext,
+  options?: ResolveOptions,
+): Expansion {
+  const dayResult = resolveDay(command.day, ctx);
+  if (!dayResult.ok) return { ok: false, question: dayResult.question };
+  const dayIndex = dayResult.dayIndex;
+  const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+  const label = command.place.length > 0 ? command.place[0] : "The board";
+  return expandEveryoneOverDays(
+    command,
+    [dayIndex],
+    `${label} has nobody on it ${iso}.`,
+    ctx,
+    options,
+  );
+}
+
+/**
+ * DEF-0040 / DEF-0047 / R-461: the ONE clear of everyone on a place, over
+ * one day (`expandEveryoneUnassign`) or several (`expandRepeatUnassign`'s
+ * week) -- the place's cells and each cell's window on each day, handed to
+ * `planClear` once, so a night block between two cleared days is ONE
+ * removal (never one edge trim per day it touches, the DEF-0047 shape the
+ * bar's duplicate guard refused) and the week asks at most the same two
+ * questions a single day does.
+ */
+function expandEveryoneOverDays(
+  command: UnassignCommand,
+  dayIndexes: readonly number[],
+  emptyText: string,
+  ctx: ResolveContext,
+  options: ResolveOptions | undefined,
+): Expansion {
   const byPath = buildPathIndex(ctx.nodeById);
   const cellsResult = resolveEveryonePlaceCells(command.place, ctx, byPath);
   if (!cellsResult.ok) return cellsResult;
   const targetCells = cellsResult.cells;
 
-  const dayResult = resolveDay(command.day, ctx);
-  if (!dayResult.ok) return { ok: false, question: dayResult.question };
-  const dayIndex = dayResult.dayIndex;
-
-  const windows = new Map<string, { startMin: number; endMin: number }>();
+  const windowsByCell = new Map<string, ClearWindow[]>();
   for (const cell of targetCells) {
-    const w = resolveWindowForCell(command.day, command.span, command.shift, dayIndex, cell, ctx);
-    if (!w.ok) return w;
-    windows.set(cell.id, { startMin: w.startMin, endMin: w.endMin });
-  }
-  const cellIds = new Set(targetCells.map((c) => c.id));
-
-  const commands: SingleCommand[] = [];
-  for (const x of ctx.assignments) {
-    if (!cellIds.has(x.nodeId)) continue;
-    const window = windows.get(x.nodeId);
-    if (!window || !ctx.overlaps(window, x)) continue;
-    const op = operatorById(x.operatorId, ctx);
-    if (op === null) continue; // a departed person's block has no words to name it by -- skipped
-    const xCell = ctx.nodeById.get(x.nodeId) as Node;
-    const insideStart = x.startMin >= window.startMin;
-    const insideEnd = x.endMin <= window.endMin;
-    if (insideStart && insideEnd) {
-      commands.push({
-        intent: "unassign",
-        operator: personWords(op),
-        place: cellWordsOf(xCell, byPath),
-        day: dayWordForIndex(dayIndex, ctx),
-        span: hoursOfBlock(x.startMin, x.endMin, ctx),
-        existing: { kind: "remove", assignmentId: x.id },
-        shift: null,
-        until: null,
-      });
-    } else if (insideStart !== insideEnd) {
-      // F-152-b, rule 1: the kept (outside-window) part is an EDGE ADJUST
-      // on the SENTENCE's own day, never a re-dated span -- the window's
-      // own edges (`window.startMin`/`window.endMin`) are always on
-      // `dayIndex` by construction (`resolveWindowForCell`'s own
-      // `wallToOffset`), so `clockOnDay` reads their wall clock with no
-      // `wallOf` at all, hence no clamp to go wrong. The block's OTHER
-      // edge (its own real start or end, left untouched) is never read
-      // here either -- `resolveMoveCommand`'s own adjust path keeps it
-      // exactly as it is, even when that is a different calendar day
-      // entirely (a leftover that starts the day before the window it is
-      // cleared from, the John Kim shape): block starts outside, ends
-      // inside -> the end moves to the window's own start (DAY_END when
-      // that is the day's own end); starts inside, ends outside -> the
-      // start moves to the window's own end (DAY_END the ordinary
-      // whole-day-window case). Items 3 (both edges outside) and 4
-      // (a kept day off the board) of the first brief no longer apply
-      // here at all -- there is no `wallOf` read left in this branch to
-      // fall off the board.
-      const adjust: Adjust = insideStart
-        ? { edge: "start", at: clockOnDay(window.endMin, dayIndex, ctx) }
-        : { edge: "end", at: clockOnDay(window.startMin, dayIndex, ctx) };
-      commands.push({
-        intent: "move",
-        operator: personWords(op),
-        place: cellWordsOf(xCell, byPath),
-        toPlace: null,
-        day: dayWordForIndex(dayIndex, ctx),
-        span: null,
-        existing: { kind: "move", assignmentId: x.id },
-        shift: null,
-        adjust,
-      });
-    } else {
-      return crossesBothEdgesQuestion(op, x, xCell, window, ctx);
+    const list: ClearWindow[] = [];
+    for (const d of dayIndexes) {
+      const w = resolveWindowForCell(
+        dayWordForIndex(d, ctx),
+        command.span,
+        command.shift,
+        d,
+        cell,
+        ctx,
+      );
+      if (!w.ok) return w;
+      list.push({ startMin: w.startMin, endMin: w.endMin, dayIndex: d });
     }
+    windowsByCell.set(cell.id, list);
   }
 
-  const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
+  const plan = planClear(
+    {
+      dayIndexes,
+      wholeDay: command.span === null && command.shift === null,
+      windowsFor: (nodeId) => windowsByCell.get(nodeId) ?? null,
+      blockInScope: () => true,
+      includeRuns: true,
+    },
+    ctx,
+    options,
+    byPath,
+  );
+  if (!plan.ok) return plan;
+  const { commands, runTrims, runRemovals } = plan;
 
-  // S70-d (R-436, brief §1/§3.2): one `ResolvedRunRemoval` per RUN on the
-  // gathered cells overlapping each cell's own window, in `ctx.runs`' own
-  // (board) order -- placed AFTER the loop above so `commands` above never
-  // sees a run, and the people/job split stays exactly the two loops it is.
-  // A run is never clipped or edge-adjusted the way a block is (brief §1:
-  // "removes ... and leaves every job (run) standing" was the bug; the fix
-  // is the whole run, always gone, never split) -- `deleteRun`'s own
-  // `cascade` mode is what a job removal means here (brief §2).
-  const runRemovals: ResolvedRunRemoval[] = [];
-  for (const run of ctx.runs) {
-    if (!cellIds.has(run.nodeId)) continue;
-    const window = windows.get(run.nodeId);
-    if (!window || !ctx.overlaps(window, run)) continue;
-    const runCell = ctx.nodeById.get(run.nodeId) as Node;
-    const runCellName = cellDisplayName(runCell, ctx, byPath);
-    const headcountPhrase = run.headcount !== null ? `, for ${run.headcount} people` : "";
-    // REVIEWER FIX (S70-d review): `deleteRun`'s `cascade` mode deletes
-    // EVERY assignment with `run_id = p_run_id`, with no window of its
-    // own -- `delete_run`'s SQL is `DELETE FROM assignments WHERE run_id =
-    // p_run_id` (migration 20260821000009_api_surface.sql), never scoped to
-    // a timerange. A run is gathered here the moment its OWN timerange
-    // overlaps the sentence's (possibly narrower, "this afternoon") window
-    // at all -- so a crew member on this same run whose OWN block sits
-    // entirely outside that window (an 08:00-10:00 block on a run that
-    // runs 08:00-16:00, cleared with "this afternoon") was never added to
-    // `commands` above (the window-overlap check just skipped it) and was
-    // never named in the run's own readout either (`run.span` is the run's
-    // hours, not any one crew member's) -- yet cascade removes it anyway.
-    // That is exactly the shape CLAUDE.md's screen/bar rule forbids in
-    // reverse: something removed that the lot never showed. Brief §3
-    // ("list the extra blocks" is the other of its two named fixes,
-    // alongside excluding the run) -- listing keeps the "clear means
-    // everything" contract (R-436) intact while keeping every removal
-    // named, so it is the one taken here: each such crew block becomes its
-    // own ordinary `unassign` command (people-first ordering holds --
-    // this still runs inside the `commands` array, all of it before any
-    // `runRemovals` entry).
-    for (const x of ctx.assignments) {
-      if (x.runId !== run.id) continue;
-      const w = windows.get(x.nodeId);
-      if (w && ctx.overlaps(w, x)) continue; // already in `commands` above
-      const op = operatorById(x.operatorId, ctx);
-      if (op === null) continue; // a departed person's block has no words to name it by
-      commands.push({
-        intent: "unassign",
-        operator: personWords(op),
-        place: cellWordsOf(runCell, byPath),
-        day: dayWordForIndex(dayIndex, ctx),
-        span: hoursOfBlock(x.startMin, x.endMin, ctx),
-        existing: { kind: "remove", assignmentId: x.id },
-        shift: null,
-        until: null,
-      });
-    }
-    runRemovals.push({
-      intent: "remove_run",
-      runId: run.id,
-      // REVIEWER FIX (S70-d review): `run.productName` is null only once its
-      // product has been deleted (D110, see `ContextRun.productName`'s own
-      // doc) -- the un-fixed `${run.productName ?? "job"} job` read
-      // "Removing the job job · ..." for that run, the same doubled word a
-      // reader would trip on. The word is dropped, never duplicated, same
-      // as every OTHER `?? "block"` fallback in this file reads (e.g.
-      // `${x.productName ?? "block"} ${x.label}` -- "block 10:00-12:00",
-      // no second "block").
-      readout: spokenizeSpans(
-        `The ${run.productName === null ? "job" : `${run.productName} job`} is off ${runCellName} ${iso}; that was ${run.span}${headcountPhrase}.`,
-      ),
-    });
+  if (commands.length === 0 && runRemovals.length === 0 && runTrims.length === 0) {
+    return { ok: false, question: { kind: "nothing_to_do", text: emptyText } };
   }
-
-  if (commands.length === 0 && runRemovals.length === 0) {
-    const label = command.place.length > 0 ? command.place[0] : "The board";
-    return {
-      ok: false,
-      question: { kind: "nothing_to_do", text: `${label} has nobody on it ${iso}.` },
-    };
-  }
-  const total = commands.length + runRemovals.length;
+  const total = commands.length + runRemovals.length + runTrims.length;
   if (total > LOT_CEILING) {
     return { ok: false, question: { kind: "lot_too_big", count: total, max: LOT_CEILING } };
   }
-  // S70-d: a run removal can never be a `SingleCommand` (no sentence names
-  // one directly, and `parse.ts`'s grammar has no such intent) -- so the
-  // moment there is at least one, this ALWAYS returns a `several` (never
-  // `wrapMany`'s single-command shortcut, even when `commands` itself has 0
-  // or 1 entries), with the runs riding on `runRemovals` beside it. A place
-  // with a job and nobody on it (brief §3's pin) is `commands: []`,
-  // `runRemovals: [the one job]` -- a several of zero SingleCommands plus
-  // one already-resolved run, which the lot lists as "1 commands ready: 1.
-  // Removing the ... job ...", the job listed alone, never folded into
-  // `nothing_to_do`. Every ordinary `everyone` removal with no runs on the
-  // place/day (today's whole behavior before this lane) is `wrapMany`,
-  // byte-for-byte unchanged.
-  if (runRemovals.length === 0) return wrapMany(commands);
-  return { ok: true, command: { intent: "several", commands }, runRemovals };
+  // S70-d: a run step can never be a `SingleCommand` (no sentence names one
+  // directly) -- so the moment there is at least one, this ALWAYS returns a
+  // `several` (never `wrapMany`'s single-command shortcut, even with 0 or 1
+  // commands), with the runs riding beside it. A place with a job and nobody
+  // on it (EX8) is `commands: []` plus the one job. Every clear with no job
+  // on the place/day is `wrapMany`, byte for byte as before.
+  if (runRemovals.length === 0 && runTrims.length === 0) return wrapMany(commands);
+  return {
+    ok: true,
+    command: { intent: "several", commands },
+    ...(runRemovals.length > 0 ? { runRemovals } : {}),
+    ...(runTrims.length > 0 ? { runTrims } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// DEF-0040 / DEF-0047 / DEF-0048 / R-461 (the maintainer, 28 Sept): the one
+// planner every clear and every absence goes through.
+// ---------------------------------------------------------------------------
+
+/** One cleared window on one day, real minutes from the window's origin. */
+interface ClearWindow {
+  startMin: number;
+  endMin: number;
+  dayIndex: number;
+}
+
+/** Touching or overlapping `ClearWindow`s merged -- a whole-day clear of
+ *  Monday to Wednesday is ONE segment, Monday's first midnight to Wednesday's
+ *  last; `startDay`/`endDay` are the days its two edges belong to. */
+interface ClearSeg {
+  startMin: number;
+  endMin: number;
+  startDay: number;
+  endDay: number;
+}
+
+function mergeClearWindows(windows: readonly ClearWindow[]): ClearSeg[] {
+  const sorted = [...windows].sort((a, b) => a.startMin - b.startMin);
+  const out: ClearSeg[] = [];
+  for (const w of sorted) {
+    const last = out[out.length - 1];
+    if (last !== undefined && w.startMin <= last.endMin) {
+      if (w.endMin > last.endMin) {
+        last.endMin = w.endMin;
+        last.endDay = w.dayIndex;
+      }
+    } else {
+      out.push({
+        startMin: w.startMin,
+        endMin: w.endMin,
+        startDay: w.dayIndex,
+        endDay: w.dayIndex,
+      });
+    }
+  }
+  return out;
+}
+
+/** How a block or a job lies against a node's cleared segments: wholly
+ *  outside, or cut -- `before`/`after` are the parts outside the clear on
+ *  either side (null when there is none), `hole` a part BETWEEN two cleared
+ *  segments (two narrow windows on two days). */
+type ClearCut =
+  | { kind: "outside" }
+  | {
+      kind: "cut";
+      first: ClearSeg;
+      last: ClearSeg;
+      before: { startMin: number; endMin: number } | null;
+      after: { startMin: number; endMin: number } | null;
+      hole: boolean;
+    };
+
+function cutAgainst(
+  item: { startMin: number; endMin: number },
+  segs: readonly ClearSeg[],
+  ctx: ResolveContext,
+): ClearCut {
+  const hit = segs.filter((s) => ctx.overlaps(s, item));
+  if (hit.length === 0) return { kind: "outside" };
+  const first = hit[0];
+  const last = hit[hit.length - 1];
+  return {
+    kind: "cut",
+    first,
+    last,
+    before:
+      item.startMin < first.startMin ? { startMin: item.startMin, endMin: first.startMin } : null,
+    after: item.endMin > last.endMin ? { startMin: last.endMin, endMin: item.endMin } : null,
+    hole: hit.length > 1,
+  };
+}
+
+type Direction = "previous" | "next";
+
+/** What happens to one cut item once every answer it needs is in:
+ *  `remove` (nothing of it is kept), `keep_before`/`keep_after` (the part on
+ *  that side stays -- an edge trim), `both` (a part on each side stays -- a
+ *  hole the app cannot make), or the directions still unanswered. */
+type Fate =
+  | { kind: "remove" }
+  | { kind: "keep_before" }
+  | { kind: "keep_after" }
+  | { kind: "both" }
+  | { kind: "ask"; needs: Direction[] };
+
+function fateOf(
+  cut: Extract<ClearCut, { kind: "cut" }>,
+  wholeDay: boolean,
+  options: ResolveOptions | undefined,
+): Fate {
+  let keepBefore = cut.before !== null;
+  let keepAfter = cut.after !== null;
+  // R-461: only a whole-day clear's edges are midnights -- a narrower
+  // window's edge ("after 2 pm") keeps the part outside with no question,
+  // exactly as R-407 always has.
+  if (wholeDay) {
+    const needs: Direction[] = [];
+    if (cut.before !== null) {
+      if (options?.previousDayPart === undefined) needs.push("previous");
+      else keepBefore = options.previousDayPart === "keep";
+    }
+    if (cut.after !== null) {
+      if (options?.nextDayPart === undefined) needs.push("next");
+      else keepAfter = options.nextDayPart === "keep";
+    }
+    if (needs.length > 0) return { kind: "ask", needs };
+  }
+  if (cut.hole) return { kind: "both" };
+  if (keepBefore && keepAfter) return { kind: "both" };
+  if (keepBefore) return { kind: "keep_before" };
+  if (keepAfter) return { kind: "keep_after" };
+  return { kind: "remove" };
+}
+
+interface ClearScope {
+  /** The clear's own days, in board order. */
+  dayIndexes: readonly number[];
+  /** True when every window is a whole calendar day, so its edges are the
+   *  plant's midnights (R-461's questions apply). */
+  wholeDay: boolean;
+  /** A node's cleared windows, or null when the node is not in the clear. */
+  windowsFor: (nodeId: string) => readonly ClearWindow[] | null;
+  /** Which blocks the clear is about (everyone on a place; one person). */
+  blockInScope: (x: ContextAssignment) => boolean;
+  /** A clear of a place removes the jobs on it too (R-436); an absence and
+   *  a named person's clear never touch a job. */
+  includeRuns: boolean;
+}
+
+type ClearPlan =
+  | { ok: false; question: Question }
+  | {
+      ok: true;
+      commands: SingleCommand[];
+      runTrims: ResolvedRunTrim[];
+      runRemovals: ResolvedRunRemoval[];
+      /** Every block the lot removes or trims, board order -- the absence
+       *  readout counts these. */
+      touched: ContextAssignment[];
+    };
+
+const WEEKDAY_TITLE_NAMES: readonly string[] = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+/** R-461: the weekday a day index falls on, "Sunday" -- off `ctx.days` when
+ *  the day is on the board, else by calendar arithmetic off a day that is
+ *  (the day before the board's first, the shift's own previous day). Never a
+ *  `Date` (commandPurity U1). */
+function weekdayNameOfIndex(dayIndex: number, ctx: ResolveContext): string {
+  const row = ctx.days.find((d) => d.index === dayIndex);
+  if (row) return WEEKDAY_TITLE_NAMES[row.weekday];
+  const ref = ctx.days[0] as BoardDay | undefined;
+  if (ref === undefined) return "";
+  return WEEKDAY_TITLE_NAMES[weekdayOfIsoDay(addDaysToIso(ref.iso, dayIndex - ref.index))];
+}
+
+/** R-461: "Priya Shah and Maria Lopez" / "Priya Shah" -- the names a
+ *  readout lists. */
+function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/** R-459: "The Housing A job on Cell 4", or "The job on Cell 4" once the
+ *  part has been deleted (D110, the EX11 rule: the word is dropped, never
+ *  doubled). */
+function jobPhrase(run: ContextRun, cellName: string): string {
+  return run.productName === null
+    ? `The job on ${cellName}`
+    : `The ${run.productName} job on ${cellName}`;
+}
+
+/**
+ * DEF-0040 / DEF-0047 / DEF-0048 / R-461: what a clear (or an absence) does
+ * to every block and every job it touches, decided ONCE over the whole span,
+ * with the invariant the pin holds: NOTHING THE LOT SAYS STAYS IS REMOVED BY
+ * ANOTHER STEP OF THE SAME LOT.
+ *
+ * Blocks: wholly inside the cleared windows -> a removal; across one edge ->
+ * an edge trim to the part outside (R-407); across a midnight edge of a
+ * whole-day clear -> the part outside is the OTHER day's, and the answer to
+ * that direction's question decides (keep: trim; clear: remove whole).
+ *
+ * Jobs (`includeRuns`): wholly inside, or touched by a narrower window at all
+ * -> removed whole (R-436, `delete_run`'s cascade), and EVERY crew block on
+ * it is its own listed removal -- never a trim, since the cascade takes the
+ * row regardless of time (that pair is DEF-0040 itself). Across a midnight
+ * of a whole-day clear -> the same question as its crew: keep TRIMS THE JOB
+ * to the other day's part; clear removes it whole, UNLESS a crew block the
+ * clear does not touch still sits in that other-day part (the maintainer:
+ * "where the whole job then has nothing left, the job"), when the job keeps
+ * that part for them.
+ *
+ * How a job is trimmed, and why no migration (the brief's design question):
+ * `move_run`'s last definition (20260918000082_home_shift.sql) SHIFTS every
+ * crew row by the run's start delta -- a move, never a clip -- so it cannot
+ * express "keep this part". The run's own timerange PATCH (`updateRunFields`,
+ * the edge-drag resize's own door) re-times the run alone; nothing on the
+ * server requires a crew block to lie inside its run's hours -- migration
+ * 0079 says so in as many words ("a run can legitimately be shrunk with its
+ * crew left outside it ... 'inside its run' is NOT an invariant of the table
+ * today") and put its containment rule on JOINING only; the one run trigger
+ * on `assignments` is `assignments_check_run_consistency`, NODE equality
+ * (0003/0009); the drag's "N crew fall outside" is a client courtesy
+ * (`planRunRetime`). So the lot writes, in order, (1) every
+ * crew trim and removal (the ordinary block doors, each refused or not on
+ * its own row), then (2) the job's PATCH to its kept part -- at no point is a
+ * row in a state any guard refuses, and a job removal (3) only ever follows
+ * the removal of every crew row it would cascade.
+ */
+function planClear(
+  scope: ClearScope,
+  ctx: ResolveContext,
+  options: ResolveOptions | undefined,
+  byPath: Map<string, Node>,
+): ClearPlan {
+  const segsCache = new Map<string, ClearSeg[] | null>();
+  const segsFor = (nodeId: string): ClearSeg[] | null => {
+    if (!segsCache.has(nodeId)) {
+      const ws = scope.windowsFor(nodeId);
+      segsCache.set(nodeId, ws === null ? null : mergeClearWindows(ws));
+    }
+    return segsCache.get(nodeId) ?? null;
+  };
+  /** The first cleared day (board order) whose window on this node overlaps
+   *  `item` -- the day a removal or a job readout is dated by. */
+  const firstClearedDay = (
+    nodeId: string,
+    item: { startMin: number; endMin: number },
+  ): number | null => {
+    const ws = scope.windowsFor(nodeId) ?? [];
+    for (const d of scope.dayIndexes) {
+      const w = ws.find((x) => x.dayIndex === d);
+      if (w !== undefined && ctx.overlaps(w, item)) return d;
+    }
+    return null;
+  };
+
+  // 1. Jobs first -- a block on a job that is certainly removed whole is a
+  // listed removal with no question of its own (step 2).
+  type RunState = {
+    run: ContextRun;
+    cut: Extract<ClearCut, { kind: "cut" }>;
+    state: "cascade" | "crossing";
+  };
+  const runStates: RunState[] = [];
+  const runStateById = new Map<string, RunState>();
+  if (scope.includeRuns) {
+    for (const run of ctx.runs) {
+      const segs = segsFor(run.nodeId);
+      if (segs === null) continue;
+      const cut = cutAgainst(run, segs, ctx);
+      if (cut.kind === "outside") continue;
+      // R-436 as amended (the maintainer, 28 Sept): a job across ANY edge of
+      // the clear keeps its part outside it -- at a midnight of a whole-day
+      // clear after R-461's question, at a narrower window's own edge ("clear
+      // Cell 1 after 1 pm") with no question at all, since the sentence said
+      // where the edge is. Only a job wholly inside the clear goes whole.
+      const crossing = cut.before !== null || cut.after !== null || cut.hole;
+      const st: RunState = { run, cut, state: crossing ? "crossing" : "cascade" };
+      runStates.push(st);
+      runStateById.set(run.id, st);
+    }
+  }
+
+  // 2. Blocks, board order.
+  type BlockPlan = {
+    x: ContextAssignment;
+    op: OperatorLike;
+    cut: Extract<ClearCut, { kind: "cut" }>;
+    fate: Fate;
+  };
+  const blockPlans: BlockPlan[] = [];
+  for (const x of ctx.assignments) {
+    if (!scope.blockInScope(x)) continue;
+    const segs = segsFor(x.nodeId);
+    if (segs === null) continue;
+    const cut = cutAgainst(x, segs, ctx);
+    if (cut.kind === "outside") continue;
+    const op = operatorById(x.operatorId, ctx);
+    if (op === null) continue; // a departed person's block has no words to name it by -- skipped
+    const onCertainCascade = x.runId !== null && runStateById.get(x.runId)?.state === "cascade";
+    const fate: Fate = onCertainCascade ? { kind: "remove" } : fateOf(cut, scope.wholeDay, options);
+    // A narrower window's hole or two kept parts is refused at once, in board
+    // order, exactly as before (EX4) -- it does not depend on any answer.
+    if (fate.kind === "both" && !scope.wholeDay) {
+      const xCell = ctx.nodeById.get(x.nodeId) as Node;
+      return crossesBothEdgesQuestion(
+        op,
+        x,
+        xCell,
+        { startMin: cut.first.startMin, endMin: cut.last.endMin },
+        ctx,
+      );
+    }
+    blockPlans.push({ x, op, cut, fate });
+  }
+  const runFates = new Map<string, Fate>();
+  for (const st of runStates) {
+    if (st.state === "crossing") {
+      runFates.set(st.run.id, fateOf(st.cut, scope.wholeDay, options));
+    }
+  }
+
+  // 3. R-461: the questions, before anything is decided -- previous first,
+  // then next; one per direction however many shifts it covers.
+  for (const direction of ["previous", "next"] as const) {
+    const blocks = blockPlans
+      .filter((p) => p.fate.kind === "ask" && p.fate.needs.includes(direction))
+      .map((p) => p.x);
+    const runs = runStates
+      .filter((st) => {
+        const f = runFates.get(st.run.id);
+        return f !== undefined && f.kind === "ask" && f.needs.includes(direction);
+      })
+      .map((st) => st.run);
+    if (blocks.length === 0 && runs.length === 0) continue;
+    return { ok: false, question: otherDayQuestion(direction, blocks, runs, scope, ctx, byPath) };
+  }
+
+  // 4. Every answer is in. A block whose two sides both stay (a night shift
+  // longer than the cleared day, both answers No) is a hole the app cannot
+  // make -- the existing refusal, naming the block's own hours.
+  for (const p of blockPlans) {
+    if (p.fate.kind === "both") {
+      const xCell = ctx.nodeById.get(p.x.nodeId) as Node;
+      return crossesBothEdgesQuestion(
+        p.op,
+        p.x,
+        xCell,
+        { startMin: p.cut.first.startMin, endMin: p.cut.last.endMin },
+        ctx,
+      );
+    }
+  }
+  const fateById = new Map<string, Fate>(blockPlans.map((p) => [p.x.id, p.fate]));
+
+  // 5. Crossing jobs: trim to the kept side, or remove whole unless crew the
+  // clear leaves alone still sit in the side a Yes cleared.
+  const trims: Array<{
+    run: ContextRun;
+    kept: { startMin: number; endMin: number };
+    side: "before" | "after";
+    cut: Extract<ClearCut, { kind: "cut" }>;
+    stayers: string[];
+    /** True when a Yes would have removed the job but `stayers` keep it. */
+    because: boolean;
+  }> = [];
+  /** The crew the clear leaves alone (no cut at all) whose blocks lie inside
+   *  `part` -- named in the job's readout as staying on it. */
+  const untouchedCrewNames = (
+    runId: string,
+    part: { startMin: number; endMin: number },
+  ): string[] => {
+    const names: string[] = [];
+    for (const x of ctx.assignments) {
+      if (x.runId !== runId || fateById.has(x.id)) continue;
+      const op = operatorById(x.operatorId, ctx);
+      if (op === null || x.startMin < part.startMin || x.endMin > part.endMin) continue;
+      if (!names.includes(op.displayName)) names.push(op.displayName);
+    }
+    return names;
+  };
+  for (const st of runStates) {
+    if (st.state !== "crossing") continue;
+    const fate = runFates.get(st.run.id) as Fate;
+    if (fate.kind === "keep_before" && st.cut.before !== null) {
+      trims.push({
+        run: st.run,
+        kept: st.cut.before,
+        side: "before",
+        cut: st.cut,
+        stayers: untouchedCrewNames(st.run.id, st.cut.before),
+        because: false,
+      });
+      continue;
+    }
+    if (fate.kind === "keep_after" && st.cut.after !== null) {
+      trims.push({
+        run: st.run,
+        kept: st.cut.after,
+        side: "after",
+        cut: st.cut,
+        stayers: untouchedCrewNames(st.run.id, st.cut.after),
+        because: false,
+      });
+      continue;
+    }
+    if (fate.kind === "both") {
+      const runCell = ctx.nodeById.get(st.run.nodeId) as Node;
+      const cellName = cellDisplayName(runCell, ctx, byPath);
+      // R-436 amended: a window INSIDE a job would leave it in two pieces,
+      // which one job cannot be -- a plain refusal that offers nothing the
+      // server would refuse (no split of a job exists).
+      if (scope.wholeDay) {
+        const text = `${jobPhrase(st.run, cellName)} runs through the whole cleared day, so keeping both of its other days would leave a hole in it. Say yes to one of the two questions, or change that job on the board.`;
+        return { ok: false, question: { kind: "nothing_to_do", text } };
+      }
+      // R-430 (S194-D third pass): not a dead end -- the windows that WOULD
+      // work are offered: the sentence's own edge to each end of the job.
+      // Only one-segment windows on one day, and only a span that stays on
+      // that day, so every button is a sentence the grammar can say.
+      const seg = st.cut.first;
+      const day = seg.startDay;
+      const dayStart = ctx.wallToOffset(day, 0);
+      const dayEnd = ctx.wallToOffset(day, 1440);
+      const spans: Array<{ label: string; start: ClockTime; end: ClockTime }> = [];
+      if (!st.cut.hole && seg.startDay === seg.endDay) {
+        const toEnd = { startMin: seg.startMin, endMin: st.run.endMin };
+        const fromStart = { startMin: st.run.startMin, endMin: seg.endMin };
+        for (const w of [toEnd, fromStart]) {
+          if (w.startMin < dayStart || w.endMin > dayEnd) continue;
+          const start = clockOnDay(w.startMin, day, ctx);
+          const end = clockOnDay(w.endMin, day, ctx);
+          spans.push({ label: `Clear ${formatSpan(start, end)}`, start, end });
+        }
+      }
+      const text = `${jobPhrase(st.run, cellName)} runs from ${formatSpan(clockOfOffset(st.run.startMin, ctx), clockOfBlockEnd(st.run.startMin, st.run.endMin, ctx))}, so clearing ${formatSpan(clockOfOffset(seg.startMin, ctx), clockOfBlockEnd(seg.startMin, st.cut.last.endMin, ctx))} would leave a hole in it; one job cannot be in two pieces. ${spans.length > 0 ? "Clear to one end of it instead?" : "Say hours that reach one end of it, or change that job on the board."}`;
+      return { ok: false, question: { kind: "job_hole", text, spans } };
+    }
+    // Removed whole by the answers -- unless crew the clear leaves alone
+    // (their blocks lie wholly outside it) still sit inside one side's part.
+    const crew = ctx.assignments.filter(
+      (x) => x.runId === st.run.id && operatorById(x.operatorId, ctx) !== null,
+    );
+    const survivors = crew.filter((x) => {
+      const f = fateById.get(x.id);
+      return f === undefined || f.kind !== "remove";
+    });
+    if (survivors.length > 0) {
+      const within = (part: { startMin: number; endMin: number } | null): boolean =>
+        part !== null &&
+        survivors.every(
+          (x) => !fateById.has(x.id) && x.startMin >= part.startMin && x.endMin <= part.endMin,
+        );
+      const side: "before" | "after" | null = within(st.cut.before)
+        ? "before"
+        : within(st.cut.after)
+          ? "after"
+          : null;
+      if (side !== null) {
+        const kept = (side === "before" ? st.cut.before : st.cut.after) as {
+          startMin: number;
+          endMin: number;
+        };
+        trims.push({
+          run: st.run,
+          kept,
+          side,
+          cut: st.cut,
+          stayers: untouchedCrewNames(st.run.id, kept),
+          because: true,
+        });
+        continue;
+      }
+    }
+    st.state = "cascade";
+  }
+
+  // 5b. S194-D third pass: a job kept to a remnant under the minimum is
+  // asked about exactly as a block's is -- `too_short`, the block path's own
+  // answer (`resolveMoveCommand`'s adjust branch; a crew block's own trim
+  // reaches that same check when the lot resolves it, before the yes), with
+  // the job named. The minimum is the client's own D31 value passed in
+  // (`ctx.minDurationMinutes`): the server enforces NO minimum length on a
+  // run (0003's `runs` table has none, and no later migration adds one).
+  for (const t of trims) {
+    const minutes = t.kept.endMin - t.kept.startMin;
+    if (minutes < ctx.minDurationMinutes) {
+      const runCell = ctx.nodeById.get(t.run.nodeId) as Node;
+      const job = jobPhrase(t.run, cellDisplayName(runCell, ctx, byPath));
+      return {
+        ok: false,
+        question: {
+          kind: "too_short",
+          minutes,
+          min: ctx.minDurationMinutes,
+          subject: job.charAt(0).toLowerCase() + job.slice(1),
+        },
+      };
+    }
+  }
+
+  // 6. Every job removed whole takes its crew by cascade, so every crew
+  // block on it is its own listed removal (the S70-d reviewer's rule) --
+  // and a block this plan had as a trim becomes a removal: a trim the
+  // cascade would delete is exactly DEF-0040.
+  const cascadeRunIds = new Set(
+    runStates.filter((st) => st.state === "cascade").map((st) => st.run.id),
+  );
+  const listed: ContextAssignment[] = [];
+  for (const st of runStates) {
+    if (st.state !== "cascade") continue;
+    for (const x of ctx.assignments) {
+      if (x.runId !== st.run.id) continue;
+      if (operatorById(x.operatorId, ctx) === null) continue; // departed: no words to name it by
+      const f = fateById.get(x.id);
+      if (f === undefined) {
+        listed.push(x);
+      } else if (f.kind !== "remove") {
+        fateById.set(x.id, { kind: "remove" });
+      }
+    }
+  }
+
+  // 7. The commands, people first: the cut blocks by the day they are first
+  // cleared on, then board order; then the listed crew, job order.
+  const commands: SingleCommand[] = [];
+  const touched: ContextAssignment[] = [];
+  const dated = blockPlans.map((p, i) => ({
+    p,
+    i,
+    day: firstClearedDay(p.x.nodeId, p.x) ?? scope.dayIndexes[0],
+  }));
+  dated.sort((a, b) => a.day - b.day || a.i - b.i);
+  for (const { p, day } of dated) {
+    const fate = fateById.get(p.x.id) as Fate;
+    const xCell = ctx.nodeById.get(p.x.nodeId) as Node;
+    if (fate.kind === "remove") {
+      const c = removalCommand(p.op, p.x, xCell, day, ctx, byPath);
+      if (!c.ok) return c;
+      commands.push(c.command);
+      touched.push(p.x);
+    } else if (fate.kind === "keep_before") {
+      // F-152-b, rule 1: the kept part is an EDGE ADJUST on the day of the
+      // cleared edge -- the segment's own start, always on `startDay` by
+      // construction (`clockOnDay`, no `wallOf` read to clamp).
+      commands.push(
+        edgeTrimCommand(
+          p.op,
+          xCell,
+          p.x,
+          "end",
+          p.cut.first.startMin,
+          p.cut.first.startDay,
+          ctx,
+          byPath,
+        ),
+      );
+      touched.push(p.x);
+    } else if (fate.kind === "keep_after") {
+      commands.push(
+        edgeTrimCommand(
+          p.op,
+          xCell,
+          p.x,
+          "start",
+          p.cut.last.endMin,
+          p.cut.last.endDay,
+          ctx,
+          byPath,
+        ),
+      );
+      touched.push(p.x);
+    }
+  }
+  for (const x of listed) {
+    const op = operatorById(x.operatorId, ctx) as OperatorLike;
+    const xCell = ctx.nodeById.get(x.nodeId) as Node;
+    const day = firstClearedDay(x.nodeId, x);
+    const c =
+      day !== null
+        ? removalCommand(op, x, xCell, day, ctx, byPath)
+        : removalOnOwnDay(op, x, xCell, ctx, byPath);
+    if (!c.ok) return c;
+    commands.push(c.command);
+    touched.push(x);
+  }
+
+  // 8. The job steps, already resolved.
+  const runTrims: ResolvedRunTrim[] = trims.map((t) =>
+    buildRunTrim(t.run, t.kept, t.side, t.cut, t.stayers, t.because, scope.wholeDay, ctx, byPath),
+  );
+  const runRemovals: ResolvedRunRemoval[] = [];
+  for (const st of runStates) {
+    if (!cascadeRunIds.has(st.run.id)) continue;
+    const runCell = ctx.nodeById.get(st.run.nodeId) as Node;
+    const runCellName = cellDisplayName(runCell, ctx, byPath);
+    const day = firstClearedDay(st.run.nodeId, st.run) ?? scope.dayIndexes[0];
+    const iso = ctx.days.find((d) => d.index === day)?.iso ?? "";
+    const headcountPhrase =
+      st.run.headcount !== null ? `, for ${peopleCount(st.run.headcount)}` : "";
+    runRemovals.push({
+      intent: "remove_run",
+      runId: st.run.id,
+      // REVIEWER FIX (S70-d review): a deleted part's run reads "The job",
+      // never "the job job" (EX11).
+      readout: spokenizeSpans(
+        `The ${st.run.productName === null ? "job" : `${st.run.productName} job`} is off ${runCellName} ${iso}; that was ${st.run.span}${headcountPhrase}.`,
+      ),
+      attempted: jobPhrase(st.run, runCellName),
+      notTried: spokenizeSpans(
+        `${jobPhrase(st.run, runCellName)} stays as it was, ${st.run.span}.`,
+      ),
+    });
+  }
+  return { ok: true, commands, runTrims, runRemovals, touched };
+}
+
+/** A block removed whole, named by the day it is cleared on: its own hours
+ *  when it lies inside that day (EX1's shape, F-199's DAY_END end), else
+ *  `span: null` -- the whole day, the block found by overlap and pinned by
+ *  `existing` -- since a block across midnight has no one-day clock pair
+ *  (`resolveDaySpanStep` would read "10 pm to 6 am" backwards). */
+function removalCommand(
+  op: OperatorLike,
+  x: ContextAssignment,
+  xCell: Node,
+  dayIndex: number,
+  ctx: ResolveContext,
+  byPath: Map<string, Node>,
+): { ok: true; command: SingleCommand } | { ok: false; question: Question } {
+  const dayStart = ctx.wallToOffset(dayIndex, 0);
+  const dayEnd = ctx.wallToOffset(dayIndex, 1440);
+  const insideDay = x.startMin >= dayStart && x.endMin <= dayEnd;
+  return {
+    ok: true,
+    command: {
+      intent: "unassign",
+      operator: personWords(op),
+      place: cellWordsOf(xCell, byPath),
+      day: dayWordForIndex(dayIndex, ctx),
+      span: insideDay ? hoursOfBlock(x.startMin, x.endMin, ctx) : null,
+      existing: { kind: "remove", assignmentId: x.id },
+      shift: null,
+      until: null,
+    },
+  };
+}
+
+/** A listed crew block outside every cleared window (S70-d's reviewer
+ *  case): named by the day it itself starts on, which may be off the board
+ *  (`day_off_board`, never a guessed date). */
+function removalOnOwnDay(
+  op: OperatorLike,
+  x: ContextAssignment,
+  xCell: Node,
+  ctx: ResolveContext,
+  byPath: Map<string, Node>,
+): { ok: true; command: SingleCommand } | { ok: false; question: Question } {
+  const edgesOk = blockEdgesOnBoard(x, ctx);
+  if (!edgesOk.ok) return edgesOk;
+  const dayIndex = ctx.wallOf(x.startMin).dayIndex;
+  return removalCommand(op, x, xCell, dayIndex, ctx, byPath);
+}
+
+/** F-152-b, rule 1: the kept part as an EDGE ADJUST -- `edge` moves to
+ *  `at`, a cleared segment's own edge, which is on `dayIndex` by
+ *  construction; the block's other edge is never read. */
+function edgeTrimCommand(
+  op: OperatorLike,
+  xCell: Node,
+  x: ContextAssignment,
+  edge: "start" | "end",
+  at: number,
+  dayIndex: number,
+  ctx: ResolveContext,
+  byPath: Map<string, Node>,
+): SingleCommand {
+  return {
+    intent: "move",
+    operator: personWords(op),
+    place: cellWordsOf(xCell, byPath),
+    toPlace: null,
+    day: dayWordForIndex(dayIndex, ctx),
+    span: null,
+    existing: { kind: "move", assignmentId: x.id },
+    shift: null,
+    adjust: { edge, at: clockOnDay(at, dayIndex, ctx) },
+  };
+}
+
+/** R-461 / R-459: a job kept to the other day's part -- "The Housing A job
+ *  on Cell 4 keeps its Sunday part, 10 pm to midnight; Monday's part,
+ *  midnight to 6 am, is cleared." (+ ", because Ahmed Ali is still on it"
+ *  when a Yes would have removed it but crew the clear leaves alone are
+ *  there). Every hour through `clockOfOffset` (the real axis, R-426). */
+function buildRunTrim(
+  run: ContextRun,
+  kept: { startMin: number; endMin: number },
+  side: "before" | "after",
+  cut: Extract<ClearCut, { kind: "cut" }>,
+  stayers: readonly string[],
+  becauseOfStayers: boolean,
+  wholeDay: boolean,
+  ctx: ResolveContext,
+  byPath: Map<string, Node>,
+): ResolvedRunTrim {
+  const runCell = ctx.nodeById.get(run.nodeId) as Node;
+  const cellName = cellDisplayName(runCell, ctx, byPath);
+  const job = jobPhrase(run, cellName);
+  // The crew the clear leaves alone are SAID to stay (R-461: "the readout
+  // says exactly which parts went and which stayed").
+  const isAre = stayers.length === 1 ? "is" : "are";
+  const because =
+    stayers.length === 0
+      ? ""
+      : becauseOfStayers
+        ? `, because ${joinNames(stayers)} ${isAre} still on it`
+        : `, and ${joinNames(stayers)} ${isAre} still on it`;
+  let readout: string;
+  if (!wholeDay) {
+    // R-436 amended: a narrower window's own edge -- what stays and what is
+    // cleared, in spoken hours, the midnight readout's pattern without days.
+    const at = (m: number): string => spokenClock(clockOfOffset(m, ctx));
+    const runEnd = spokenClock(clockOfBlockEnd(run.startMin, run.endMin, ctx));
+    readout =
+      side === "before"
+        ? job +
+          " keeps " +
+          at(run.startMin) +
+          " to " +
+          at(kept.endMin) +
+          because +
+          "; the part from " +
+          at(kept.endMin) +
+          " to " +
+          runEnd +
+          " is cleared."
+        : job +
+          " keeps " +
+          at(kept.startMin) +
+          " to " +
+          runEnd +
+          because +
+          "; the part from " +
+          at(run.startMin) +
+          " to " +
+          at(kept.startMin) +
+          " is cleared.";
+  } else if (side === "before") {
+    const keptDay = weekdayNameOfIndex(cut.first.startDay - 1, ctx);
+    const clearedDay = weekdayNameOfIndex(cut.first.startDay, ctx);
+    const keptFrom = spokenClock(clockOfOffset(run.startMin, ctx));
+    const clearedTo = spokenClock(clockOfOffset(run.endMin, ctx));
+    readout = `${job} keeps its ${keptDay} part, ${keptFrom} to midnight${because}; ${clearedDay}'s part, midnight to ${clearedTo}, is cleared.`;
+  } else {
+    const keptDay = weekdayNameOfIndex(cut.last.endDay + 1, ctx);
+    const clearedDay = weekdayNameOfIndex(cut.last.endDay, ctx);
+    const keptTo = spokenClock(clockOfOffset(run.endMin, ctx));
+    const clearedFrom = spokenClock(clockOfOffset(run.startMin, ctx));
+    readout = `${job} keeps its ${keptDay} part, midnight to ${keptTo}${because}; ${clearedDay}'s part, ${clearedFrom} to midnight, is cleared.`;
+  }
+  return {
+    intent: "trim_run",
+    runId: run.id,
+    nodeId: run.nodeId,
+    range: { startMin: kept.startMin, endMin: kept.endMin },
+    readout,
+    attempted: job,
+    notTried: spokenizeSpans(`${job} stays as it was, ${run.span}.`),
+  };
+}
+
+/** R-461: the one question for every part in one direction -- see the
+ *  `other_day_part` Question's own doc for the fields. */
+function otherDayQuestion(
+  direction: Direction,
+  blocks: readonly ContextAssignment[],
+  runs: readonly ContextRun[],
+  scope: ClearScope,
+  ctx: ResolveContext,
+  byPath: Map<string, Node>,
+): Question {
+  const people: string[] = [];
+  for (const x of blocks) {
+    const name = operatorById(x.operatorId, ctx)?.displayName ?? "";
+    if (!people.includes(name)) people.push(name);
+  }
+  // A job is named on its own only when no crossing block on it already
+  // names someone ("a job with no crew on it is named as the job").
+  const crewedRunIds = new Set(blocks.map((x) => x.runId).filter((id) => id !== null));
+  const jobs = runs.filter((r) => !crewedRunIds.has(r.id));
+  const firstJob = jobs[0] as ContextRun | undefined;
+  const first: Extract<Question, { kind: "other_day_part" }>["first"] =
+    people.length > 0 || firstJob === undefined
+      ? { kind: "person", name: people[0] ?? "" }
+      : {
+          kind: "job",
+          product: firstJob.productName,
+          cell: cellDisplayName(ctx.nodeById.get(firstJob.nodeId) as Node, ctx, byPath),
+        };
+  const others = people.length + jobs.length - 1;
+  // The other day's part starts (previous) or ends (next) at each NAMED
+  // item's own edge -- a crewed job's hours are its crew's business, not the
+  // question's -- read off the real axis, never 1440 arithmetic (R-426).
+  const clocks = [...blocks, ...jobs].map((item) =>
+    spokenClock(clockOfOffset(direction === "previous" ? item.startMin : item.endMin, ctx)),
+  );
+  const at = clocks.every((c) => c === clocks[0]) ? (clocks[0] ?? null) : null;
+  const hours =
+    others === 0 && at !== null
+      ? direction === "previous"
+        ? `${at} to midnight`
+        : `midnight to ${at}`
+      : null;
+  const dayIndex =
+    direction === "previous"
+      ? scope.dayIndexes[0] - 1
+      : scope.dayIndexes[scope.dayIndexes.length - 1] + 1;
+  return {
+    kind: "other_day_part",
+    direction,
+    day: weekdayNameOfIndex(dayIndex, ctx),
+    first,
+    others,
+    at,
+    hours,
+    answers: [
+      { id: "clear", label: "Yes", word: "yes" },
+      { id: "keep", label: "No", word: "no" },
+    ],
+  };
 }
 
 /**
@@ -3941,7 +5011,13 @@ function expandEveryoneMove(command: MoveCommand, ctx: ResolveContext): Expansio
       span: command.toPlace === null ? command.span : null,
       existing: { kind: "move", assignmentId: x.id },
       shift: command.toPlace === null ? command.shift : null,
-      adjust: null,
+      // DEF-0046: the sentence's own adjust ({edge, by}/{edge, at}) used to be
+      // dropped here, so every expanded step carried no destination at all
+      // and `resolveMoveCommand` fell into the "move in time" branch with a
+      // null span. `command.adjust` never co-occurs with `toPlace` (the
+      // parser's `bad_adjust` check enforces that on the un-expanded
+      // command), so it is gated the same way `span`/`shift` are, above.
+      adjust: command.toPlace === null ? command.adjust : null,
     });
   }
   if (commands.length === 0) {
@@ -4748,25 +5824,45 @@ function expandCopy(command: CopyCommand, ctx: ResolveContext): Expansion {
 }
 
 /**
- * R-409, §3.6: `command.until` non-null -- every day from `command.day` to
- * `until` inclusive, each of the person's blocks (anywhere, the S49
- * gathering -- narrowed by a place/span when the sentence unusually carries
- * one too, brief §3.6's own comment) becomes an `unassign`. `until` before
- * `day` is `day_order`; nothing over every day is `nothing_to_do`.
+ * R-409, §3.6: an absence -- "Sam is off today", "Sam Patel is off tomorrow"
+ * (DEF-0048: the one-day form, `command.absence` set by the grammar), "Ana is
+ * on leave till Friday" (`command.until`). Every day from `command.day` to
+ * `until` (or that one day) inclusive; each of the person's blocks (anywhere,
+ * narrowed by a place/span when the sentence unusually carries one) is
+ * cleared through `planClear` -- ONE removal per block however many of the
+ * days it touches, and a night shift across the absence's first or last
+ * midnight asks R-461's question (the maintainer, 28 Sept) rather than taking
+ * the other day's part silently. The one-day form NEVER asks which block
+ * (R-409 amended 28 Sept): every block that day goes with the one yes.
+ *
+ * DEF-0048 / R-409 amended / R-431: the same yes RECORDS the absence --
+ * `absenceRecord`, written last by the lot through `setAbsence`, the Absences
+ * form's own call -- when `ctx.absenceRecordable` (the server's own answer)
+ * names the person and `ctx.hasWholeDayAbsence` finds none already there.
+ * Otherwise the blocks still go and `summary` says plainly why nothing is
+ * recorded. `until` before `day` is `day_order`; nothing on the board and
+ * nothing to record is `nothing_to_do`.
  */
-function expandAbsence(command: UnassignCommand, ctx: ResolveContext): Expansion {
-  const until = command.until as DayWord;
+function expandAbsence(
+  command: UnassignCommand,
+  ctx: ResolveContext,
+  options?: ResolveOptions,
+): Expansion {
   const byPath = buildPathIndex(ctx.nodeById);
 
   const dayResult = resolveDay(command.day, ctx);
   if (!dayResult.ok) return { ok: false, question: dayResult.question };
-  const untilResult = resolveDay(until, ctx);
-  if (!untilResult.ok) return { ok: false, question: untilResult.question };
+  let lastIndex = dayResult.dayIndex;
+  if (command.until !== null) {
+    const untilResult = resolveDay(command.until, ctx);
+    if (!untilResult.ok) return { ok: false, question: untilResult.question };
+    lastIndex = untilResult.dayIndex;
+  }
 
   const fromIso = ctx.days.find((d) => d.index === dayResult.dayIndex)?.iso ?? "";
-  const toIso = ctx.days.find((d) => d.index === untilResult.dayIndex)?.iso ?? "";
+  const toIso = ctx.days.find((d) => d.index === lastIndex)?.iso ?? "";
 
-  if (untilResult.dayIndex < dayResult.dayIndex) {
+  if (lastIndex < dayResult.dayIndex) {
     return { ok: false, question: { kind: "day_order", first: fromIso, second: toIso } };
   }
 
@@ -4781,85 +5877,157 @@ function expandAbsence(command: UnassignCommand, ctx: ResolveContext): Expansion
     cellFilter = cellResult.cell;
   }
 
-  const commands: SingleCommand[] = [];
-  // F-152 (the `until` form): a block spanning midnight (a night-shift
-  // leftover, the same shape the John Kim bug shipped from) overlaps TWO of
-  // this loop's own per-day windows -- `seen` keeps it a single removal,
-  // never one per day it touches.
-  const seen = new Set<string>();
-  for (let dayIndex = dayResult.dayIndex; dayIndex <= untilResult.dayIndex; dayIndex++) {
-    let dayStart: number;
-    let dayEnd: number;
+  const dayIndexes: number[] = [];
+  const windows: ClearWindow[] = [];
+  for (let d = dayResult.dayIndex; d <= lastIndex; d++) {
+    dayIndexes.push(d);
     if (command.span !== null) {
-      dayStart = ctx.wallToOffset(dayIndex, clockToMinuteOfDay(command.span.start));
-      dayEnd = ctx.wallToOffset(dayIndex, clockToMinuteOfDay(command.span.end));
+      windows.push({
+        startMin: ctx.wallToOffset(d, clockToMinuteOfDay(command.span.start)),
+        endMin: ctx.wallToOffset(d, clockToMinuteOfDay(command.span.end)),
+        dayIndex: d,
+      });
     } else {
-      dayStart = ctx.wallToOffset(dayIndex, 0);
-      dayEnd = ctx.wallToOffset(dayIndex, 1440);
-    }
-    const dayBlocks = ctx.assignments.filter(
-      (x) =>
-        x.operatorId === person.id &&
-        (cellFilter === null || x.nodeId === cellFilter.id) &&
-        ctx.overlaps({ startMin: dayStart, endMin: dayEnd }, x),
-    );
-    for (const x of dayBlocks) {
-      if (seen.has(x.id)) continue;
-      seen.add(x.id);
-      const xCell = ctx.nodeById.get(x.nodeId) as Node;
-      // F-152-b, rule 2: `x`'s own edges, checked before `ctx.wallOf`/
-      // `copyableSpan` read them just below -- a leftover block found by
-      // this day's own window may itself start (or end) off the board.
-      const edgesOk = blockEdgesOnBoard(x, ctx);
-      if (!edgesOk.ok) return edgesOk;
-      // F-152: a whole block (never clipped here, R-409's own "each of the
-      // person's blocks becomes an unassign") is dated by the day IT
-      // starts on, never the loop's own `dayIndex` -- the same "22:00 to
-      // 06:00 dated today" negative span the John Kim bug shipped from,
-      // reached here whenever a leftover block overlaps a later day's
-      // window without starting on it. When the block's own hours are not
-      // representable on that one day (genuinely two nights, not just an
-      // exact-midnight end), `span: null` (S49's own "whole day" window)
-      // still finds and removes the SAME block by its `existing`
-      // assignment id -- never a guess at hours nobody asked for.
-      const dayForBlock = dayWordOrOffBoard(ctx.wallOf(x.startMin).dayIndex, ctx);
-      if (!dayForBlock.ok) return dayForBlock;
-      const repSpan = copyableSpan(x.startMin, x.endMin, ctx);
-      commands.push({
-        intent: "unassign",
-        operator: personWords(person),
-        place: cellWordsOf(xCell, byPath),
-        day: dayForBlock.day,
-        span:
-          repSpan === null
-            ? null
-            : {
-                start: clockFromMinuteOfDay(repSpan.startMOD),
-                end: clockFromMinuteOfDay(repSpan.endMOD),
-              },
-        existing: { kind: "remove", assignmentId: x.id },
-        shift: null,
-        until: null,
+      windows.push({
+        startMin: ctx.wallToOffset(d, 0),
+        endMin: ctx.wallToOffset(d, 1440),
+        dayIndex: d,
       });
     }
   }
 
-  if (commands.length === 0) {
+  const plan = planClear(
+    {
+      dayIndexes,
+      wholeDay: command.span === null,
+      windowsFor: (nodeId) => (cellFilter === null || nodeId === cellFilter.id ? windows : null),
+      blockInScope: (x) => x.operatorId === person.id,
+      includeRuns: false,
+    },
+    ctx,
+    options,
+    byPath,
+  );
+  if (!plan.ok) return plan;
+  const { commands, touched } = plan;
+
+  return absenceOutcome(person, fromIso, toIso, commands, touched, command.absence, ctx, byPath);
+}
+
+/**
+ * DEF-0048 / R-409 (amended 28 Sept, twice): what an absence sentence ends in,
+ * once its blocks are planned -- the one-day form, the `until` form and (the
+ * second amendment) the week form ("Sam is off this week") all come here, so
+ * the record, the R-431 checks and the summary are built one way. ONE record
+ * over the whole span (`set_absence` takes a from and a to), written last;
+ * only when the server's recordable set names the person and no whole-day
+ * absence already overlaps any day of the span (the server's own exclusion,
+ * transcribed: `absences_whole_day_excl` refuses ANY overlap, not only a
+ * covering one).
+ */
+/** DEF-0048 / R-431 (S194-D, the bar's half): said when the server's
+ *  recordable set is not known yet (loading, or the read failed) -- the
+ *  blocks still go, nothing is recorded, and the answer says why. */
+const UNKNOWN_RECORDABLE =
+  "the absence is not recorded, because I could not check whether you may record it";
+
+function absenceOutcome(
+  person: OperatorLike,
+  fromIso: string,
+  toIso: string,
+  commands: readonly SingleCommand[],
+  touched: readonly ContextAssignment[],
+  absenceWord: string | undefined,
+  ctx: ResolveContext,
+  byPath: Map<string, Node>,
+): Expansion {
+  // R-431: the record is offered only on the server's own answer.
+  const dayPhrase = fromIso === toIso ? fromIso : `from ${fromIso} to ${toIso}`;
+  const recordable = ctx.absenceRecordable;
+  const known = recordable !== undefined;
+  const mayRecord = known && recordable.has(person.id);
+  const alreadyAbsent = mayRecord && (ctx.hasWholeDayAbsence?.(person.id, fromIso, toIso) ?? false);
+  const willRecord = mayRecord && !alreadyAbsent;
+
+  const n = touched.length;
+  if (n === 0 && !willRecord) {
+    const base = `${person.displayName} has no block ${dayPhrase}`;
+    const text = !known
+      ? `${base}; ${UNKNOWN_RECORDABLE}.`
+      : alreadyAbsent
+        ? `${base}, and already has an absence recorded then.`
+        : `${base}, and I cannot record an absence for them from here.`;
+    return { ok: false, question: { kind: "nothing_to_do", text } };
+  }
+  if (commands.length + (willRecord ? 1 : 0) > LOT_CEILING) {
     return {
       ok: false,
       question: {
-        kind: "nothing_to_do",
-        text: `${person.displayName} has no block from ${fromIso} to ${toIso}.`,
+        kind: "lot_too_big",
+        count: commands.length + (willRecord ? 1 : 0),
+        max: LOT_CEILING,
       },
     };
   }
-  if (commands.length > LOT_CEILING) {
-    return {
-      ok: false,
-      question: { kind: "lot_too_big", count: commands.length, max: LOT_CEILING },
-    };
+
+  const cellNames: string[] = [];
+  for (const x of touched) {
+    const node = ctx.nodeById.get(x.nodeId);
+    const name = node ? cellDisplayName(node as Node, ctx, byPath) : "";
+    if (!cellNames.includes(name)) cellNames.push(name);
   }
-  return wrapMany(commands);
+  const theirBlocks =
+    n === 1
+      ? `their block on ${joinNames(cellNames)} is cleared`
+      : `their ${n} blocks on ${joinNames(cellNames)} are cleared`;
+  const TheirBlocks = theirBlocks.charAt(0).toUpperCase() + theirBlocks.slice(1);
+  let summary: string;
+  if (willRecord) {
+    summary =
+      n === 0
+        ? `${person.displayName} has nothing on the board ${dayPhrase}; the absence is recorded.`
+        : `${person.displayName} is off ${dayPhrase}. ${TheirBlocks} and the absence is recorded.`;
+  } else if (!known) {
+    summary = `${person.displayName} is off ${dayPhrase}. ${TheirBlocks}; ${UNKNOWN_RECORDABLE}.`;
+  } else if (alreadyAbsent) {
+    // The server refuses a whole-day absence that overlaps ANY whole-day one
+    // already there, even on one day of the span (`absences_whole_day_excl`,
+    // 0069) -- so over a span this says "some of the days", never all.
+    const already = fromIso === toIso ? dayPhrase : `on some of the days ${dayPhrase}`;
+    summary = `${person.displayName} already has an absence recorded ${already}; ${theirBlocks}.`;
+  } else {
+    summary = `I cannot record an absence for ${person.displayName} from here; ${theirBlocks}.`;
+  }
+
+  if (!willRecord) {
+    // No record: exactly the lot this expansion always built -- a lone
+    // removal unwrapped, several wrapped (AB1-AB3's shape).
+    const wrapped = wrapMany(commands as SingleCommand[]);
+    if (!wrapped.ok) return wrapped;
+    return { ...wrapped, summary };
+  }
+  const word = absenceWord ?? "absent";
+  const reason = word.charAt(0).toUpperCase() + word.slice(1);
+  const absenceRecord: ResolvedAbsenceRecord = {
+    intent: "record_absence",
+    operatorId: person.id,
+    person: person.displayName,
+    from: fromIso,
+    to: toIso,
+    reason,
+    readout: `${person.displayName} is recorded as off ${dayPhrase}.`,
+    attempted: `An absence for ${person.displayName} ${dayPhrase}`,
+    notTried: `No absence is recorded for ${person.displayName}.`,
+  };
+  // The record rides BESIDE the removals (like a job step), so the lot is
+  // always a several here -- even of no removal at all ("the absence is
+  // still recorded, and the answer says so").
+  return {
+    ok: true,
+    command: { intent: "several", commands: [...commands] },
+    absenceRecord,
+    summary,
+  };
 }
 
 /**
@@ -5114,7 +6282,11 @@ function expandRepeatDay(command: AssignCommand | BookCommand, ctx: ResolveConte
  * its days is already in the future by construction (`resolveWeekDays`
  * anchors on the plant's own today, F-191).
  */
-function expandRepeatUnassign(command: UnassignCommand, ctx: ResolveContext): Expansion {
+function expandRepeatUnassign(
+  command: UnassignCommand,
+  ctx: ResolveContext,
+  options?: ResolveOptions,
+): Expansion {
   const day = command.day as { kind: "weekdays" | "every_day"; week: "this_week" | "next_week" };
   const weekResult = resolveWeekDays(day.week, ctx, "week_word");
   if (!weekResult.ok) return weekResult;
@@ -5125,103 +6297,105 @@ function expandRepeatUnassign(command: UnassignCommand, ctx: ResolveContext): Ex
     );
   }
 
-  const everyone = isEveryone(command.operator);
-  const commands: SingleCommand[] = [];
-  const runRemovals: ResolvedRunRemoval[] = [];
-
-  if (everyone) {
-    // Each day is its own ordinary `everyone` removal -- reuse that
-    // machinery whole (CLAUDE.md §4, "reuse the lot machinery; do not build
-    // a second expansion"), never re-derived here.
-    for (const dayIndex of dayIndexes) {
-      const perDay: UnassignCommand = { ...command, day: dayWordForIndex(dayIndex, ctx) };
-      const dayExpansion = expandEveryoneUnassign(perDay, ctx);
-      if (!dayExpansion.ok) {
-        // A day with nobody on it is `nothing_to_do` -- dropped, not asked.
-        // Any OTHER question (a real ambiguity, a board too narrow) stops
-        // the whole expansion, same as every other board-answered group.
-        if (dayExpansion.question.kind === "nothing_to_do") continue;
-        return dayExpansion;
-      }
-      const dayCommand = dayExpansion.command;
-      if (dayCommand.intent === "several") commands.push(...dayCommand.commands);
-      else if (dayCommand.intent !== "headcount") commands.push(dayCommand);
-      if (dayExpansion.runRemovals) runRemovals.push(...dayExpansion.runRemovals);
-    }
-  } else {
-    // A named person: the same person/cell/window gather
-    // `resolveUnassignCommand`'s own whole-day path and `expandAbsence`'s
-    // per-day loop already use, one day at a time -- never a second
-    // "which block" ambiguity question here (R-407's `everyone` shape has
-    // none either); a cell that cannot be resolved at all is a REAL
-    // question, asked once, not per day.
-    const byPath = buildPathIndex(ctx.nodeById);
-    const personResult = resolvePersonStep(command.operator, ctx);
-    if (!personResult.ok) return { ok: false, question: personResult.question };
-    const person = personResult.operator;
-    let cellFilter: Node | null = null;
-    if (command.place.length > 0) {
-      const cellResult = resolveCellStep(command.place, ctx, byPath);
-      if (!cellResult.ok) return { ok: false, question: cellResult.question };
-      cellFilter = cellResult.cell;
-    }
-    for (const dayIndex of dayIndexes) {
-      const win =
-        cellFilter !== null
-          ? resolveWindowForCell(
-              dayWordForIndex(dayIndex, ctx),
-              command.span,
-              command.shift,
-              dayIndex,
-              cellFilter,
-              ctx,
-            )
-          : {
-              ok: true as const,
-              startMin: ctx.wallToOffset(dayIndex, 0),
-              endMin: ctx.wallToOffset(dayIndex, 1440),
-            };
-      if (!win.ok) return win;
-      const dayBlocks = ctx.assignments.filter(
-        (x) =>
-          x.operatorId === person.id &&
-          (cellFilter === null || x.nodeId === cellFilter.id) &&
-          ctx.overlaps({ startMin: win.startMin, endMin: win.endMin }, x),
-      );
-      for (const x of dayBlocks) {
-        const edgesOk = blockEdgesOnBoard(x, ctx);
-        if (!edgesOk.ok) return edgesOk;
-        const xCell = ctx.nodeById.get(x.nodeId) as Node;
-        commands.push({
-          intent: "unassign",
-          operator: personWords(person),
-          place: cellWordsOf(xCell, byPath),
-          day: dayWordForIndex(dayIndex, ctx),
-          span: hoursOfBlock(x.startMin, x.endMin, ctx),
-          existing: { kind: "remove", assignmentId: x.id },
-          shift: null,
-          until: null,
-        });
-      }
-    }
+  if (isEveryone(command.operator)) {
+    // DEF-0047 / R-461: the whole span in ONE plan (`expandEveryoneOverDays`)
+    // -- never one `expandEveryoneUnassign` per day stitched together, which
+    // turned a night block between two cleared days into two edge trims on
+    // one block (the S194-B reviewer's red case) and needed a de-duplication
+    // set per kind of command. Only the span's outer midnights ask (R-461).
+    const label = command.place.length > 0 ? command.place[0] : "The board";
+    return expandEveryoneOverDays(
+      command,
+      dayIndexes,
+      `${label} has nobody on it ${WEEK_WORD[day.week]}.`,
+      ctx,
+      options,
+    );
   }
 
-  if (commands.length === 0 && runRemovals.length === 0) {
-    const label = command.place.length > 0 ? command.place[0] : "The board";
+  // A named person: the same planner over the person's own blocks, never a
+  // "which block" question (R-407's `everyone` shape has none either); a
+  // cell that cannot be resolved at all is a REAL question, asked once.
+  const byPath = buildPathIndex(ctx.nodeById);
+  const personResult = resolvePersonStep(command.operator, ctx);
+  if (!personResult.ok) return { ok: false, question: personResult.question };
+  const person = personResult.operator;
+  let cellFilter: Node | null = null;
+  if (command.place.length > 0) {
+    const cellResult = resolveCellStep(command.place, ctx, byPath);
+    if (!cellResult.ok) return { ok: false, question: cellResult.question };
+    cellFilter = cellResult.cell;
+  }
+  const windows: ClearWindow[] = [];
+  for (const d of dayIndexes) {
+    const win =
+      cellFilter !== null
+        ? resolveWindowForCell(
+            dayWordForIndex(d, ctx),
+            command.span,
+            command.shift,
+            d,
+            cellFilter,
+            ctx,
+          )
+        : {
+            ok: true as const,
+            startMin: ctx.wallToOffset(d, 0),
+            endMin: ctx.wallToOffset(d, 1440),
+          };
+    if (!win.ok) return win;
+    windows.push({ startMin: win.startMin, endMin: win.endMin, dayIndex: d });
+  }
+  const plan = planClear(
+    {
+      dayIndexes,
+      // With no cell named, the window is the whole day whatever the span
+      // said (the gather this path always used), so its edges are midnights.
+      wholeDay: cellFilter === null || (command.span === null && command.shift === null),
+      windowsFor: (nodeId) => (cellFilter === null || nodeId === cellFilter.id ? windows : null),
+      blockInScope: (x) => x.operatorId === person.id,
+      includeRuns: false,
+    },
+    ctx,
+    options,
+    byPath,
+  );
+  if (!plan.ok) return plan;
+  const { commands } = plan;
+  // R-409 amended again (the maintainer, 28 Sept): "Sam is off this week"
+  // records ONE absence over the span the sentence covers -- "this week"
+  // from today on (F-224's own reading, the filter above), "next week" the
+  // whole week -- through the same outcome the one-day and `until` forms use.
+  if (command.absence !== undefined && dayIndexes.length > 0) {
+    const isoOf = (idx: number): string => ctx.days.find((d) => d.index === idx)?.iso ?? "";
+    return absenceOutcome(
+      person,
+      isoOf(dayIndexes[0]),
+      isoOf(dayIndexes[dayIndexes.length - 1]),
+      commands,
+      plan.touched,
+      command.absence,
+      ctx,
+      byPath,
+    );
+  }
+  if (commands.length === 0) {
+    // DEF-0043: a named person names herself in the refusal.
     return {
       ok: false,
       question: {
         kind: "nothing_to_do",
-        text: `${label} has nobody on it ${WEEK_WORD[day.week]}.`,
+        text: `${person.displayName} has no block ${WEEK_WORD[day.week]}.`,
       },
     };
   }
-  const total = commands.length + runRemovals.length;
-  if (total > LOT_CEILING) {
-    return { ok: false, question: { kind: "lot_too_big", count: total, max: LOT_CEILING } };
+  if (commands.length > LOT_CEILING) {
+    return {
+      ok: false,
+      question: { kind: "lot_too_big", count: commands.length, max: LOT_CEILING },
+    };
   }
-  if (runRemovals.length === 0) return wrapMany(commands);
-  return { ok: true, command: { intent: "several", commands }, runRemovals };
+  return wrapMany(commands);
 }
 
 /**
@@ -5231,7 +6405,15 @@ function expandRepeatUnassign(command: UnassignCommand, ctx: ResolveContext): Ex
  * to R-409's three intents never reach here unhandled; an ordinary single or
  * an already-built `several` passes straight through).
  */
-export function expandCommand(command: Command, ctx: ResolveContext): Expansion {
+export function expandCommand(
+  command: Command,
+  ctx: ResolveContext,
+  /** DEF-0040 / R-461: the answers to the `other_day_part` questions so far
+   *  (`previousDayPart`/`nextDayPart`), carried back by the bar on the rerun
+   *  exactly as `resolveCommand`'s own reasons are. Pure: the same command,
+   *  context and answers always give the same next question or lot. */
+  options?: ResolveOptions,
+): Expansion {
   if (command.intent === "several") return { ok: true, command };
   if (command.intent === "replace") return expandReplace(command, ctx);
   if (command.intent === "swap") return expandSwap(command, ctx);
@@ -5243,18 +6425,25 @@ export function expandCommand(command: Command, ctx: ResolveContext): Expansion 
   // existing write, unchanged (`resolveCommand`'s own new branch does it).
   if (command.intent === "headcount") return { ok: true, command };
   if (command.intent === "unassign") {
-    if (command.until !== null) return expandAbsence(command, ctx);
+    if (command.until !== null) return expandAbsence(command, ctx, options);
     // S72-e (F-224, R-416, R-435): "clear Cell 5 this week"/"... for the
     // whole week"/"... next week" -- checked BEFORE the plain `isEveryone`
     // branch below, since a repeat-day `everyone` removal needs both: one
-    // day at a time AND, on each day, one command per matching block.
+    // day at a time AND, on each day, one command per matching block. An
+    // absence said over a week ("Sam is off this week") goes this way too,
+    // and records one absence over the span (R-409 amended again, 28 Sept).
     if (
       command.day !== null &&
       (command.day.kind === "weekdays" || command.day.kind === "every_day")
     ) {
-      return expandRepeatUnassign(command, ctx);
+      return expandRepeatUnassign(command, ctx, options);
     }
-    if (isEveryone(command.operator)) return expandEveryoneUnassign(command, ctx);
+    // DEF-0048 / R-409 amended: "Sam Patel is off tomorrow" -- the one-day
+    // absence -- takes every block that day with one yes and records the
+    // absence; "remove Sam Patel tomorrow" (no mark) still asks which.
+    // ("everyone is off today" stays the clear of everyone it always was.)
+    if (isEveryone(command.operator)) return expandEveryoneUnassign(command, ctx, options);
+    if (command.absence !== undefined) return expandAbsence(command, ctx, options);
     return { ok: true, command };
   }
   if (command.intent === "move") {
@@ -5358,7 +6547,11 @@ function describeQuestionRaw(q: Question): string {
     case "day_off_board":
       return `${q.text} is not on the board. Move the board to that day first.`;
     case "too_short":
-      return `That is ${q.minutes} minutes; a block is at least ${q.min} minutes.`;
+      return q.subject === undefined
+        ? `That is ${q.minutes} minutes; a block is at least ${q.min} minutes.`
+        : `That would leave ${q.subject} ${q.minutes} minutes; a job is at least ${q.min} minutes.`;
+    case "job_hole":
+      return q.text;
     case "run_exists":
       if (q.runs.length === 1) {
         return `A ${q.product} job is already booked on ${q.cell}, ${q.runs[0].label}. Join it, or make a separate block?`;
@@ -5486,7 +6679,48 @@ function describeQuestionRaw(q: Question): string {
       return `${q.product} runs more than once on ${q.cell}: ${q.runs.join(", ")}. Say the hours.`;
     case "bad_repeat_day":
       return `${q.text} cannot be used here.`;
+    case "other_day_part":
+      return describeOtherDayPart(q);
   }
+}
+
+/** DEF-0040 / R-461: the two questions, in the words the maintainer chose
+ *  (28 Sept) -- they name the people and the hours:
+ *  "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part
+ *  too, 10 pm to midnight?"; "Maria Lopez's night shift runs into Tuesday.
+ *  Clear Tuesday's part too, midnight to 6 am?"; several people, the first
+ *  by board order and the count of the rest, hours left out when they
+ *  differ; a job with no crew named as the job. */
+function describeOtherDayPart(q: Extract<Question, { kind: "other_day_part" }>): string {
+  const rest = q.others === 1 ? "1 other" : `${q.others} others`;
+  const ask = `Clear ${q.day}'s part too`;
+  const tail = q.others === 0 && q.hours !== null ? `${ask}, ${q.hours}?` : `${ask}?`;
+  const job =
+    q.first.kind === "job"
+      ? q.first.product === null
+        ? `The job on ${q.first.cell}`
+        : `The ${q.first.product} job on ${q.first.cell}`
+      : "";
+  if (q.direction === "previous") {
+    const at = q.at !== null ? ` at ${q.at}` : "";
+    if (q.first.kind === "person") {
+      return q.others === 0
+        ? `${q.first.name}'s night shift started ${q.day}${at}. ${tail}`
+        : `${q.first.name} and ${rest} started their night shift ${q.day}${at}. ${tail}`;
+    }
+    return q.others === 0
+      ? `${job} started ${q.day}${at}. ${ask}?`
+      : `${job} and ${rest} started ${q.day}${at}. ${ask}?`;
+  }
+  const until = q.at !== null ? ` until ${q.at}` : "";
+  if (q.first.kind === "person") {
+    return q.others === 0
+      ? `${q.first.name}'s night shift runs into ${q.day}. ${tail}`
+      : `${q.first.name} and ${rest} have night shifts running into ${q.day}${until}. ${tail}`;
+  }
+  return q.others === 0
+    ? `${job} runs into ${q.day}${until}. ${ask}?`
+    : `${job} and ${rest} run into ${q.day}${until}. ${ask}?`;
 }
 
 /** R-459: hours read as a person says them in every question the bar shows,

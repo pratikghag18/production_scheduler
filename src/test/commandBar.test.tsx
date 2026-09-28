@@ -67,6 +67,7 @@ import * as verbGuessLib from "@/lib/voice/verbGuess";
 import type { VerbGuess } from "@/lib/voice/verbGuess";
 import {
   CommandBar,
+  renderIsoDays,
   type ConfirmWordResult,
   type ResolvedAny,
   type LotResult,
@@ -167,6 +168,12 @@ function buildCtx(over: Partial<ResolveContext> = {}): ResolveContext {
       { id: "so", displayName: "Sam Ortiz", employeeRef: "E200", active: true },
       { id: "lin", displayName: "Lin On", employeeRef: null, active: true },
       { id: "gone", displayName: "Sam Gone", employeeRef: null, active: false },
+      // DEF-0052: a FOURTH real, active, resolvable operator for the
+      // longer-lot fixtures below (`BLK_PS`) -- "Lin On" fails to parse in a
+      // several ("On" collides with the place grammar, see `BLK_SO`'s own
+      // doc) and "Sam Gone" is inactive (excluded from resolution), so
+      // neither of the two names already here could stand in.
+      { id: "ps", displayName: "Priya Shah", employeeRef: null, active: true },
     ],
     products: [
       { id: "ha", sku: "HA-1", name: "Housing A" },
@@ -306,6 +313,22 @@ const BLK_C1B: ContextAssignment = { ...BLK1, id: "blkC1b", nodeId: "c1b" };
 /** S51: BLK1's same cell and hours, but Sam Patel's block instead of
  *  Operator 1's -- the several-lot fixtures' second person. */
 const BLK_SP: ContextAssignment = { ...BLK1, id: "blkSp", operatorId: "sp" };
+
+/** DEF-0052: BLK1's same cell and hours, Sam Ortiz's / Priya Shah's own
+ *  blocks -- the four-and-more-person lot fixtures below need a THIRD and
+ *  FOURTH real, resolvable operator beside Operator 1 and Sam Patel, so a
+ *  lot longer than two can be built from real people. Not "Lin On": the
+ *  grammar reads the trailing "On" of her own name as the start of an "on
+ *  <place>" clause and fails the whole sentence (`bad_time`, found probing
+ *  this fixture) -- a real, separate parsing gap outside this lane's files,
+ *  named here rather than worked around silently. Not "Sam Gone" either:
+ *  she is `active: false` in the fixture roster, so the board answers "No
+ *  person called ... on this board" for her, the same as a stranger's name
+ *  -- correct (an inactive person is off the board), but not what this
+ *  fixture needs. Priya Shah (`buildCtx`'s own `operators` list, added for
+ *  this lane) is a fourth active, resolvable name. */
+const BLK_SO: ContextAssignment = { ...BLK1, id: "blkSo", operatorId: "so" };
+const BLK_PS: ContextAssignment = { ...BLK1, id: "blkPs", operatorId: "ps" };
 
 /** S51: "assign A2 and A3 ..." shape -- two removals in one sentence,
  *  Operator 1 and Sam Patel, both from Cell 1 in Line 1, 10 to 2. */
@@ -501,8 +524,10 @@ function statusText(): string {
  * carry `aria-live="polite"`.
  *
  * CP-7 (CONTRACT CHANGED, CLAUDE.md §4, session 178, found by the typed
- * walk): a LOT's last word -- "Done, N things." or "Did k of N things; the
- * next failed: …" (R-459) -- is filed into the thread the moment the lot finishes, the
+ * walk): a LOT's last word -- "Done, N things." or (DEF-0052 / R-432, 28
+ * Sept, replacing the old count-only "Did k of N things; the next failed:
+ * …") `buildLotOutcome`'s SEPARATE-LINES failure sentence -- is filed into
+ * the thread the moment the lot finishes, the
  * same order a single's readout takes (CP-5), so the fifteen lot cases that
  * read it from `statusText()` read it from here now, and the live line is
  * empty once the turn is filed. It used to stay live as a second copy.
@@ -544,10 +569,25 @@ function stubFetch(): ReturnType<typeof vi.fn> {
   return fetchMock;
 }
 
-/** The trace entry `stubFetch`'s mock posted on call `call` (default the
- *  first) -- asserts the URL and method along the way. */
-function postedEntry(fetchMock: ReturnType<typeof vi.fn>, call = 0): TraceEntry {
-  const [url, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+/**
+ * The trace entry `stubFetch`'s mock posted on call `call` -- asserts the
+ * URL and method along the way.
+ *
+ * DEF-0049 (CONTRACT CHANGED, 28 Sept, CLAUDE.md §4: not wrong when
+ * written): an entry now posts at the ASK too, not only at the finish
+ * (`postTrace`'s own doc, commandConversation.ts), so a sentence that asks a
+ * question before it writes posts TWICE for the SAME entry -- an ask-time
+ * line, then a `revises: true` correction. `call` with no argument used to
+ * mean "the one and only post"; it now means "the LAST post" (`-1`,
+ * `Array.prototype.at`'s own convention) -- the up-to-date state, exactly
+ * what every real reader already does (`TraceEntry.revises`' own doc: "take
+ * the LAST line for each `at`"). A caller that wants a SPECIFIC line (the
+ * ask-time one, to prove it went out at all, or the FIRST of two DIFFERENT
+ * entries) still passes an explicit index, unchanged.
+ */
+function postedEntry(fetchMock: ReturnType<typeof vi.fn>, call?: number): TraceEntry {
+  const index = call ?? fetchMock.mock.calls.length - 1;
+  const [url, init] = fetchMock.mock.calls[index] as [string, RequestInit];
   expect(url).toBe("/__trace");
   expect(init.method).toBe("POST");
   return JSON.parse(init.body as string) as TraceEntry;
@@ -565,9 +605,13 @@ function postedEntry(fetchMock: ReturnType<typeof vi.fn>, call = 0): TraceEntry 
  * `resolve.ts` wrote into `.readout`.
  */
 function renderedReadout(rawReadout: string): string {
-  return rawReadout.replace(/\d{4}-\d{2}-\d{2}/, (iso) =>
-    formatDayLabel(new Date(`${iso}T00:00:00Z`), "d_mon_yyyy", "UTC"),
-  );
+  // S194-D third pass (CONTRACT CHANGED, every `Written:`/`ran` pin below): a
+  // single write's thread line and trace `ran` are the readout AS SPOKEN now,
+  // the lot path's rule since DEF-0043 -- they used to carry the raw ISO day.
+  // The bar's OWN renderer, not a mirror -- the mirror this
+  // used to be copied the bar's single-replace bug (only the first ISO day
+  // rendered), so no case here could ever have caught a second raw date.
+  return renderIsoDays(rawReadout, "UTC", "d_mon_yyyy");
 }
 
 describe("CommandBar (P1-7a, brief §9)", () => {
@@ -789,7 +833,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     // (and the live line cleared) in the same tick it happens -- the readout
     // reads from the thread now, not the live status line.
     expect(resolved.readout).toContain("Changing the block that ran 10 am to 2 pm.");
-    expect(threadText()).toContain(`Written: ${resolved.readout}`);
+    expect(threadText()).toContain(`Written: ${renderedReadout(resolved.readout)}`);
   });
 
   it("C13: Separate block sends direct; with a run also present it asks the run question instead", () => {
@@ -859,7 +903,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
 
     // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
     // cleared) the same tick -- the readout reads from the thread now.
-    expect(threadText()).toContain(`Written: ${resolved.readout}`);
+    expect(threadText()).toContain(`Written: ${renderedReadout(resolved.readout)}`);
   });
 
   it("CB2: a job of the same part in the way asks to change it; Change calls onRetimeRun", () => {
@@ -974,7 +1018,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(resolved.assignmentId).toBe("blk1");
     // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
     // cleared) the same tick -- the readout reads from the thread now.
-    expect(threadText()).toContain(`Written: ${resolved.readout}`);
+    expect(threadText()).toContain(`Written: ${renderedReadout(resolved.readout)}`);
   });
 
   it("CU3: a no-hours sentence with two blocks shows two buttons labelled with part and hours", () => {
@@ -1028,7 +1072,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.assignmentId).toBe("blk1");
     expect(resolved.target).toEqual({ kind: "move_cell" });
-    expect(threadText()).toContain(`Written: ${resolved.readout}`);
+    expect(threadText()).toContain(`Written: ${renderedReadout(resolved.readout)}`);
     expect(onOpen).not.toHaveBeenCalled();
     expect(onRetime).not.toHaveBeenCalled();
     expect(onBook).not.toHaveBeenCalled();
@@ -1866,7 +1910,12 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect(onHighlight).toHaveBeenLastCalledWith(null);
   });
 
-  it("CB-lot-3: onRunLot resolving {done:1, error:'boom.'} shows the partial-failure message, input kept, highlight cleared", async () => {
+  // DEF-0052 / R-432 (CONTRACT CHANGED, 28 Sept, CLAUDE.md §4: not wrong
+  // when written): the maintainer restated R-432 to SEPARATE LINES -- "I
+  // made k of N changes." / "Done: ..." / "Not done: ..." / "Not tried:
+  // ..." -- replacing the count-only "Did k of N things; the next failed:
+  // ... What was already done stayed: ..." this pin used to read.
+  it("CB-lot-3: onRunLot resolving {done:1, error:'boom.'} shows the SEPARATE-LINES partial-failure message, input kept, highlight cleared", async () => {
     // A typed (if unused) param -- same as CB-lot-2's own `onRunLot` above --
     // so `mock.calls[0]` types as `[ResolvedAny[]]` for the cast below.
     // F-154 review fix: `error` is a plain sentence -- every real source
@@ -1896,24 +1945,25 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
 
-    // F-154 review fix: a partial lot says what actually stood, not just
-    // the raw failure text -- "boom" pins the "stayed" clause; CB-lot-fail-1
-    // pins that a message `useSchedulerToast.ts` itself would have worded
-    // through `buildSchedulerErrorToast` (which no longer bakes in "—
-    // reverted." at all, that F-154 fix's own clean half) reads verbatim.
+    // S194-D (R-432 as the maintainer chose it, CONTRACT CHANGED from lane E's
+    // interim, which named the refused change by its READOUT -- a sentence
+    // saying it happened -- and printed the raw refusal): the refused change
+    // is its `attempted` ("who and where"), the reason in the plant's words
+    // through the one rewriter, every change after it said as what stays.
+    // "boom." has no shape `rewriteRefusal` rewrites, so it prints unchanged.
     await waitFor(() =>
       expect(threadText()).toContain(
-        `Did 1 of 2 things; the next failed: boom. What was already done stayed: ${renderedReadout(resolvedList[0].readout)}.`,
+        "I made 1 of the 2 changes.\n" +
+          `Done: ${renderedReadout(resolvedList[0].readout)}\n` +
+          "Not done: Sam Patel's block on Cell 1 in Line 1. boom.",
       ),
     );
-    // Not "boom.." -- the bar doesn't add a period on top of the message's
-    // own.
 
     expect(input.value).toBe("yes");
     expect(onHighlight).toHaveBeenLastCalledWith(null);
   });
 
-  // CR-1 (reviewer fix, S63 review): `rewriteCapRefusal` (brief §5, CB-ref-1)
+  // CR-1 (reviewer fix, S63 review): `rewriteCapRefusal` -- now `rewriteRefusal`, S194-D -- (brief §5, CB-ref-1)
   // was applied on the single-sentence write path only -- `runLotNow`'s own
   // `result.error` (`LotResult`'s own doc: "the same wording a toast would
   // show") is the identical capacity sentence and reached the thread/status
@@ -1936,14 +1986,20 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
 
     // CP-7 (CONTRACT CHANGED, CLAUDE.md §4, session 178): a lot's last word
     // is filed into the thread the moment the lot finishes, the same as a
     // single's readout (CP-5), so it is read from the thread, not the live
     // line, which is empty once the turn is filed.
+    // DEF-0052 / R-432 (CONTRACT CHANGED, 28 Sept): SEPARATE LINES -- the
+    // rewritten capacity sentence is still the "Not done" reason, still
+    // through the one rewriter (`rewriteRefusal`), still never "try the split again".
     await waitFor(() =>
       expect(threadText()).toContain(
-        "Did 1 of 2 things; the next failed: Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
+        "I made 1 of the 2 changes.\n" +
+          `Done: ${renderedReadout(resolvedList[0].readout)}\n` +
+          "Not done: Sam Patel's block on Cell 1 in Line 1. Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
       ),
     );
     expect(threadText()).not.toContain("try the split again");
@@ -2201,7 +2257,11 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
   });
 
-  it("CB-lot-11: two commands naming the same block drop the lot with the collision message", () => {
+  // DEF-0043 item 3 (CONTRACT CHANGED, 28 Sept, CLAUDE.md §4: not wrong when
+  // written): "Those two lines (N and M)" answered a person who typed ONE
+  // sentence with a position no supervisor said (R-459) -- rewritten to name
+  // the block from the board's own facts instead.
+  it("CB-lot-11: two commands naming the same block drop the lot with the collision message, naming the block", () => {
     const { input } = renderBar({ assignments: [BLK1] });
 
     fireEvent.change(input, {
@@ -2216,9 +2276,15 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
 
     expect(statusText()).toBe(
-      "Those two lines (1 and 2) are about the same block; say them one at a time.",
+      "I could not do that in one go: two of the changes are about Operator 1's block on Cell 1. Say them one at a time.",
     );
-    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    // DEF-0049 (CONTRACT CHANGED, 28 Sept): this refusal now closes the
+    // trace entry (`finishTrace`) instead of leaving it dangling, which
+    // files a turn into the thread -- "Clear history" now renders (history
+    // is no longer empty), so this checks the CANDIDATE strip specifically,
+    // not every button on the page (the same distinction `candidateButtons`
+    // exists for).
+    expect(candidateButtons()).toHaveLength(0);
   });
 
   it("CB-lot-12: Escape during Working… leaves it standing, and the result message still arrives", async () => {
@@ -2623,7 +2689,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
     // cleared) the same tick -- the readout reads from the thread now.
     expect(resolved.readout).toContain("10:15");
-    expect(threadText()).toContain(`Written: ${resolved.readout}`);
+    expect(threadText()).toContain(`Written: ${renderedReadout(resolved.readout)}`);
   });
 
   // -----------------------------------------------------------------------
@@ -2742,7 +2808,12 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     runId: null,
   };
 
-  it("CB-mid-2: the lot's adjust step readout for MN13's first command -- John Kim's own compact 'ends 00:00, was 06:00', never a re-dated span", () => {
+  // S194-D (R-461, CONTRACT CHANGED): a clear across midnight now ASKS about
+  // the other day's part first; the adjust the old case pinned is the answer
+  // No, and its readout says which part stays and which is cleared. Both
+  // answers asserted, each with its trace entry (R-434).
+  function renderMid2(): { input: HTMLInputElement; fetchMock: ReturnType<typeof stubFetch> } {
+    const fetchMock = stubFetch();
     const { input } = renderXBar({
       assignments: [XJOHN_OVERNIGHT, XSAMP_PLAIN],
       days: ONE_DAY_XBOARD,
@@ -2752,12 +2823,35 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
         { id: "samp", displayName: "Sam Patel", employeeRef: null, active: true },
       ],
     });
-
     fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
+    return { input, fetchMock };
+  }
+  const MID2_QUESTION =
+    "John Kim's night shift started Wednesday at 2 am. Clear Wednesday's part too, 2 am to midnight?";
+
+  it("CB-mid-2: clear Cell 1 today over John Kim's block from yesterday asks first, Yes and No the same group; No keeps Wednesday's part", () => {
+    const { fetchMock } = renderMid2();
+    expect(statusText()).toBe(MID2_QUESTION);
+    const yes = screen.getByRole("button", { name: "Yes" });
+    const no = screen.getByRole("button", { name: "No" });
+    expect(yes.parentElement).toBe(no.parentElement);
+    expect(postedEntry(fetchMock).asked).toBe(MID2_QUESTION);
+
+    fireEvent.click(no);
 
     expect(statusText()).toMatch(/^Ready to do 2 things: /);
-    expect(statusText()).toContain("1. John Kim's block on Cell 1 now ends midnight; it was 6 am.");
+    expect(statusText()).toContain(
+      "1. John Kim's night shift on Cell 1 keeps its Wednesday part, 2 am to midnight; Thursday's part, midnight to 6 am, is cleared.",
+    );
+    expect(postedEntry(fetchMock).answered).toBe("No");
+  });
+
+  it("CB-mid-2b: the same question answered Yes -- John Kim's whole block goes, no trim", () => {
+    renderMid2();
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(statusText()).toMatch(/^Ready to do 2 things: 1\. John Kim is off Cell 1 /);
+    expect(statusText()).not.toContain("keeps its");
   });
 
   it("CB-x-10: an ambiguous SECOND person on a replace fills `with`, never `operator`, and the lot appears once picked", () => {
@@ -3172,7 +3266,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
     // cleared) the same tick -- the readout reads from the thread now.
     expect(resolved.readout).toContain("Sam's block on Cell 1 now ends 3 pm; it was 2 pm.");
-    expect(threadText()).toContain(`Written: ${resolved.readout}`);
+    expect(threadText()).toContain(`Written: ${renderedReadout(resolved.readout)}`);
   });
 
   it("CB-y-4: 'make the Housing A job on Cell 1 4 people' calls onSetHeadcount with the run and the number, and shows the readout", () => {
@@ -3191,7 +3285,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
     // cleared) the same tick -- the readout reads from the thread now.
     expect(resolved.readout).toContain("4 people");
-    expect(threadText()).toContain(`Written: ${resolved.readout}`);
+    expect(threadText()).toContain(`Written: ${renderedReadout(resolved.readout)}`);
   });
 
   it("CB-y-5: 'make it 4 people' has no memory of \"it\" -- the grammar asks for the job's own name, nothing resolves", () => {
@@ -3388,7 +3482,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     // S63-a review fix (CP-5, CLAUDE.md §4): filed (and the live line
     // cleared) the same tick -- the readout reads from the thread now.
     expect(resolved.readout).toContain("Sam's block on Cell 1 now ends 3 pm; it was 2 pm.");
-    expect(threadText()).toContain(`Written: ${resolved.readout}`);
+    expect(threadText()).toContain(`Written: ${renderedReadout(resolved.readout)}`);
   });
 
   // S63-a review fix (CP-5, CLAUDE.md §4): `onSetHeadcount` is held pending
@@ -3972,8 +4066,16 @@ describe("CB-ground: the model's reading must be grounded in what was heard (S71
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => expect(onBook).toHaveBeenCalledTimes(1));
-    const entry = postedEntry(fetchMock);
-    expect(entry.answered).toBe("yes");
+    // DEF-0049 (CONTRACT CHANGED, 28 Sept): TWO separate trace entries now,
+    // not one -- the verb-guess question's OWN entry (posted at the ask,
+    // call 0; revised to `answered: "yes"` when `run_sentence` starts a
+    // FRESH entry for the guessed sentence, call 1) and that second
+    // sentence's own entry (call 2, `answered: "auto"`, it ran straight off
+    // its own readout). This pin is about the FIRST entry's own answer.
+    const askedEntry = postedEntry(fetchMock, 0);
+    expect(askedEntry.answered).toBeNull();
+    const answeredEntry = postedEntry(fetchMock, 1);
+    expect(answeredEntry.answered).toBe("yes");
   });
 
   it("CB-ground-6: the same ungrounded book, confirmed by a spoken 'yes' through the recogniser (a second press, same as CB-yes-5)", async () => {
@@ -4287,10 +4389,17 @@ describe("CB-verb: the verb question (R-456, F-222)", () => {
       const [, init] = call as [string, RequestInit];
       return JSON.parse(init.body as string) as TraceEntry;
     });
-    const firstEntry = entries.find((e) => e.heard === "gibberish");
+    // DEF-0049 (CONTRACT CHANGED, 28 Sept): "gibberish"'s own entry now
+    // posts TWICE -- once at the ask (`answered: null`), once flushed
+    // (`answered: guessA.label`) when the guess's own sentence starts a
+    // fresh entry -- `findLast` reads the up-to-date line, same as
+    // `postedEntry`'s own updated default (this helper takes an array of
+    // already-parsed entries, not `fetchMock` itself, so it uses the array
+    // method directly rather than that helper).
+    const firstEntry = entries.findLast((e) => e.heard === "gibberish");
     expect(firstEntry?.asked).toBe("Did you mean:");
     expect(firstEntry?.answered).toBe(guessA.label);
-    const secondEntry = entries.find((e) => e.heard === guessA.sentence);
+    const secondEntry = entries.findLast((e) => e.heard === guessA.sentence);
     expect(secondEntry).toBeTruthy();
     expect(secondEntry?.outcome).toBe("written");
   });
@@ -5691,16 +5800,241 @@ describe("CB-unknown: nearest names as buttons (S59, R-418's message)", () => {
     );
   });
 
-  it("CB-unknown-4: no suggestions (today's real resolver) keeps the plain message and no buttons", () => {
+  // S194-D (R-430 for a person, CONTRACT CHANGED -- this case pinned the
+  // dead end the standard forbids: "No person called ..." with nothing to
+  // choose): the caller's own active people are offered, board order, and a
+  // pick runs the sentence with that name. The trace entry holds the ask.
+  it("CB-unknown-4: no near name for a person -- offers the people on the caller's own board (active only), a pick reaches onOpen, the ask is traced", () => {
+    const fetchMock = stubFetch();
     const { input, onOpen } = renderBar();
     fireEvent.change(input, {
       target: { value: "assign Zzznotaperson to Housing A on Cell 1 in Line 1 from 10 to 2" },
     });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe('No person called "Zzznotaperson" on this board.');
-    expect(screen.queryByRole("button")).toBeNull();
+    const asked = 'No person called "Zzznotaperson" on your board. Did you mean one of these?';
+    expect(statusText()).toBe(asked);
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "Operator 1",
+      "Sam Patel",
+      "Sam Ortiz",
+      "Lin On",
+      "Priya Shah",
+    ]); // never "Sam Gone" (inactive)
+    expect(postedEntry(fetchMock).asked).toBe(asked);
     expect(onOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.operatorId).toBe("sp");
+  });
+
+  it("CB-unknown-4b (S194-D, R-430 checked for a part): a part with no near name gets the cell's own menu as buttons; with a cell that makes NOTHING, no part is offered -- every one would be refused there (R-431)", () => {
+    const { input } = renderBar();
+    fireEvent.change(input, {
+      target: { value: "assign Sam Patel to Zzznotapart on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(candidateButtons().map((b) => b.textContent)).toEqual(["Housing A", "Housing B"]);
+
+    cleanup();
+    const bare = renderBar({ offeredAt: () => [] });
+    fireEvent.change(bare.input, {
+      target: { value: "assign Sam Patel to Zzznotapart on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(bare.input, { key: "Enter" });
+    expect(statusText()).toBe('No part called "Zzznotapart" on this board.');
+    expect(candidateButtons()).toEqual([]);
+  });
+
+  /**
+   * DEF-0051 / R-430 (28 Sept, tester): Ana types "clear Cell 3 today" --
+   * Cell 3 is real (one line over) but not on her board, so the resolver's
+   * own nearest-match suggestions (computed against HER `ctx`, which never
+   * heard of Cell 3) come back empty -- CB-unknown-4's shape, one field
+   * over. The fix (`questionToStatus`'s own `field === "place"` fallback,
+   * CommandBar.tsx) never asks the server or the question for anything
+   * further; it offers Ana's own board (`ctx.cells`) as buttons instead.
+   * Two cells, no duplicate name, so a real, unmocked resolver drives it
+   * end to end -- `withUnknownSuggestions` is not needed here (there is
+   * nothing to mock: the whole point is the REAL empty-suggestions case).
+   */
+  it('CB-unknown-5 (DEF-0051, place, no server suggestions): "No cell called ... on your board" offers her own cells, a pick reaches onOpen', () => {
+    const twoCells = [
+      { id: "c1a", name: "Cell 1", path: "plant_1.assembly.line_1.cell_1" },
+      { id: "c2", name: "Cell 2", path: "plant_1.assembly.line_1.cell_2" },
+    ];
+    const { input, onOpen } = renderBar({ cells: twoCells });
+    fireEvent.change(input, {
+      target: { value: "assign Operator 1 to Housing A on Cell 3 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe('No cell called "Cell 3" on your board. Did you mean one of these?');
+    expect(screen.getByRole("button", { name: "Cell 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cell 2" })).toBeTruthy();
+    // R-430/R-431: the client never says where Cell 3 really is -- nothing
+    // on screen names Line 2, a path, or any other clue past Ana's grant.
+    expect(threadText()).not.toContain("Line 2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cell 2" }));
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.nodeId).toBe("c2");
+  });
+
+  it("CB-unknown-6 (DEF-0051): a trace entry is asserted for the cell fallback question", () => {
+    const fetchMock = stubFetch();
+    const twoCells = [
+      { id: "c1a", name: "Cell 1", path: "plant_1.assembly.line_1.cell_1" },
+      { id: "c2", name: "Cell 2", path: "plant_1.assembly.line_1.cell_2" },
+    ];
+    const { input } = renderBar({ cells: twoCells });
+    fireEvent.change(input, {
+      target: { value: "assign Operator 1 to Housing A on Cell 3 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Cell 2" }));
+
+    const entries = fetchMock.mock.calls.map((call: unknown[]) => {
+      const [, init] = call as [string, RequestInit];
+      return JSON.parse(init.body as string) as TraceEntry;
+    });
+    // DEF-0049 (CONTRACT CHANGED, 28 Sept): this question's own entry now
+    // posts at the ask too (`answered: null`), then again once "Cell 2" is
+    // picked and written -- `findLast` reads the up-to-date line.
+    const asked = entries.findLast((e) =>
+      (e.asked ?? "").startsWith('No cell called "Cell 3" on your board'),
+    );
+    expect(asked).toBeTruthy();
+    expect(asked?.answered).toBe("Cell 2");
+  });
+});
+
+/**
+ * DEF-0046, the bar's half (28 Sept, tester): "extend everyone on Cell 1 by
+ * 30 minutes" throws inside `resolveMoveCommand` (`resolve.ts`), reached
+ * through `resolveCommand` -- lane B's own fix is the resolver no longer
+ * throwing there; this lane's half is that ANY throw reaching `runCommand`/
+ * `resolveLotStep`/`startLot`/`runCandidateAction` is caught, shown as one
+ * plain turn, and recorded (`reportBarCrash`, CommandBar.tsx), rather than
+ * freezing the question and its buttons with nothing in the console or the
+ * trace. `resolveCommand` is mocked to throw directly (the same shape a
+ * genuine `resolve.ts` regression would produce) -- this describe block does
+ * not need the real crash reproduced, only that CATCHING one works.
+ */
+describe("CB-crash: DEF-0046, the bar's half -- a throw never freezes the thread (R-434)", () => {
+  it("CB-crash-1: a throw resolving a typed sentence is caught, shown as one plain turn, and recorded with its outcome", () => {
+    const spy = vi.spyOn(resolveLib, "resolveCommand").mockImplementation(() => {
+      throw new TypeError("Cannot read properties of null (reading 'start')");
+    });
+    const fetchMock = stubFetch();
+    try {
+      const { input, onOpen } = renderBar({ assignments: [BLK1] });
+      fireEvent.change(input, { target: { value: P1_SENTENCE } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      // The live line -- the maintainer's own sentence, verbatim, no buttons.
+      expect(statusText()).toBe("Something went wrong and nothing was changed. Say it again.");
+      expect(candidateButtons()).toHaveLength(0);
+      expect(onOpen).not.toHaveBeenCalled();
+
+      // Filed into the thread through the SAME "refused:" rendering every
+      // other refusal already uses (R-459's "Not done:" prefix).
+      expect(threadText()).toContain(
+        "Not done: Something went wrong and nothing was changed. Say it again.",
+      );
+
+      // R-434: a trace entry, with its outcome -- never silently dropped.
+      const entries = fetchMock.mock.calls.map((call: unknown[]) => {
+        const [, init] = call as [string, RequestInit];
+        return JSON.parse(init.body as string) as TraceEntry;
+      });
+      const posted = entries.find((e) => (e.outcome ?? "").includes("Something went wrong"));
+      expect(posted).toBeTruthy();
+      expect(posted?.outcome).toBe(
+        "refused: Something went wrong and nothing was changed. Say it again.",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("CB-crash-2: the bar is not frozen after a crash -- a second, ordinary sentence still runs cleanly", () => {
+    const spy = vi.spyOn(resolveLib, "resolveCommand").mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const { input, onOpen } = renderBar({ assignments: [BLK1] });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Something went wrong and nothing was changed. Say it again.");
+    spy.mockRestore();
+
+    // The REAL resolver, unmocked, on a fresh sentence -- nothing held over
+    // (no stale lot, no frozen question, no leftover input text) from the
+    // crash before it.
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("CB-crash-3: a throw from a candidate press (the model's ungrounded-reading button, DEF-0046's own real shape) is caught the same way", async () => {
+    // S71-m's own ungrounded-reading button (`askUngrounded`) runs
+    // `runCommand(action.command)` directly with the command OBJECT, never
+    // a re-parse -- the same door DEF-0046's own second route (the model
+    // misreading a sentence, the person pressing the one button offered)
+    // goes through. The heard text and the move-with-`adjust`-on-"everyone"
+    // reading are DEF-0046's own shapes: "sorry, this will take a few extra
+    // minutes, go ahead without me" has no clock/domain word/name/possessive
+    // (`looksLikeCommand` false, so `verbGuessStatus` offers nothing) and no
+    // MOVE_VERBS/ADJUST_VERBS word either (`no_intent_word`, not the
+    // sweeping unassign case DEF-0041 covers) -- `applyReading` reaches
+    // `askUngrounded` exactly as it did for the tester, WITHOUT ever calling
+    // `resolveCommand` (the button's own action hands the command object
+    // straight to `runCommand`, never a re-parse) -- so `resolveCommand` can
+    // throw unconditionally here; the button press is its first real call.
+    const fakeReader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      by: "model",
+      command: {
+        intent: "move",
+        operator: "everyone",
+        place: ["Cell 2"],
+        toPlace: null,
+        day: null,
+        span: null,
+        existing: null,
+        shift: null,
+        adjust: { edge: "end", by: 30 },
+      },
+    }));
+    const spy = vi.spyOn(resolveLib, "resolveCommand").mockImplementation(() => {
+      throw new TypeError("Cannot read properties of null (reading 'start')");
+    });
+    try {
+      // BLK_C2: a real block on Cell 2 -- "everyone on Cell 2" must expand
+      // to at least one real move for `resolveCommand` to ever be reached
+      // at all (an empty expansion is a plain `nothing_to_do` readout, no
+      // resolution attempted, nothing here to catch).
+      const { input } = renderBar({ assignments: [BLK_C2] }, fakeReader);
+      fireEvent.change(input, {
+        target: { value: "sorry, this will take a few extra minutes, go ahead without me" },
+      });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => expect(statusText()).toMatch(/^I heard ".*"\. Did you mean: /));
+      const button = candidateButtons()[0];
+      fireEvent.click(button);
+
+      expect(statusText()).toBe("Something went wrong and nothing was changed. Say it again.");
+      expect(candidateButtons()).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -5889,7 +6223,7 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     // this test still speaks for the whole entry it posts).
     expect(entry.asked).toBe(renderedReadout(resolved.readout));
     expect(entry.answered).toBe("auto");
-    expect(entry.ran).toEqual([resolved.readout]);
+    expect(entry.ran).toEqual([renderedReadout(resolved.readout)]);
   });
 
   it("CB-t-2: a spoken sentence through the reader stub -- by 'local' and the raw answer", async () => {
@@ -6058,7 +6392,7 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     expect(entry.clip).toBeUndefined();
   });
 
-  it("CB-t-3: a question answered by a button -- asked and answered, posted once (not while the question stands)", () => {
+  it("CB-t-3: a question answered by a button -- posted at the ask (DEF-0049), corrected when answered", () => {
     const fetchMock = stubFetch();
     const { onOpen, input } = renderBar();
     fireEvent.change(input, {
@@ -6067,16 +6401,19 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe('Which person? "Sam" matches 2:');
-    // The sentence's life has not ended yet -- a question stands.
-    expect(fetchMock).not.toHaveBeenCalled();
+    // DEF-0049: the sentence's life has not ended yet (the entry stays
+    // OPEN, unanswered), but the ask itself already posted.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(postedEntry(fetchMock).answered).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
     expect(onOpen).toHaveBeenCalledTimes(1);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const entry = postedEntry(fetchMock);
     expect(entry.asked).toBe('Which person? "Sam" matches 2:');
     expect(entry.answered).toBe("Sam Patel");
+    expect(entry.revises).toBe(true);
   });
 
   it("CB-t-4: a lot -- ran lists every command that was written, in order", async () => {
@@ -6091,16 +6428,26 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
-    expect(fetchMock).not.toHaveBeenCalled();
+    // DEF-0049 (CONTRACT CHANGED, 28 Sept): each of the lot's own per-step
+    // questions posts at its own ask now (`resolveLotStep`'s new call,
+    // CommandBar.tsx) -- three so far: "1 of 2: ..." (the ask), "2 of 2:
+    // ..." (a revision once the first is answered and the second is asked),
+    // "Ready to do 2 things: ..." (a revision once the second is answered).
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
     fireEvent.change(input, { target: { value: "yes" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     const entry = postedEntry(fetchMock);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
-    expect(entry.ran).toEqual(resolvedList.map((r) => r.readout));
+    // DEF-0043 item 1 (CONTRACT CHANGED, 28 Sept, CLAUDE.md §4: not wrong
+    // when written): `ran` used to hold the RAW readout (a raw ISO date
+    // token and all) -- the same field the thread's own "Written: ..." line
+    // reads (`turnResultLine`), so a raw `2026-...` date used to show there
+    // too. `renderReadout`'d now, same builder the question before it uses.
+    expect(entry.ran).toEqual(resolvedList.map((r) => renderedReadout(r.readout)));
     expect(entry.ran).toHaveLength(2);
     expect(entry.answered).toBe("yes");
   });
@@ -6143,7 +6490,16 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
   // cancel word (`traceRef.current.answered = "escape"` then `finishTrace`),
   // in all three places Escape can find something open: a standing
   // question, a "Reading…" spinner, and an active listen.
-  it("CB-t-7a: Escape on a standing question posts the entry, answered 'escape'", () => {
+  // DEF-0049 (CONTRACT CHANGED, 28 Sept, CLAUDE.md §4: not wrong when
+  // written): "a question left open when the page closes ... went missing"
+  // -- these three used to pin that an entry stayed unposted until it
+  // FINISHED (a readout, a cancel, Escape); the whole point of the fix is
+  // that a standing question posts the moment it is ASKED too
+  // (`traceQuestionStatus`, CommandBar.tsx) -- so `fetchMock` is called
+  // once right after Enter now, and Escape's own post is a SECOND line, a
+  // `revises: true` correction (`postedEntry`'s own updated doc: no
+  // argument now means the LAST line, the up-to-date state).
+  it("CB-t-7a: a standing question posts at the ask; Escape corrects it, answered 'escape'", () => {
     const fetchMock = stubFetch();
     const { input } = renderBar();
     fireEvent.change(input, {
@@ -6151,17 +6507,22 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(statusText()).toBe('Which person? "Sam" matches 2:');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const asked = postedEntry(fetchMock);
+    expect(asked.asked).toBe('Which person? "Sam" matches 2:');
+    expect(asked.answered).toBeNull();
+    expect(asked.revises).toBeUndefined();
 
     fireEvent.keyDown(input, { key: "Escape" });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const entry = postedEntry(fetchMock);
     expect(entry.asked).toBe('Which person? "Sam" matches 2:');
     expect(entry.answered).toBe("escape");
+    expect(entry.revises).toBe(true);
   });
 
-  it("CB-t-7b: Escape on a 'Reading…' spinner posts the entry, answered 'escape'", () => {
+  it("CB-t-7b: a 'Reading…' spinner opens no question yet, so nothing posts until Escape, answered 'escape'", () => {
     const fetchMock = stubFetch();
     const neverSettles: Reader = vi.fn(() => new Promise<Reading>(() => {}));
     const { input } = renderBar({ runs: [] }, neverSettles);
@@ -6169,6 +6530,7 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(statusText()).toBe("Reading…");
+    // "Reading…" is not a question (no `asked` yet) -- nothing to post.
     expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.keyDown(input, { key: "Escape" });
@@ -6179,18 +6541,18 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     expect(entry.answered).toBe("escape");
   });
 
-  it("CB-t-7c: Escape on an active listen posts whatever entry was still open, answered 'escape'", () => {
+  it("CB-t-7c: Escape on an active listen corrects whatever entry was already posted at the ask, answered 'escape'", () => {
     const fetchMock = stubFetch();
     const { recognizer } = makeFakeRecognizer();
     const { input } = renderBar({ runs: [] }, null, recognizer);
 
-    // Opens a trace entry (`asked` set) that never posts on its own -- a
-    // question stands.
+    // Opens a trace entry (`asked` set) -- posted the instant it is asked
+    // now (DEF-0049), not only once it is answered.
     fireEvent.change(input, {
       target: { value: "assign Sam to Housing A on Cell 1 in Line 1 from 10 to 2" },
     });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // A fresh listen starts -- R-458 (24 Sept): the status (and the
     // still-open trace entry) stand untouched; a mic press never clears
@@ -6199,10 +6561,11 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
 
     fireEvent.keyDown(input, { key: "Escape" });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const entry = postedEntry(fetchMock);
     expect(entry.asked).toBe('Which person? "Sam" matches 2:');
     expect(entry.answered).toBe("escape");
+    expect(entry.revises).toBe(true);
   });
 
   // CB-t-9/CB-t-10 (the S60-b reviewer, 15 Sept): `finishTrace`'s own no-op
@@ -6220,7 +6583,7 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("CB-t-10: Escape twice posts the entry once, not twice", () => {
+  it("CB-t-10: Escape CLOSES the entry once, not twice (DEF-0049: the ask-time post is call 1, Escape's own correction is call 2, a second Escape adds nothing)", () => {
     const fetchMock = stubFetch();
     const { input } = renderBar();
     fireEvent.change(input, {
@@ -6228,9 +6591,10 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(statusText()).toBe('Which person? "Sam" matches 2:');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     // CB-t-10 (CONTRACT CHANGED, CLAUDE.md §4, R-437/CB-ent-3): this used to
     // say the sentence came back into the box for the second Escape (per the
     // old C7) to clear. R-437 empties the box the moment the question was
@@ -6239,7 +6603,7 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     expect(input.value).toBe("");
 
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   // CB-t-8 (the S59 reviewer, 15 Sept): `recognizerName` is now a GETTER,
@@ -6309,24 +6673,29 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     const entry = postedEntry(fetchMock);
     expect(entry.asked).toBe(renderedReadout(resolved.readout));
     expect(entry.answered).toBe("auto");
-    expect(entry.ran).toEqual([resolved.readout]);
+    expect(entry.ran).toEqual([renderedReadout(resolved.readout)]);
   });
 
-  it("CB-t-12: a parse failure's own shape hint is recorded as asked", () => {
+  it("CB-t-12: a parse failure's own shape hint is recorded as asked, posted at the ask (DEF-0049)", () => {
     const fetchMock = stubFetch();
     const { input } = renderBar();
 
     fireEvent.change(input, { target: { value: "gibberish" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(statusText()).toBe(SHAPE);
-    // A shape hint alone is none of the three life-end triggers (a readout,
-    // a cancel, a new sentence) -- the entry stays open until Escape closes
-    // it (CB-t-7a's own pattern), which is what makes it observable here.
-    expect(fetchMock).not.toHaveBeenCalled();
+    // DEF-0049: a shape hint is a question the bar asked (R-434) -- posted
+    // the instant it is shown, not only once Escape (or a later sentence)
+    // closes it; the entry stays OPEN (unanswered) until then, but the line
+    // is already in the file, which is the whole point of the fix (a page
+    // closed here before Escape must not lose this turn).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const asked = postedEntry(fetchMock);
+    expect(asked.asked).toBe(SHAPE);
+    expect(asked.answered).toBeNull();
 
     fireEvent.keyDown(input, { key: "Escape" });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const entry = postedEntry(fetchMock);
     // `read` is whatever `ParseFailure.kind` this sentence hit -- not this
     // pin's own concern (`commandParse.test.ts` owns that table); only that
@@ -6334,6 +6703,7 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     expect(entry.read.length).toBeGreaterThan(0);
     expect(entry.asked).toBe(SHAPE);
     expect(entry.answered).toBe("escape");
+    expect(entry.revises).toBe(true);
   });
 
   it("CB-t-13: a headcount's own readout is recorded -- asked and ran", () => {
@@ -6358,7 +6728,7 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     const entry = postedEntry(fetchMock);
     expect(entry.asked).toBe(renderedReadout(resolved.readout));
     expect(entry.answered).toBe("auto");
-    expect(entry.ran).toEqual([resolved.readout]);
+    expect(entry.ran).toEqual([renderedReadout(resolved.readout)]);
   });
 
   it("CB-t-14: an entry still open when the bar unmounts is flushed with navigator.sendBeacon", () => {
@@ -6427,15 +6797,17 @@ describe("CB-keep: the bar keeps its conversation through a ctx that goes null a
     });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(statusText()).toBe('Which person? "Sam" matches 2:');
-    // The sentence's life has not ended -- a question stands, same as
-    // CB-t-3's own identical case.
-    expect(fetchMock).not.toHaveBeenCalled();
+    // DEF-0049: posted at the ask (the sentence's life has not ENDED -- the
+    // entry stays open, same as CB-t-3's own identical case -- but the ask
+    // itself is already in the file).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // The window's ctx goes null (a refetch gap) -- must not crash, must
-    // not lose the status, must not flush the still-open entry early.
+    // not lose the status, must not flush the still-open entry early or post
+    // again on its own.
     rerenderCtx(null);
     expect(statusText()).toBe('Which person? "Sam" matches 2:');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // ... and comes back.
     rerenderCtx({});
@@ -6446,10 +6818,11 @@ describe("CB-keep: the bar keeps its conversation through a ctx that goes null a
     fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
     expect(onOpen).toHaveBeenCalledTimes(1);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const entry = postedEntry(fetchMock);
     expect(entry.asked).toBe('Which person? "Sam" matches 2:');
     expect(entry.answered).toBe("Sam Patel");
+    expect(entry.revises).toBe(true);
   });
 
   it("CB-keep-2: Show that day's rerun keeps the entry -- a null ctx in between neither fires early nor crashes, and the real ctx still completes it", () => {
@@ -6593,10 +6966,15 @@ describe("CB-day: the readout's ISO day renders in the plant's own zone (F-153)"
 // anything was actually rolled back -- so `LotResult.error` here is exactly
 // what a real one would be: no "reverted" to begin with, nothing for this
 // file to strip any more either.
-// This pin is now just the "stayed" clause, same as CB-lot-3's "boom" case,
-// against a message shaped the way a real certificate refusal reads.
+// DEF-0052 / R-432 (CONTRACT CHANGED, 28 Sept, CLAUDE.md §4: not wrong when
+// written): the maintainer restated R-432 to SEPARATE LINES on 28 Sept --
+// this pin's own count-only "Did 1 of 2 things; the next failed: ... What
+// was already done stayed: ..." is the OLD form; DEF-0052 filed against it
+// because a lot longer than two never named the changes after the refused
+// one at all. Rewritten to "I made k of N changes." / "Done: ..." / "Not
+// done: ..." / "Not tried: ...".
 describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-154)", () => {
-  it("CB-lot-fail-1: 'Did 1 of 2 things; the next failed: <message>. What was already done stayed: <readout>.'", async () => {
+  it("CB-lot-fail-1: 'I made 1 of the 2 changes.\\nDone: <readout>\\nNot done: <who and where>. <the reason in the plant's words>'", async () => {
     const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
       done: 1,
       error: "Tom Baker is not certified for Cell 1: missing Welding.",
@@ -6616,10 +6994,146 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
 
     await waitFor(() =>
       expect(threadText()).toContain(
-        `Did 1 of 2 things; the next failed: Tom Baker is not certified for Cell 1: missing Welding. What was already done stayed: ${renderedReadout(resolved[0].readout)}.`,
+        "I made 1 of the 2 changes.\n" +
+          `Done: ${renderedReadout(resolved[0].readout)}\n` +
+          "Not done: Sam Patel's block on Cell 1 in Line 1. Tom Baker is not certified for Welding, which Cell 1 needs.",
       ),
     );
     expect(threadText()).not.toContain("reverted");
+    // n=2, done=1: nothing after the refused step -- no "Not tried" line.
+    expect(threadText()).not.toContain("Not tried:");
+  });
+
+  // DEF-0052's own report: a lot of four with the SECOND refused (one done,
+  // one not done, two not tried) -- the brief's own example is a lot of
+  // five; four real operators is what `buildCtx`'s own fixture roster gives
+  // without inventing a name it would refuse to resolve, and two "Not
+  // tried" items already proves the join (a THIRD would only repeat it).
+  it("CB-lot-fail-2 (DEF-0052): a lot of four with the second refused -- one Done, one Not done, two Not tried", async () => {
+    const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: 1,
+      error: "Sam Patel is not certified for Cell 1: missing Welding.",
+    }));
+    const { input } = renderBar(
+      { assignments: [BLK1, BLK_SP, BLK_SO, BLK_PS] },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+
+    fireEvent.change(input, {
+      target: {
+        value:
+          "Unassign Operator 1 and Sam Patel and Sam Ortiz and Priya Shah from Cell 1 in Line 1 from 10 to 2",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    for (let i = 0; i < 4; i++) {
+      fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    }
+    await waitFor(() => expect(statusText()).toMatch(/^Ready to do 4 things: /));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+
+    await waitFor(() =>
+      expect(threadText()).toContain(
+        "I made 1 of the 4 changes.\n" +
+          `Done: ${renderedReadout(resolved[0].readout)}\n` +
+          "Not done: Sam Patel's block on Cell 1 in Line 1. Sam Patel is not certified for Welding, which Cell 1 needs.\n" +
+          "Not tried: Sam Ortiz stays on Cell 1 in Line 1. Priya Shah stays on Cell 1 in Line 1.",
+      ),
+    );
+  });
+
+  // DEF-0052's own report: a lot whose FIRST is refused -- no "Done" line.
+  it("CB-lot-fail-3 (DEF-0052): a lot of three whose first is refused -- 'I made none of the 3 changes.', no Done line, two Not tried", async () => {
+    const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: 0,
+      error: "Operator 1 is not certified for Cell 1: missing Welding.",
+    }));
+    const { input } = renderBar(
+      { assignments: [BLK1, BLK_SP, BLK_SO] },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+
+    fireEvent.change(input, {
+      target: {
+        value: "Unassign Operator 1 and Sam Patel and Sam Ortiz from Cell 1 in Line 1 from 10 to 2",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    for (let i = 0; i < 3; i++) {
+      fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    }
+    await waitFor(() => expect(statusText()).toMatch(/^Ready to do 3 things: /));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+
+    await waitFor(() =>
+      expect(threadText()).toContain(
+        "I made none of the 3 changes.\n" +
+          "Not done: Operator 1's block on Cell 1 in Line 1. Operator 1 is not certified for Welding, which Cell 1 needs.\n" +
+          "Not tried: Sam Patel stays on Cell 1 in Line 1. Sam Ortiz stays on Cell 1 in Line 1.",
+      ),
+    );
+    expect(threadText()).not.toContain("Done:");
+  });
+
+  // DEF-0052's own report: a lot whose LAST is refused -- no "Not tried" line.
+  it("CB-lot-fail-4 (DEF-0052): a lot of three whose last is refused -- no 'Not tried' line", async () => {
+    const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: 2,
+      error: "Sam Ortiz is not certified for Cell 1: missing Welding.",
+    }));
+    const { input } = renderBar(
+      { assignments: [BLK1, BLK_SP, BLK_SO] },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+
+    fireEvent.change(input, {
+      target: {
+        value: "Unassign Operator 1 and Sam Patel and Sam Ortiz from Cell 1 in Line 1 from 10 to 2",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    for (let i = 0; i < 3; i++) {
+      fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    }
+    await waitFor(() => expect(statusText()).toMatch(/^Ready to do 3 things: /));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+
+    await waitFor(() =>
+      expect(threadText()).toContain(
+        "I made 2 of the 3 changes.\n" +
+          "Done: " +
+          resolved
+            .slice(0, 2)
+            .map((r) => renderedReadout(r.readout))
+            .join(" ") +
+          "\n" +
+          "Not done: Sam Ortiz's block on Cell 1 in Line 1. Sam Ortiz is not certified for Welding, which Cell 1 needs.",
+      ),
+    );
+    expect(threadText()).not.toContain("Not tried:");
   });
 });
 
@@ -6853,17 +7367,26 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
     expect(onRunLot).toHaveBeenCalledTimes(1);
     await act(async () => {
-      settle({ done: 1, error: "That person belongs to a different part of the structure." });
+      // The server's own area refusal, as `describeSchedulerError` words it.
+      settle({
+        done: 1,
+        error:
+          "That person belongs to a different part of the structure, so it can't be used here.",
+      });
     });
 
-    expect(threadText()).toContain("Did 1 of 2 things; the next failed:");
+    // DEF-0052 / R-432 (CONTRACT CHANGED, 28 Sept, CLAUDE.md §4: not wrong
+    // when written): SEPARATE LINES, the count-only "Did k of N things; the
+    // next failed: ..." replaced.
+    expect(threadText()).toContain("I made 1 of the 2 changes.");
     const entry = postedEntry(fetchMock);
-    // The one thing the maintainer's own trace could not tell him. CP-7
-    // (session 178): the outcome is the whole sentence the thread shows, the
-    // "stayed" clause included, so this reads the failure's own words rather
-    // than the exact string.
-    expect(entry.outcome).toContain(
-      "Did 1 of 2 things; the next failed: That person belongs to a different part of the structure.",
+    // S194-D (CONTRACT CHANGED from lane E's interim, which printed the raw
+    // refusal after the refused step's READOUT): the whole outcome, exactly
+    // -- the refused change named by who and where, the area refusal in the
+    // plant's words through the one rewriter.
+    expect(entry.outcome).toBe(
+      `I made 1 of the 2 changes.\nDone: ${entry.ran[0]}\n` +
+        "Not done: Sam Patel's block on Cell 1 in Line 1. That person is not from this cell's area.",
     );
     // And only the step that actually ran.
     expect(entry.ran).toHaveLength(1);
@@ -7074,24 +7597,31 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     expect(fetchMock).not.toHaveBeenCalled();
 
     // A second sentence, before the first writer answered: the first entry is
-    // flushed as it stands -- ran empty, outcome null.
+    // flushed as it stands -- ran empty, outcome null. DEF-0049 (CONTRACT
+    // CHANGED, 28 Sept): "gibberish" ALSO asks its own shape-hint question
+    // now, posted at the ask (`traceQuestionStatus`'s new call) -- a SECOND,
+    // separate entry, call index 1, right after P1's own flush at index 0.
     fireEvent.change(input, { target: { value: "gibberish" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const firstLine = postedEntry(fetchMock, 0);
     expect(firstLine.heard).toBe(P1_SENTENCE);
     expect(firstLine.ran).toEqual([]);
     expect(firstLine.outcome).toBeNull();
+    const gibberishAsked = postedEntry(fetchMock, 1);
+    expect(gibberishAsked.heard).toBe("gibberish");
+    expect(gibberishAsked.asked).toBe(SHAPE);
 
     // Now the first sentence's write lands.
     await act(async () => {
       settleFirst({ kind: "written" });
     });
 
-    // The file gets a CORRECTED line -- same `at`, `revises: true` -- since it
-    // is append-only and the first line is already in it.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const corrected = postedEntry(fetchMock, 1);
+    // The file gets a CORRECTED line for P1's OWN entry -- same `at`,
+    // `revises: true` -- since it is append-only and the first line is
+    // already in it; call index 2, after gibberish's own ask-time post.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const corrected = postedEntry(fetchMock, 2);
     expect(corrected.at).toBe(firstLine.at);
     expect(corrected.revises).toBe(true);
     expect(corrected.outcome).toBe("written");
@@ -7175,9 +7705,11 @@ describe("CB-w: the four silent writers answer for real (F-168)", () => {
     await act(async () => {});
 
     expect(onUnassign).toHaveBeenCalledTimes(1);
-    expect(threadText()).toContain("Not done: You don't have permission to change that.");
+    // S194-D (R-432/R-459, CONTRACT CHANGED): the one rewriter now puts a
+    // permission refusal in the plant's words.
+    expect(threadText()).toContain("Not done: You cannot change that from here.");
     const entry = postedEntry(fetchMock);
-    expect(entry.outcome).toBe("refused: You don't have permission to change that.");
+    expect(entry.outcome).toBe("refused: You cannot change that from here.");
     expect(entry.ran).toEqual([]);
   });
 
@@ -8316,5 +8848,619 @@ describe("CB-stale: a leftover voice session must not re-answer an already-resol
     fire.final("Sam Ortiz");
 
     expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S194-D second pass -- the bar's half of R-461 (the night shift questions),
+// R-409 (the absence record), and R-432's answer said properly.
+// ---------------------------------------------------------------------------
+
+describe("CB-night: R-461's two questions in the bar (S194-D)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const w = (d: number, m: number): number => d * 1440 + m;
+  // Cell 2 (c2, one name on the board). Today is Thursday (index 3).
+  const SAM_INTO: ContextAssignment = {
+    ...BLK1,
+    id: "samInto",
+    nodeId: "c2",
+    operatorId: "sp",
+    startMin: w(2, 1320), // Wed 22:00
+    endMin: w(3, 360), // Thu 06:00
+    label: "22:00–06:00",
+  };
+  const ORTIZ_OUT: ContextAssignment = {
+    ...BLK1,
+    id: "ortizOut",
+    nodeId: "c2",
+    operatorId: "so",
+    startMin: w(3, 1320), // Thu 22:00
+    endMin: w(4, 360), // Fri 06:00
+    label: "22:00–06:00",
+  };
+  const Q_PREV =
+    "Sam Patel's night shift started Wednesday at 10 pm. Clear Wednesday's part too, 10 pm to midnight?";
+  const Q_NEXT =
+    "Sam Ortiz's night shift runs into Friday. Clear Friday's part too, midnight to 6 am?";
+
+  it("CB-night-1: one sentence, both questions in order -- Yes pressed, 'no' typed (an answer here, never the cancel) -- ONE trace entry holding both asks and both answers", async () => {
+    const fetchMock = stubFetch();
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderBar(
+      { assignments: [SAM_INTO, ORTIZ_OUT] },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toBe(Q_PREV);
+    expect(input.placeholder).toContain("yes or no");
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+
+    expect(statusText()).toBe(Q_NEXT);
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
+    expect(statusText()).toContain("1. Sam Patel is off Cell 2 ");
+    expect(statusText()).toContain(
+      "2. Sam Ortiz's night shift on Cell 2 keeps its Friday part, midnight to 6 am; Thursday's part, 10 pm to midnight, is cleared.",
+    );
+    const mid = postedEntry(fetchMock);
+    expect(mid.asked?.split("\n").slice(0, 2)).toEqual([Q_PREV, Q_NEXT]);
+    expect(mid.answered).toBe("Yes\nNo");
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
+    const last = postedEntry(fetchMock);
+    expect(last.asked?.split("\n")[0]).toBe(Q_PREV);
+    expect(last.asked?.split("\n")[1]).toBe(Q_NEXT);
+    expect(last.answered).toBe("Yes\nNo\nDo all 2");
+    expect(last.outcome).toBe("Done, 2 things.");
+  });
+
+  it("CB-night-2: the Yes and No buttons are one group, drawn from the one pair style (R-447)", () => {
+    renderBar({ assignments: [SAM_INTO] });
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const yes = screen.getByRole("button", { name: "Yes" });
+    const no = screen.getByRole("button", { name: "No" });
+    expect(yes.parentElement).toBe(no.parentElement);
+    expect(yes.parentElement?.className).toMatch(/answerPair/);
+  });
+
+  it("CB-night-3: a cancel word other than 'no' still drops the sentence at a night shift question", () => {
+    const { input } = renderBar({ assignments: [SAM_INTO] });
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "cancel" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(threadText()).toContain("Cancelled");
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+  });
+
+  it("CB-night-4 (R-455): the answers already given survive the board moving and the sentence re-running -- the question is not asked again", () => {
+    // A one-day board (Thursday). Sam Patel's block and his job run from
+    // Wednesday 22:00; Sam Ortiz sits on the same job on Wednesday morning,
+    // outside the job's own hours -- so a Yes removes the job whole, which
+    // must list Sam Ortiz, whose day is off this board: the bar moves the
+    // board and re-runs.
+    const thu: BoardDay[] = [{ index: 0, iso: "2026-09-03", weekday: 4 }];
+    const run: ContextRun = {
+      ...RUN1,
+      id: "nightJob",
+      nodeId: "c2",
+      startMin: -120,
+      endMin: 360,
+      label: "Housing A 22:00–06:00",
+      span: "22:00–06:00",
+      headcount: 2,
+    };
+    const crew1: ContextAssignment = {
+      ...SAM_INTO,
+      id: "crew1",
+      runId: "nightJob",
+      startMin: -120,
+      endMin: 360,
+    };
+    const crew2: ContextAssignment = {
+      ...BLK1,
+      id: "crew2",
+      nodeId: "c2",
+      operatorId: "so",
+      runId: "nightJob",
+      startMin: -840,
+      endMin: -720,
+      label: "10:00–12:00",
+    };
+    const { input, onShowDay, rerenderCtx } = renderBar({
+      days: thu,
+      todayIndex: 0,
+      assignments: [crew1, crew2],
+      runs: [run],
+    });
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toMatch(/^Sam Patel's night shift started Wednesday at 10 pm\./);
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(onShowDay).toHaveBeenCalledWith("2026-09-02");
+
+    // The board lands on Wednesday and Thursday; the same rows, re-based.
+    const two: BoardDay[] = [
+      { index: 0, iso: "2026-09-02", weekday: 3 },
+      { index: 1, iso: "2026-09-03", weekday: 4 },
+    ];
+    const shift = (x: ContextAssignment): ContextAssignment => ({
+      ...x,
+      startMin: x.startMin + 1440,
+      endMin: x.endMin + 1440,
+    });
+    act(() => {
+      rerenderCtx({
+        days: two,
+        todayIndex: 1,
+        assignments: [shift(crew1), shift(crew2)],
+        runs: [{ ...run, startMin: run.startMin + 1440, endMin: run.endMin + 1440 }],
+      });
+    });
+    // Never the same question a second time: the Yes rode the rerun.
+    expect(statusText()).not.toContain("Clear Wednesday's part too");
+    expect(statusText()).toMatch(/^Ready to do 3 things: /);
+  });
+});
+
+describe("CB-abs: an absence sentence in the bar (S194-D, R-409, R-431)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const SAM_MORNING: ContextAssignment = {
+    ...BLK_SP,
+    id: "samAm",
+    startMin: 3 * 1440 + 480,
+    endMin: 3 * 1440 + 600,
+    label: "08:00–10:00",
+  };
+  const SAM_AFTERNOON: ContextAssignment = {
+    ...BLK_SP,
+    id: "samPm",
+    nodeId: "c2",
+    startMin: 3 * 1440 + 780,
+    endMin: 3 * 1440 + 900,
+    label: "13:00–15:00",
+  };
+
+  it("CB-abs-1: 'Sam Patel is off today', recordable -- both blocks and the absence in one lot, the absence LAST; the Done line says it was recorded", async () => {
+    const fetchMock = stubFetch();
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderBar(
+      { assignments: [SAM_MORNING, SAM_AFTERNOON], absenceRecordable: new Set(["sp"]) },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+    fireEvent.change(input, { target: { value: "Sam Patel is off today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toMatch(/^Ready to do 3 things: /);
+    expect(statusText()).toContain(
+      `3. ${renderedReadout("Sam Patel is recorded as off 2026-09-03.")}`,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Do all 3" }));
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [steps] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(steps.map((s) => s.intent)).toEqual(["unassign", "unassign", "record_absence"]);
+    const done =
+      "Done, 3 things. " +
+      renderedReadout(
+        "Sam Patel is off 2026-09-03. Their 2 blocks on Cell 1 in Line 1 and Cell 2 are cleared and the absence is recorded.",
+      );
+    await waitFor(() => expect(threadText()).toContain(done));
+    expect(postedEntry(fetchMock).outcome).toBe(done);
+  });
+
+  it("CB-abs-2: the recordable set still loading (unknown) -- the one block is removed, and the thread says the absence was not recorded, and why", () => {
+    const { input, onUnassign } = renderBar({ assignments: [SAM_MORNING] });
+    fireEvent.change(input, { target: { value: "Sam Patel is off today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    expect(threadText()).toContain(
+      renderedReadout(
+        "Sam Patel is off 2026-09-03. Their block on Cell 1 in Line 1 is cleared; the absence is not recorded, because I could not check whether you may record it.",
+      ),
+    );
+  });
+
+  it("CB-abs-3: 'remove Sam Patel today' is not an absence -- it still asks which block", () => {
+    const { input } = renderBar({
+      assignments: [SAM_MORNING, SAM_AFTERNOON],
+      absenceRecordable: new Set(["sp"]),
+    });
+    fireEvent.change(input, { target: { value: "remove Sam Patel today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toMatch(/Remove which\?/);
+  });
+});
+
+describe("CB-432: R-432's answer, every new step kind, a refusal in the middle (S194-D)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const w = (d: number, m: number): number => d * 1440 + m;
+  // Cell 2: Sam Patel's block and his job run from Wednesday 22:00 into
+  // today (No keeps Wednesday's part: a block trim and a JOB TRIM), and a
+  // second job wholly inside today (a JOB REMOVAL).
+  const nightJob: ContextRun = {
+    ...RUN1,
+    id: "nightJob",
+    nodeId: "c2",
+    startMin: w(2, 1320),
+    endMin: w(3, 360),
+    label: "Housing A 22:00–06:00",
+    span: "22:00–06:00",
+    headcount: 1,
+  };
+  const dayJob: ContextRun = {
+    ...RUN1,
+    id: "dayJob",
+    nodeId: "c2",
+    startMin: w(3, 600),
+    endMin: w(3, 720),
+    label: "Housing A 10:00–12:00",
+    span: "10:00–12:00",
+    headcount: null,
+  };
+  const crew: ContextAssignment = {
+    ...BLK1,
+    id: "nightCrew",
+    nodeId: "c2",
+    operatorId: "sp",
+    runId: "nightJob",
+    startMin: w(2, 1320),
+    endMin: w(3, 360),
+    label: "22:00–06:00",
+  };
+
+  it("CB-432-1: the job trim is refused -- Done names what was made, Not done the job in the plant's words, Not tried says the job removal stays as it was", async () => {
+    const onRunLot = vi.fn(async (_r: ResolvedAny[]): Promise<LotResult> => ({
+      done: 1,
+      error: "You don't have permission to edit Cell 2.",
+    }));
+    const { input } = renderBar(
+      { assignments: [crew], runs: [nightJob, dayJob] },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "No" }));
+    expect(statusText()).toMatch(/^Ready to do 3 things: /);
+    fireEvent.click(screen.getByRole("button", { name: "Do all 3" }));
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [steps] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(steps.map((s) => s.intent)).toEqual(["move", "trim_run", "remove_run"]);
+    await waitFor(() =>
+      expect(threadText()).toContain(
+        "I made 1 of the 3 changes.\n" +
+          "Done: Sam Patel's night shift on Cell 2 keeps its Wednesday part, 10 pm to midnight; Thursday's part, midnight to 6 am, is cleared.\n" +
+          "Not done: The Housing A job on Cell 2. You cannot change Cell 2 from here.\n" +
+          "Not tried: The Housing A job on Cell 2 stays as it was, 10 am to noon.",
+      ),
+    );
+  });
+
+  it("CB-432-2: an absence lot whose record is refused (an absence already there) -- the blocks are Done, the record Not done in words", async () => {
+    const onRunLot = vi.fn(async (_r: ResolvedAny[]): Promise<LotResult> => ({
+      done: 1,
+      error:
+        "This person already has an absence over some of those days (2026-09-03 – 2026-09-03).",
+    }));
+    const { input } = renderBar(
+      { assignments: [BLK_SP], absenceRecordable: new Set(["sp"]) },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+    fireEvent.change(input, { target: { value: "Sam Patel is sick today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(threadText()).toContain(
+        `Not done: ${renderedReadout("An absence for Sam Patel 2026-09-03")}. An absence is already recorded on some of those days.`,
+      ),
+    );
+  });
+
+  it("CB-432-3: the runner REJECTS but says how many it made -- answered like any partial failure, and traced", async () => {
+    const fetchMock = stubFetch();
+    const onRunLot = vi.fn((_r: ResolvedAny[]): Promise<LotResult> =>
+      Promise.reject({ done: 1, error: "boom." }),
+    );
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() =>
+      expect(threadText()).toContain("Not done: Sam Patel's block on Cell 1 in Line 1. boom."),
+    );
+    expect(postedEntry(fetchMock).outcome).toMatch(/^I made 1 of the 2 changes\./);
+  });
+
+  it("CB-432-4: the runner REJECTS with no count -- never 'nothing was changed'; the thread says some may have been, and it is traced", async () => {
+    const fetchMock = stubFetch();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onRunLot = vi.fn((_r: ResolvedAny[]): Promise<LotResult> =>
+      Promise.reject(new Error("network down")),
+    );
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    const said =
+      "Something went wrong while making the changes; some may have been made. Check the board before saying it again.";
+    await waitFor(() => expect(threadText()).toContain(said));
+    expect(threadText()).not.toContain("nothing was changed");
+    expect(postedEntry(fetchMock).outcome).toBe(`refused: ${said}`);
+    errSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S194-D third pass: the reviewer's five items, the bar's cases.
+// ---------------------------------------------------------------------------
+
+describe("CB-iso: every ISO day in a sentence is spoken, never only the first (S194-D third pass)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+  const RAW = /\d{4}-\d{2}-\d{2}/;
+  const SAM_THU: ContextAssignment = { ...BLK_SP, id: "samThu" };
+
+  it("CB-iso-1: 'Sam Patel is off until Saturday' -- the listing, the Done line and the trace entry carry no raw date anywhere", async () => {
+    const fetchMock = stubFetch();
+    const onRunLot = vi.fn(async (r: ResolvedAny[]): Promise<LotResult> => ({
+      done: r.length,
+      error: null,
+    }));
+    const { input } = renderBar(
+      { assignments: [SAM_THU], absenceRecordable: new Set(["sp"]) },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+    fireEvent.change(input, { target: { value: "Sam Patel is off until Saturday" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
+    expect(statusText()).not.toMatch(RAW);
+    expect(statusText()).toContain(
+      renderedReadout("Sam Patel is recorded as off from 2026-09-03 to 2026-09-05."),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
+    expect(threadText()).not.toMatch(RAW);
+    const entry = postedEntry(fetchMock);
+    expect(`${entry.asked} ${entry.outcome} ${entry.ran.join(" ")}`).not.toMatch(RAW);
+  });
+
+  it("CB-iso-2: nothing on the board over the span and the set unknown -- 'has no block from X to Y' is spoken whole", () => {
+    const { input } = renderBar({ assignments: [] });
+    fireEvent.change(input, { target: { value: "Sam Patel is off until Saturday" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(threadText()).toContain(
+      renderedReadout("Sam Patel has no block from 2026-09-03 to 2026-09-05;"),
+    );
+    expect(threadText()).not.toMatch(RAW);
+  });
+
+  it("CB-iso-3: an absence already on some of the days -- 'on some of the days from X to Y' is spoken whole", () => {
+    const { input } = renderBar({
+      assignments: [SAM_THU],
+      absenceRecordable: new Set(["sp"]),
+      hasWholeDayAbsence: () => true,
+    });
+    fireEvent.change(input, { target: { value: "Sam Patel is off until Saturday" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(threadText()).toContain(
+      renderedReadout(
+        "already has an absence recorded on some of the days from 2026-09-03 to 2026-09-05",
+      ),
+    );
+    expect(threadText()).not.toMatch(RAW);
+  });
+
+  it("CB-iso-4: the day_order question names two days -- both spoken", () => {
+    const { input } = renderBar({ assignments: [SAM_THU] });
+    fireEvent.change(input, {
+      target: { value: "Sam Patel is off from 2026-09-05 until 2026-09-03" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // The person's own typed words keep their dates; the board's never do.
+    expect(statusText()).not.toMatch(RAW);
+    expect(statusText()).toContain("is before");
+  });
+
+  it("CB-iso-5: a refused absence over a span -- the Not done line's 'An absence for Sam Patel from X to Y' is spoken whole", async () => {
+    const onRunLot = vi.fn(async (_r: ResolvedAny[]): Promise<LotResult> => ({
+      done: 1,
+      error: "This person already has an absence over some of those days.",
+    }));
+    const { input } = renderBar(
+      { assignments: [SAM_THU], absenceRecordable: new Set(["sp"]) },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+    fireEvent.change(input, { target: { value: "Sam Patel is off until Saturday" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await waitFor(() =>
+      expect(threadText()).toContain(
+        `Not done: ${renderedReadout("An absence for Sam Patel from 2026-09-03 to 2026-09-05")}.`,
+      ),
+    );
+    expect(threadText()).not.toMatch(RAW);
+  });
+});
+
+describe("CB-hole: a window inside a job offers the windows that would work (S194-D third pass, R-430)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+  const dayJob: ContextRun = {
+    ...RUN1,
+    id: "dayJob",
+    nodeId: "c2",
+    startMin: 3 * 1440 + 600,
+    endMin: 3 * 1440 + 960,
+    label: "Housing A 10:00–16:00",
+    span: "10:00–16:00",
+  };
+
+  it("CB-hole-1: 'clear Cell 2 from 1 to 2 pm' on a 10 am to 4 pm job -- two buttons; pressing one clears to that end of the job, traced", () => {
+    const fetchMock = stubFetch();
+    const { input } = renderBar({ runs: [dayJob] });
+    fireEvent.change(input, { target: { value: "clear Cell 2 today from 1pm to 2pm" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toContain("would leave a hole in it");
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "Clear 1 pm to 4 pm",
+      "Clear 10 am to 2 pm",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Clear 1 pm to 4 pm" }));
+    expect(statusText()).toMatch(
+      /^Ready to do 1 things: 1\. The Housing A job on Cell 2 keeps 10 am to 1 pm; /,
+    );
+    // The hole question was posted AT THE ASK (R-434); the entry then moved
+    // on to the lot's own question, answered by the pressed window.
+    const asks = fetchMock.mock.calls.map((_c, i) => postedEntry(fetchMock, i).asked ?? "");
+    expect(asks.some((a) => a.includes("would leave a hole in it"))).toBe(true);
+    expect(postedEntry(fetchMock).answered).toBe("Clear 1 pm to 4 pm");
+  });
+});
+
+describe("CB-held: three branches the reviewer found no test holding (S194-D third pass)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-held-1: a MODEL reading of 'Sam Patel is off tomorrow' comes back as a plain unassign -- the heard words mark it an absence: every block, the record, no which-block question", async () => {
+    const plain: UnassignCommand = {
+      intent: "unassign",
+      operator: "Sam Patel",
+      place: [],
+      day: { kind: "tomorrow" },
+      span: null,
+      existing: null,
+      shift: null,
+      until: null,
+    };
+    const reader: Reader = vi.fn(async (): Promise<Reading> => ({
+      ok: true,
+      command: plain,
+      by: "model",
+    }));
+    const friAm: ContextAssignment = {
+      ...BLK_SP,
+      id: "friAm",
+      startMin: 4 * 1440 + 480,
+      endMin: 4 * 1440 + 600,
+      label: "08:00–10:00",
+    };
+    const friPm: ContextAssignment = {
+      ...BLK_SP,
+      id: "friPm",
+      nodeId: "c2",
+      startMin: 4 * 1440 + 780,
+      endMin: 4 * 1440 + 900,
+      label: "13:00–15:00",
+    };
+    const onRunLot = vi.fn(async (r: ResolvedAny[]): Promise<LotResult> => ({
+      done: r.length,
+      error: null,
+    }));
+    const { input } = renderBar(
+      { assignments: [friAm, friPm], absenceRecordable: new Set(["sp"]) },
+      reader,
+      null,
+      {},
+      { onRunLot },
+    );
+    fireEvent.change(input, { target: { value: "Sam Patel is off tomorrow" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(statusText()).toMatch(/^Ready to do 3 things: /));
+    expect(statusText()).not.toContain("Remove which?");
+    fireEvent.click(screen.getByRole("button", { name: "Do all 3" }));
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [steps] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(steps.map((s) => s.intent)).toEqual(["unassign", "unassign", "record_absence"]);
+  });
+
+  it("CB-held-2: a single write whose answer then throws -- the thread names the write that was made and never says nothing changed", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { input, onUnassign } = renderBar({ assignments: [BLK1] });
+    onUnassign.mockReturnValue({
+      then: () => {
+        throw new Error("the writer blew up after writing");
+      },
+    } as never);
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    expect(threadText()).toContain(
+      "Something went wrong after that; check the board before saying it again.",
+    );
+    expect(threadText()).not.toContain("nothing was changed");
+    errSpy.mockRestore();
+  });
+
+  it("CB-held-3: a person dead end with more than eight people on the board -- eight buttons and 'and more'", () => {
+    const many = Array.from({ length: 11 }, (_, i) => ({
+      id: `p${i}`,
+      displayName: `Person ${String.fromCharCode(65 + i)}`,
+      employeeRef: null,
+      active: true,
+    }));
+    const { input } = renderBar({ operators: many });
+    fireEvent.change(input, {
+      target: { value: "assign Qqqq to Housing A on Cell 1 in Line 1 from 10 to 2" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(candidateButtons()).toHaveLength(8);
+    expect(statusText()).toBe(
+      'No person called "Qqqq" on your board. Did you mean one of these? … and more — say the person.',
+    );
   });
 });

@@ -167,6 +167,61 @@ describe("R-390 / S42-a: the voice-command training and held-out sets", () => {
     }
   });
 
+  // DEF-0048 (S194-D): the grammar marks an absence (`absence: "off"`); the
+  // model's recorded forms never carry it and are not taught it. The oracle
+  // ignores that ONE key, by name, on an unassign -- and nothing else.
+  describe("V-ABS: equalForms ignores the derived absence mark and nothing else", () => {
+    const recorded: Command = {
+      intent: "unassign",
+      operator: "Sam Patel",
+      place: [],
+      day: { kind: "tomorrow" },
+      span: null,
+      existing: null,
+      shift: null,
+      until: null,
+    };
+
+    it("V-ABS-1: the grammar's marked absence equals the model's recorded form", () => {
+      const parsed = parseCommand("Sam Patel is off tomorrow");
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.command).toEqual({ ...recorded, absence: "off" });
+      expect(equalForms(parsed.command, recorded)).toBe(true);
+      // Inside a several too, and in either argument order.
+      const several: Command = { intent: "several", commands: [parsed.command as SingleCommand] };
+      expect(equalForms({ intent: "several", commands: [recorded] }, several)).toBe(true);
+    });
+
+    it("V-ABS-2: a difference in ANY other key still fails -- every key of the unassign form, one at a time", () => {
+      const changed: Record<string, unknown> = {
+        intent: "move",
+        operator: "Sam Ortiz",
+        place: ["Cell 1"],
+        day: { kind: "today" },
+        span: { start: { hour: 8, minute: 0 }, end: { hour: 12, minute: 0 } },
+        existing: { kind: "remove", assignmentId: "a1" },
+        shift: "Shift 1",
+        until: { kind: "weekday", day: 5 },
+      };
+      for (const [key, value] of Object.entries(changed)) {
+        const other = { ...recorded, absence: "off", [key]: value };
+        expect(equalForms(other, recorded), `a different "${key}" must not compare equal`).toBe(
+          false,
+        );
+      }
+      // A key the model's form lacks, other than the absence mark, still fails.
+      expect(equalForms({ ...recorded, extra: "x" }, recorded)).toBe(false);
+      // The mark is ignored on an unassign ONLY.
+      expect(
+        equalForms(
+          { intent: "assign", operator: "Sam", absence: "off" },
+          { intent: "assign", operator: "Sam" },
+        ),
+      ).toBe(false);
+    });
+  });
+
   describe("V5: the scorer", () => {
     const assignForm: Command = {
       intent: "assign",

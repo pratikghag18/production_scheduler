@@ -16,6 +16,8 @@ import {
   createConversationStore,
   finishTrace,
   historyStorageKey,
+  postTrace,
+  postTraceOnTeardown,
   storeRef,
   type HistoryTurn,
 } from "@/features/board/store/commandConversation";
@@ -261,5 +263,66 @@ describe("commandConversation: the conversation history (R-427)", () => {
     expect(now.lot).toBeNull();
     expect(now.text).toBe("");
     expect(now.offered).toEqual([]);
+  });
+});
+
+/**
+ * DEF-0049 (28 Sept, tester): the trace loses whole turns -- a question left
+ * open when the page closes was never posted at all (an entry only ever
+ * went out once, at the sentence's FINISH). The fix posts at the ASK too
+ * (`CommandBar.tsx`'s own `traceQuestionStatus`/`resolveLotStep`/
+ * `showLotStatus`, not this file's own concern), which means `postTrace`/
+ * `postTraceOnTeardown` now see the SAME entry object posted more than once
+ * routinely, not only on the rare F-164 "write landed late" path S62-b built
+ * `revises` for -- so a second post can never again be a silent no-op.
+ */
+describe("commandConversation: postTrace/postTraceOnTeardown never silently drop a second post (DEF-0049)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("CS-5: postTrace posted twice for the same entry sends TWO lines, the second one revises", () => {
+    const fetchMock = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    const e = entry({ asked: "Which person?", answered: null, outcome: null });
+
+    postTrace(e);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const first = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(first.revises).toBeUndefined();
+    expect(first.answered).toBeNull();
+
+    e.answered = "Sam Patel";
+    e.outcome = "written";
+    postTrace(e);
+
+    // Second post: NOT dropped (the pre-DEF-0049 rule), a real second line.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const second = JSON.parse((fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string);
+    expect(second.revises).toBe(true);
+    expect(second.at).toBe(first.at);
+    expect(second.answered).toBe("Sam Patel");
+    expect(second.outcome).toBe("written");
+  });
+
+  it("CS-6: postTraceOnTeardown after an ask-time postTrace still sends a correction, never skips", () => {
+    const fetchMock = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    // sendBeacon unavailable in this environment -- falls to the keepalive
+    // fetch, same as `flushTraceOnTeardown`'s own real callers in jsdom.
+    const e = entry({ asked: "Which person?", answered: null, outcome: null });
+
+    postTrace(e); // the ask-time line
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    postTraceOnTeardown(e); // the page closing before an answer ever came
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const teardownLine = JSON.parse(
+      (fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string,
+    );
+    expect(teardownLine.revises).toBe(true);
+    expect(teardownLine.asked).toBe("Which person?");
   });
 });

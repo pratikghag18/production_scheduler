@@ -239,6 +239,105 @@ describe("groundReading (S71-m, F-212/F-215, R-435/R-431)", () => {
 });
 
 /**
+ * DEF-0041 (28 Sept, tester): the brief's own two lists, checked against the
+ * exact sentences it names -- the strong words ground a sweeping unassign
+ * (`unassignCmd()`'s own default: operator "everyone", place []) on their
+ * own; the everyday words ("take", "out", "off", "away") need a word for
+ * "everyone" or the board itself alongside them. Every sentence here is the
+ * SWEEPING case; GR-11 (above) already covers the narrow case (a named
+ * person keeps today's looser rule) and DEF-0041.test.ts itself pins the
+ * two garbled transcripts the tester found.
+ */
+describe("groundReading: DEF-0041's own sweeping-case sentence list", () => {
+  it.each(["clear everyone", "take everyone off the board", "everybody out", "clear the board"])(
+    "grounds: %s",
+    (heard) => {
+      const g = groundReading(heard, unassignCmd(), VERBS);
+      expect(g).toEqual({ ok: true });
+    },
+  );
+
+  it.each(["I will be out of the office tomorrow", "take your time"])(
+    "does not ground: %s",
+    (heard) => {
+      const g = groundReading(heard, unassignCmd(), VERBS);
+      expect(g.ok).toBe(false);
+      if (!g.ok) expect(g.reason).toBe("sweeping");
+    },
+  );
+});
+
+/**
+ * S194-D third pass (DEF-0041 / F-215, the main session's rule): a sweeping
+ * clear read by the model grounds ONLY on a REMOVAL PHRASE -- a removal word
+ * bound to "everyone"/"everybody"/"the board", ending its clause (THE RULE,
+ * grounded.ts). GS-G grounds, GS-R refuses; each sentence by name. GS-O are
+ * this lane's own ten attempts to get an ordinary sentence through.
+ */
+describe("groundReading: THE RULE for a sweeping clear (S194-D third pass)", () => {
+  const mustGround = [
+    "clear everyone",
+    "clear the board",
+    "clear the whole board",
+    "remove everybody",
+    "empty the board",
+    "wipe the board",
+    "unassign everyone",
+    "take everyone off",
+    "get everyone off",
+    "pull everyone off",
+    "send everyone home",
+    "everybody out",
+    "everyone off",
+    "take everyone off the board",
+    "clear the board today",
+    "remove everyone from the board",
+    "send everyone home early today",
+  ];
+  for (const heard of mustGround) {
+    it(`GS-G grounds: "${heard}"`, () => {
+      expect(groundReading(heard, unassignCmd(), VERBS)).toEqual({ ok: true });
+    });
+  }
+  const mustRefuse = [
+    "everyone is out to lunch",
+    "the board meeting is off",
+    "take the board down to the office",
+    "everybody take a break",
+    "clear skies today",
+    "remove your gloves",
+    "drop by my office",
+    "pull up a chair",
+    "cancel my lunch",
+    "free coffee in the break room",
+  ];
+  const ownTen = [
+    "can you clear your desk before everyone leaves",
+    "remove the wrapper, everyone can have one",
+    "everyone off to the canteen",
+    "please take everyone out for pizza",
+    "get everyone out of the rain",
+    "we should clear the board of directors meeting",
+    "delete everyone's old messages",
+    "empty the board room bins",
+    "remove everyone from the group chat",
+    "clear everyone's plates after lunch",
+  ];
+  for (const heard of [...mustRefuse, ...ownTen]) {
+    it(`GS-R refuses: "${heard}"`, () => {
+      const g = groundReading(heard, unassignCmd(), VERBS);
+      expect(g.ok).toBe(false);
+      if (!g.ok) expect(g.reason).toBe("sweeping");
+    });
+  }
+  it("GS-N: the NARROW rule is unchanged -- a named person grounds on any removal word", () => {
+    expect(groundReading("Sam is off today", unassignCmd({ operator: "Sam" }), VERBS)).toEqual({
+      ok: true,
+    });
+  });
+});
+
+/**
  * S72-e (docs/agent-briefs/s72-e-clear-over-a-week-brief.md §3, F-224,
  * R-435): `groundDays`'s own pins, GD-1..GD-6. `DAY_GROUNDING_WORDS` is
  * `parse.ts`'s own export, unioned with nothing here -- unlike `VerbLists`
@@ -297,6 +396,30 @@ describe("groundDays (S72-e, F-224, R-435)", () => {
       DAY_GROUNDING_WORDS,
     );
     expect(g).toEqual({ ok: false, reason: "day_dropped", phrase: "2026-09-04" });
+  });
+
+  /**
+   * DEF-0044 item 7 (28 Sept, tester): `groundDays`'s own comment (its
+   * header doc, above) names the mixed several -- "a phrase said once for
+   * the whole sentence is not a drop as long as AT LEAST ONE member kept a
+   * day" -- but no existing case built one: GD-3/GD-4 are a single
+   * unassign, GR-7/GR-8/GR-9 (`groundReading`'s own severals) never check
+   * `groundDays` at all. Mutating the `.some` in `groundDays`' `several`
+   * branch to `.every` makes every OTHER case here pass unchanged (none of
+   * them is a mixed several) while this one goes red: Sam kept "tomorrow",
+   * Ana's own member dropped it, and the rule the comment states is that
+   * one kept day is enough.
+   */
+  it("GD-7 (DEF-0044 item 7): a several where one member kept 'tomorrow' and the other dropped it is not flagged -- one kept day is enough", () => {
+    const command: SeveralCommand = {
+      intent: "several",
+      commands: [
+        unassignCmd({ operator: "Sam", day: { kind: "tomorrow" } }),
+        unassignCmd({ operator: "Ana" }),
+      ],
+    };
+    const g = groundDays("Sam is off tomorrow and clear Ana", command, DAY_GROUNDING_WORDS);
+    expect(g).toEqual({ ok: true });
   });
 });
 

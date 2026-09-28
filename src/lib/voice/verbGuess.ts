@@ -32,7 +32,7 @@
  */
 import type { VerbLists } from "@/lib/command/grounded";
 import { hasAnyWord } from "@/lib/command/grounded";
-import { parseCommand, formatCommand } from "@/lib/command/parse";
+import { parseCommand, formatCommand, type Command } from "@/lib/command/parse";
 
 /** One candidate reading of a sentence with a verb put in. `label` is the
  *  board's own reading of `sentence` (`formatCommand` of its parse), the
@@ -41,6 +41,27 @@ export interface VerbGuess {
   verb: string;
   sentence: string;
   label: string;
+}
+
+/**
+ * DEF-0043 item 2 (28 Sept, tester): `formatCommand`'s own `quoteIfNeeded`
+ * (`parse.ts`) quotes the reserved word `EVERYONE` ("everyone") on purpose,
+ * so a rendered sentence that gets FED BACK into `parseCommand` (a genuinely
+ * quoted person literally named "Everyone" would otherwise collapse into
+ * the reserved word on reparse -- `parse.ts`'s own comment, right above
+ * `needsQuoting`) round-trips correctly. A `VerbGuess.label` is shown, never
+ * reparsed (`sentence`, not `label`, is what a press runs), so the quoting
+ * buys nothing there and only makes the board's own reserved word read back
+ * like a person's name in quotation marks, which R-459 rules out. Stripping
+ * the exact literal `"everyone"` (lower case, `EVERYONE`'s own spelling) is
+ * safe and exact: a genuinely quoted person named "Everyone" prints with
+ * her own case preserved inside the quotes (`"Everyone"`), a different
+ * string, untouched by this replace. `CommandBar.tsx` reuses this for its
+ * own display-only `formatCommand` call sites (`askUngrounded`,
+ * `askDayDropped`) rather than a second, hand-synced copy (CLAUDE.md §4).
+ */
+export function spokenCommand(command: Command): string {
+  return formatCommand(command).replace(/"everyone"/g, "everyone");
 }
 
 /** Same shape as `grounded.ts`'s own private `normalize` -- duplicated
@@ -292,7 +313,7 @@ function computeVerbGuess(
       const sentence = `${m.verb}${m.rest}`.trim();
       const parsed = parseCommand(sentence);
       if (!parsed.ok) continue;
-      built.push({ verb: m.verb, sentence, label: formatCommand(parsed.command) });
+      built.push({ verb: m.verb, sentence, label: spokenCommand(parsed.command) });
       usedVerbs.add(m.verb);
     }
     // Only report this branch's candidates -- and only name what it
@@ -311,7 +332,7 @@ function computeVerbGuess(
     const sentence = `${verb} ${heard}`.trim();
     const parsed = parseCommand(sentence);
     if (!parsed.ok) continue;
-    built.push({ verb, sentence, label: formatCommand(parsed.command) });
+    built.push({ verb, sentence, label: spokenCommand(parsed.command) });
     usedVerbs.add(verb);
   }
   return { guesses: built, heardWord: "" };
