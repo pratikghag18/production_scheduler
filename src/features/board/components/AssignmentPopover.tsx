@@ -4,7 +4,7 @@ import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/li
 import type { IndexedAssignment, IndexedRun } from "../lib/boardIndex";
 import { absenceGaps, type AbsenceRow } from "@/lib/absence";
 import { leaveLine } from "../lib/leave";
-import { formatClock, formatFull, addMinutes, BOARD_ZONE } from "../lib/time";
+import { formatClock, formatFull, addMinutes } from "../lib/time";
 import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
@@ -80,7 +80,11 @@ export function describeRefusal(
   refusal: SchedulerError,
   personName: string,
   dateFormat: DateFormat = DEFAULT_DATE_FORMAT,
-  zone: string = BOARD_ZONE,
+  // DEF-0038 / R-426: required, not `= BOARD_ZONE`, so a caller that forgets
+  // it is a `tsc` error, not a silent UTC hour on an absence refusal. The
+  // component's own `zone` prop is required too (below), so its one
+  // production call (l.636-ish) always has a real zone to pass through.
+  zone: string,
 ): string {
   if (refusal.kind === "CapacityExceeded") {
     return `${personName} would reach ${Math.round(refusal.peak * 100)}% of capacity at this time (limit ${Math.round(refusal.cap * 100)}%).`;
@@ -177,7 +181,11 @@ export function AssignmentPopover({
   anchor: { x: number; y: number };
   windowStart: Date;
   dateFormat?: DateFormat;
-  zone?: string;
+  /** DEF-0038 / R-426: required, not `zone?:`, so a mount that leaves it off
+   *  is a `tsc` error, not a silent fall-through to `formatClock`'s /
+   *  `formatFull`'s own `BOARD_ZONE = "UTC"` default (`lib/time.ts`) — the
+   *  plant's own zone, the same one the axis behind this pop-up reads. */
+  zone: string;
   /**
    * R-357: every absence the board can see (RLS-scoped upstream to this board's
    * own people). `absenceGaps` narrows it to the CHOSEN person and this row's

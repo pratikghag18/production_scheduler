@@ -264,6 +264,45 @@ describe("OperatorAbsences — recording and removing in place (R-360)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(h.removeAbsence).toHaveBeenCalledWith("A1"));
   });
+
+  // DEF-0037: a refusal that still lands (a race between the recordable read
+  // and the click) is worded for THIS screen, never describeSchedulerError's
+  // cell-shaped NotPermitted sentence ("You do not have edit rights on this
+  // cell.") — a person's own record has no cell.
+  it("a stale Remove that the server still refuses is worded for this screen, not the cell one", async () => {
+    h.fetchAbsences.mockResolvedValue({
+      absences: [h.absence("A1", ELENA.operatorId, "2099-01-01", "2099-01-03")],
+      skipped: 0,
+    });
+    h.removeAbsence.mockRejectedValueOnce({ kind: "NotPermitted", nodeId: "n1" });
+    wrap(<OperatorAbsences {...ELENA} />);
+    await screen.findByText("Sick leave");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(
+      await screen.findByText("You cannot remove an absence for this person from here."),
+    ).toBeTruthy();
+    expect(screen.queryByText("You do not have edit rights on this cell.")).toBeNull();
+  });
+
+  // S194-A follow-up (DEF-0037 reviewer note): the recordable read failing
+  // must not hide this person's OWN absences either -- reading them is not
+  // this query's business, only recording/removing for them is. The list
+  // stays, no row offers Remove (fail closed, same as the loading case
+  // above), and the record form is withheld with the error in its own slot.
+  it("the recordable read failing withholds only the form -- the list stays, and no row offers Remove", async () => {
+    h.fetchAbsences.mockResolvedValue({
+      absences: [h.absence("A1", ELENA.operatorId, "2099-01-01", "2099-01-03")],
+      skipped: 0,
+    });
+    h.fetchRecordableAbsencePeople.mockReset().mockRejectedValue({
+      message: "Could not check who you may record for.",
+    });
+    wrap(<OperatorAbsences {...ELENA} />);
+    expect(await screen.findByText("Sick leave")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(await screen.findByText("Could not check who you may record for.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Record absence" })).toBeNull();
+  });
 });
 
 /* ===========================================================================

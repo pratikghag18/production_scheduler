@@ -210,7 +210,11 @@ export function CreatePopover({
   hereOperatorIds: ReadonlySet<string>;
   windowStart: Date;
   dateFormat?: DateFormat;
-  zone?: string;
+  /** DEF-0038 / R-426: required, not `zone?:`, so a mount that leaves it off
+   *  is a `tsc` error, not a silent fall-through to `formatClock`'s /
+   *  `formatFull`'s own `BOARD_ZONE = "UTC"` default (`lib/time.ts`) — the
+   *  plant's own zone, the same one the axis behind this pop-up reads. */
+  zone: string;
   /** D64/D65: this node's effective required skills (`skillsForNode`, an
    *  ancestor-inherited union — already resolved by `boardIndex.ts`). */
   requiredSkills: Skill[];

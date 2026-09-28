@@ -393,6 +393,51 @@ describe("OperatorPanel: the shift chips and the shift-based default list (S66-c
   });
 
   /**
+   * R-462, the maintainer, 28 Sept: a shift covers the clock now (or a
+   * toggled-on one) and nobody is homed on it -- the heading says so in the
+   * SAME slot the "On shift now"/"Showing" reading sits in, rather than
+   * leaving that reading over an empty list below it. SC-6/SC-7 above cover
+   * the ordinary case (someone IS on the shown shift, or has no shift and is
+   * listed anyway); these three are the empty one, and the unchanged
+   * no-band-at-all sentence beside it.
+   */
+  it("R-462a: the on-now shift has nobody homed on it -- 'Nobody on Shift 1 on this board', not an empty list under 'On shift now'", () => {
+    // Ben is homed on Shift 3, which does not cover `NOW` (Shift 1 does) and
+    // is never toggled on here -- so the default list has nobody in it.
+    const ben = operatorOnShift("op-2", "Ben", "s3");
+    renderPanel({ rootTemplate: THREE_SHIFT, now: NOW, operators: [ben] });
+    // "on this board" (the maintainer, second pass): "Nobody on Shift 1"
+    // alone reads as true of the whole plant, not just this rail's own board.
+    expect(screen.getByText("Nobody on Shift 1 on this board")).not.toBeNull();
+    expect(screen.queryByText("On shift now: Shift 1")).toBeNull();
+    expect(screen.queryByText("Ben")).toBeNull();
+  });
+
+  it("R-462b: toggling a second empty shift in names both -- 'Nobody on Shift 1 or Shift 2 on this board'", () => {
+    const ben = operatorOnShift("op-2", "Ben", "s3");
+    renderPanel({ rootTemplate: THREE_SHIFT, now: NOW, operators: [ben] });
+    fireEvent.click(screen.getByRole("button", { name: "Shift 2" }));
+    expect(screen.getByText("Nobody on Shift 1 or Shift 2 on this board")).not.toBeNull();
+    expect(screen.queryByText("Showing: Shift 1, Shift 2")).toBeNull();
+  });
+
+  it("R-462c: the existing no-band-at-all sentence is untouched -- a gap in the pattern still reads 'No one on shift now'", () => {
+    // A pattern that does NOT cover the whole day, unlike THREE_SHIFT --
+    // 13:00 UTC falls in the gap between the two shifts below.
+    const gapped: ShiftTemplate = {
+      id: "pat-gap",
+      name: "Gapped",
+      shifts: [
+        { id: "ga", name: "Morning", startMin: 360, endMin: 720, breaks: [] }, // 06:00-12:00
+        { id: "gb", name: "Evening", startMin: 840, endMin: 1200, breaks: [] }, // 14:00-20:00
+      ],
+    };
+    const inTheGap = new Date("2026-09-18T13:00:00.000Z");
+    renderPanel({ rootTemplate: gapped, now: inTheGap });
+    expect(screen.getByText("No one on shift now")).not.toBeNull();
+  });
+
+  /**
    * RC-3 (reviewer, S66-c review): the brief's own file header says "`now`
    * ... refreshed once a minute (`useEffect`/`setInterval`)" and "a `now`
    * PROP ... wins ... production never passes one" -- but every other case

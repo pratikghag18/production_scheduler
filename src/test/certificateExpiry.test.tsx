@@ -337,6 +337,7 @@ function renderPopover(
       // "show other people in this plant" control never appears.
       hereOperatorIds={new Set(operators.map((o) => o.id))}
       windowStart={new Date("2026-10-01T00:00:00Z")}
+      zone="UTC"
       requiredSkills={[CNC]}
       outsideAreaOperatorIds={outsideAreaIds}
       eligibilityPolicy={eligibilityPolicy}

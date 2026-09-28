@@ -152,6 +152,7 @@ function openPopoverOn(nodeId: string, index: ReturnType<typeof indexFor>) {
       // people are homed, so everyone it renders is a default offer here.
       hereOperatorIds={new Set(index.operatorById.keys())}
       windowStart={WINDOW_START}
+      zone="UTC"
       requiredSkills={index.skillsForNode.get(nodeId) ?? []}
       outsideAreaOperatorIds={new Set<string>()}
       eligibilityPolicy={policyForNode(index, nodeId)}

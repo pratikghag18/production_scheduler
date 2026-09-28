@@ -78,6 +78,19 @@ interface Props {
 
 /** Soonest first: by effective day, then whole-day before part-day on a tied
  *  day — the same order `absenceGaps` sorts by (src/lib/absence.ts). */
+// DEF-0037 / R-431, R-449: the same rule the record half already keeps
+// (AbsenceForm.tsx's header) — a refusal the server still raises (a stale
+// page; the Remove button below is hidden once `isRecordable` is known
+// false, so this only fires on a race) is worded for THIS screen, not with
+// describeSchedulerError's NotPermitted sentence ("You do not have edit
+// rights on this cell."), which names a cell this screen has none of.
+function removeErrorMessage(err: SchedulerError): string {
+  if (err.kind === "NotPermitted") {
+    return "You cannot remove an absence for this person from here.";
+  }
+  return describeSchedulerError(err);
+}
+
 function byWhenSoonestFirst(a: AbsenceRecord, b: AbsenceRecord): number {
   if (a.from !== b.from) return a.from < b.from ? -1 : 1;
   const aPart = a.startsAt !== undefined;
@@ -156,7 +169,7 @@ export function OperatorAbsences({ operatorId, displayName, homeNodeId }: Props)
   function remove(id: string) {
     setRowError(null);
     removeMutation.mutate(id, {
-      onError: (err) => setRowError({ id, message: describeSchedulerError(err) }),
+      onError: (err) => setRowError({ id, message: removeErrorMessage(err) }),
     });
   }
 
@@ -188,14 +201,24 @@ export function OperatorAbsences({ operatorId, displayName, homeNodeId }: Props)
                     )}
                   </span>
                   <span className={styles.reason}>{a.reason}</span>
-                  <button
-                    className={fieldStyles.btn}
-                    type="button"
-                    onClick={() => remove(a.id)}
-                    disabled={removeMutation.isPending}
-                  >
-                    Remove
-                  </button>
+                  {/* DEF-0037 / R-431, R-449: `remove_absence` refuses the
+                      same set `set_absence` does (the server's own
+                      `absence_recordable_people()`, already asked above for
+                      the form's gate) — one person on this screen, so the
+                      same `isRecordable` answer gates both halves. `null`
+                      (still loading) offers no Remove, same as `false`: fail
+                      closed, never guess which way a pending answer lands.
+                      The row stays listed either way (reading is allowed). */}
+                  {isRecordable === true && (
+                    <button
+                      className={fieldStyles.btn}
+                      type="button"
+                      onClick={() => remove(a.id)}
+                      disabled={removeMutation.isPending}
+                    >
+                      Remove
+                    </button>
+                  )}
                   {rowError !== null && rowError.id === a.id && (
                     <span className={styles.error} role="alert">
                       {rowError.message}

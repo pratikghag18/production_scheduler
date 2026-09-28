@@ -37,6 +37,14 @@ function shiftChipColumns(count: number): number {
   return 2;
 }
 
+/** R-462: "Shift 1", "Shift 1 or Shift 2", "Shift 1, Shift 2 or Shift 3" —
+ *  plain-language listing for the shift heading's "Nobody on ..." sentence. */
+function orJoin(names: readonly string[]): string {
+  if (names.length <= 1) return names.join("");
+  if (names.length === 2) return `${names[0]} or ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
+}
+
 /**
  * Left operator panel, read-only half (brief §8). Ported from the mockup's
  * `renderPanel`, with real-data substitutions.
@@ -308,17 +316,6 @@ export function OperatorPanel({
 
   const shownShiftNames = sortedShifts.filter((s) => activeShiftIds.has(s.id)).map((s) => s.name);
 
-  // R-448 DECIDED: "the list should automatically show people from current
-  // shift based on time with a selectable option to assign people from other
-  // shifts" -- the heading says which reading is in effect, in plain words,
-  // rather than leaving a person to infer it from which chips look filled.
-  const shiftHeading =
-    shownShiftNames.length === 0
-      ? "No one on shift now"
-      : toggledShiftIds.size === 0 && nowBand
-        ? `On shift now: ${shownShiftNames[0]}`
-        : `Showing: ${shownShiftNames.join(", ")}`;
-
   // Every operator's own band, resolved once per (person, pattern) change --
   // not recomputed inside `chip()` per render, the same discipline `titles`/
   // `absentIds` below already keep. `null` = no personal band answerable
@@ -474,6 +471,31 @@ export function OperatorPanel({
     }
     return [...matched, ...noShift];
   }, [here, personBand, activeShiftIds]);
+
+  // R-448 DECIDED: "the list should automatically show people from current
+  // shift based on time with a selectable option to assign people from other
+  // shifts" -- the heading says which reading is in effect, in plain words,
+  // rather than leaving a person to infer it from which chips look filled.
+  //
+  // ⭐ R-462, the maintainer, 28 Sept: a shift that covers the clock now (or
+  // one toggled on) with nobody homed on it reads "Nobody on Shift 1 on this
+  // board" in THIS SAME slot, rather than the "On shift now: Shift 1" /
+  // "Showing: Shift 1, Shift 2" heading sitting over an empty list below it —
+  // `hereShown` must be known first, so this reads after it, not beside
+  // `shownShiftNames` where the old single-branch version of this lived.
+  // The existing no-band-at-all sentence ("No one on shift now") is
+  // untouched; this is a THIRD reading, not a replacement for either.
+  // "on this board" (the maintainer, 28 Sept, second pass): the reviewer
+  // flagged that "Nobody on Shift 1" alone reads as true of the whole plant,
+  // not just this rail's own board -- the words now say whose rail this is.
+  const shiftHeading =
+    shownShiftNames.length === 0
+      ? "No one on shift now"
+      : hereShown.length === 0
+        ? `Nobody on ${orJoin(shownShiftNames)} on this board`
+        : toggledShiftIds.size === 0 && nowBand
+          ? `On shift now: ${shownShiftNames[0]}`
+          : `Showing: ${shownShiftNames.join(", ")}`;
 
   // F-125: every chip's tooltip `title`, computed once per change instead of
   // once per render. Before this memo, `chip()` built the string in render —

@@ -63,6 +63,11 @@ const h = vi.hoisted(() => ({
   // DEF-0035: `useEditRights` runs for real in this file, so its own network
   // call needs a mock at the same boundary every other read here uses.
   fetchGrantPaths: vi.fn(),
+  // S194-A follow-up (DEF-0037 reviewer note): was a static
+  // `() => Promise.resolve(["O1", "O2"])` inline below -- moved behind a mock
+  // so the one new "the recordable read fails" case can reject it without
+  // touching every other case's fixture.
+  fetchRecordableAbsencePeople: vi.fn(),
 }));
 
 vi.mock("@/features/auth/useSession", () => ({
@@ -83,8 +88,9 @@ vi.mock("@/lib/api", () => ({
   removeAbsence: (id: string) => h.removeAbsence(id),
   fetchNodeSetting: (nodeId: string, key: string) => h.fetchNodeSetting(nodeId, key),
   fetchGrantPaths: () => h.fetchGrantPaths(),
-  // DEF-0035 (0084): the server names both fixture people as recordable.
-  fetchRecordableAbsencePeople: () => Promise.resolve(["O1", "O2"]),
+  // DEF-0035 (0084): the server names both fixture people as recordable, by
+  // default (see `beforeEach`; one case below overrides it to reject).
+  fetchRecordableAbsencePeople: () => h.fetchRecordableAbsencePeople(),
   describeSchedulerError: (e: unknown) =>
     (e as { message?: string })?.message ?? "Something went wrong.",
 }));
@@ -126,6 +132,7 @@ beforeEach(() => {
   // before this ever resolves) but must resolve rather than hang, or a case
   // awaiting an unrelated `findBy*` would hang with it.
   h.fetchGrantPaths.mockReset().mockResolvedValue({ adminPaths: [], writablePaths: [] });
+  h.fetchRecordableAbsencePeople.mockReset().mockResolvedValue(["O1", "O2"]);
 });
 
 describe("who is offered the section", () => {
@@ -204,6 +211,40 @@ describe("the panel", () => {
     await screen.findByText("Sick leave");
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(h.removeAbsence).toHaveBeenCalledWith("A1"));
+  });
+
+  // DEF-0037: a refusal that still lands (a race between the recordable read
+  // and the click) is worded for THIS screen, never describeSchedulerError's
+  // cell-shaped NotPermitted sentence ("You do not have edit rights on this
+  // cell.") — this table has no cell.
+  it("a stale Remove that the server still refuses is worded for this screen, not the cell one", async () => {
+    h.removeAbsence.mockRejectedValueOnce({ kind: "NotPermitted", nodeId: "n1" });
+    wrap(<AbsencesPanel />);
+    await screen.findByText("Sick leave");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(
+      await screen.findByText("You cannot remove an absence for this person from here."),
+    ).toBeTruthy();
+    expect(screen.queryByText("You do not have edit rights on this cell.")).toBeNull();
+  });
+
+  // S194-A follow-up (DEF-0037 reviewer note): the recordable read failing
+  // used to hide the whole panel, including the table -- a person who may
+  // READ every row lost the table because of a query that only decides who
+  // may be WRITTEN for. Reading stays wider than writing (this file's own
+  // header): the table stays, no row offers Remove, the form is withheld,
+  // and the error is worded in the form's own slot.
+  it("the recordable read failing withholds only the form -- the table stays, and no row offers Remove", async () => {
+    h.fetchRecordableAbsencePeople.mockReset().mockRejectedValue({
+      message: "Could not check who you may record for.",
+    });
+    wrap(<AbsencesPanel />);
+    expect(await screen.findByText("Sick leave")).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "Elena" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(await screen.findByText("Could not check who you may record for.")).toBeTruthy();
+    expect(screen.queryByLabelText("Person")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Record absence" })).toBeNull();
   });
 });
 

@@ -123,6 +123,7 @@ function renderAssignment(
       products={[PRODUCT]}
       anchor={{ x: 10, y: 10 }}
       windowStart={new Date("2026-09-07T00:00:00Z")}
+      zone="UTC"
       onCancel={onCancel}
       onSave={onSave}
       onReassign={onReassign}

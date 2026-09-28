@@ -155,6 +155,7 @@ function renderPopover(over: Partial<React.ComponentProps<typeof AssignmentPopov
       products={[{ id: "pr-a", orgId: "org-1", sku: "A", name: "Widget A" } as never]}
       anchor={{ x: 10, y: 10 }}
       windowStart={WINDOW_START}
+      zone="UTC"
       onCancel={onCancel}
       onSave={onSave}
       onReassign={onReassign}
@@ -432,17 +433,23 @@ describe("AP6: every other refusal is shown in the pop-up", () => {
 
 describe("AP7: a capacity refusal names the person, not their id", () => {
   it("says who would be over capacity, with the peak and the limit as percentages", () => {
+    // DEF-0038: `zone` is now required; `undefined` for `dateFormat` keeps
+    // its own default, since a capacity refusal reads neither.
     expect(
       describeRefusal(
         { kind: "CapacityExceeded", operatorId: BEN.id, peak: 2, cap: 1, timerange: "" },
         "Ben",
+        undefined,
+        "UTC",
       ),
     ).toBe("Ben would reach 200% of capacity at this time (limit 100%).");
   });
 
   it("leaves every other refusal to the contract's own sentence", () => {
     const notPermitted = { kind: "NotPermitted", nodeId: "n1" } as const;
-    expect(describeRefusal(notPermitted, "Ben")).toBe(describeSchedulerError(notPermitted));
+    expect(describeRefusal(notPermitted, "Ben", undefined, "UTC")).toBe(
+      describeSchedulerError(notPermitted),
+    );
   });
 });
 

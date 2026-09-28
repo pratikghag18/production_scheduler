@@ -209,6 +209,7 @@ function renderCreate(over: Partial<ComponentProps<typeof CreatePopover>> = {}) 
       operators={PLANT}
       hereOperatorIds={HERE}
       windowStart={new Date("2026-09-07T00:00:00Z")}
+      zone="UTC"
       requiredSkills={[]}
       outsideAreaOperatorIds={OUTSIDE}
       eligibilityPolicy="warn"
@@ -356,6 +357,7 @@ function renderAssignment(over: Partial<ComponentProps<typeof AssignmentPopover>
       products={[PRODUCT]}
       anchor={{ x: 10, y: 10 }}
       windowStart={new Date("2026-09-07T00:00:00Z")}
+      zone="UTC"
       onCancel={vi.fn()}
       onSave={vi.fn()}
       onReassign={onReassign}

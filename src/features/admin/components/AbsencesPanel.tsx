@@ -28,12 +28,19 @@
    transcribed" — here, the server's rule, ASKED). 88_absences_test.sql AB35
    holds the function to `set_absence` person by person.
 
-   ⚠️ NO FAIL-OPEN HERE, BECAUSE THERE IS NOTHING TO GUESS. The answer is a
-   read like the operators and the absences: while it is pending the panel
-   says Loading, and if it fails the panel shows that error in words rather
-   than a list it cannot vouch for. A refusal the server still raises after
-   the click (an overlap, a grant changed since the read) is worded by the
-   form's own `addMutation.onError` — see `AbsenceForm.tsx`.
+   ⚠️ NO FAIL-OPEN HERE, BECAUSE THERE IS NOTHING TO GUESS. While the read is
+   pending the whole panel says Loading (this file's own header above: reading
+   is wider than writing, but there is nothing yet to read either). If it
+   FAILS, though, reading is still wider than writing — the table of absences
+   the caller can already see is not this query's business, so it stays; only
+   the create form (which needs the server's answer to know who it may offer)
+   is withheld, in its own slot, with the error in words there. A row's Remove
+   is gated on `recordableIds`, below, which is empty whenever this query has
+   no data (pending or failed) — fail closed either way, never a guess. A
+   refusal the server still raises after the click (an overlap, a grant
+   changed since the read) is worded by the form's own `addMutation.onError`
+   — see `AbsenceForm.tsx` — or, for Remove, by this file's own
+   `removeErrorMessage` below.
 
    ⚠️ THE DATES ARE SHOWN IN THE CHOSEN PLANT'S FORMAT (R-333), via
    `useDateFormat(plant.choice)` — a plant root resolves its own override, All
@@ -87,6 +94,19 @@ import styles from "./AbsencesPanel.module.css";
 
 /** Flip to `true` in the same commit that gives this panel a real body. */
 export const ABSENCES_PANEL_READY = true;
+
+// DEF-0037 / R-431, R-449: the same rule OperatorAbsences.tsx keeps (its own
+// copy of this function) — a refusal the server still raises on Remove (a
+// stale page; the button below is hidden once a row's person is known not
+// recordable, so this only fires on a race) is worded for THIS screen, not
+// with describeSchedulerError's NotPermitted sentence ("You do not have edit
+// rights on this cell."), which names a cell this screen has none of.
+function removeErrorMessage(err: SchedulerError): string {
+  if (err.kind === "NotPermitted") {
+    return "You cannot remove an absence for this person from here.";
+  }
+  return describeSchedulerError(err);
+}
 
 export function AbsencesPanel() {
   const { session, loading: sessionLoading } = useSession();
@@ -187,7 +207,7 @@ export function AbsencesPanel() {
   function remove(id: string) {
     setRowError(null);
     removeMutation.mutate(id, {
-      onError: (err) => setRowError({ id, message: describeSchedulerError(err) }),
+      onError: (err) => setRowError({ id, message: removeErrorMessage(err) }),
     });
   }
 
@@ -206,15 +226,6 @@ export function AbsencesPanel() {
       </p>
     );
   }
-  // DEF-0035: the server's answer failed, so there is no list to vouch for —
-  // say so, rather than offer everyone or nobody.
-  if (recordableQuery.isError) {
-    return (
-      <p className={styles.error} role="alert">
-        {describeSchedulerError(recordableQuery.error)}
-      </p>
-    );
-  }
 
   return (
     <div className={styles.panel}>
@@ -224,11 +235,23 @@ export function AbsencesPanel() {
         </p>
       )}
 
-      {/* S70-a / R-360 amended, R-449: the one absence form, shared with
-          OperatorAbsences.tsx's fixed-person mount — see AbsenceForm.tsx's
-          header. `recordablePeople` is DEF-0035's server-answer intersection,
-          computed above; this component adds no predicate of its own. */}
-      <AbsenceForm ariaLabel="Record an absence" people={recordablePeople} canQuery={canQuery} />
+      {/* DEF-0037 (reviewer, S194-A follow-up): the table below is a READ,
+          and reading is wider than writing (this file's own header) — a
+          failed `recordableQuery` says nothing about who may be SEEN, only
+          who may be recorded for or removed, so it withholds only the form,
+          in its own slot, exactly as `OperatorAbsences.tsx` already does for
+          its fixed-person form. The table keeps rendering below either way. */}
+      {recordableQuery.isError ? (
+        <p className={styles.error} role="alert">
+          {describeSchedulerError(recordableQuery.error)}
+        </p>
+      ) : (
+        /* S70-a / R-360 amended, R-449: the one absence form, shared with
+           OperatorAbsences.tsx's fixed-person mount — see AbsenceForm.tsx's
+           header. `recordablePeople` is DEF-0035's server-answer intersection,
+           computed above; this component adds no predicate of its own. */
+        <AbsenceForm ariaLabel="Record an absence" people={recordablePeople} canQuery={canQuery} />
+      )}
 
       {rows.length === 0 ? (
         <p className={styles.muted}>No absences recorded for the people in view.</p>
@@ -270,14 +293,25 @@ export function AbsencesPanel() {
                     </td>
                     <td>{a.reason}</td>
                     <td className={styles.actions}>
-                      <button
-                        className={fieldStyles.btn}
-                        type="button"
-                        onClick={() => remove(a.id)}
-                        disabled={removeMutation.isPending}
-                      >
-                        Remove
-                      </button>
+                      {/* DEF-0037 / R-431, R-449: `remove_absence` refuses
+                          the same set `set_absence` does — `recordableIds`,
+                          the server's own answer, already computed above for
+                          the create form's Person list. This table is not
+                          gated by that set (reading stays wider than writing,
+                          by design, per this file's header); only Remove is.
+                          The Actions column's width is set by the widest row
+                          (R-447): a row with no Remove does not narrow it, as
+                          long as some row keeps one. */}
+                      {recordableIds.has(a.operatorId) && (
+                        <button
+                          className={fieldStyles.btn}
+                          type="button"
+                          onClick={() => remove(a.id)}
+                          disabled={removeMutation.isPending}
+                        >
+                          Remove
+                        </button>
+                      )}
                       {rowError !== null && rowError.id === a.id && (
                         <span className={styles.error} role="alert">
                           {rowError.message}

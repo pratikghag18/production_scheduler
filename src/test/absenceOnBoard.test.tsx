@@ -98,6 +98,7 @@ function renderCreate(opts: {
       operators={[ELENA]}
       hereOperatorIds={new Set([ELENA.id])}
       windowStart={new Date("2026-10-01T00:00:00Z")}
+      zone="UTC"
       requiredSkills={[]}
       outsideAreaOperatorIds={new Set<string>()}
       eligibilityPolicy={opts.eligibilityPolicy ?? "warn"}
@@ -218,6 +219,7 @@ function renderReassign(opts: { absences: AbsenceRow[]; eligibilityPolicy?: "war
       anchor={{ x: 10, y: 10 }}
       windowStart={new Date("2026-09-07T00:00:00.000Z")}
       dateFormat="d_mon_yyyy"
+      zone="UTC"
       absences={opts.absences}
       eligibilityPolicy={opts.eligibilityPolicy ?? "warn"}
       onCancel={vi.fn()}
@@ -569,8 +571,10 @@ describe("errors.ts: the `absent` describer", () => {
     expect(sentence).toMatch(/on leave/);
     expect(sentence).toMatch(/2026-09-28 – 2026-10-01/);
     expect(sentence).toMatch(/sick/);
-    // The pop-up names the person rather than the id.
-    expect(describeRefusal(err, "Elena")).toMatch(/^Elena is on leave/);
+    // The pop-up names the person rather than the id. DEF-0038: `zone` is
+    // now required (no `= BOARD_ZONE` default); `undefined` for `dateFormat`
+    // keeps its own default, since this case is not about either format.
+    expect(describeRefusal(err, "Elena", undefined, "UTC")).toMatch(/^Elena is on leave/);
   });
 
   it("AB10: names the whole absent crew for a move_run refusal", () => {

@@ -18,6 +18,7 @@ import {
   type PopoverConfirmHandle,
 } from "@/features/board/components/CreatePopover";
 import type { PopupReporter } from "@/features/board/store/commandConversation";
+import type { ShiftChip } from "@/features/board/hooks/useDragGesture";
 import type { Product, BoardOperator, Skill } from "@/lib/api";
 import type { AbsenceRow } from "@/lib/absence";
 
@@ -74,6 +75,11 @@ function renderPopover(
     outsideAreaOperatorIds?: ReadonlySet<string>;
     eligibilityPolicy?: "warn" | "block";
     absences?: AbsenceRow[];
+    /** DEF-0038: `zone` is now required on the real component. This file's
+     *  fixtures (`WINDOW_START`, the chip minutes) were written in UTC, so
+     *  "UTC" here is honest, not a stand-in -- the R-450 behavioural cases
+     *  below pass their own zone through this same override. */
+    zone?: string;
     presetOperatorId?: string;
     presetProductId?: string;
     presetRun?: { id: string; label: string };
@@ -105,6 +111,12 @@ function renderPopover(
      * otherwise have created.
      */
     onSubmitDirect?: Mock<OnSubmitDirect>;
+    /** DEF-0038: overridable for the zone behavioural cases below, which need
+     *  an instant and a chip list of their own -- every other case in this
+     *  file is happy with the fixed `WINDOW_START` and no chips. */
+    windowStart?: Date;
+    initialRange?: { startMin: number; endMin: number };
+    shiftChips?: ShiftChip[];
   } = {},
 ) {
   const onSubmitRun = vi.fn();
@@ -117,13 +129,14 @@ function renderPopover(
       ref={over.ref}
       nodeId="cell-1"
       anchor={{ x: 0, y: 0 }}
-      initialRange={{ startMin: 360, endMin: 480 }}
-      shiftChips={[]}
+      initialRange={over.initialRange ?? { startMin: 360, endMin: 480 }}
+      shiftChips={over.shiftChips ?? []}
       defaultCreateMode={over.defaultCreateMode ?? "run"}
       products={over.products ?? [product]}
       operators={ops}
       hereOperatorIds={new Set(ops.map((o) => o.id))}
-      windowStart={WINDOW_START}
+      windowStart={over.windowStart ?? WINDOW_START}
+      zone={over.zone ?? "UTC"}
       requiredSkills={over.requiredSkills ?? []}
       outsideAreaOperatorIds={over.outsideAreaOperatorIds ?? new Set()}
       eligibilityPolicy={over.eligibilityPolicy ?? "warn"}
@@ -512,6 +525,7 @@ describe("CreatePopover — S41-c: presetMove (move to another cell)", () => {
           operators={[trainedOperator]}
           hereOperatorIds={new Set(["op-1"])}
           windowStart={WINDOW_START}
+          zone="UTC"
           requiredSkills={[CNC]}
           outsideAreaOperatorIds={new Set()}
           eligibilityPolicy="warn"
@@ -826,5 +840,49 @@ describe("CreatePopover — F-205: no flash while a clean auto-press is pending"
     });
 
     expect(results).toEqual([{ kind: "written" }]);
+  });
+});
+
+/* ===========================================================================
+ * DEF-0038 / R-426 — the chips and the time line read the plant's own zone,
+ * not UTC (BoardPage.tsx now mounts this component with `zone={zone}`; this
+ * checks the component's own rendering once it has one). R-426's own rule:
+ * a clock-dependent bug needs a pin in BOTH directions, west of UTC (Chicago,
+ * where the local day can trail UTC's) and east of UTC (Berlin, where the
+ * local day can lead it) -- so each case below both reads a shift chip's
+ * hour and crosses a UTC day boundary the wrong way for a client that fell
+ * back to UTC.
+ * ======================================================================== */
+describe("DEF-0038: chips and the time line read the plant's clock, not UTC", () => {
+  it("America/Chicago (west of UTC): Shift 1 reads 06:00 on its chip, and a block at 22:00 Monday reads Monday, not the UTC Tuesday it lands on", () => {
+    renderPopover({
+      zone: "America/Chicago",
+      // 06:00 Monday 28 Sep 2026 in Chicago (CDT, UTC-5) is 11:00Z.
+      windowStart: new Date("2026-09-28T11:00:00.000Z"),
+      shiftChips: [{ name: "Shift 1", startMin: 0, endMin: 480 }],
+      // 22:00 Monday Chicago is 03:00Z Tuesday -- the UTC day is already
+      // "Tuesday" while Chicago's own day is still "Monday" (DEF-0038's
+      // actual, measured screenshot: a Monday night block read "Tuesday").
+      initialRange: { startMin: 960, endMin: 1440 },
+    });
+    expect(document.body.textContent).toMatch(/Shift 1\s*06:00.14:00/);
+    expect(document.body.textContent).toContain("Mon Sep 28 22:00");
+    expect(document.body.textContent).not.toContain("Sep 29");
+  });
+
+  it("Europe/Berlin (east of UTC): Shift 1 reads 06:00 on its chip, and a block just past midnight Tuesday reads Tuesday, not the UTC Monday it lands on", () => {
+    renderPopover({
+      zone: "Europe/Berlin",
+      // 06:00 Monday 28 Sep 2026 in Berlin (CEST, UTC+2) is 04:00Z.
+      windowStart: new Date("2026-09-28T04:00:00.000Z"),
+      shiftChips: [{ name: "Shift 1", startMin: 0, endMin: 480 }],
+      // 01:00 Tuesday Berlin is 23:00Z Monday -- the mirror-image failure:
+      // the UTC day is still "Monday" while Berlin's own day is already
+      // "Tuesday".
+      initialRange: { startMin: 1140, endMin: 1620 },
+    });
+    expect(document.body.textContent).toMatch(/Shift 1\s*06:00.14:00/);
+    expect(document.body.textContent).toContain("Tue Sep 29 01:00");
+    expect(document.body.textContent).not.toContain("Mon Sep 28 23:00");
   });
 });
