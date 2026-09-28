@@ -120,8 +120,8 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
   <div class="stat ok"><span class="n">904</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">84</span><span class="l">database changes (migrations)</span></div>
-  <a class="stat act" href="#defects"><span class="n">15</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">334 / 404</span><span class="l">requirements covered by a test · 20 contradicted</span></div>
+  <a class="stat act" href="#defects"><span class="n">16</span><span class="l">open defects — index</span></a>
+  <div class="stat act"><span class="n">334 / 404</span><span class="l">requirements covered by a test · 21 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>4854fc3</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -886,7 +886,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="defects">
   <span class="eyebrow">Defects</span>
-  <h2>15 open defects</h2>
+  <h2>16 open defects</h2>
   <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>. Click a defect to jump to it; a closed one is folded and opens on click.</p>
   <table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody><tr class="open">
     <td><a href="#DEF-0037"><code>DEF-0037</code></a></td>
@@ -1007,6 +1007,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
     <td>A supervisor who names a cell outside her board is told 'No cell called Cell 3 on this board' with nothing to choose -- a dead end</td>
     <td><a href="#R-430">R-430</a></td>
     <td class="fine">2026-09-28 · <a href="defects/DEF-0051.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0052"><code>DEF-0052</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>major</td>
+    <td>When part of a sentence's changes fail, the bar says 'Did 1 of 3 things; the next failed' and never says which changes it skipped -- a supervisor cannot tell what the board now looks like</td>
+    <td><a href="#R-432">R-432</a>, <a href="#R-459">R-459</a></td>
+    <td class="fine">2026-09-28 · <a href="defects/DEF-0052.md">file</a></td>
   </tr>
 <tr class="closed">
     <td><a href="#DEF-0001"><code>DEF-0001</code></a></td>
@@ -2893,6 +2901,22 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>No buttons. (The trace has the turn only because a later sentence closed it -- DEF-0049.)</p>
 <p><b>Lead</b></p>
 <p><b>A suspicion, not a fact.</b> The unknown-cell refusal seems to offer matches only when a name is close to one on the board; &quot;Cell 3&quot; is exactly a cell that exists in the plant but not on Ana's board, and &quot;Cell 1&quot;/&quot;Cell 2&quot; are one character away. A sentence the server would refuse anyway (Cell 3 is on Line 2, outside her grant) should say that in words -- &quot;Cell 3 is on Line 2, which is not on your board&quot; -- and offer her own cells, rather than stop.</p>
+</div>
+<div class="find" id="DEF-0052">
+  <span class="tag">DEF-0052 · major · other · open</span>
+  <h3>When part of a sentence's changes fail, the bar says 'Did 1 of 3 things; the next failed' and never says which changes it skipped -- a supervisor cannot tell what the board now looks like</h3>
+  <p class="fine">Violates <a href="#R-432">R-432</a>, <a href="#R-459">R-459</a> · filed 2026-09-28 by tester · <a href="defects/DEF-0052.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>Any sentence the bar turns into three or more changes where one in the middle is refused -- e.g. a swap followed by a placement the certificate rule refuses, or a clear of a place where one removal is refused. The developer's own case shows the wording: <code>npx vitest run src/test/commandBar.test.tsx -t &quot;CB-lot-fail-1&quot;</code> (a two-change lot whose second change is refused), and the code that builds the answer: <code>CommandBar.tsx</code> ~l.2212-2224 (the message) and <code>useDragGesture.ts</code> ~l.2842-2929 (the lot runner).</p>
+<p>No pin: the lot's answer is built inside <code>CommandBar</code>, whose render harness lives in <code>commandBar.test.tsx</code> and is not exported; a pin needs a lot of three with the middle one refused and should assert the third change is named as not done.</p>
+<p><b>Expected</b></p>
+<p>R-432, as the maintainer restated it on 28 Sept: &quot;Let the board specify what was done and what was not done in such instances, it should be very clear and conversational message so a non-technical person should be able to follow it.&quot; Every change is named: what was done; what was not done -- the refused one with its reason, and every one after it that was never tried.</p>
+<p><b>Actual</b></p>
+<p>The answer today, as the developer's CB-lot-fail-1 names it:</p>
+<p>``<code> Did 1 of 2 things; the next failed: Tom Baker is not certified for Cell 1: missing Welding. What was already done stayed: &lt;readout of the change that was made&gt;. </code>``</p>
+<p>The runner stops at the first failure and returns only a count and the error (<code>return { done, error: err.message }</code>, useDragGesture.ts ~l.2923); the message is built from <code>resolved.slice(0, result.done)</code> and that error (CommandBar.tsx ~l.2212). So in a lot of five whose second change is refused, changes 3 to 5 are never tried and never mentioned -- the person is left believing they may have happened. &quot;Did 1 of 2 things; the next failed:&quot; and the raw refusal (&quot;...: missing Welding&quot;) are not sentences a supervisor would say (R-459).</p>
+<p><b>Lead</b></p>
+<p><b>A suspicion, not a fact.</b> The runner already knows the full list (<code>resolved</code>); the answer could name <code>resolved.slice(done + 1)</code> as &quot;I stopped there, so these were not done&quot;, and the refused one in the plant's words (the same rewriting the single-sentence refusals get). CB-lot-3 and CB-lot-fail-1 pin today's wording and will change with the fix -- the contract changed on 28 Sept, they were not wrong when written. CLAUDE.md §7 still states R-432's old all-or-nothing form; the developer owns that file and should restate it with this.</p>
 </div>
 </section>
 
@@ -4822,7 +4846,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>404 requirements · 334 covered · 26 uncovered · 20 contradicted · 24 superseded</caption>
+<caption>404 requirements · 334 covered · 25 uncovered · 21 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -7441,12 +7465,12 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="fine">manual: the audit this standard triggers (queued 17 Sept): capacity and absence checked before the yes in the bar, each pinned; area and certificates already are (R-425, F-165)</td>
   <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
-<tr class="r-uncovered" id="R-432">
+<tr class="r-contradicted" id="R-432">
   <td class="g-n">R-432</td>
-  <td class="reqmain"><b>A lot is all or nothing --- several writes from one sentence land together or not at all, and the thread says which</b><br><span class="fine">A sentence that becomes several writes (a swap, a copy, &quot;everyone&quot;, a comma list) either lands every write or none. If one is refused, the ones already written are reverted and the thread says Refused with the reason and &quot;nothing changed&quot;. Today a lot writes what it can and refuses the rest (F-165's three writes then a refusal); that is the defect this standard names.</span>
-      <br><span class="fine">session 178 conversation (the maintainer, 17 Sept, answer 3), CLAUDE.md §7 · maintainer · STATED 17 Sept (session 178): &quot;3. Yes&quot;.</span></td>
-  <td class="fine">manual: the audit this standard triggers (queued 17 Sept): every lot builder in the bar, the revert on a refusal, pinned with a lot whose last write is refused</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="reqmain"><b>When one sentence makes several changes and some cannot be made, the board says plainly what it did and what it did not do, and why</b><br><span class="fine">A sentence that becomes several changes (a swap, a copy, &quot;everyone&quot;, a clear, a comma list) makes the ones it can. When any of them is refused or fails, the changes already made stay, and the bar's answer names every change in plain words in two groups: what was done, and what was not done --- the one that failed with its reason in the plant's words, and every change after it that was never tried. A person who has never seen the app can tell from that answer alone what the board looks like now. For example: &quot;I made 1 of the 3 changes. Done: Sam Patel is on Cell 2 today from 8 am to 4 pm. Not done: Lena Novak on Cell 3 --- she is not certified for Welding, which Cell 3 needs. I stopped there, so Tom Baker is still on Cell 1.&quot; It is one of R-459's sentences: no count-only line (&quot;Did 1 of 3 things&quot;), no raw error text, no internal word. AMENDED 28 Sept: this replaces the 17 Sept form (every write lands or none does, with a revert), which was never built; the board no longer undoes the changes it made.</span>
+      <br><span class="fine">session 178 conversation (the maintainer, 17 Sept, answer 3) --- the first form, all or nothing, tester session 193t conversation (the maintainer, 28 Sept, choosing between building the revert and restating the rule): &quot;Let the board specify what was done and what was not done in such instances, it should be very clear and conversational message so a non-technical person should be able to follow it.&quot;, CLAUDE.md §7 · maintainer · STATED 17 Sept (session 178): &quot;3. Yes&quot;. RESTATED 28 Sept by the maintainer when shown the two columns side by side (the revert the rule asked for, and what the app does). Today's answer is &quot;Did k of N things; the next failed: &lt;error&gt;. What was already done stayed: ...&quot; and never names the changes after the failure, which are never tried (DEF-0052). CB-lot-3 and CB-lot-fail-1 pin today's wording, not this claim. CLAUDE.md §7 still states the 17 Sept form; the developer owns that file.</span></td>
+  <td class="fine">—</td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-contradicted" id="R-433">
   <td class="g-n">R-433</td>

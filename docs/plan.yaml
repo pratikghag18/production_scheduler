@@ -12239,22 +12239,31 @@ requirements:
   note: >-
     STATED 17 Sept (session 178): "2. Yes".
 - id: R-432
-  title: A lot is all or nothing --- several writes from one sentence land together or not at all, and the thread says which
+  title: When one sentence makes several changes and some cannot be made, the board says plainly what it did and what it did not do, and why
   source:
-  - 'session 178 conversation (the maintainer, 17 Sept, answer 3)'
+  - 'session 178 conversation (the maintainer, 17 Sept, answer 3) --- the first form, all or nothing'
+  - 'tester session 193t conversation (the maintainer, 28 Sept, choosing between building the revert and restating the rule): "Let the board specify what was done and what was not done in such instances, it should be very clear and conversational message so a non-technical person should be able to follow it."'
   - CLAUDE.md §7
   stated_by: maintainer
   claim: >-
-    A sentence that becomes several writes (a swap, a copy, "everyone", a comma list) either lands every write
-    or none. If one is refused, the ones already written are reverted and the thread says Refused with the
-    reason and "nothing changed". Today a lot writes what it can and refuses the rest (F-165's three writes
-    then a refusal); that is the defect this standard names.
-  verified_by:
-  - kind: manual
-    steps: "the audit this standard triggers (queued 17 Sept): every lot builder in the bar, the revert on a refusal, pinned with a lot whose last write is refused"
-  status: uncovered
+    A sentence that becomes several changes (a swap, a copy, "everyone", a clear, a comma list) makes the
+    ones it can. When any of them is refused or fails, the changes already made stay, and the bar's answer
+    names every change in plain words in two groups: what was done, and what was not done --- the one that
+    failed with its reason in the plant's words, and every change after it that was never tried. A person
+    who has never seen the app can tell from that answer alone what the board looks like now. For example:
+    "I made 1 of the 3 changes. Done: Sam Patel is on Cell 2 today from 8 am to 4 pm. Not done: Lena
+    Novak on Cell 3 --- she is not certified for Welding, which Cell 3 needs. I stopped there, so Tom Baker
+    is still on Cell 1." It is one of R-459's sentences: no count-only line ("Did 1 of 3 things"), no raw
+    error text, no internal word. AMENDED 28 Sept: this replaces the 17 Sept form (every write lands or
+    none does, with a revert), which was never built; the board no longer undoes the changes it made.
+  verified_by: []
+  status: contradicted
   note: >-
-    STATED 17 Sept (session 178): "3. Yes".
+    STATED 17 Sept (session 178): "3. Yes". RESTATED 28 Sept by the maintainer when shown the two
+    columns side by side (the revert the rule asked for, and what the app does). Today's answer is "Did k
+    of N things; the next failed: <error>. What was already done stayed: ..." and never names the
+    changes after the failure, which are never tried (DEF-0052). CB-lot-3 and CB-lot-fail-1 pin today's
+    wording, not this claim. CLAUDE.md §7 still states the 17 Sept form; the developer owns that file.
 - id: R-433
   title: A walk is a spec first --- no sentence list is handed to the maintainer before it runs green twice as an end-to-end spec
   source:
