@@ -13035,6 +13035,28 @@ requirements:
   note: >-
     Added by the tester with DEF-0039 so the defect has a rule to stand against; the maintainer may
     restate or retire it. The Vite dev server already binds loopback (no server.host anywhere).
+- id: R-461
+  title: A night shift is split at midnight --- each day is its own bucket; clearing a day clears that day's part, and the board asks whether to clear the previous day's part too
+  source:
+  - 'tester session 193t conversation (the maintainer, 28 Sept, answering DEF-0040''s question): "The night shift, each day is its own bucket, what we can do though is when we clear Monday for example, the board can ask the user if they want to clear the portion of the shift for the previous day."'
+  stated_by: maintainer
+  claim: >-
+    A block or a job that runs across midnight belongs to two days: the part before midnight to the day it
+    starts, the part after midnight to the next day. Clearing a day removes only that day's part of every
+    block and job on the place --- a Sunday 22:00 to Monday 06:00 night shift, cleared on Monday, keeps
+    Sunday 22:00-24:00 and loses Monday 00:00-06:00, for the people and for the job alike. When the cleared
+    day's part continues a shift that began the day before, the board asks, before anything is written,
+    whether to clear the previous day's part of that shift as well, with both answers as buttons; the
+    readout then says exactly which parts went. Nothing the readout says is kept may be removed by any
+    other step of the same clear.
+  verified_by: []
+  status: contradicted
+  note: >-
+    Recorded by the tester in the turn the maintainer decided it. Today the clear trims the person's block
+    at midnight and then deletes the whole job, which takes the kept part with it (DEF-0040). The tester's
+    reading of "each day is its own bucket" for a shift that STARTS on the cleared day (Monday 22:00 to
+    Tuesday 06:00, clearing Monday) is: Monday's 22:00-24:00 goes, Tuesday's 00:00-06:00 stays, no
+    question --- the maintainer named a question only for the previous day's part.
 findings:
 - id: F-224
   title: '"Clear Cell 5 for the remainder of the week" clears today only, or nothing --- the week phrase is dropped by the model and kept inside the place name by the rules, and neither reader says so'

@@ -121,7 +121,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">904</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">84</span><span class="l">database changes (migrations)</span></div>
   <a class="stat act" href="#defects"><span class="n">15</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">334 / 403</span><span class="l">requirements covered by a test · 19 contradicted</span></div>
+  <div class="stat act"><span class="n">334 / 404</span><span class="l">requirements covered by a test · 20 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>4854fc3</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -917,7 +917,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
     <td><span class="chip bad">open</span></td>
     <td>major</td>
     <td>'Clear Cell 4 Monday' deletes Sunday night's shift too -- the bar says Priya's Sunday block now ends at midnight and stays, then the job's removal wipes it and the Sunday half of the job</td>
-    <td><a href="#R-407">R-407</a>, <a href="#R-431">R-431</a>, <a href="#R-436">R-436</a></td>
+    <td><a href="#R-407">R-407</a>, <a href="#R-431">R-431</a>, <a href="#R-436">R-436</a>, <a href="#R-461">R-461</a></td>
     <td class="fine">2026-09-28 · <a href="defects/DEF-0040.md">file</a></td>
   </tr>
 <tr class="open">
@@ -2676,7 +2676,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <div class="find" id="DEF-0040">
   <span class="tag">DEF-0040 · major · other · open</span>
   <h3>'Clear Cell 4 Monday' deletes Sunday night's shift too -- the bar says Priya's Sunday block now ends at midnight and stays, then the job's removal wipes it and the Sunday half of the job</h3>
-  <p class="fine">Violates <a href="#R-407">R-407</a>, <a href="#R-431">R-431</a>, <a href="#R-436">R-436</a> · filed 2026-09-28 by tester · pinned by <code>src/test/defects/DEF-0040.test.ts</code> · <a href="defects/DEF-0040.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p class="fine">Violates <a href="#R-407">R-407</a>, <a href="#R-431">R-431</a>, <a href="#R-436">R-436</a>, <a href="#R-461">R-461</a> · filed 2026-09-28 by tester · pinned by <code>src/test/defects/DEF-0040.test.ts</code> · <a href="defects/DEF-0040.md">open the file</a> · <a href="#defects">back to the index</a></p>
   <p><b>Reproduction</b></p>
 <p>Tester's stack, demo seed. As the database owner (fixture only), put a job and its crew block on Plant A's Cell 4 (Line 2) across one midnight: Housing A, Priya Shah, both <code>[2026-10-12 03:00+00, 2026-10-12 11:00+00)</code> -- Sunday 11 Oct 22:00 to Monday 12 Oct 06:00 in Chicago, a night shift (Shift 3's own band). Then as the company admin (<code>dana@example.test</code>) on the board, open the bar and say <b>&quot;clear Cell 4 in Line 2 2026-10-12&quot;</b>, press <b>Do all 2</b>, and read both rows back from the database. Any plant with a night shift has this shape every Monday (the seed writes it every Sunday night since R-452).</p>
 <p>Pin: <code>npx vitest run src/test/defects/DEF-0040.test.ts</code> (resolver level, the same shape).</p>
@@ -2696,6 +2696,8 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>Re-run as the least-privileged person the screen touches (CLAUDE.md §4), on the seed's own rows: Ana, &quot;clear Cell 2 tomorrow&quot;, Maria Lopez's two night blocks on Cell 2 (Mon 22:00-Tue 06:00 and Tue 22:00-Wed 06:00, both on jobs). Before, then the bar, then after:</p>
 <p>``<code>  Maria Lopez | [&quot;2026-09-29 03:00:00+00&quot;,&quot;2026-09-29 11:00:00+00&quot;) | t  Maria Lopez | [&quot;2026-09-30 03:00:00+00&quot;,&quot;2026-09-30 11:00:00+00&quot;) | t (2 rows) YES ... Done, 4 things. Written: Maria Lopez's block on Cell 2 now ends midnight; it was 6 am.; Maria Lopez's block on Cell 2 now starts midnight; it was 10 pm.; The Housing A job is off Cell 2 2026-09-29; that was 10 pm to 6 am, for 1 people.; The Line 1 Sub... AFTER (0 rows) </code>``</p>
 <p>Both edges this time: the bar promised Monday 22:00-24:00 (tonight) and Wednesday 00:00-06:00 stay, and both are gone. A tester lane also found the job-removal step itself has no test at the execution layer (DEF-0044, item 4): with <code>deleteRun.mutateAsync</code> removed, 664 of 664 cases pass.</p>
+<p><b>The maintainer's decision -- 28 Sept (now R-461)</b></p>
+<p>The question this defect carried is answered: &quot;The night shift, each day is its own bucket, what we can do though is when we clear Monday for example, the board can ask the user if they want to clear the portion of the shift for the previous day.&quot; So a clear of Monday removes Monday's part of every block AND of every job on the place, keeps Sunday's part, and asks first whether Sunday's part of that shift should go too. The expected behaviour of this defect is R-461's claim; the pin's invariant (no part the lot says it keeps is removed by another step of the same lot) holds under it unchanged.</p>
 </div>
 <div class="find" id="DEF-0041">
   <span class="tag">DEF-0041 · major · other · open</span>
@@ -4820,7 +4822,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>403 requirements · 334 covered · 26 uncovered · 19 contradicted · 24 superseded</caption>
+<caption>404 requirements · 334 covered · 26 uncovered · 20 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -7639,6 +7641,13 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="g-n">R-460</td>
   <td class="reqmain"><b>A tool the project runs on this machine listens on this machine only --- a recording page, a model server or a dev endpoint is never reachable from the network</b><br><span class="fine">Every server a project script starts for local work --- the clip recording page, the Whisper and model containers serve.mjs publishes, the Vite dev endpoints --- binds the loopback interface only, so a person on the same network cannot read or overwrite what it holds (recorded speech, clips, traces). The address a tool prints is the address it listens on.</span>
       <br><span class="fine">tester session 192t (28 Sept): the voice recording page (scripts/voice/clips/record.mjs) printed 127.0.0.1 and answered on the LAN address; DEF-0039 · agent · Added by the tester with DEF-0039 so the defect has a rule to stand against; the maintainer may restate or retire it. The Vite dev server already binds loopback (no server.host anywhere).</span></td>
+  <td class="fine">—</td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
+</tr>
+<tr class="r-contradicted" id="R-461">
+  <td class="g-n">R-461</td>
+  <td class="reqmain"><b>A night shift is split at midnight --- each day is its own bucket; clearing a day clears that day's part, and the board asks whether to clear the previous day's part too</b><br><span class="fine">A block or a job that runs across midnight belongs to two days: the part before midnight to the day it starts, the part after midnight to the next day. Clearing a day removes only that day's part of every block and job on the place --- a Sunday 22:00 to Monday 06:00 night shift, cleared on Monday, keeps Sunday 22:00-24:00 and loses Monday 00:00-06:00, for the people and for the job alike. When the cleared day's part continues a shift that began the day before, the board asks, before anything is written, whether to clear the previous day's part of that shift as well, with both answers as buttons; the readout then says exactly which parts went. Nothing the readout says is kept may be removed by any other step of the same clear.</span>
+      <br><span class="fine">tester session 193t conversation (the maintainer, 28 Sept, answering DEF-0040's question): &quot;The night shift, each day is its own bucket, what we can do though is when we clear Monday for example, the board can ask the user if they want to clear the portion of the shift for the previous day.&quot; · maintainer · Recorded by the tester in the turn the maintainer decided it. Today the clear trims the person's block at midnight and then deletes the whole job, which takes the kept part with it (DEF-0040). The tester's reading of &quot;each day is its own bucket&quot; for a shift that STARTS on the cleared day (Monday 22:00 to Tuesday 06:00, clearing Monday) is: Monday's 22:00-24:00 goes, Tuesday's 00:00-06:00 stays, no question --- the maintainer named a question only for the previous day's part.</span></td>
   <td class="fine">—</td>
   <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr></tbody></table></div>
