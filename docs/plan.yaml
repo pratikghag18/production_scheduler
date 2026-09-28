@@ -9318,7 +9318,7 @@ requirements:
       through to a button inside; T5 a viewer's finger is refused on a block and on empty track and
       scrolls nothing; T6 the tree row body does not reorder on touch; T7 the tree grip drags on
       touch; T8 the level-list grip drags on touch
-  status: covered
+  status: contradicted
 - id: R-356
   title: A named template is a whole week, jobs and people, saved relative to Monday and applied through Copy Week
   source:
@@ -9508,7 +9508,7 @@ requirements:
   - kind: vitest
     file: src/test/errors.test.ts
     cases: "absence_overlap parses the person and the requested days and is worded with them, never as Something went wrong (F-185)"
-  status: covered
+  status: contradicted
   note: >-
     CONTRADICTED until the tester verifies DEF-0035 (fix-claimed in session 184). Filed 21 Sept (DEF-0035, session 181t): the Person dropdown offered a supervisor everyone she could see while set_absence accepts only people whose home (falling back to site) she manages. Session 182 filtered the list by canEditNode on the same coalesce; the tester REOPENED it the same day (session 183t): the preview has no path for a cell on another line and fails open, so all six were still offered. Session 184: the form asks the server (absence_recordable_people, 0084, the same expression set_absence gates on), no client predicate, AB35 holds the two to each other. Found on the way in 182: the overlap refusal was not parsed (F-185); the rail's on-leave mark could shrink to nothing (F-186).
 - id: R-351
@@ -9903,7 +9903,7 @@ requirements:
     cases: >-
       the person's detail renders the absences block below "Where they can work" and every existing
       person-selecting case still holds
-  status: covered
+  status: contradicted
   note: >-
     ⭐ VERIFIED BY THE TESTER 8 Sept at `0a8da7a`, the cross-plant question every screen here has had
     to answer, live and not just by reading the RLS policy: recorded a real absence for a Plant B
@@ -11628,7 +11628,7 @@ requirements:
   - kind: vitest
     file: src/test/commandBar.test.tsx
     cases: "CB-x-1 (clear Cell 1 today: a lot of two, both outlined, one yes runs both), CB-x-5 and CB-x-17 (nobody there is a plain readout, never a duplicate)"
-  status: covered
+  status: contradicted
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 items 1, 2 and 5).
 - id: R-408
@@ -12115,7 +12115,7 @@ requirements:
     cases: "isoPlusDays, isoMondayOfWeek, dayMarker, isCalendarDay (30 February refused: V8 normalises it silently)"
   - kind: manual
     steps: "the grep in docs/agent-briefs/s62-a-one-clock-audit-brief.md run and every hit classified in the lane's report (session 177); CLAUDE.md §7 carries the three duties"
-  status: covered
+  status: contradicted
   note: >-
     STATED 17 Sept (session 177): "can we make sure the time set by the settings for the plant is the standard
     the whole board should use for any further development happening here on after? And any kind of
@@ -12235,7 +12235,7 @@ requirements:
   verified_by:
   - kind: manual
     steps: "the audit this standard triggers (queued 17 Sept): capacity and absence checked before the yes in the bar, each pinned; area and certificates already are (R-425, F-165)"
-  status: uncovered
+  status: contradicted
   note: >-
     STATED 17 Sept (session 178): "2. Yes".
 - id: R-432
@@ -12271,7 +12271,7 @@ requirements:
     cases: "the twenty-two sentences, dated to next Monday in the plant's zone since 22 Sept (F-182, F-190); green twice on 22 Sept before the spoken list was handed over"
   - kind: manual
     steps: "each hand-over names the spec and its two green runs in the session summary"
-  status: covered
+  status: contradicted
   note: >-
     STATED 17 Sept (session 178): "4. Yes".
 - id: R-434
@@ -12305,7 +12305,7 @@ requirements:
   verified_by:
   - kind: manual
     steps: "pinned when the bare-pair question lands (queued 17 Sept); then the grammar's own cases"
-  status: uncovered
+  status: contradicted
   note: >-
     STATED 17 Sept (session 178): "7. Yes, definitely ask, always ask when in doubt."
 - id: R-436
@@ -12321,7 +12321,7 @@ requirements:
   verified_by:
   - kind: manual
     steps: "pinned when the clear grammar and the undo land (queued 17 Sept)"
-  status: uncovered
+  status: contradicted
   note: >-
     STATED 17 Sept (session 178): "Unless specified clear means clearing everything, we can program an undo
     option since we have the activity data, it should be easy." Today clear removes the people and leaves the
@@ -12797,7 +12797,7 @@ requirements:
     cases: "D13: Plant A resolves to America/Chicago through app_resolve_node_setting and every seeded block starts at 06:00 in that zone"
   - kind: manual
     steps: "22 Sept (session 187): proved on the scratch demo database (14 passed), the local database reset with the maintainer's word and read back (America/Chicago; 84 of 84 seeded blocks at 06:00 Chicago); the whole e2e suite on the reset stack: 36 passed, 5 skipped (the volume fixture), 1 failed --- linePeople's first assertion assumed someone homed on the current band; fixed the same session and re-run with roleWalk and viewerBoard, 9 passed"
-  status: covered
+  status: contradicted
   note: >-
     STATED 22 Sept (session 187), answering the question F-190 raised. Until then the seed wrote its hours
     as UTC and set no zone, so the plant was a UTC plant after every reset while the design (F-159, the
@@ -12843,7 +12843,7 @@ requirements:
     cases: "D13 (every seeded block starts at its operator's own band start in Chicago) and D14 (the band rebuilt as a range with the seed's own wall-clock arithmetic; no seeded minute outside it); both fail against the old fixed hours, 14 of 84 and 70 of 84"
   - kind: manual
     steps: "23 Sept (session 190): proved on the scratch demo database, 15 passed; the daylight-saving night of 7 March 2026 checked by hand against the container (420 elapsed minutes, wall-clock equal); the local database not reset --- the maintainer's app was on it"
-  status: covered
+  status: contradicted
   note: >-
     STATED 23 Sept (session 190). Built by lane S71-e (docs/agent-briefs/s71-e-demo-bands-brief.md); proved on
     the scratch demo database, the local database reset only with the maintainer's word.
@@ -12945,7 +12945,7 @@ requirements:
   - kind: vitest
     file: src/test/commandBar.test.tsx
     cases: "CB-verb-1 to 6: the buttons render instead of the grammar hint at both sites and on the no-reader path; a press re-submits the guess's sentence and the trace records it; a guess that fails to parse falls through; a spoken yes presses a one-candidate question and not a two-candidate one; CB-ground-2, 5, 6 rewritten for the new path"
-  status: covered
+  status: contradicted
   note: >-
     STATED 24 Sept (session 191). The trace of the third round: "Tom Baker to Cell 3 from 18 to 12 p.m. today"
     got the grammar hint; "and John Kim''s block at 10 a.m. today" got the hint twice and then a "move" the
@@ -13013,13 +13013,28 @@ requirements:
   - kind: e2e
     file: e2e/typedWalk.spec.ts
     cases: "both sentence lists green twice against the new wording (R-433), following the board's own move (R-455)"
-  status: covered
+  status: contradicted
   note: >-
     STATED 24 Sept (session 191). Standard, CLAUDE.md section 7. The maintainer weighed two candidates ---
     the board writes every sentence from templates with pins, or the model is asked a second time to
     rephrase the board's facts --- and chose the first; the second is not parked, it is declined until a
     walk finds the first still stiff. R-426's duty: the wording lane (S72-d) inventories every string the
     bar shows and rewrites each, one pin per sentence shape. BUILT the same session by lane S72-d (4854fc3) from the 104-row inventory the maintainer read first; the reviewer found four breaks and fixed them.
+- id: R-460
+  title: A tool the project runs on this machine listens on this machine only --- a recording page, a model server or a dev endpoint is never reachable from the network
+  source:
+  - 'tester session 192t (28 Sept): the voice recording page (scripts/voice/clips/record.mjs) printed 127.0.0.1 and answered on the LAN address; DEF-0039'
+  stated_by: agent
+  claim: >-
+    Every server a project script starts for local work --- the clip recording page, the Whisper and model
+    containers serve.mjs publishes, the Vite dev endpoints --- binds the loopback interface only, so a
+    person on the same network cannot read or overwrite what it holds (recorded speech, clips, traces).
+    The address a tool prints is the address it listens on.
+  verified_by: []
+  status: contradicted
+  note: >-
+    Added by the tester with DEF-0039 so the defect has a rule to stand against; the maintainer may
+    restate or retire it. The Vite dev server already binds loopback (no server.host anywhere).
 findings:
 - id: F-224
   title: '"Clear Cell 5 for the remainder of the week" clears today only, or nothing --- the week phrase is dropped by the model and kept inside the place name by the rules, and neither reader says so'
@@ -18393,6 +18408,82 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 192t
+  date: 2026-09-28
+  title: "Tester run over sessions 186 to 191: the suite is green at 4455, and nine defects under it --- a clear of Monday deletes Sunday night, the New pop-up reads UTC, Remove is offered where the server refuses, and the typed walk is red on a fresh seed (DEF-0037 to DEF-0045)"
+  commits: []
+  numbers:
+    app_tests: 4455
+    app_test_files: 170
+    tsc: 0
+    eslint: 0
+    db_checks: 893
+    migrations: 84
+    e2e: 51
+  confirmed: true
+  numbers_note: >-
+    Fast-forwarded tester onto Development at 14afd34. `node scripts/tester-run.mjs --sql --e2e` on the
+    tester's own stack, freshly reset and seeded by `tester-stack.mjs up`: `ok count matches the plan:
+    4455 in 170`, `Test Files 170 passed (170)`, `Tests 4455 passed (4455)`; `db:types` regenerated
+    from the stack and `typecheck` ok, so tsc is conclusive; lint ok; every SQL file ok, and
+    `dev_demo.sql builds the demo world` ok. Playwright: `3 failed`, `6 skipped`, `42 passed (4.2m)`
+    --- the typed walk (DEF-0042), touch T3 (DEF-0045, failed again alone), and weekTemplates' afterAll
+    timeout, which passed alone and is not filed. `format:check` lists every file, the worktree's
+    CRLF artifact as in earlier tester sessions. That report was lost when the isolated Playwright
+    re-run cleaned `test-results/`; a second `--sql` run's per-file lines sum to 904 PASS (dev_demo's
+    15 included), a counting rule not reconciled with the plan's 893, so db_checks is carried. With
+    this session's pins the suite reads `Test Files 7 failed | 170 passed (177)`, `Tests 8 failed |
+    4456 passed (4464)`: the eight failures are exactly the new red pins, and tsc and eslint are clean
+    over them. One live pin (DEF-0020) once ran against the developer's stack through `.env.local`
+    when the tester's env was not exported (an invite that is refused; nothing written); against the
+    tester's stack it passed twice.
+  summary: >-
+    WHAT WAS JUDGED. Sessions 186 to 191, about sixty commits: the one absence form (R-360 amended,
+    R-449), the Chicago seed and in-band blocks (R-450, R-452), Ctrl+M and the mic (R-451, R-454,
+    R-458), the clip harness (R-453), the bar's move-and-rerun, verb and place questions, grounding and
+    plain sentences (R-455 to R-459, F-212 to F-224). No migration in the range. Three Sonnet lanes
+    ran in their own worktrees (the resolver's writes; the bar's conversation; the voice clips and
+    seed), each told to mutate and to bring back red repros; every finding below was re-run by the
+    tester in its own tree before filing.
+    ⛔ DEF-0040 (major), THE WORST. Any plant with a night shift: "clear Cell 4" for Monday offers to
+    trim Sunday's 22:00-06:00 block to end at midnight AND to remove the job it belongs to; after the
+    yes the bar says "Done, 2 things ... now ends midnight" and a database read-back finds zero rows --
+    the job's cascade removed the block it said it kept, and Sunday's half of the job with it. Proved
+    live with the real bar on a fixture, pinned at the resolver level. It carries a question for the
+    maintainer: whose day is a night shift?
+    ⛔ DEF-0038 (major): the board's New pop-up is mounted without the plant's zone, so in Chicago it
+    offers "Shift 1 11:00-19:00" under an axis reading 08:00 and labels a Monday-night block Tuesday.
+    Never passed; invisible until R-450 moved the demo off UTC. `dateSeam.test.ts` cannot see a
+    zone prop left off.
+    ⛔ DEF-0037 (major): both absence screens offer Remove on every absence the caller can read, while
+    `remove_absence` refuses anyone outside `absence_recordable_people()` -- the set both screens
+    already fetch for the record form. As Ana: Remove on John Kim's row, pressed, "You do not have edit
+    rights on this cell." DEF-0035's shape on the other button.
+    ⛔ DEF-0041 (major): the grounding guard F-215 added passes a clear-everyone whenever the heard text
+    contains "take" or "out" anywhere ("this will take a few extra minutes").
+    ⛔ DEF-0042 (major): the typed walk, R-433's and R-459's e2e proof, is red on every fresh seed:
+    since R-452 the seed's Sunday night blocks run into the walk's Monday. Session 190 records the
+    developer's database was not reset after R-452, so the two green runs were on the old seed.
+    DEF-0039 (minor): the clip recording page prints 127.0.0.1 and answers on the LAN (a curl to
+    192.168.1.180 returned 200); R-460 added, stated_by agent. DEF-0043 (cosmetic): "for 1 people", a
+    raw 2026-10-12 in the Done line, "The board has nobody on it" for a named person. DEF-0044
+    (minor, test-cannot-fail): three limits no test holds -- the verb cap (cap raised to 30, 329
+    green), the week clear's lot ceiling (removed, 281 green), the seed's end edge (every block an
+    hour short, D13 and D14 still PASS; the UTC mutation of the same file fails both, so the zone is
+    guarded). DEF-0045 (minor): nobody in Plant A is homed on Shift 1, so from 06:00 to 14:00 the
+    rail is empty under "On shift now: Shift 1" and touch T3 fails.
+    ⭐ HELD, WITH EVIDENCE. The absence form keeps DEF-0035's server gate for recording. The clip
+    endpoint: traversal refused by an ISO stem check, same-millisecond posts suffixed, eviction at
+    500, POST only, dev server only, loopback only -- seven mutations, seven named reds. R-455's rerun
+    waits on `settled` and re-enters the ordinary path (no write skips its question); R-457 re-resolves
+    the substituted line fully; R-458 and R-454 hold; Ctrl+M's modifiers hold. Mutations caught by
+    name across the three lanes: seventeen of twenty; the three that were not are DEF-0044. Not
+    examined: a Line 1 supervisor clearing a place holding blocks she can read but not write (the
+    lane's suspicion; her board shows only her line), and the served model itself (not running on
+    the tester's stack).
+    Requirements set contradicted: R-350, R-357, R-360, R-407, R-426, R-431, R-433, R-435, R-436, R-450,
+    R-452, R-456, R-459, and the new R-460.
+  shipped: []
 - id: 191
   date: 2026-09-24
   title: "The evening's findings fixed before the walk resumes: Listening only when the microphone is live, the dash stripped, the model's reading grounded in what was heard; the scorer compares models against what was said"
