@@ -113,15 +113,15 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
 
 <section>
   <span class="eyebrow">Where we are right now</span>
-  <h2>Session 192t · 2026-09-28 · Tester run over sessions 186 to 191: the suite is green at 4455, and nine defects under it --- a clear of Monday deletes Sunday night, the New pop-up reads UTC, Remove is offered where the server refuses, and the typed walk is red on a fresh seed (DEF-0037 to DEF-0045)</h2>
-  <div class="lead"><p>WHAT WAS JUDGED. Sessions 186 to 191, about sixty commits: the one absence form (R-360 amended, R-449), the Chicago seed and in-band blocks (R-450, R-452), Ctrl+M and the mic (R-451, R-454, R-458), the clip harness (R-453), the bar's move-and-rerun, verb and place questions, grounding and plain sentences (R-455 to R-459, F-212 to F-224). No migration in the range. Three Sonnet lanes ran in their own worktrees (the resolver's writes; the bar's conversation; the voice clips and seed), each told to mutate and to bring back red repros; every finding below was re-run by the tester in its own tree before filing. ⛔ DEF-0040 (major), THE WORST. Any plant with a night shift: &quot;clear Cell 4&quot; for Monday offers to trim Sunday's 22:00-06:00 block to end at midnight AND to remove the job it belongs to; after the yes the bar says &quot;Done, 2 things ... now ends midnight&quot; and a database read-back finds zero rows -- the job's cascade removed the block it said it kept, and Sunday's half of the job with it. Proved live with the real bar on a fixture, pinned at the resolver level. It carries a question for the maintainer: whose day is a night shift? ⛔ DEF-0038 (major): the board's New pop-up is mounted without the plant's zone, so in Chicago it offers &quot;Shift 1 11:00-19:00&quot; under an axis reading 08:00 and labels a Monday-night block Tuesday. Never passed; invisible until R-450 moved the demo off UTC. <code>dateSeam.test.ts</code> cannot see a zone prop left off. ⛔ DEF-0037 (major): both absence screens offer Remove on every absence the caller can read, while <code>remove_absence</code> refuses anyone outside <code>absence_recordable_people()</code> -- the set both screens already fetch for the record form. As Ana: Remove on John Kim's row, pressed, &quot;You do not have edit rights on this cell.&quot; DEF-0035's shape on the other button. ⛔ DEF-0041 (major): the grounding guard F-215 added passes a clear-everyone whenever the heard text contains &quot;take&quot; or &quot;out&quot; anywhere (&quot;this will take a few extra minutes&quot;). ⛔ DEF-0042 (major): the typed walk, R-433's and R-459's e2e proof, is red on every fresh seed: since R-452 the seed's Sunday night blocks run into the walk's Monday. Session 190 records the developer's database was not reset after R-452, so the two green runs were on the old seed. DEF-0039 (minor): the clip recording page prints 127.0.0.1 and answers on the LAN (a curl to 192.168.1.180 returned 200); R-460 added, stated_by agent. DEF-0043 (cosmetic): &quot;for 1 people&quot;, a raw 2026-10-12 in the Done line, &quot;The board has nobody on it&quot; for a named person. DEF-0044 (minor, test-cannot-fail): three limits no test holds -- the verb cap (cap raised to 30, 329 green), the week clear's lot ceiling (removed, 281 green), the seed's end edge (every block an hour short, D13 and D14 still PASS; the UTC mutation of the same file fails both, so the zone is guarded). DEF-0045 (minor): nobody in Plant A is homed on Shift 1, so from 06:00 to 14:00 the rail is empty under &quot;On shift now: Shift 1&quot; and touch T3 fails. ⭐ HELD, WITH EVIDENCE. The absence form keeps DEF-0035's server gate for recording. The clip endpoint: traversal refused by an ISO stem check, same-millisecond posts suffixed, eviction at 500, POST only, dev server only, loopback only -- seven mutations, seven named reds. R-455's rerun waits on <code>settled</code> and re-enters the ordinary path (no write skips its question); R-457 re-resolves the substituted line fully; R-458 and R-454 hold; Ctrl+M's modifiers hold. Mutations caught by name across the three lanes: seventeen of twenty; the three that were not are DEF-0044. Not examined: a Line 1 supervisor clearing a place holding blocks she can read but not write (the lane's suspicion; her board shows only her line), and the served model itself (not running on the tester's stack). Requirements set contradicted: R-350, R-357, R-360, R-407, R-426, R-431, R-433, R-435, R-436, R-450, R-452, R-456, R-459, and the new R-460.</p></div>
+  <h2>Session 193t · 2026-09-28 · Tester second pass over sessions 186 to 191: the gaps 192t left, closed --- the bar as Ana, the served model, the invite specs, a frozen clock; six more defects, and a typed sentence that crashes the bar (DEF-0046 to DEF-0051)</h2>
+  <div class="lead"><p>THE MAINTAINER ASKED what 192t did not test, then why, then to do all of it. 192t's own summary had named two gaps where there were about a dozen; this pass closed them. Two Sonnet lanes (the UTC-default sweep and the unjudged screens; daylight saving, the scorer, a wider mutation sample); the live work on the tester's stack by the tester. ⛔ DEF-0046 (major): typing &quot;extend everyone on Cell 1 by 30 minutes&quot; throws in resolveMoveCommand (&quot;Cannot read properties of null (reading 'start')&quot;); nothing happens, no message, no trace. The expansion of a move of everyone drops the adjust. The same crash is behind the one-button question the bar asks when the served model misreads &quot;sorry, this will take a few extra minutes&quot; as &quot;extend everyone by 30 minutes&quot; --- the model really produces that reading (DEF-0041's note). ⛔ DEF-0040 AS ANA: &quot;clear Cell 2 tomorrow&quot; promised Maria keeps Monday 22:00-24:00 (tonight) and Wednesday 00:00-06:00; after the yes, 0 rows. ⛔ DEF-0047 (major): &quot;clear Line 1 for the rest of the week&quot; as Ana is refused &quot;Those two lines (2 and 5) are about the same block&quot; --- a night block is queued once per day it touches; the week clear is unusable wherever there is a night shift. ⛔ DEF-0048 (major): &quot;Sam Patel is off tomorrow&quot; asks which one of his two blocks to remove; R-409 says all of them with one yes; the parse is identical to &quot;remove Sam Patel tomorrow&quot;. The maintainer says this sentence in the spoken walks. R-409's &quot;the app has no absence record&quot; is stale since R-357. DEF-0049 (minor): the trace loses a question left open when the page closes, every crashed turn, and the refusal after the bar moves the board. DEF-0050 (minor): one failed clip loses the whole scorer run; the scorer itself ran clean on 12 of the maintainer's real clips through small.en. DEF-0051 (minor): &quot;clear Cell 3 today&quot; as Ana is a dead end with no choices (R-430). DEF-0044 gains four limits no test holds, the worst: the clear's job deletion removed, 664 of 664 still green. DEF-0045 proved with a frozen clock: Ana's rail 0 people at 10 am, 2 at 3 pm, 4 at 11 pm. ⭐ HELD. No other UTC default beyond DEF-0038 (every other mount passes zone). The pop-up drag, R-447's CSS, R-449 for the create side (remove is two copies --- DEF-0037's fix must touch both). Invites and password reset end to end. The served model reads the voice spec's free sentence right (10.7 s). Berlin and Chicago day lists across DST. Mutations this pass: 18, 11 caught by name; of the seven misses, one repeats another (the job delete), one is likely dead code (a second de-dup in verbGuess), one is the known pixel-width gap R-447 discloses, and four are DEF-0044 items 4 to 7. ⚠️ R-432 IS UNBUILT AND PINNED AGAINST: a lot does not revert on a refusal (useDragGesture's runLot says so), and CB-lot-3 / CB-lot-fail-1 assert &quot;what was already done stayed&quot;. R-432 is <code>uncovered</code>; this is recorded, not filed --- the maintainer decides whether to build it or restate it. Requirements newly contradicted: R-409, R-430, R-434, R-453, R-455.</p></div>
   <div class="band">
-  <div class="stat ok"><span class="n">4455</span><span class="l">app tests in 170 files — session 192t, 2026-09-28</span></div>
+  <div class="stat ok"><span class="n">4455</span><span class="l">app tests in 170 files — session 193t, 2026-09-28</span></div>
   <div class="stat ok"><span class="n">509 of 536</span><span class="l">deliberate breakages caught</span></div>
-  <div class="stat ok"><span class="n">893</span><span class="l">database checks</span></div>
+  <div class="stat ok"><span class="n">904</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">84</span><span class="l">database changes (migrations)</span></div>
-  <a class="stat act" href="#defects"><span class="n">9</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">337 / 403</span><span class="l">requirements covered by a test · 14 contradicted</span></div>
+  <a class="stat act" href="#defects"><span class="n">15</span><span class="l">open defects — index</span></a>
+  <div class="stat act"><span class="n">334 / 403</span><span class="l">requirements covered by a test · 19 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>4854fc3</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -886,7 +886,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <hr class="rule">
 <section id="defects">
   <span class="eyebrow">Defects</span>
-  <h2>9 open defects</h2>
+  <h2>15 open defects</h2>
   <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>. Click a defect to jump to it; a closed one is folded and opens on click.</p>
   <table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody><tr class="open">
     <td><a href="#DEF-0037"><code>DEF-0037</code></a></td>
@@ -959,6 +959,54 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
     <td>All working day the demo's operator rail is blank -- nobody in Plant A is homed on Shift 1 -- and the touch spec that proves chip dragging fails whenever it runs between 6 am and 2 pm</td>
     <td><a href="#R-350">R-350</a></td>
     <td class="fine">2026-09-28 · <a href="defects/DEF-0045.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0046"><code>DEF-0046</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>major</td>
+    <td>Typing 'extend everyone on Cell 1 by 30 minutes' crashes the bar -- nothing happens, no message, no trace; the same crash sits behind the button the bar offers for a misheard sentence</td>
+    <td><a href="#R-407">R-407</a>, <a href="#R-431">R-431</a>, <a href="#R-434">R-434</a></td>
+    <td class="fine">2026-09-28 · <a href="defects/DEF-0046.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0047"><code>DEF-0047</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>major</td>
+    <td>'Clear Line 1 for the rest of the week' is refused with 'those two lines are about the same block; say them one at a time' whenever the line has a night shift -- the week clear cannot be used</td>
+    <td><a href="#R-407">R-407</a>, <a href="#R-459">R-459</a></td>
+    <td class="fine">2026-09-28 · <a href="defects/DEF-0047.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0048"><code>DEF-0048</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>major</td>
+    <td>'Sam Patel is off tomorrow' asks which one of his two blocks to remove -- an absence should take them all with one yes, and it records no absence either</td>
+    <td><a href="#R-409">R-409</a>, <a href="#R-357">R-357</a></td>
+    <td class="fine">2026-09-28 · <a href="defects/DEF-0048.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0049"><code>DEF-0049</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>minor</td>
+    <td>The bar's trace loses whole turns: a question left open when the page closes, a turn that crashed, and the answer after the bar moves the board are never written</td>
+    <td><a href="#R-434">R-434</a>, <a href="#R-455">R-455</a></td>
+    <td class="fine">2026-09-28 · <a href="defects/DEF-0049.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0050"><code>DEF-0050</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>minor</td>
+    <td>One failed clip makes the voice scorer throw away every clip it had already scored -- no table, no results file -- and a hung Whisper hangs it forever</td>
+    <td><a href="#R-453">R-453</a></td>
+    <td class="fine">2026-09-28 · <a href="defects/DEF-0050.md">file</a></td>
+  </tr>
+<tr class="open">
+    <td><a href="#DEF-0051"><code>DEF-0051</code></a></td>
+    <td><span class="chip bad">open</span></td>
+    <td>minor</td>
+    <td>A supervisor who names a cell outside her board is told 'No cell called Cell 3 on this board' with nothing to choose -- a dead end</td>
+    <td><a href="#R-430">R-430</a></td>
+    <td class="fine">2026-09-28 · <a href="defects/DEF-0051.md">file</a></td>
   </tr>
 <tr class="closed">
     <td><a href="#DEF-0001"><code>DEF-0001</code></a></td>
@@ -2644,6 +2692,10 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>(its two shape assertions -- one trim of <code>priyaBlk</code>, one <code>remove_run</code> of <code>run1</code> -- pass first.)</p>
 <p><b>Lead</b></p>
 <p><b>A suspicion, not a fact.</b> <code>resolve.ts</code>'s clear of everyone builds per-block commands (~3763: a block crossing one edge of the day becomes an end-edge move to midnight) and then, per run overlapping the day, a <code>remove_run</code> (~3812-3871) that <code>delete_run</code> executes in <code>cascade</code> mode -- which deletes every assignment with that <code>run_id</code> regardless of time (the reviewer's comment at ~3819 says so, and handles the crew blocks outside the window by listing them, but not the blocks the same lot trims). So a run that crosses the day's edge takes the trimmed block and its own out-of-day part with it. The lot reported a state that was not the state written. The typed walk (DEF-0042) runs this exact sentence first and would have shown it on the current seed. A question for the maintainer rides on the fix: when Monday is cleared, does Sunday's night crew keep Sunday 22:00-24:00, or does a night shift belong wholly to the day it starts?</p>
+<p><b>Tester note -- 28 Sept, second pass, as Ana</b></p>
+<p>Re-run as the least-privileged person the screen touches (CLAUDE.md §4), on the seed's own rows: Ana, &quot;clear Cell 2 tomorrow&quot;, Maria Lopez's two night blocks on Cell 2 (Mon 22:00-Tue 06:00 and Tue 22:00-Wed 06:00, both on jobs). Before, then the bar, then after:</p>
+<p>``<code>  Maria Lopez | [&quot;2026-09-29 03:00:00+00&quot;,&quot;2026-09-29 11:00:00+00&quot;) | t  Maria Lopez | [&quot;2026-09-30 03:00:00+00&quot;,&quot;2026-09-30 11:00:00+00&quot;) | t (2 rows) YES ... Done, 4 things. Written: Maria Lopez's block on Cell 2 now ends midnight; it was 6 am.; Maria Lopez's block on Cell 2 now starts midnight; it was 10 pm.; The Housing A job is off Cell 2 2026-09-29; that was 10 pm to 6 am, for 1 people.; The Line 1 Sub... AFTER (0 rows) </code>``</p>
+<p>Both edges this time: the bar promised Monday 22:00-24:00 (tonight) and Wednesday 00:00-06:00 stay, and both are gone. A tester lane also found the job-removal step itself has no test at the execution layer (DEF-0044, item 4): with <code>deleteRun.mutateAsync</code> removed, 664 of 664 cases pass.</p>
 </div>
 <div class="find" id="DEF-0041">
   <span class="tag">DEF-0041 · major · other · open</span>
@@ -2659,6 +2711,8 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>Heard: &quot;sorry, this will take a few extra minutes, go ahead without me&quot; and &quot;the shipment is out for delivery today, nothing else to say&quot;. Both ground a clear of everyone. Found by a tester lane; re-run red by the tester in its own tree.</p>
 <p><b>Lead</b></p>
 <p><b>A suspicion, not a fact.</b> <code>groundOne</code> asks whether ANY word of the intent's list appears ANYWHERE in the heard text (<code>hasAnyWord</code>). The unassign list is <code>UNASSIGN_VERBS</code> plus <code>ABSENCE_WORDS</code>, and it holds everyday words: &quot;take&quot; (added at R-405 for &quot;take Sam to Cell 2&quot;), &quot;out&quot;, &quot;off&quot;, &quot;away&quot;. A word the sentence uses as ordinary English satisfies the guard. The sweeping case (everyone, no named person or place) is the one that matters; it may want a stricter test -- the removal word adjacent to a person, a place or &quot;everyone&quot;, or at the head of the sentence -- while the narrow cases keep today's rule. Not checked: whether the served model actually produces such a reading for these sentences today; F-215 shows it produced one for &quot;EF76.&quot;.</p>
+<p><b>Tester note -- 28 Sept, second pass: the served model does produce sweeping readings</b></p>
+<p>With the default model file served (<code>scheduler-voice.gguf</code> via <code>npm run voice:serve</code>, Whisper small.en), the app's own <code>readSentence</code> read &quot;sorry, this will take a few extra minutes, go ahead without me&quot; as <code>{&quot;intent&quot;:&quot;move&quot;,&quot;operator&quot;:&quot;everyone&quot;,...,&quot;adjust&quot;:{&quot;edge&quot;:&quot;end&quot;,&quot;by&quot;:30}}</code> in 9.2 s. Grounding answered <code>no_intent_word</code> for that move, so the bar asked it as a one-button question rather than refusing it; only a sweeping UNASSIGN is refused outright. Pressing that button crashes (DEF-0046). The unassign case this defect pins was not reproduced from the model with these sentences.</p>
 </div>
 <div class="find" id="DEF-0042">
   <span class="tag">DEF-0042 · major · doc-drift · open</span>
@@ -2689,6 +2743,10 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>``<code> × the run removal's readout says 'for 1 person', not 'for 1 people' AssertionError: expected 'The Housing A job is off Cell 4 2026-...' to contain 'for 1 person' × 'clear Sam Patel this week' with no blocks at all names Sam, not 'The board' AssertionError: expected 'The board has nobody on it this week.' to contain 'Sam Patel' </code>``</p>
 <p><b>Lead</b></p>
 <p><b>A suspicion, not a fact.</b> <code>resolve.ts</code> writes &quot;people&quot; unconditionally at three sites (~2526 &quot;For N people.&quot;, ~3138 &quot;now takes N people&quot;, ~3818 &quot;, for N people&quot;). The run removal's readout is built with <code>iso</code> (the raw <code>YYYY-MM-DD</code>, ~3860) where the question shows the spoken day -- the question and the Done line seem to take different strings. <code>expandRepeatUnassign</code>'s empty case (~5210) picks &quot;The board&quot; from <code>command.place.length</code> without asking whether the removal named a person.</p>
+<p><b>Tester note -- 28 Sept, second pass</b></p>
+<p>Three more, seen as Ana and with the served model on:</p>
+<p>``<code> Sam Patel has 2 blocks Tue Sep 29. Remove which? Remove Cell 1 · Housing A 09:00–11:00 Remove Cell 1 · Line 1 Subassembly A 14:00–22:00 I heard &quot;sorry, this will take a few extra minutes, go ahead without me&quot;. Did you mean: extend &quot;everyone&quot; by 30 minutes? Those two lines (2 and 5) are about the same block; say them one at a time. </code>``</p>
+<p>R-459 names &quot;a 24-hour span&quot; and a path-like chain as things the bar never says; the which-block buttons carry both. &quot;everyone&quot; in quotes is the reserved word printed as data. &quot;Two lines ... one at a time&quot; answers a person who said one sentence (DEF-0047 is the cause; this is the wording).</p>
 </div>
 <div class="find" id="DEF-0044">
   <span class="tag">DEF-0044 · minor · test-cannot-fail · open</span>
@@ -2704,6 +2762,9 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>For contrast, the same run's other mutation of the seed (both edges written in UTC) fails D13 and D14 as it should: <code>FAIL D13 ... 0 of 84 seeded blocks start at their operator's home-shift minute</code>, <code>FAIL D14: 84 of 84 seeded blocks have a minute outside their operator's home band</code>. So D14 guards &quot;no minute outside the band&quot; and D13 the start; a block that stops short of its band passes both.</p>
 <p><b>Lead</b></p>
 <p><b>A suspicion, not a fact.</b> (1) VG-9's fixtures never produce more than three sound-alike matches; a fixture whose heard word sits near four verbs would hold the cap (the shape branch's own cap is redundant with <code>shapeCandidates</code>' slice, per the lane, so only this one is bare). (2) No fixture builds more than <code>LOT_CEILING</code> removals over a week; one with a cell full of short blocks across seven days would. (3) D13's check could compare the END minute too (upper bound's wall-clock minute against <code>s.end_min</code>, modulo 1440 for Shift 3).</p>
+<p><b>Tester note -- 28 Sept, second pass: four more limits no test holds</b></p>
+<p>Mutations by two further tester lanes; item 4 re-run by the tester.</p>
+<p>4. The job removal the clear writes (<code>useDragGesture.ts</code> ~l.2900,    <code>await deleteRun.mutateAsync({ runId: r.runId, mode: &quot;cascade&quot; })</code>) replaced by nothing:    <code>npx vitest run src/test/commandBar.test.tsx src/test/dragGesture.test.ts src/test/commandResolve.test.ts src/test/createPopover.test.tsx</code>    -&gt; <code>Test Files 4 passed (4)</code>, <code>Tests 664 passed (664)</code>. A clear could print &quot;the job is off&quot; and    remove nothing (R-436, R-431). 5. <code>roundUpToQuarterHour</code> (resolve.ts ~l.1266) with its on-the-quarter short-circuit removed: no    case has &quot;now&quot; exactly on :00/:15/:30/:45 (lane E, commandResolve + commandBar green). 6. <code>edgeOnBoard</code> (resolve.ts ~l.3369) upper bound <code>&lt;=</code> -&gt; <code>&lt;</code>: no block edge sits on the board's    last midnight in any fixture (lane E, green). 7. <code>groundDays</code> (grounded.ts ~l.238) <code>.some</code> -&gt; <code>.every</code>: no lot where some members kept the day    and some dropped it -- the mixed case the function's own comment calls out (lane E, green).</p>
 </div>
 <div class="find" id="DEF-0045">
   <span class="tag">DEF-0045 · minor · other · open</span>
@@ -2723,6 +2784,113 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>(<code>weekTemplates.spec.ts</code>, which also failed in the full run with an afterAll timeout, passed alone in the same re-run; not filed.)</p>
 <p><b>Lead</b></p>
 <p><b>A suspicion, not a fact.</b> R-441's hash homes Plant A's people on Shift 2 and 3 only; since R-448 the rail filters to the band covering now, so from 06:00 to 14:00 the demo rail is empty. The rail code does say &quot;No one on shift now&quot; when no band covers now, but not when a band does and nobody is homed on it. Either the seed spreads Plant A across all three shifts (a seed fix like R-452's), or T3 presses the rail's shift chips first as <code>absenceOnBoard.spec.ts</code> already does, or both; and the maintainer may want the rail to say &quot;Nobody on Shift 1&quot; rather than stand empty under a heading that implies otherwise.</p>
+<p><b>Tester note -- 28 Sept, second pass: proved with a frozen clock</b></p>
+<p>Ana's board opened three times with the browser clock installed at a fixed Chicago time (Playwright <code>page.clock.install</code>), counting the rail's chips:</p>
+<p>``<code> 2026-09-28T10:00:00-05:00  rail: &quot;OPERATORS / On shift now: Shift 1 / Shift 1&quot;  chips=0 2026-09-28T15:00:00-05:00  rail: &quot;OPERATORS / On shift now: Shift 2 / Shift 1&quot;  chips=2 2026-09-28T23:00:00-05:00  rail: &quot;OPERATORS / On shift now: Shift 3 / Shift 1&quot;  chips=4 </code>``</p>
+<p>So T3's result depends only on the hour it runs. <code>weekTemplates.spec.ts</code>, the run's other failure, passed 9 of 9 with <code>--repeat-each=3</code> and is not filed.</p>
+</div>
+<div class="find" id="DEF-0046">
+  <span class="tag">DEF-0046 · major · other · open</span>
+  <h3>Typing 'extend everyone on Cell 1 by 30 minutes' crashes the bar -- nothing happens, no message, no trace; the same crash sits behind the button the bar offers for a misheard sentence</h3>
+  <p class="fine">Violates <a href="#R-407">R-407</a>, <a href="#R-431">R-431</a>, <a href="#R-434">R-434</a> · filed 2026-09-28 by tester · pinned by <code>src/test/defects/DEF-0046.test.ts</code> · <a href="defects/DEF-0046.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>Tester's stack, demo seed, any person who can place (Ana or the admin), a cell with a block today (Cell 1: Sam Patel 14:00-22:00). Open the bar and type <b>&quot;extend everyone on Cell 1 by 30 minutes&quot;</b>, Enter. Watch the browser console.</p>
+<p>Second route, with the served model on (<code>npm run voice:serve</code>, dev server with <code>VITE_VOICE_URL=/voice</code>): type &quot;sorry, this will take a few extra minutes, go ahead without me&quot;. The model reads it as a move of everyone, end +30 minutes; the bar asks &quot;I heard ... Did you mean: extend &quot;everyone&quot; by 30 minutes?&quot; with that as one button. Press it (or type yes).</p>
+<p>Pin: <code>npx vitest run src/test/defects/DEF-0046.test.ts</code> -- the model's exact reading, expanded and resolved step by step the way <code>runCommand</code> does.</p>
+<p><b>Expected</b></p>
+<p>R-407: &quot;move everyone&quot; reads everyone as the reserved word and expands to one command per block -- the extend reaches every block on the cell, or the bar asks. R-431: a button the bar offers is one the bar can carry out. R-434: every turn is a trace entry.</p>
+<p><b>Actual</b></p>
+<p>Browser, Playwright on the tester's dev server, typed sentence:</p>
+<p>``<code> PAGEERROR TypeError: Cannot read properties of null (reading 'start')     at resolveMoveCommand (http://localhost:5174/src/lib/command/resolve.ts:1322:55)     at resolveCommand (http://localhost:5174/src/lib/command/resolve.ts:1440:41) </code>``</p>
+<p>The pressed button, the same error with the rest of the stack:</p>
+<p>``<code>     at resolveLotStep (.../CommandBar.tsx:575:24)     at startLot (.../CommandBar.tsx:560:5)     at runCommand (.../CommandBar.tsx:518:7)     at runCandidateAction (.../CommandBar.tsx:1302:9)     at onClick (.../CommandBar.tsx:1773:25) </code>``</p>
+<p>On screen nothing changes: the question stays, the button stays, no readout, and the database checksum of <code>assignments</code> is the same before and after (<code>136|8e0654fd...</code>). No trace entry exists for any of the four attempts.</p>
+<p>The pin, which also shows why:</p>
+<p>``<code> × expand then resolve every step of the model's own reading, as runCommand does, without a throw AssertionError: {&quot;intent&quot;:&quot;move&quot;,&quot;operator&quot;:&quot;Priya Shah&quot;,&quot;place&quot;:[&quot;Cell 4&quot;,&quot;Line 2&quot;],&quot;toPlace&quot;:null,&quot;day&quot;:{&quot;kind&quot;:&quot;date&quot;,&quot;iso&quot;:&quot;2026-10-11&quot;},&quot;span&quot;:null,&quot;existing&quot;:{&quot;kind&quot;:&quot;move&quot;,&quot;assignmentId&quot;:&quot;priyaBlk&quot;},&quot;shift&quot;:null,&quot;adjust&quot;:null}: expected [Function] to not throw an error but 'TypeError: Cannot read properties of …' was thrown </code>``</p>
+<p>The parser gives the typed sentence the same shape the model gave the misheard one: <code>{&quot;intent&quot;:&quot;move&quot;,&quot;operator&quot;:&quot;everyone&quot;,&quot;place&quot;:[&quot;Cell 4&quot;],...,&quot;adjust&quot;:{&quot;edge&quot;:&quot;end&quot;,&quot;by&quot;:30}}</code>.</p>
+<p><b>Lead</b></p>
+<p><b>A suspicion, not a fact.</b> Expanding a move of everyone builds one move per block with <code>existing</code> filled but drops the sentence's <code>adjust</code> (<code>adjust: null</code>), so each step is a move with no new cell, no span, no shift and no adjust, and <code>resolveMoveCommand</code> reads <code>.start</code> of the null span. Either the expansion carries <code>adjust</code> into each step, or a step with nothing to change is a question, never a throw. Separately, a throw inside a candidate press should not leave the thread frozen: R-434 wants the turn recorded even when it fails. The live model producing a sweeping reading from an unrelated sentence is DEF-0041's concern; this defect is the crash.</p>
+</div>
+<div class="find" id="DEF-0047">
+  <span class="tag">DEF-0047 · major · other · open</span>
+  <h3>'Clear Line 1 for the rest of the week' is refused with 'those two lines are about the same block; say them one at a time' whenever the line has a night shift -- the week clear cannot be used</h3>
+  <p class="fine">Violates <a href="#R-407">R-407</a>, <a href="#R-459">R-459</a> · filed 2026-09-28 by tester · pinned by <code>src/test/defects/DEF-0047.test.ts</code> · <a href="defects/DEF-0047.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>Tester's stack, demo seed (Maria Lopez on Line 1 Cell 2, Shift 3, 22:00-06:00 every night). Sign in as <b>Ana</b> (Line 1 supervisor), open the bar, type <b>&quot;clear Line 1 for the rest of the week&quot;</b>.</p>
+<p>Pin: <code>npx vitest run src/test/defects/DEF-0047.test.ts</code> (a named person's week clear over a night block, on the REAL board axis -- <code>buildDayAxis</code>/<code>wallOf</code> -- in the week of the 8 March 2026 change).</p>
+<p><b>Expected</b></p>
+<p>F-224 (session 191): a clear over a week is &quot;a lot of one removal per day from today on&quot;. R-407: a clear expands to one command per block. One block is one removal. R-459: the bar's answer is a sentence a supervisor would say; the person said one sentence, not &quot;two lines&quot;.</p>
+<p><b>Actual</b></p>
+<p>As Ana (Playwright, tester's dev server):</p>
+<p>``<code> SAY  clear Line 1 for the rest of the week BAR  Moved the board to this week. Those two lines (2 and 5) are about the same block; say them one at a time. </code>``</p>
+<p>The trace records only &quot;Moved the board to this week.&quot; with no outcome (see DEF-0049). The pin:</p>
+<p>``<code> × 'clear Priya Shah every day this week' removes her one Sat/Sun night block exactly ONCE, not once per day it overlaps AssertionError: expected [ 'priyaNight', 'priyaNight' ] to deeply equal [ 'priyaNight' ] </code>``</p>
+<p>Found by a tester lane on the resolver, re-run red by the tester, and seen live as Ana on the seed.</p>
+<p><b>Lead</b></p>
+<p><b>A suspicion, not a fact.</b> <code>expandRepeatUnassign</code> (resolve.ts ~5168-5206) loops the week's days and, for each day whose window overlaps a block, pushes a removal for that assignment -- a block across midnight overlaps two days and is queued twice. The bar's own duplicate guard (<code>findDuplicateBlockPair</code>, CommandBar.tsx ~2061) then refuses the whole lot, which is why nothing wrong is written but nothing can be done. De-duplicating by assignment id in the resolver would leave the guard for genuinely repeated sentences. The words &quot;two lines ... say them one at a time&quot; were written for a typed list of commands and read wrongly for one sentence.</p>
+</div>
+<div class="find" id="DEF-0048">
+  <span class="tag">DEF-0048 · major · other · open</span>
+  <h3>'Sam Patel is off tomorrow' asks which one of his two blocks to remove -- an absence should take them all with one yes, and it records no absence either</h3>
+  <p class="fine">Violates <a href="#R-409">R-409</a>, <a href="#R-357">R-357</a> · filed 2026-09-28 by tester · pinned by <code>src/test/defects/DEF-0048.test.ts</code> · <a href="defects/DEF-0048.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>Tester's stack, demo seed; Sam Patel has two blocks tomorrow (Cell 1 09:00-11:00 and 14:00-22:00). Sign in as <b>Ana</b>, open the bar, type <b>&quot;Sam Patel is off tomorrow&quot;</b> (the same for &quot;Maria Lopez is off tomorrow&quot;). The maintainer's own spoken walk of 24 Sept says exactly this sentence (&quot;Maria Lopez is off today&quot;, two clips in <code>data/voice/trace/clips</code>).</p>
+<p>Pin: <code>npx vitest run src/test/defects/DEF-0048.test.ts</code>.</p>
+<p><b>Expected</b></p>
+<p>R-409: &quot;'Sam is off today' ... the resolver expands it into one removal per block per day, in board order, with existing filled in&quot; -- &quot;their blocks go with one yes&quot;. R-357: an absence is recorded in the app; R-409's own words &quot;No absence record is written -- the app has none&quot; predate R-357 (7 Sept) and are no longer true of the app.</p>
+<p><b>Actual</b></p>
+<p>As Ana:</p>
+<p>``<code> SAY  Sam Patel is off tomorrow BAR  Sam Patel has 2 blocks Tue Sep 29. Remove which? Remove Cell 1 · Housing A 09:00–11:00 Remove Cell 1 · Line 1 Subassembly A 14:00–22:00 </code>``</p>
+<p>There is no button for both. The parser gives the absence the exact shape of a single removal:</p>
+<p>``<code> Sam Patel is off tomorrow -&gt; {&quot;ok&quot;:true,&quot;command&quot;:{&quot;intent&quot;:&quot;unassign&quot;,&quot;operator&quot;:&quot;Sam Patel&quot;,&quot;place&quot;:[],&quot;day&quot;:{&quot;kind&quot;:&quot;tomorrow&quot;},&quot;span&quot;:null,&quot;existing&quot;:null,&quot;shift&quot;:null,&quot;until&quot;:null}} </code>``</p>
+<p>The pin:</p>
+<p>``<code> × 'Priya Shah is off today' with two blocks today expands to two removals, not a which-block question AssertionError: expected [ { intent: 'unassign', …(7) } ] to have a length of 2 but got 1 </code>``</p>
+<p><code>commandResolve.test.ts</code> AB1-AB3 cover only the &quot;until&quot; form; the one-day form has no case.</p>
+<p><b>Lead</b></p>
+<p><b>A suspicion, not a fact.</b> Only <code>until</code> marks a removal as an absence today, so &quot;off tomorrow&quot; is indistinguishable from &quot;remove Sam tomorrow&quot;. The absence grammar could set a flag the resolver reads to take every block on the day. Whether the bar should also write an absence record through <code>set_absence</code> now that the app has them (R-357) is the maintainer's call; R-409's sentence saying the app has none is stale either way.</p>
+</div>
+<div class="find" id="DEF-0049">
+  <span class="tag">DEF-0049 · minor · other · open</span>
+  <h3>The bar's trace loses whole turns: a question left open when the page closes, a turn that crashed, and the answer after the bar moves the board are never written</h3>
+  <p class="fine">Violates <a href="#R-434">R-434</a>, <a href="#R-455">R-455</a> · filed 2026-09-28 by tester · <a href="defects/DEF-0049.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>Tester's dev server (<code>data/voice/trace/bar.jsonl</code> in the tester's worktree). In fresh pages, as Ana or the admin, type one sentence each and close the page without answering: &quot;Sam Patel is off tomorrow&quot;, &quot;John Kim is away tomorrow&quot;, &quot;put Tom Baker on Cell 1 tomorrow from 8 am to noon&quot;, and the garbled sentence of DEF-0046 with the model on. Then &quot;extend everyone on Cell 1 by 30 minutes&quot; (DEF-0046's crash). Then &quot;clear Line 1 for the rest of the week&quot; as Ana (a move, then a refusal). Read the trace file's entries for the afternoon.</p>
+<p><b>Expected</b></p>
+<p>R-434: &quot;Anything the bar hears, asks, offers, writes or refuses is a trace entry.&quot; R-455: &quot;the trace entry stays open across the move and the rerun's outcome closes it.&quot;</p>
+<p><b>Actual</b></p>
+<p>Every trace entry from 15:20 on (tester's worktree), all of them:</p>
+<p>``<code> 15:25:25 | could you put Sam Patel on Housing A at Cell 1 tomorrow between 9 and 11 | answered: auto | outcome: written 15:32:48 | clear Cell 2 tomorrow | answered: no | outcome: cancelled 15:32:53 | John Kim is off tomorrow | asked: John Kim has no block Tue Sep 29. | answered: null | outcome: 15:32:57 | Maria Lopez is off tomorrow | asked: ... Remove which? | answered: null | outcome: 15:33:00 | clear Cell 3 today | asked: No cell called &quot;Cell 3&quot; on this board. | answered: null | outcome: 15:33:02 | clear Line 1 for the rest of the week | asked: Moved the board to this week. | answered: auto | outcome: 15:34:31 | clear Cell 1 for the rest of the week | answered: no | outcome: cancelled 15:36:12 | clear Cell 2 tomorrow | answered: Do all 4 | outcome: Done, 4 things. </code>``</p>
+<p>Missing entirely: the four garbled-sentence turns, both &quot;extend everyone&quot; crashes, and the single-sentence pages whose question was left open (&quot;John Kim is away tomorrow&quot;, &quot;Sam Patel is off tomorrow&quot;, the second &quot;clear Cell 3 today&quot;, &quot;put Tom Baker ...&quot;). The entries that exist for open questions exist only because a later sentence in the same page closed them. The week clear's entry ends at the move: the refusal the person read (&quot;Those two lines (2 and 5) are about the same block ...&quot;) is not in it.</p>
+<p><b>Lead</b></p>
+<p><b>A suspicion, not a fact.</b> An entry appears to be posted when its turn is finished (answered, or superseded by the next sentence), so a page closed on an open question, a reload, or a throw before the finish drops it. Posting at the ask and patching at the answer, or flushing on <code>pagehide</code>, would keep them. The moved-then-refused case looks like the refusal path after a rerun not calling the entry's finish.</p>
+</div>
+<div class="find" id="DEF-0050">
+  <span class="tag">DEF-0050 · minor · other · open</span>
+  <h3>One failed clip makes the voice scorer throw away every clip it had already scored -- no table, no results file -- and a hung Whisper hangs it forever</h3>
+  <p class="fine">Violates <a href="#R-453">R-453</a> · filed 2026-09-28 by tester · <a href="defects/DEF-0050.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>A tester lane ran <code>node scripts/voice/clips/score.mjs</code> for real against a fake Whisper server answering POST <code>/inference</code> with chosen text, over synthetic 16 kHz mono WAVs and a manifest in <code>record.mjs</code>'s shape, in a scratch folder: four listed clips, one missing, the last answered 500. The tester read the code paths it names.</p>
+<p><b>Expected</b></p>
+<p>R-453: &quot;a change to the Whisper model, its decoding flags or the hint is accepted or rejected on that table&quot; -- the table and the results file are the product of a recording session.</p>
+<p><b>Actual</b></p>
+<p>From the lane's run: clips 1 and 2 scored and printed, then the 500 threw out of <code>main()</code> (<code>main().catch</code> prints the stack, exit code 1); no summary line, and no results JSON written. With a missing clip the summary reads <code>mean WER 0.417 names 2/3 exact 1/3 wall/clip 7ms</code> and never says how many of the listed clips were scored.</p>
+<p>The code, read by the tester: <code>scoreOne</code> throws on any non-OK reply (<code>score.mjs</code> ~l.174-176), the per-clip loop (~l.493-510) has no try around it, and the results are written once, after the loop (~l.548). The fetch has no timeout or AbortSignal (<code>grep -n &quot;AbortSignal\|timeout&quot;</code> finds none in the file), so a Whisper that stops answering stops the scorer with no message. Not re-run by the tester against a failing server; the scorer's normal path was run by the tester on 12 of the maintainer's real clips through the running small.en (<code>--from-trace 12</code>, read-only) and scored them sensibly (<code>12 clip(s) scored across 10 entries, mean then-vs-now WER 0.000; mean wall 3978 ms per clip</code>).</p>
+<p><b>Lead</b></p>
+<p><b>A suspicion, not a fact.</b> Catch per clip and record the row as failed with its status; write the results file incrementally or in a <code>finally</code>; give the fetch a timeout; print &quot;N of M scored, K missing, F failed&quot; beside the mean.</p>
+</div>
+<div class="find" id="DEF-0051">
+  <span class="tag">DEF-0051 · minor · other · open</span>
+  <h3>A supervisor who names a cell outside her board is told 'No cell called Cell 3 on this board' with nothing to choose -- a dead end</h3>
+  <p class="fine">Violates <a href="#R-430">R-430</a> · filed 2026-09-28 by tester · <a href="defects/DEF-0051.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p><b>Reproduction</b></p>
+<p>Tester's stack, demo seed. Sign in as <b>Ana</b> (Line 1 supervisor; her board shows Cell 1 and Cell 2). Open the bar and type <b>&quot;clear Cell 3 today&quot;</b>.</p>
+<p><b>Expected</b></p>
+<p>R-430 (a standard): &quot;When a sentence names something the board cannot find (a person, a place, a product, a day off the board), the bar offers the closest matches as buttons and asks which. 'No such X' with no choice is a defect.&quot;</p>
+<p><b>Actual</b></p>
+<p>``<code> SAY  clear Cell 3 today BAR  No cell called &quot;Cell 3&quot; on this board. </code>``</p>
+<p>No buttons. (The trace has the turn only because a later sentence closed it -- DEF-0049.)</p>
+<p><b>Lead</b></p>
+<p><b>A suspicion, not a fact.</b> The unknown-cell refusal seems to offer matches only when a name is close to one on the board; &quot;Cell 3&quot; is exactly a cell that exists in the plant but not on Ana's board, and &quot;Cell 1&quot;/&quot;Cell 2&quot; are one character away. A sentence the server would refuse anyway (Cell 3 is on Line 2, outside her grant) should say that in words -- &quot;Cell 3 is on Line 2, which is not on your board&quot; -- and offer her own cells, rather than stop.</p>
 </div>
 </section>
 
@@ -4652,7 +4820,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>403 requirements · 337 covered · 28 uncovered · 14 contradicted · 24 superseded</caption>
+<caption>403 requirements · 334 covered · 26 uncovered · 19 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -7110,12 +7278,12 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="fine">vitest · <code>src/test/commandParse.test.ts</code> CP1 to CP11 (same as yesterday with and without a place; weekday to weekday; week to week; last week; a day onto a week refused; the same day refused; dates; round trips)<br>vitest · <code>src/test/commandResolve.test.ts</code> CP1 to CP10 (runs become bookings with headcount, blocks direct assigns; identical ones skipped, different hours not; all there is nothing_to_do; week pairs Monday to Monday; a Sunday off the board names its iso; over the ceiling; the year boundary; an overnight run skipped, one ending at midnight kept)<br>vitest · <code>src/test/voiceRead.test.ts</code> VR14 to VR19 (a copy decodes with day and week words; a week word on any other day or on until is refused by the schema and the decoder alike)<br>vitest · <code>src/test/commandBar.test.tsx</code> CB-x-3 (a copy of one block is the single-command path), CB-x-13 (a decoded copy lands in the same lot)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-covered" id="R-409">
+<tr class="r-contradicted" id="R-409">
   <td class="g-n">R-409</td>
   <td class="reqmain"><b>An absence — a person is off today or until a day, and their blocks go with one yes</b><br><span class="fine">&quot;Sam is off today&quot;, &quot;Sam is out&quot;, &quot;Sam is sick&quot;, &quot;Ana is on leave till Friday&quot; and &quot;Ana is away until Friday&quot; are a removal with no place over one day, or over every day from the first to the named one when until is said (a removal's new field, null otherwise); the resolver expands it into one removal per block per day, in board order, with existing filled in; a person with nothing on the board over those days is a plain answer. The board's window must hold the days (the day-off-board question names the first missing one). No absence record is written — the app has none; the blocks go, and that is what the sentence asked.</span>
       <br><span class="fine">session 168 conversation (the maintainer, 14 Sept: &quot;Unpark group 1 and group 3 together, one retrain&quot;), §19.101 (D130) · maintainer · STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 item 2).</span></td>
   <td class="fine">vitest · <code>src/test/commandParse.test.ts</code> AB1 to AB10 (off/out/sick/on leave/away, today by default, a day, till a weekday or a date, from a day until a day; Sam is on Housing A stays an assign)<br>vitest · <code>src/test/commandResolve.test.ts</code> AB1 to AB3 (one removal per block per day; until before the day is day_order; nothing is nothing_to_do)<br>vitest · <code>src/test/voiceRead.test.ts</code> the unassign decoder requires until (VR14 onward)<br>vitest · <code>src/test/commandBar.test.tsx</code> CB-x-14 (a decoded absence lands in the lot)<br>vitest · <code>src/test/voiceData.test.ts</code> V4 and V6 after the held-out removals carry until: null (114 rows migrated, no sentence changed but one verb)</td>
-  <td class="chipcol"><span class="chip done">covered</span></td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-covered" id="R-410">
   <td class="g-n">R-410</td>
@@ -7257,12 +7425,12 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="fine">vitest · <code>src/test/commandLauncher.test.tsx</code> CL-5 and CB-keep-4 inverted (a mousedown outside leaves the panel open), CL-9 (Close and Escape return focus to the launcher), CL-10 and CL-11 (a drag changes the size, reopening restores it), CR-2 (pointer capture: a stray move after release does not resize)<br>vitest · <code>src/test/panelSize.test.ts</code> PS-1 to PS-4 (round trip, corrupt storage ignored, the clamp both ways against the launcher's offset, no key means no persistence)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-uncovered" id="R-430">
+<tr class="r-contradicted" id="R-430">
   <td class="g-n">R-430</td>
   <td class="reqmain"><b>A dead end offers the nearest choices --- the bar never answers with only &quot;no such thing&quot;</b><br><span class="fine">When a sentence names something the board cannot find --- a person, a place, a product, a day off the board --- the bar offers the closest matches as buttons and asks which, for every kind of thing, the way names already do (R-418). An answer that ends with &quot;no such X&quot; and no choice is a defect. Standard: it applies to every dead end the bar has and every one added later.</span>
       <br><span class="fine">session 178 conversation (the maintainer, 17 Sept, answer 1 of the seven candidates), CLAUDE.md §7 · maintainer · STATED 17 Sept (session 178): &quot;1. Yes&quot;. Candidate put on 17 Sept (session 177) under R-426's third duty after the swap's near-miss and the walk's &quot;There is no Cell 1 in Cell 2&quot;.</span></td>
   <td class="fine">manual: the audit this standard triggers (queued 17 Sept): grep the resolver's refusals for every dead end with no choices, fix or queue each hit, and pin the ones fixed</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-contradicted" id="R-431">
   <td class="g-n">R-431</td>
@@ -7285,12 +7453,12 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="fine">e2e · <code>e2e/typedWalk.spec.ts</code> the twenty-two sentences, dated to next Monday in the plant's zone since 22 Sept (F-182, F-190); green twice on 22 Sept before the spoken list was handed over<br>manual: each hand-over names the spec and its two green runs in the session summary</td>
   <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
-<tr class="r-uncovered" id="R-434">
+<tr class="r-contradicted" id="R-434">
   <td class="g-n">R-434</td>
   <td class="reqmain"><b>Every bar feature traces --- anything the bar does writes a trace entry, which is also the thread</b><br><span class="fine">Anything the bar hears, asks, offers, writes or refuses is a trace entry (R-421) and so a turn in the thread (R-427); a bar feature with no trace line is not done, and a pin for a bar feature asserts its trace entry. F-164 (the trace missing a lot's failure and a write that never happened) is the defect this standard names.</span>
       <br><span class="fine">session 178 conversation (the maintainer, 17 Sept, answer 5), CLAUDE.md §7 · maintainer · STATED 17 Sept (session 178): &quot;5. Yes&quot;.</span></td>
   <td class="fine">manual: the audit this standard triggers (queued 17 Sept): every path through the bar that ends without a trace entry, fixed or queued</td>
-  <td class="chipcol"><span class="chip q">uncovered</span></td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-contradicted" id="R-435">
   <td class="g-n">R-435</td>
@@ -7418,12 +7586,12 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="fine">sql · <code>supabase/tests/dev_demo_test.sql</code> D13 (every seeded block starts at its operator's own band start in Chicago) and D14 (the band rebuilt as a range with the seed's own wall-clock arithmetic; no seeded minute outside it); both fail against the old fixed hours, 14 of 84 and 70 of 84<br>manual: 23 Sept (session 190): proved on the scratch demo database, 15 passed; the daylight-saving night of 7 March 2026 checked by hand against the container (420 elapsed minutes, wall-clock equal); the local database not reset --- the maintainer's app was on it</td>
   <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
-<tr class="r-covered" id="R-453">
+<tr class="r-contradicted" id="R-453">
   <td class="g-n">R-453</td>
   <td class="reqmain"><b>The recogniser is measured on recorded clips, never on the maintainer's afternoons --- the sentence list is recorded once and every model, flag and prompt change is a score from a script</b><br><span class="fine">A recording page (npm run voice:clips:record) saves the maintainer's reading of the walk's sentence list as 16 kHz WAV clips under data/voice/clips (never committed), and a scorer (npm run voice:clips:score) posts every clip to the running whisper-server with a given prompt file and prints word error rate, board names heard right and exact matches per clip and in total, writing a results file. A change to the Whisper model, its decoding flags or the hint is accepted or rejected on that table. The server runs beam search with non-speech suppression by default (serve.mjs --whisper-decode, always -sns), and small.en is the first model measured against base.en.</span>
       <br><span class="fine">session 190 conversation (the maintainer, 23 Sept: &quot;I give up, that was so much worse than yesterday&quot;, &quot;There has to be something we are doing wrong&quot;; yes to the plan) · maintainer · STATED 23 Sept (session 190). Why the spoken walks read worse than television subtitles: the container ran ggml-base.en (74M parameters, the second-smallest model) with greedy decoding, no non-speech suppression and a word list as its prompt, chosen at S57 and never measured; subtitles come from the large model with beam search. Built by lane S71-c (docs/agent-briefs/s71-c-clip-harness-brief.md). The old S71-c queue item (the 34- versus 53-word hint) is one row of this matrix now. Second half the same day (S71-f, dce9e7a): every clip the bar posts is kept under data/voice/trace/clips with its length, the rule that ended it and its loudness, and npm run voice:clips:score -- --from-trace N replays the newest through the running container, printing what Whisper wrote then and now --- so a sentence said to the board is a measurement too, and a clip cut short by the recorder's rules shows as such before the model is blamed.</span></td>
   <td class="fine">vitest · <code>src/test/voiceClips.test.ts</code> VCLIP-1 onward: the scorer's normaliser (am and pm glued, dotted and spaced; spelled numbers; ordinals; apostrophes), word error rate exact, empty and partial, name hits with one misheard name<br>manual: 23 Sept (session 190): the scorer against whisper.cpp's own jfk.wav on the running base.en container, with and without a prompt --- word error rate 0, exact, about 2 to 3 s a clip; the recording page served and took a posted clip into the manifest; the maintainer's 22 clips and the six-cell matrix are the next step</td>
-  <td class="chipcol"><span class="chip done">covered</span></td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-covered" id="R-454">
   <td class="g-n">R-454</td>
@@ -7432,12 +7600,12 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <td class="fine">vitest · <code>src/test/localRecognizer.test.ts</code> LREC-32a to 32c: the status event fires listening on start and transcribing at the post, never through the transcript event; the wrapper forwards it on both legs and announces listening again on a fallback<br>vitest · <code>src/test/commandBar.test.tsx</code> CB-mic-2, 3, 13 to 19 and the reviewer's two stop cases: the input's value is empty or the typed text throughout a session, the placeholder carries a partial, the label beside the mic carries the phase, a stop restores the default placeholder</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
 </tr>
-<tr class="r-covered" id="R-455">
+<tr class="r-contradicted" id="R-455">
   <td class="g-n">R-455</td>
   <td class="reqmain"><b>A day off the board is shown by the board itself --- the bar moves the window and runs the sentence, and says so; no button</b><br><span class="fine">When a sentence names a day, a week or today that the board's window does not hold, the bar moves the window so the day is on it (the window's own start-date and day-count controls, a week word widening to seven days, exactly as R-419's button did), waits for the new window's data to land --- never a placeholder of the old window --- and then runs the same sentence, with one line in the thread first: &quot;Moved the board to &lt;day&gt;.&quot; There is no question and no button. A cancel word, Escape or new typing while the move is in flight drops the rerun as R-419's did.</span>
       <br><span class="fine">session 191 conversation (the maintainer, 24 Sept, after the third spoken round: &quot;It said today is not on the board, why would it not go to it on its own? It will be annoying for someone to use this if a simple thing like this is not done.&quot;) · maintainer · STATED 24 Sept (session 191). Supersedes R-419 (whose rerun machinery it reuses without the press). F-219 is the placeholder race this row's &quot;waits for the data&quot; clause closes: on 24 Sept the rerun fired against the previous window's blocks on the new window's day axis and told the maintainer Maria Lopez had no block when she did. BUILT the same session by lane S72-b (d5a8829), reviewed by a second agent that closed the trace hole the move opened and bounded the rerun.</span></td>
   <td class="fine">vitest · <code>src/test/commandBar.test.tsx</code> CB-showday-1 to 12: the move is one line in the thread and no button; the rerun waits for a ctx whose rows are the new window's (settled), fires on the next; Escape, a cancel word and typing drop it; a window that never loads is bounded and says so (10, 11); a fresh sentence is not blocked by an unsettled ctx (12); CB-keep-2 and CB-rr-1 the trace entry stays open across the move and the rerun's outcome closes it; CB-lot-4 a lot step landing off the board</td>
-  <td class="chipcol"><span class="chip done">covered</span></td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr>
 <tr class="r-contradicted" id="R-456">
   <td class="g-n">R-456</td>
@@ -7481,6 +7649,14 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <span class="eyebrow">The log</span>
   <h2>Every session, newest first</h2>
   <details class="donefold" open>
+  <summary><b>Session 193t</b> · 2026-09-28 · Tester second pass over sessions 186 to 191: the gaps 192t left, closed --- the bar as Ana, the served model, the invite specs, a frozen clock; six more defects, and a typed sentence that crashes the bar (DEF-0046 to DEF-0051) <span class="chip done">counts confirmed</span></summary>
+  <div class="inner">
+    <p>THE MAINTAINER ASKED what 192t did not test, then why, then to do all of it. 192t's own summary had named two gaps where there were about a dozen; this pass closed them. Two Sonnet lanes (the UTC-default sweep and the unjudged screens; daylight saving, the scorer, a wider mutation sample); the live work on the tester's stack by the tester. ⛔ DEF-0046 (major): typing &quot;extend everyone on Cell 1 by 30 minutes&quot; throws in resolveMoveCommand (&quot;Cannot read properties of null (reading 'start')&quot;); nothing happens, no message, no trace. The expansion of a move of everyone drops the adjust. The same crash is behind the one-button question the bar asks when the served model misreads &quot;sorry, this will take a few extra minutes&quot; as &quot;extend everyone by 30 minutes&quot; --- the model really produces that reading (DEF-0041's note). ⛔ DEF-0040 AS ANA: &quot;clear Cell 2 tomorrow&quot; promised Maria keeps Monday 22:00-24:00 (tonight) and Wednesday 00:00-06:00; after the yes, 0 rows. ⛔ DEF-0047 (major): &quot;clear Line 1 for the rest of the week&quot; as Ana is refused &quot;Those two lines (2 and 5) are about the same block&quot; --- a night block is queued once per day it touches; the week clear is unusable wherever there is a night shift. ⛔ DEF-0048 (major): &quot;Sam Patel is off tomorrow&quot; asks which one of his two blocks to remove; R-409 says all of them with one yes; the parse is identical to &quot;remove Sam Patel tomorrow&quot;. The maintainer says this sentence in the spoken walks. R-409's &quot;the app has no absence record&quot; is stale since R-357. DEF-0049 (minor): the trace loses a question left open when the page closes, every crashed turn, and the refusal after the bar moves the board. DEF-0050 (minor): one failed clip loses the whole scorer run; the scorer itself ran clean on 12 of the maintainer's real clips through small.en. DEF-0051 (minor): &quot;clear Cell 3 today&quot; as Ana is a dead end with no choices (R-430). DEF-0044 gains four limits no test holds, the worst: the clear's job deletion removed, 664 of 664 still green. DEF-0045 proved with a frozen clock: Ana's rail 0 people at 10 am, 2 at 3 pm, 4 at 11 pm. ⭐ HELD. No other UTC default beyond DEF-0038 (every other mount passes zone). The pop-up drag, R-447's CSS, R-449 for the create side (remove is two copies --- DEF-0037's fix must touch both). Invites and password reset end to end. The served model reads the voice spec's free sentence right (10.7 s). Berlin and Chicago day lists across DST. Mutations this pass: 18, 11 caught by name; of the seven misses, one repeats another (the job delete), one is likely dead code (a second de-dup in verbGuess), one is the known pixel-width gap R-447 discloses, and four are DEF-0044 items 4 to 7. ⚠️ R-432 IS UNBUILT AND PINNED AGAINST: a lot does not revert on a refusal (useDragGesture's runLot says so), and CB-lot-3 / CB-lot-fail-1 assert &quot;what was already done stayed&quot;. R-432 is <code>uncovered</code>; this is recorded, not filed --- the maintainer decides whether to build it or restate it. Requirements newly contradicted: R-409, R-430, R-434, R-453, R-455.</p>
+    <div class="aside"><span class="k">A note on these numbers</span><p>Same tip as 192t (14afd34 under test; tester at 469465d). The developer's suite unchanged at 4455 in 170; with this pass's pins <code>npx vitest run</code> on the tester's stack reads <code>Test Files 10 failed | 170 passed (180)</code>, <code>Tests 11 failed | 4457 passed (4468)</code> --- the eleven failures are exactly the red pin cases (DEF-0037 x2, 0038, 0040, 0041 x2, 0043 x2, 0046, 0047, 0048), the two extra passes are guard cases inside DEF-0038's and DEF-0047's pins. tsc and eslint clean over the pins. db_checks is now MEASURED, not carried: the <code>--sql</code> run's per-file lines sum to 889 in the suite plus 15 in dev_demo_test = 904. The plan's 893 was kept by adding to a carried figure (&quot;891 plus D13&quot;, &quot;carries 893&quot;), not read from a runner; the difference is not chased further here. e2e: the specs 192t could not run were run --- invite and passwordReset 7 passed once the tester stack's edge runtime (stopped with Docker) was started; weekTemplates 9 of 9 with --repeat-each=3; the two load specs still skip (no volume fixture, by design); voiceBar and clipCapture were first run with the voice URLs mangled by Git Bash's path conversion (<code>/voice</code> became <code>C:/Program Files/Git/voice</code>) and that failure is the tester's environment, not filed.</p></div>
+    <p class="fine">4455 app tests in 170 files · 904 database checks · 84 migrations · tsc 0 · eslint 0</p>
+  </div>
+</details>
+<details class="donefold" >
   <summary><b>Session 192t</b> · 2026-09-28 · Tester run over sessions 186 to 191: the suite is green at 4455, and nine defects under it --- a clear of Monday deletes Sunday night, the New pop-up reads UTC, Remove is offered where the server refuses, and the typed walk is red on a fresh seed (DEF-0037 to DEF-0045) <span class="chip done">counts confirmed</span></summary>
   <div class="inner">
     <p>WHAT WAS JUDGED. Sessions 186 to 191, about sixty commits: the one absence form (R-360 amended, R-449), the Chicago seed and in-band blocks (R-450, R-452), Ctrl+M and the mic (R-451, R-454, R-458), the clip harness (R-453), the bar's move-and-rerun, verb and place questions, grounding and plain sentences (R-455 to R-459, F-212 to F-224). No migration in the range. Three Sonnet lanes ran in their own worktrees (the resolver's writes; the bar's conversation; the voice clips and seed), each told to mutate and to bring back red repros; every finding below was re-run by the tester in its own tree before filing. ⛔ DEF-0040 (major), THE WORST. Any plant with a night shift: &quot;clear Cell 4&quot; for Monday offers to trim Sunday's 22:00-06:00 block to end at midnight AND to remove the job it belongs to; after the yes the bar says &quot;Done, 2 things ... now ends midnight&quot; and a database read-back finds zero rows -- the job's cascade removed the block it said it kept, and Sunday's half of the job with it. Proved live with the real bar on a fixture, pinned at the resolver level. It carries a question for the maintainer: whose day is a night shift? ⛔ DEF-0038 (major): the board's New pop-up is mounted without the plant's zone, so in Chicago it offers &quot;Shift 1 11:00-19:00&quot; under an axis reading 08:00 and labels a Monday-night block Tuesday. Never passed; invisible until R-450 moved the demo off UTC. <code>dateSeam.test.ts</code> cannot see a zone prop left off. ⛔ DEF-0037 (major): both absence screens offer Remove on every absence the caller can read, while <code>remove_absence</code> refuses anyone outside <code>absence_recordable_people()</code> -- the set both screens already fetch for the record form. As Ana: Remove on John Kim's row, pressed, &quot;You do not have edit rights on this cell.&quot; DEF-0035's shape on the other button. ⛔ DEF-0041 (major): the grounding guard F-215 added passes a clear-everyone whenever the heard text contains &quot;take&quot; or &quot;out&quot; anywhere (&quot;this will take a few extra minutes&quot;). ⛔ DEF-0042 (major): the typed walk, R-433's and R-459's e2e proof, is red on every fresh seed: since R-452 the seed's Sunday night blocks run into the walk's Monday. Session 190 records the developer's database was not reset after R-452, so the two green runs were on the old seed. DEF-0039 (minor): the clip recording page prints 127.0.0.1 and answers on the LAN (a curl to 192.168.1.180 returned 200); R-460 added, stated_by agent. DEF-0043 (cosmetic): &quot;for 1 people&quot;, a raw 2026-10-12 in the Done line, &quot;The board has nobody on it&quot; for a named person. DEF-0044 (minor, test-cannot-fail): three limits no test holds -- the verb cap (cap raised to 30, 329 green), the week clear's lot ceiling (removed, 281 green), the seed's end edge (every block an hour short, D13 and D14 still PASS; the UTC mutation of the same file fails both, so the zone is guarded). DEF-0045 (minor): nobody in Plant A is homed on Shift 1, so from 06:00 to 14:00 the rail is empty under &quot;On shift now: Shift 1&quot; and touch T3 fails. ⭐ HELD, WITH EVIDENCE. The absence form keeps DEF-0035's server gate for recording. The clip endpoint: traversal refused by an ISO stem check, same-millisecond posts suffixed, eviction at 500, POST only, dev server only, loopback only -- seven mutations, seven named reds. R-455's rerun waits on <code>settled</code> and re-enters the ordinary path (no write skips its question); R-457 re-resolves the substituted line fully; R-458 and R-454 hold; Ctrl+M's modifiers hold. Mutations caught by name across the three lanes: seventeen of twenty; the three that were not are DEF-0044. Not examined: a Line 1 supervisor clearing a place holding blocks she can read but not write (the lane's suspicion; her board shows only her line), and the served model itself (not running on the tester's stack). Requirements set contradicted: R-350, R-357, R-360, R-407, R-426, R-431, R-433, R-435, R-436, R-450, R-452, R-456, R-459, and the new R-460.</p>

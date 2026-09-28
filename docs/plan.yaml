@@ -11679,7 +11679,7 @@ requirements:
   - kind: vitest
     file: src/test/voiceData.test.ts
     cases: "V4 and V6 after the held-out removals carry until: null (114 rows migrated, no sentence changed but one verb)"
-  status: covered
+  status: contradicted
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 item 2).
 - id: R-410
@@ -12216,7 +12216,7 @@ requirements:
   verified_by:
   - kind: manual
     steps: "the audit this standard triggers (queued 17 Sept): grep the resolver's refusals for every dead end with no choices, fix or queue each hit, and pin the ones fixed"
-  status: uncovered
+  status: contradicted
   note: >-
     STATED 17 Sept (session 178): "1. Yes". Candidate put on 17 Sept (session 177) under R-426's third duty
     after the swap's near-miss and the walk's "There is no Cell 1 in Cell 2".
@@ -12288,7 +12288,7 @@ requirements:
   verified_by:
   - kind: manual
     steps: "the audit this standard triggers (queued 17 Sept): every path through the bar that ends without a trace entry, fixed or queued"
-  status: uncovered
+  status: contradicted
   note: >-
     STATED 17 Sept (session 178): "5. Yes".
 - id: R-435
@@ -12866,7 +12866,7 @@ requirements:
     cases: "VCLIP-1 onward: the scorer's normaliser (am and pm glued, dotted and spaced; spelled numbers; ordinals; apostrophes), word error rate exact, empty and partial, name hits with one misheard name"
   - kind: manual
     steps: "23 Sept (session 190): the scorer against whisper.cpp's own jfk.wav on the running base.en container, with and without a prompt --- word error rate 0, exact, about 2 to 3 s a clip; the recording page served and took a posted clip into the manifest; the maintainer's 22 clips and the six-cell matrix are the next step"
-  status: covered
+  status: contradicted
   note: >-
     STATED 23 Sept (session 190). Why the spoken walks read worse than television subtitles: the container ran
     ggml-base.en (74M parameters, the second-smallest model) with greedy decoding, no non-speech suppression and
@@ -12918,7 +12918,7 @@ requirements:
   - kind: vitest
     file: src/test/commandBar.test.tsx
     cases: "CB-showday-1 to 12: the move is one line in the thread and no button; the rerun waits for a ctx whose rows are the new window's (settled), fires on the next; Escape, a cancel word and typing drop it; a window that never loads is bounded and says so (10, 11); a fresh sentence is not blocked by an unsettled ctx (12); CB-keep-2 and CB-rr-1 the trace entry stays open across the move and the rerun's outcome closes it; CB-lot-4 a lot step landing off the board"
-  status: covered
+  status: contradicted
   note: >-
     STATED 24 Sept (session 191). Supersedes R-419 (whose rerun machinery it reuses without the press). F-219 is
     the placeholder race this row's "waits for the data" clause closes: on 24 Sept the rerun fired against the
@@ -18408,6 +18408,66 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 193t
+  date: 2026-09-28
+  title: "Tester second pass over sessions 186 to 191: the gaps 192t left, closed --- the bar as Ana, the served model, the invite specs, a frozen clock; six more defects, and a typed sentence that crashes the bar (DEF-0046 to DEF-0051)"
+  commits: []
+  numbers:
+    app_tests: 4455
+    app_test_files: 170
+    tsc: 0
+    eslint: 0
+    db_checks: 904
+    migrations: 84
+    e2e: 51
+  confirmed: true
+  numbers_note: >-
+    Same tip as 192t (14afd34 under test; tester at 469465d). The developer's suite unchanged at 4455 in
+    170; with this pass's pins `npx vitest run` on the tester's stack reads `Test Files 10 failed | 170
+    passed (180)`, `Tests 11 failed | 4457 passed (4468)` --- the eleven failures are exactly the red pin
+    cases (DEF-0037 x2, 0038, 0040, 0041 x2, 0043 x2, 0046, 0047, 0048), the two extra passes are guard
+    cases inside DEF-0038's and DEF-0047's pins. tsc and eslint clean over the pins. db_checks is now
+    MEASURED, not carried: the `--sql` run's per-file lines sum to 889 in the suite plus 15 in
+    dev_demo_test = 904. The plan's 893 was kept by adding to a carried figure ("891 plus D13",
+    "carries 893"), not read from a runner; the difference is not chased further here. e2e: the specs
+    192t could not run were run --- invite and passwordReset 7 passed once the tester stack's edge
+    runtime (stopped with Docker) was started; weekTemplates 9 of 9 with --repeat-each=3; the two load
+    specs still skip (no volume fixture, by design); voiceBar and clipCapture were first run with the
+    voice URLs mangled by Git Bash's path conversion (`/voice` became `C:/Program Files/Git/voice`) and
+    that failure is the tester's environment, not filed.
+  summary: >-
+    THE MAINTAINER ASKED what 192t did not test, then why, then to do all of it. 192t's own summary had
+    named two gaps where there were about a dozen; this pass closed them. Two Sonnet lanes (the
+    UTC-default sweep and the unjudged screens; daylight saving, the scorer, a wider mutation sample);
+    the live work on the tester's stack by the tester.
+    ⛔ DEF-0046 (major): typing "extend everyone on Cell 1 by 30 minutes" throws in resolveMoveCommand
+    ("Cannot read properties of null (reading 'start')"); nothing happens, no message, no trace. The
+    expansion of a move of everyone drops the adjust. The same crash is behind the one-button question
+    the bar asks when the served model misreads "sorry, this will take a few extra minutes" as "extend
+    everyone by 30 minutes" --- the model really produces that reading (DEF-0041's note).
+    ⛔ DEF-0040 AS ANA: "clear Cell 2 tomorrow" promised Maria keeps Monday 22:00-24:00 (tonight) and
+    Wednesday 00:00-06:00; after the yes, 0 rows. ⛔ DEF-0047 (major): "clear Line 1 for the rest of the
+    week" as Ana is refused "Those two lines (2 and 5) are about the same block" --- a night block is
+    queued once per day it touches; the week clear is unusable wherever there is a night shift.
+    ⛔ DEF-0048 (major): "Sam Patel is off tomorrow" asks which one of his two blocks to remove; R-409
+    says all of them with one yes; the parse is identical to "remove Sam Patel tomorrow". The
+    maintainer says this sentence in the spoken walks. R-409's "the app has no absence record" is stale
+    since R-357.
+    DEF-0049 (minor): the trace loses a question left open when the page closes, every crashed turn,
+    and the refusal after the bar moves the board. DEF-0050 (minor): one failed clip loses the whole
+    scorer run; the scorer itself ran clean on 12 of the maintainer's real clips through small.en.
+    DEF-0051 (minor): "clear Cell 3 today" as Ana is a dead end with no choices (R-430). DEF-0044 gains
+    four limits no test holds, the worst: the clear's job deletion removed, 664 of 664 still green.
+    DEF-0045 proved with a frozen clock: Ana's rail 0 people at 10 am, 2 at 3 pm, 4 at 11 pm.
+    ⭐ HELD. No other UTC default beyond DEF-0038 (every other mount passes zone). The pop-up drag, R-447's
+    CSS, R-449 for the create side (remove is two copies --- DEF-0037's fix must touch both). Invites and
+    password reset end to end. The served model reads the voice spec's free sentence right (10.7 s).
+    Berlin and Chicago day lists across DST. Mutations this pass: 18, 11 caught by name; of the seven misses, one repeats another (the job delete), one is likely dead code (a second de-dup in verbGuess), one is the known pixel-width gap R-447 discloses, and four are DEF-0044 items 4 to 7.
+    ⚠️ R-432 IS UNBUILT AND PINNED AGAINST: a lot does not revert on a refusal (useDragGesture's runLot
+    says so), and CB-lot-3 / CB-lot-fail-1 assert "what was already done stayed". R-432 is `uncovered`;
+    this is recorded, not filed --- the maintainer decides whether to build it or restate it.
+    Requirements newly contradicted: R-409, R-430, R-434, R-453, R-455.
+  shipped: []
 - id: 192t
   date: 2026-09-28
   title: "Tester run over sessions 186 to 191: the suite is green at 4455, and nine defects under it --- a clear of Monday deletes Sunday night, the New pop-up reads UTC, Remove is offered where the server refuses, and the typed walk is red on a fresh seed (DEF-0037 to DEF-0045)"
