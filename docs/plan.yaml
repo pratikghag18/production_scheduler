@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-28'
-  tip: 'f84fbd3'
+  updated: '2026-09-29'
+  tip: 'e122727'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13127,6 +13127,12 @@ requirements:
     started their night shift Sunday at 10 pm. Clear Sunday's part too?"). Yes and No are the buttons.
     The build lane for this requirement runs on Opus by the maintainer's word the same day ("use opus
     for lane D"), a named exception to the every-subagent-on-Sonnet rule for this one lane.
+    AMENDED 29 Sept (session 194) by the maintainer, from two candidates (say how to stop, or leave as it
+    was): THE QUESTION SAYS HOW TO STOP. At this question "no" keeps the other day's part and goes on to
+    the list of changes, where everywhere else in the bar "no" cancels; the reviewer showed a person who
+    says "no" meaning "stop" is offered the list. So the question ends "Say cancel to stop.": "Priya
+    Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight? Say cancel to
+    stop." Nothing is written before a further yes either way.
 - id: R-462
   title: A shift with nobody on it says so --- the rail reads "Nobody on Shift 1", and the demo plant has people on every shift
   source:
@@ -13157,6 +13163,23 @@ requirements:
     Shift 1 or Shift 2 on this board"). The rail lists the people of the board's own place; the "show
     other people" control under it still brings in the rest of the plant.
 findings:
+- id: F-232
+  title: A database test passes or fails by the hour it runs --- it books Cell 1 from "now" for two hours, and the seed already has a job there at some hours of the week
+  tag: A test on the machine's clock
+  status: open
+  found_by: agent
+  refs:
+  - R-426
+  - DEF-0045
+  story: >-
+    29 Sept (session 194), on the first whole run of the SQL suite since the tester's. 93_schedulable_node_guard_test.sql
+    failed CS2 and CS5 with "an active run already overlaps this node/window" (PT409). Both are controls that book
+    Cell 1 over tstzrange(now(), now() + 2 hours) and expect success; seed.sql places its runs at fixed minutes of
+    the current week, so whenever the suite runs inside one of them the control collides. Nothing in the file or
+    in seed.sql changed this session (only dev_demo.sql and its test did), and the tester's run a day earlier, at
+    another hour, passed all seven. It is DEF-0045's shape in the SQL suite: a proof that holds at some hours.
+    The fix is a fixed instant clear of the seed (a day in a far week) in place of now(), in this file and any
+    other that books from now(); grep supabase/tests for it.
 - id: F-231
   title: A scratch database was left inside the developer's database container when a deliberately broken seed failed to build
   tag: A cleanup that runs only on success
@@ -18634,9 +18657,9 @@ sessions:
   date: 2026-09-28
   title: "The tester's sixteen defects, fix-claimed the day they were filed: a night shift split at midnight, an absence recorded from the bar, a lot that says what it did and did not, the New pop-up on the plant's clock, and the typed walk green on a fresh seed (DEF-0037 to DEF-0052)"
   shipped: []
-  commits: ['504a74b', 'a381b01', 'f84fbd3']
+  commits: ['504a74b', 'a381b01', 'f84fbd3', 'e122727']
   numbers:
-    app_tests: 4642
+    app_tests: 4647
     app_test_files: 184
     tsc: 0
     eslint: 0
@@ -18646,15 +18669,18 @@ sessions:
   confirmed: true
   numbers_note: >-
     npm run test copied from the runner on the developer's own run, after the last lane and after formatting:
-    `Test Files  3 failed | 181 passed (184)`, `Tests  3 failed | 4642 passed (4645)`. The three failures are
+    `Test Files  3 failed | 181 passed (184)`, `Tests  3 failed | 4647 passed (4650)` (4642 before the last commit's five cases). The three failures are
     known and named: DEF-0040's pin and DEF-0043's headcount pin, neither of which can reach its assertion now
     that a clear across midnight asks a question first (each defect file carries a developer note), and
     DEF-0020's live pin, which needs the invite edge function and the developer's stack has no edge runtime
-    container running. So the count the next session should expect is 4642 passing with those three red until
+    container running. So the count the next session should expect is 4647 passing with those three red until
     the tester rewrites the two pins. tsc -b and eslint clean; no migration, so tsc is conclusive. db_checks is
-    CARRIED from 193t's measured 904 and is out of date by two: dev_demo_test gained D15 and D16 (17 passed on
-    the lane's scratch run) but the SQL suite was not re-run whole, because a scratch database was left in the
-    container (F-231). e2e: four entries were added to the typed walk; on the tester's stack, rebuilt from this
+    MEASURED on 29 Sept, once the maintainer had the leftover scratch database dropped (F-231): every file in
+    supabase/tests and the demo seed's checks, on scratch databases in the tester's container, per-file tally
+    lines summed: 64 files, 904 passed, 2 failed. dev_demo_test reads 17 passed (D15 and D16 are new). The two
+    failures are CS2 and CS5 of 93_schedulable_node_guard_test, which book from now() and collide with the
+    seed at some hours (F-232); no file they depend on changed this session. So the suite holds 906 checks,
+    904 of them green at the hour it was run. e2e: four entries were added to the typed walk; on the tester's stack, rebuilt from this
     tree, the developer ran both typed walk lists (`1 passed` each; the lane ran each twice over the same
     database, R-433), the touch spec and the role walk (`13 passed`), and the two absence specs. The rest of
     the e2e suite was not run this session.
@@ -18680,9 +18706,10 @@ sessions:
     from a spoken sentence needs a removal phrase, not a removal word; the parser marks an absence itself so the
     tester's pin passes as written.
     NOT A STANDARD, asked and not raised: nothing this session repeated a choice that no standard covers.
-    STILL WITH THE MAINTAINER. Whether the night shift question should say how to stop the whole clear ("no"
-    there keeps the other day's part and goes on; cancel and Escape stop). Dropping the scratch database sql_demo_db
-    (F-231).
+    SETTLED ON 29 SEPT. The night shift question says how to stop ("Say cancel to stop.", e122727, R-461
+    amended); checking it found Escape at the second question overwriting the first answer in the trace, fixed
+    in the same commit. The maintainer had the scratch database dropped (F-231's leftover is gone; the
+    script's cleanup is still to be made to run on failure).
     LEFT RED ON PURPOSE. The two pins above. REQUIREMENTS: R-462 is covered. R-461, R-432 and R-460 now carry
     their proofs and stay contradicted, because a defect that is fix-claimed is still open until the tester
     verifies it (the validator holds this, and it is right). The others the tester set contradicted (R-350, R-357, R-360, R-407, R-409, R-426, R-430, R-431, R-433,
