@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-29'
-  tip: '4cde4cc'
+  tip: '96b5a37'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13197,6 +13197,24 @@ requirements:
     shortest length is one minute ("1 minute"), the smallest positive length a board that works in whole
     minutes can show. The developer's database holds no job and
     no block under 15 minutes today (113 jobs, 116 blocks, read 29 Sept), so nothing existing changes.
+- id: R-464
+  title: The bar never throws a sentence away --- a second sentence entered while the first is still being read runs after it, and Escape is how a sentence is taken back
+  source:
+  - 'session 194 conversation (the maintainer, 29 Sept, shown two candidates for F-236 --- run both in order, or the second replaces the first as today): "I agree with A."'
+  stated_by: maintainer
+  claim: >-
+    Every sentence the bar hears runs to an outcome, in the order it was heard. A second sentence entered
+    while the first is still being read, or while the first's write has not yet come back, waits for the
+    first and then runs; it does not cancel it. Escape, or a typed cancel, takes back every sentence that
+    has not yet run, writes nothing, and says Cancelled in the thread. No turn is ever left with a blank
+    line. It replaces the rule the bar was built with (S44-b: a second Enter aborts the reading in
+    flight).
+  verified_by: []
+  status: uncovered
+  note: >-
+    STATED 29 Sept (session 194), answering F-236. It is the same queue F-233's fix needs (a sentence said
+    while a create is in flight waits for it), so the two are built as one piece: one queue, entered at
+    the moment a sentence is heard, not two holds at two depths.
 findings:
 - id: F-236
   title: A second sentence entered while the bar is still reading the first throws the first away, and its line in the thread stays blank
@@ -13249,7 +13267,7 @@ findings:
 - id: F-233
   title: A block the server has not yet answered for can be cleared, dragged or removed --- its placeholder id goes to the server and the clear stops half-way with "Something went wrong"
   tag: A row that is drawn but not yet real
-  status: open
+  status: fixed
   found_by: agent
   stage: S57
   refs:
@@ -13279,6 +13297,18 @@ findings:
     bound, the one helper that knows a placeholder id, the drag and keyboard guards, and the reviewer's cases.
     The machine ran short of memory twice during the proofs and the harness stopped them; the walks need
     about 2 GB free beside the two stacks.
+  fix: >-
+    FIXED the same evening (session 194, 96b5a37), by doing what the paragraph above says. The developer ran the
+    failing walk from a copy of the parked branch with the bar's own state logged to the browser console, and
+    the log showed the order in two lines: the board is handed the refreshed data, new row included, and only
+    THEN does the writer answer the bar. The bar, told its save was done, waited for the next refresh, which had
+    already happened. It now asks the board it holds at that moment, one task on from the writer's answer, and
+    again on every later refresh; every mutation returns its refetch, so a writer's answer means the data is
+    there. Proof on the tester's stack: both walk lists twice each at about thirty seconds, the throttled create
+    thirty of thirty at 2000, 200 and 0 ms, touch, role walk and the absence specs; 4705 unit tests. STILL OWED:
+    a unit case for the ordering itself (only the walk proves it), and R-464's queue for a sentence entered
+    while another is still being read, until which the throttled check waits for the first sentence's written
+    line before it says the second.
 - id: F-232
   title: A database test passes or fails by the hour it runs --- it books Cell 1 from "now" for two hours, and the seed already has a job there at some hours of the week
   tag: A test on the machine's clock
@@ -18773,10 +18803,10 @@ sessions:
   date: 2026-09-28
   title: "The tester's sixteen defects, fix-claimed the day they were filed: a night shift split at midnight, an absence recorded from the bar, a lot that says what it did and did not, the New pop-up on the plant's clock, and the typed walk green on a fresh seed (DEF-0037 to DEF-0052)"
   shipped: []
-  commits: ['504a74b', 'a381b01', 'f84fbd3', 'e122727', '4cde4cc']
+  commits: ['504a74b', 'a381b01', 'f84fbd3', 'e122727', '4cde4cc', '96b5a37']
   numbers:
-    app_tests: 4660
-    app_test_files: 184
+    app_tests: 4705
+    app_test_files: 186
     tsc: 0
     eslint: 0
     db_checks: 904
@@ -18785,11 +18815,11 @@ sessions:
   confirmed: true
   numbers_note: >-
     npm run test copied from the runner on the developer's own run, after the last lane and after formatting:
-    `Test Files  3 failed | 181 passed (184)`, `Tests  3 failed | 4660 passed (4663)`, read again on 29 Sept on two workers after the unfinished F-233 work was taken out of the tree (4642 at the first four commits, 4647 after the fifth). The three failures are
+    `Test Files  3 failed | 183 passed (186)`, `Tests  3 failed | 4705 passed (4708)` in 186 files, read on 29 Sept on two workers after F-233's fix (4642 at the first four commits, 4647 after the fifth, 4660 after the sixth). The three failures are
     known and named: DEF-0040's pin and DEF-0043's headcount pin, neither of which can reach its assertion now
     that a clear across midnight asks a question first (each defect file carries a developer note), and
     DEF-0020's live pin, which needs the invite edge function and the developer's stack has no edge runtime
-    container running. So the count the next session should expect is 4660 passing with those three red until
+    container running. So the count the next session should expect is 4705 passing with those three red until
     the tester rewrites the two pins. tsc -b and eslint clean; no migration, so tsc is conclusive. db_checks is
     MEASURED on 29 Sept, once the maintainer had the leftover scratch database dropped (F-231): every file in
     supabase/tests and the demo seed's checks, on scratch databases in the tester's container, per-file tally
@@ -18834,12 +18864,12 @@ sessions:
     THE MINIMUM LENGTH, 29 SEPT. Asked whether the server should enforce the app's fifteen minutes, the
     maintainer answered that there is no such rule; the app's floor is one minute now, for a job and a block
     (R-463, 4cde4cc), with no migration. A drag by hand still floors at the grid's step.
-    F-233, NOT FIXED, AND THE LESSON OF THE DAY. R-463 put a create directly before a clear in the typed walk
+    F-233, FIXED AT THE FOURTH ATTEMPT (96b5a37; the finding's fix says how), AND THE LESSON OF THE DAY. R-463 put a create directly before a clear in the typed walk
     and showed that a row the server has not answered for can be acted on. Three attempts to fix it, each
     green on the unit suite, none working on the real app; the second and third made the bar refuse the
     sentence after every create. They were caught only because the developer ran the walks itself; the lane
-    had reported on units alone when the machine was short of memory. The work is parked on wip/f233-hold
-    and the tree is back at 4cde4cc. The developer also reported the first attempt to the maintainer as
+    had reported on units alone when the machine was short of memory. The work was parked on wip/f233-hold
+    and the tree put back at 4cde4cc until the cause was seen in a browser's own log. The developer also reported the first attempt to the maintainer as
     passing on three green runs of a timing check, which a reviewer then failed twice on the same code:
     a check that depends on timing is proved by many runs at more than one delay, never by a few.
     FOUND ON THE WAY, queued as findings: F-225 to F-236. NOT RUN: the scorer against the real Whisper (the
