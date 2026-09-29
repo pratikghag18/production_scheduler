@@ -7365,8 +7365,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
       },
     });
     if (asked.ok) return;
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(asked.question)).toBe(
-      "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight?",
+      "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight? Say cancel to stop.",
     );
 
     const no = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: "keep" });
@@ -7423,8 +7424,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     const ctx = ndCtx({ assignments: [mariaNight], runs: [run2] });
     const asked = expandCommand(clear("2026-10-12"), ctx);
     if (asked.ok) throw new Error("expected the question");
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(asked.question)).toBe(
-      "Maria Lopez's night shift runs into Tuesday. Clear Tuesday's part too, midnight to 6 am?",
+      "Maria Lopez's night shift runs into Tuesday. Clear Tuesday's part too, midnight to 6 am? Say cancel to stop.",
     );
     expect(asked.question).toMatchObject({ direction: "next", day: "Tuesday", at: "6 am" });
 
@@ -7498,14 +7500,16 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     const same = expandCommand(clear("2026-10-12", ["Line 2"]), ndCtx({ assignments: three }));
     if (same.ok) throw new Error("expected the question");
     expect(same.question).toMatchObject({ others: 2, at: "10 pm", hours: null });
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(same.question)).toBe(
-      "Priya Shah and 2 others started their night shift Sunday at 10 pm. Clear Sunday's part too?",
+      "Priya Shah and 2 others started their night shift Sunday at 10 pm. Clear Sunday's part too? Say cancel to stop.",
     );
     const differ = [three[0], three[1], { ...three[2], startMin: w(0, 1260) }];
     const mixed = expandCommand(clear("2026-10-12", ["Line 2"]), ndCtx({ assignments: differ }));
     if (mixed.ok) throw new Error("expected the question");
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(mixed.question)).toBe(
-      "Priya Shah and 2 others started their night shift Sunday. Clear Sunday's part too?",
+      "Priya Shah and 2 others started their night shift Sunday. Clear Sunday's part too? Say cancel to stop.",
     );
     // The other direction's several-people wording.
     const outs = [
@@ -7514,8 +7518,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     ];
     const next = expandCommand(clear("2026-10-12", ["Line 2"]), ndCtx({ assignments: outs }));
     if (next.ok) throw new Error("expected the question");
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(next.question)).toBe(
-      "Maria Lopez and 1 other have night shifts running into Tuesday until 6 am. Clear Tuesday's part too?",
+      "Maria Lopez and 1 other have night shifts running into Tuesday until 6 am. Clear Tuesday's part too? Say cancel to stop.",
     );
     // One answer covers all three.
     const ctx = ndCtx({ assignments: three });
@@ -7552,8 +7557,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
       first: { kind: "job", product: "Housing A", cell: "Cell 4" },
       others: 0,
     });
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(asked.question)).toBe(
-      "The Housing A job on Cell 4 started Sunday at 10 pm. Clear Sunday's part too?",
+      "The Housing A job on Cell 4 started Sunday at 10 pm. Clear Sunday's part too? Say cancel to stop.",
     );
     const no = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: "keep" });
     if (!no.ok || no.command.intent !== "several") throw new Error("expected the job alone");
@@ -7567,8 +7573,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     // The other direction, a crewless job running into Tuesday.
     const out = expandCommand(clear("2026-10-12"), ndCtx({ runs: [run2] }));
     if (out.ok) throw new Error("expected the question");
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(out.question)).toBe(
-      "The Housing A job on Cell 4 runs into Tuesday until 6 am. Clear Tuesday's part too?",
+      "The Housing A job on Cell 4 runs into Tuesday until 6 am. Clear Tuesday's part too? Say cancel to stop.",
     );
   });
 
@@ -7582,8 +7589,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     if (asked.ok) throw new Error("expected the question");
     // Only Priya's part goes on a Yes -- Ahmed is not named, and the job's
     // own 8 pm start does not muddle her hours.
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(asked.question)).toBe(
-      "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight?",
+      "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight? Say cancel to stop.",
     );
     for (const answer of ["keep", "clear"] as const) {
       const res = expandCommand(clear("2026-10-12"), ctx, { previousDayPart: answer });
@@ -8106,8 +8114,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     // Clear Sunday: Saturday's part is asked about.
     const sun = expandCommand(clear("2026-03-08"), mCtx);
     if (sun.ok) throw new Error("expected the question");
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(sun.question)).toBe(
-      "Priya Shah's night shift started Saturday at 10 pm. Clear Saturday's part too, 10 pm to midnight?",
+      "Priya Shah's night shift started Saturday at 10 pm. Clear Saturday's part too, 10 pm to midnight? Say cancel to stop.",
     );
     const sunNo = expandCommand(clear("2026-03-08"), mCtx, { previousDayPart: "keep" });
     holdsInvariant(sunNo, mCtx);
@@ -8125,8 +8134,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     // Clear Saturday: Sunday's part is asked about, and kept from Sunday's own midnight.
     const sat = expandCommand(clear("2026-03-07"), mCtx);
     if (sat.ok) throw new Error("expected the question");
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(sat.question)).toBe(
-      "Priya Shah's night shift runs into Sunday. Clear Sunday's part too, midnight to 6 am?",
+      "Priya Shah's night shift runs into Sunday. Clear Sunday's part too, midnight to 6 am? Say cancel to stop.",
     );
     const satNo = expandCommand(clear("2026-03-07"), mCtx, { nextDayPart: "keep" });
     if (!satNo.ok) throw new Error("expected a lot");
@@ -8178,8 +8188,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     });
     const asked = expandCommand(clear("2026-03-28"), bCtx);
     if (asked.ok) throw new Error("expected the question");
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(asked.question)).toBe(
-      "Maria Lopez's night shift runs into Sunday. Clear Sunday's part too, midnight to 6 am?",
+      "Maria Lopez's night shift runs into Sunday. Clear Sunday's part too, midnight to 6 am? Say cancel to stop.",
     );
     const no = expandCommand(clear("2026-03-28"), bCtx, { nextDayPart: "keep" });
     holdsInvariant(no, bCtx);
@@ -8329,8 +8340,9 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     const ctx = ndCtx({ assignments: [priyaNight], absenceRecordable: new Set(["priya"]) });
     const asked = expandCommand(absence("Priya Shah is off today"), ctx);
     if (asked.ok) throw new Error("expected the question");
+    // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
     expect(describeQuestion(asked.question)).toBe(
-      "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight?",
+      "Priya Shah's night shift started Sunday at 10 pm. Clear Sunday's part too, 10 pm to midnight? Say cancel to stop.",
     );
     const yes = expandCommand(absence("Priya Shah is off today"), ctx, {
       previousDayPart: "clear",

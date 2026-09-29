@@ -217,7 +217,9 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       say: `clear Cell 5 ${dates.day}`,
       answer: "no",
       note: "R-461: a whole-day clear of a cell whose one block crosses the NEXT midnight asks first; No keeps the other day's part (a trim, not a delete) -- the DB read after asserts the block's new range starts that day's midnight, proving the OTHER day's part (10 pm to midnight) was cleared and this one survived, not the reverse.",
-      expect: /^Priya Shah's night shift runs into \w+\. Clear \w+'s part too, midnight to 6 am\?$/,
+      // R-461 as amended (29 Sept): the question ends "Say cancel to stop."
+      expect:
+        /^Priya Shah's night shift runs into \w+\. Clear \w+'s part too, midnight to 6 am\? Say cancel to stop\.$/,
     },
 
     // 1d. Setup: Maria's own Shift 3 block on Cell 6 -- the symmetric case,
@@ -236,7 +238,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       answer: "yes",
       note: "R-461's other answer: Yes clears the other day's part too, so the whole crossing block is removed rather than trimmed -- the DB read after asserts no row at all remains for it.",
       expect:
-        /^Maria Lopez's night shift runs into \w+\. Clear \w+'s part too, midnight to 6 am\?$/,
+        /^Maria Lopez's night shift runs into \w+\. Clear \w+'s part too, midnight to 6 am\? Say cancel to stop\.$/,
     },
 
     // 2. Assign with a part -- an ordinary single sentence, runs on its own

@@ -6692,6 +6692,18 @@ function describeQuestionRaw(q: Question): string {
  *  by board order and the count of the rest, hours left out when they
  *  differ; a job with no crew named as the job. */
 function describeOtherDayPart(q: Extract<Question, { kind: "other_day_part" }>): string {
+  // R-461 as amended (the maintainer, 29 Sept): every form of the question
+  // says how to stop the whole clear -- at THIS question "no" is an answer
+  // (keep the other day's part and go on), where everywhere else in the bar
+  // "no" cancels. Added here, once, so the thread, the trace and every
+  // re-ask carry the same sentence.
+  return `${otherDayPartAsk(q)} ${OTHER_DAY_PART_STOP}`;
+}
+
+/** R-461 (29 Sept): the sentence every night shift question ends with. */
+export const OTHER_DAY_PART_STOP = "Say cancel to stop.";
+
+function otherDayPartAsk(q: Extract<Question, { kind: "other_day_part" }>): string {
   const rest = q.others === 1 ? "1 other" : `${q.others} others`;
   const ask = `Clear ${q.day}'s part too`;
   const tail = q.others === 0 && q.hours !== null ? `${ask}, ${q.hours}?` : `${ask}?`;

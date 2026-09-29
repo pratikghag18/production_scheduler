@@ -2827,8 +2827,9 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.keyDown(input, { key: "Enter" });
     return { input, fetchMock };
   }
+  // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
   const MID2_QUESTION =
-    "John Kim's night shift started Wednesday at 2 am. Clear Wednesday's part too, 2 am to midnight?";
+    "John Kim's night shift started Wednesday at 2 am. Clear Wednesday's part too, 2 am to midnight? Say cancel to stop.";
 
   it("CB-mid-2: clear Cell 1 today over John Kim's block from yesterday asks first, Yes and No the same group; No keeps Wednesday's part", () => {
     const { fetchMock } = renderMid2();
@@ -8882,10 +8883,12 @@ describe("CB-night: R-461's two questions in the bar (S194-D)", () => {
     endMin: w(4, 360), // Fri 06:00
     label: "22:00–06:00",
   };
+  // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
   const Q_PREV =
-    "Sam Patel's night shift started Wednesday at 10 pm. Clear Wednesday's part too, 10 pm to midnight?";
+    "Sam Patel's night shift started Wednesday at 10 pm. Clear Wednesday's part too, 10 pm to midnight? Say cancel to stop.";
+  // CONTRACT CHANGED (R-461 amended 29 Sept): the question now ends "Say cancel to stop."
   const Q_NEXT =
-    "Sam Ortiz's night shift runs into Friday. Clear Friday's part too, midnight to 6 am?";
+    "Sam Ortiz's night shift runs into Friday. Clear Friday's part too, midnight to 6 am? Say cancel to stop.";
 
   it("CB-night-1: one sentence, both questions in order -- Yes pressed, 'no' typed (an answer here, never the cancel) -- ONE trace entry holding both asks and both answers", async () => {
     const fetchMock = stubFetch();
@@ -8949,6 +8952,95 @@ describe("CB-night: R-461's two questions in the bar (S194-D)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(threadText()).toContain("Cancelled");
     expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+  });
+
+  // R-461 as amended (the maintainer, 29 Sept): every night shift question
+  // ends "Say cancel to stop.", and a cancel -- typed, or Escape -- at EITHER
+  // question drops the whole sentence and writes nothing. The trace entry
+  // holds the questions asked, the answers given before the cancel, and the
+  // cancel itself.
+  it("CB-night-5: 'cancel' at the FIRST question -- nothing written; the trace holds the question and the cancel", () => {
+    const fetchMock = stubFetch();
+    const { input, onUnassign, onRunLot } = renderBar({ assignments: [SAM_INTO, ORTIZ_OUT] });
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe(Q_PREV);
+    fireEvent.change(input, { target: { value: "cancel" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(threadText()).toContain("Cancelled");
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(onRunLot).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toBe(Q_PREV);
+    expect(entry.answered).toBe("cancel");
+    expect(entry.outcome).toBe("cancelled");
+  });
+
+  it("CB-night-6: 'cancel' at the SECOND question, after Yes to the first -- the whole sentence drops, nothing written; the trace holds both questions, the Yes and the cancel", () => {
+    const fetchMock = stubFetch();
+    const { input, onUnassign, onRunLot } = renderBar({ assignments: [SAM_INTO, ORTIZ_OUT] });
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(statusText()).toBe(Q_NEXT);
+    fireEvent.change(input, { target: { value: "cancel" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(threadText()).toContain("Cancelled");
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Do all/ })).toBeNull();
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(onRunLot).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked?.split("\n")).toEqual([Q_PREV, Q_NEXT]);
+    expect(entry.answered).toBe("Yes\ncancel");
+    expect(entry.outcome).toBe("cancelled");
+  });
+
+  it("CB-night-7: Escape at the FIRST question drops the sentence, nothing written; the trace says escape", () => {
+    const fetchMock = stubFetch();
+    const { input, onUnassign, onRunLot } = renderBar({ assignments: [SAM_INTO, ORTIZ_OUT] });
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe(Q_PREV);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(onRunLot).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toBe(Q_PREV);
+    expect(entry.answered).toBe("escape");
+  });
+
+  it("CB-night-8: Escape at the SECOND question, after No to the first -- the whole sentence drops, nothing written; the trace keeps the No before the escape", () => {
+    const fetchMock = stubFetch();
+    const { input, onUnassign, onRunLot } = renderBar({ assignments: [SAM_INTO, ORTIZ_OUT] });
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "No" }));
+    expect(statusText()).toBe(Q_NEXT);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Do all/ })).toBeNull();
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(onRunLot).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked?.split("\n")).toEqual([Q_PREV, Q_NEXT]);
+    expect(entry.answered).toBe("No\nescape");
+  });
+
+  // CONTRACT CHANGED (R-461 amended 29 Sept): the re-ask was "Say yes or
+  // no."; it now names the way out as the question itself does. Only a
+  // confirm word that is not a yes ("remove it", "move it") reaches this
+  // re-ask -- any other text is read as a new sentence, as at every question.
+  it("CB-night-9: a confirm word that is not a yes re-asks, naming the way out", () => {
+    const { input, onUnassign } = renderBar({ assignments: [SAM_INTO] });
+    fireEvent.change(input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "remove it" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Say yes or no, or cancel to stop.");
+    expect(screen.getByRole("button", { name: "Yes" })).toBeTruthy();
+    expect(onUnassign).not.toHaveBeenCalled();
   });
 
   it("CB-night-4 (R-455): the answers already given survive the board moving and the sentence re-running -- the question is not asked again", () => {

@@ -4214,7 +4214,8 @@ export function CommandBar({
         cancelStanding(value);
         return;
       }
-      setStatus({ ...status, message: "Say yes or no." });
+      // R-461 (29 Sept): the re-ask agrees with the question's own ending.
+      setStatus({ ...status, message: "Say yes or no, or cancel to stop." });
       return;
     }
     if (isConfirmCandidate || isCancel) {
@@ -4778,7 +4779,11 @@ export function CommandBar({
         // fixes -- the question's own `asked` was written when it was
         // shown, but nothing ever closed the entry (a pick would have, via
         // `runCommand`'s own readout; Escape never ran that).
-        if (traceRef.current) traceRef.current.answered = "escape";
+        // R-461 as amended (29 Sept): through `setAnswered`, so an Escape at
+        // the second night shift question keeps the first question's answer
+        // ("Yes\nescape") -- identical to the plain write when nothing is
+        // carried.
+        if (traceRef.current) setAnswered(traceRef.current, "escape");
         finishTrace();
         setStatus(null);
       } else if (text !== "") {
