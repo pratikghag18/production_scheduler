@@ -8,13 +8,15 @@ import {
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Run, AbsenceRecord, Skill, BoardOperator, BoardNode } from "@/lib/api";
+import type { Run, AbsenceRecord, Skill, BoardOperator, BoardNode, BoardWindow } from "@/lib/api";
 import { useDragGesture, type UseDragGestureArgs } from "@/features/board/hooks/useDragGesture";
 import { useToastStore } from "@/features/board/hooks/useSchedulerToast";
 import { absenceKeys } from "@/features/board/hooks/useAbsences";
+import { boardKeys } from "@/features/board/hooks/useBoardWindow";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "@/features/board/lib/boardIndex";
 import { DENSITIES } from "@/features/board/lib/geometry";
 import { buildDayAxis } from "@/features/board/lib/time";
+import { isPlaceholderId } from "@/features/board/lib/optimisticId";
 import type { ResolvedAny, LotResult } from "@/features/board/components/CommandBar";
 import type { ResolvedLotStep } from "@/lib/command/resolve";
 
@@ -162,6 +164,50 @@ function buildIndex(crew: IndexedAssignment[]): BoardIndex {
     // — none of these cases opens a create popover, and an empty map is the
     // state `policyForNode` reads the company scalar above for.
     eligibilityPolicyByNode: new Map(),
+  };
+}
+
+/**
+ * F-233 (S194-G): a minimal, valid `BoardWindow` -- everything a real
+ * payload carries, mostly empty, just enough for `useCreateAssignment`'s/
+ * `useCreateRun`'s own `onMutate` to find a `previous` board to add its
+ * optimistic row onto (`snapshotBoard` reads exactly this shape off the
+ * query cache). Seeded directly via `client.setQueryData`, never fetched --
+ * these tests drive the mutation hooks' own optimistic-update path, not a
+ * network layer.
+ */
+function boardWindowFixture(): BoardWindow {
+  return {
+    org: { id: "org-1", name: "Org", settings: null },
+    levels: [],
+    nodes: [],
+    runs: [],
+    assignments: [],
+    operators: [],
+    products: [],
+    skills: [],
+    nodeSkillRequirements: [],
+    shiftTemplates: [],
+    nodeShiftMap: [],
+    cycleTimes: [],
+    nodePolicies: [],
+    canPlace: true,
+    dateFormat: "d_mon_yyyy",
+    timezone: "UTC",
+    commandBar: "voice",
+    me: null,
+  };
+}
+
+/** F-233: `wrapper`'s own twin, taking an EXTERNALLY built `QueryClient` so
+ *  a test can seed its cache (`boardWindowFixture`, above) before the hook
+ *  ever mounts and read it back afterward -- `wrapper` builds its own
+ *  client internally and hands no test a handle to it, which is fine for
+ *  every OTHER case here (none needs to seed or re-read the cache) but not
+ *  for these. */
+function wrapperWithClient(client: QueryClient) {
+  return function ({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children);
   };
 }
 
@@ -2531,6 +2577,295 @@ describe("useDragGesture", () => {
         vi.mocked(api.setAbsence).mock.invocationCallOrder[0],
       ];
       expect(order).toEqual([...order].sort((a, b) => a - b));
+    });
+  });
+
+  /**
+   * F-233 (S194-G): the fault, reproduced. `createAssignment`/`createRun`
+   * are held back (a deferred promise, resolved only when the test says
+   * so) -- while held, the optimistic row `onMutate` adds to the query
+   * cache carries a placeholder id (`optimisticId.ts`), and a drag started
+   * on THAT row (the second door -- a person grabbing the chip they just
+   * placed, or dropped, before the server has answered) must do nothing at
+   * all: no `activeDrag`, no popover, no writer ever called with that id.
+   * `commandBar.test.tsx`'s own F-233 block proves the OTHER half -- a
+   * sentence held while unsettled reruns and writes once the real row
+   * lands -- since that half is `CommandBar.tsx`'s own `runCommand`, not
+   * anything this hook does; no existing harness combines both at once
+   * (BoardPage's real ctx-building, CommandBar's submit pipeline and these
+   * real, React-Query-backed mutation hooks together), so this file proves
+   * ITS half and that file proves the other, rather than a single giant
+   * fixture standing in for `BoardPage` that nothing else here needs.
+   */
+  describe("F-233: a row the server has not answered for yet is never sent to it", () => {
+    it("a held-back assignment create carries a placeholder id, and a drag started on it does nothing", async () => {
+      const api = await import("@/lib/api");
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      const key = boardKeys.window(
+        "plant_1",
+        WINDOW_START,
+        new Date(WINDOW_START.getTime() + WINDOW_MINUTES * 60_000),
+      );
+      client.setQueryData(key, boardWindowFixture());
+
+      // D61: `submitCreateDirect` probes capacity before it ever calls
+      // `createAssignment` -- a plain `vi.fn()` with no implementation
+      // returns `undefined`, not a promise, so this must resolve "fits"
+      // for the create to reach the mutation this test actually holds back.
+      vi.mocked(api.probeCapacity).mockResolvedValue({
+        fits: true,
+        cap: 1,
+        peak: 0.5,
+        overlapping: [],
+      } as unknown as Awaited<ReturnType<typeof api.probeCapacity>>);
+
+      let resolveCreate!: (v: unknown) => void;
+      vi.mocked(api.createAssignment).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveCreate = resolve as (v: unknown) => void;
+          }),
+      );
+
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), {
+        wrapper: wrapperWithClient(client),
+      });
+
+      // `onMutate` is async (it awaits `cancelQueries` first), so its own
+      // `setQueryData` lands a microtask after `mutate` returns -- an
+      // async `act` flushes that before this reads the cache back.
+      await act(async () => {
+        void result.current.submitCreateDirect(
+          "cell-1",
+          { startMin: 360, endMin: 420 },
+          "op-1",
+          { kind: "direct", productId: "prod-1" },
+          100,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          false,
+          undefined,
+          { x: 0, y: 0 },
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // The optimistic row is in the cache, and its id is a placeholder --
+      // `onMutate` (useAssignmentMutations.ts) built it with
+      // `makePlaceholderId()`.
+      const cached = client.getQueryData<BoardWindow>(key);
+      expect(cached?.assignments).toHaveLength(1);
+      const placeholderId = cached!.assignments[0].id;
+      expect(isPlaceholderId(placeholderId)).toBe(true);
+
+      // The second door: grab that exact row with the pointer. A fresh
+      // IndexedAssignment carrying the SAME id (the shape a re-rendered
+      // board would draw it with) -- `beginBlockDrag` must refuse it.
+      const placeholderAssignment: IndexedAssignment = { ...crewFixture(), id: placeholderId };
+      const drag2 = renderHook(
+        () => useDragGesture(baseArgs(buildIndex([placeholderAssignment]))),
+        { wrapper: wrapperWithClient(client) },
+      );
+      act(() => {
+        drag2.result.current.beginBlockDrag(
+          {
+            nodeId: "cell-1",
+            subject: { kind: "assignment", assignment: placeholderAssignment, homeRun: null },
+            original: {
+              startMin: placeholderAssignment.startMin,
+              endMin: placeholderAssignment.endMin,
+            },
+            pxPerHour: 100,
+            windowMinutes: WINDOW_MINUTES,
+            template: null,
+            dayCount: 1,
+            dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
+            zoomIndex: 1,
+            handlePx: 8,
+            blockWidthPx: 200,
+            offsetXPx: 100,
+            runsOnNode: [runFixture],
+            crew: [],
+          },
+          fakePointerEvent(500, 300),
+        );
+      });
+      expect(drag2.result.current.activeDrag).toBe(null);
+      expect(drag2.result.current.popover).toBe(null);
+      act(() => {
+        drag2.result.current.updateBlockDrag(fakePointerEvent(560, 300));
+        drag2.result.current.endBlockDrag(fakePointerEvent(560, 300));
+      });
+      expect(drag2.result.current.popover).toBe(null);
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+      expect(api.deleteAssignment).not.toHaveBeenCalled();
+
+      // Let the create land -- the mutation settles; nothing above ever
+      // sent the placeholder id anywhere. F-233, third pass (S194-G3):
+      // `submitCreateDirect` now reads the real row's own id off this
+      // resolved value (`result.assignment.id`) to answer the bar's write
+      // outcome with it -- a bare `{}` would throw reading `.id` of
+      // `undefined`.
+      await act(async () => {
+        resolveCreate({ assignment: { id: "created-assignment-1" } });
+      });
+      await waitFor(() => expect(api.createAssignment).toHaveBeenCalledTimes(1));
+      expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+      expect(api.deleteAssignment).not.toHaveBeenCalled();
+    });
+
+    it("the same for a job: a held-back run create carries a placeholder id, and a drag started on it does nothing", async () => {
+      const api = await import("@/lib/api");
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      const key = boardKeys.window(
+        "plant_1",
+        WINDOW_START,
+        new Date(WINDOW_START.getTime() + WINDOW_MINUTES * 60_000),
+      );
+      client.setQueryData(key, boardWindowFixture());
+
+      let resolveCreate!: (v: unknown) => void;
+      vi.mocked(api.createRun).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveCreate = resolve as (v: unknown) => void;
+          }),
+      );
+
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), {
+        wrapper: wrapperWithClient(client),
+      });
+
+      // 700-960, not 360-960: `buildIndex` always seats `runFixture`
+      // (360-600) on "cell-1" regardless of the `crew` argument -- this
+      // window starts after it ends, so the overlap check this hook runs
+      // before ever calling `createRun` does not refuse the create.
+      await act(async () => {
+        void result.current.submitCreateRun(
+          "cell-1",
+          { startMin: 700, endMin: 960 },
+          "prod-run",
+          undefined,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const cached = client.getQueryData<BoardWindow>(key);
+      expect(cached?.runs).toHaveLength(1);
+      const placeholderId = cached!.runs[0].id;
+      expect(isPlaceholderId(placeholderId)).toBe(true);
+
+      const placeholderRun: IndexedRun = { ...runFixture, id: placeholderId };
+      const indexWithPlaceholderRun: BoardIndex = {
+        ...buildIndex([]),
+        runById: new Map([[placeholderId, placeholderRun]]),
+        runsByNode: new Map([["cell-1", [placeholderRun]]]),
+      };
+      const drag2 = renderHook(() => useDragGesture(baseArgs(indexWithPlaceholderRun)), {
+        wrapper: wrapperWithClient(client),
+      });
+      act(() => {
+        drag2.result.current.beginBlockDrag(
+          {
+            nodeId: "cell-1",
+            subject: { kind: "run", run: placeholderRun },
+            original: { startMin: placeholderRun.startMin, endMin: placeholderRun.endMin },
+            pxPerHour: 100,
+            windowMinutes: WINDOW_MINUTES,
+            template: null,
+            dayCount: 1,
+            dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
+            zoomIndex: 1,
+            handlePx: 8,
+            blockWidthPx: 200,
+            offsetXPx: 100,
+            runsOnNode: [placeholderRun],
+            crew: [],
+          },
+          fakePointerEvent(500, 300),
+        );
+      });
+      expect(drag2.result.current.activeDrag).toBe(null);
+      expect(drag2.result.current.popover).toBe(null);
+      expect(api.updateRunFields).not.toHaveBeenCalled();
+      expect(api.deleteRun).not.toHaveBeenCalled();
+
+      // F-233, third pass (S194-G3): `submitCreateRun` now reads the real
+      // row's own id off this resolved value (`result.run.id`) -- see the
+      // assignment case's own identical comment above.
+      await act(async () => {
+        resolveCreate({ run: { id: "created-run-1" } });
+      });
+      await waitFor(() => expect(api.createRun).toHaveBeenCalledTimes(1));
+      expect(api.updateRunFields).not.toHaveBeenCalled();
+      expect(api.deleteRun).not.toHaveBeenCalled();
+    });
+
+    /**
+     * S194-G3, proving item 2: `submitCreateDirect` answers the SERVER's OWN
+     * id, read off `create_assignment`'s own resolved `assignment.id` --
+     * never a placeholder, never invented -- so `CommandBar.tsx`'s own
+     * `awaitingRowIdRef` waits for the id the ROW ACTUALLY HAS. Mutation-tested:
+     * `return { kind: "written", id: result.assignment.id }` changed to a
+     * literal/wrong id (`useDragGesture.ts`) turns this red.
+     */
+    it("submitCreateDirect answers the server's own real id, not a placeholder", async () => {
+      const api = await import("@/lib/api");
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      const key = boardKeys.window(
+        "plant_1",
+        WINDOW_START,
+        new Date(WINDOW_START.getTime() + WINDOW_MINUTES * 60_000),
+      );
+      client.setQueryData(key, boardWindowFixture());
+      vi.mocked(api.probeCapacity).mockResolvedValue({
+        fits: true,
+        cap: 1,
+        peak: 0.5,
+        overlapping: [],
+      } as unknown as Awaited<ReturnType<typeof api.probeCapacity>>);
+      vi.mocked(api.createAssignment).mockResolvedValue({
+        assignment: { ...crewFixture(), id: "server-assigned-id-42" },
+        eligibility: { eligible: true, policy: "warn", missingSkills: [], expiringSkills: [] },
+        absence: { absent: false, from: null, to: null, reason: null },
+      });
+
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), {
+        wrapper: wrapperWithClient(client),
+      });
+
+      let verdict: { kind: "written"; id: string } | "handed-off" | undefined;
+      await act(async () => {
+        verdict = await result.current.submitCreateDirect(
+          "cell-1",
+          { startMin: 360, endMin: 420 },
+          "op-1",
+          { kind: "direct", productId: "prod-1" },
+          100,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          false,
+          undefined,
+          { x: 0, y: 0 },
+        );
+      });
+
+      expect(verdict).toEqual({ kind: "written", id: "server-assigned-id-42" });
     });
   });
 });

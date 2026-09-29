@@ -376,7 +376,13 @@ function normalizeWord(value: string): string {
  * `undefined` is a defect to fix, never a success to assume.
  */
 export type WriteOutcome =
-  | { kind: "written" }
+  | {
+      kind: "written";
+      /** F-233, third pass (S194-G3): the real id of the row this write
+       *  created, when it created one -- see `PopupResult`'s own identical
+       *  field (`commandConversation.ts`) for why this replaced a count. */
+      id?: string;
+    }
   | { kind: "refused"; message: string }
   | { kind: "popup"; waitingFor: string };
 
@@ -413,6 +419,21 @@ export interface CommandBarProps {
    * only ever moves forward to a real `ResolveContext`.
    */
   ctx: ResolveContext | null;
+  /**
+   * F-233 (S194-G): true while any row in the window is still a
+   * placeholder -- its own create (`useCreateAssignment`/
+   * `useApplySplitCoverage`/`useCreateRun`) not yet replaced by the real
+   * row (`optimisticId.ts`). Deliberately NOT part of `ctx`/
+   * `ResolveContext`: `ctx.settled` already has an established, narrower
+   * meaning (CB-showday-12 pins it: gates the "Show that day" rerun only,
+   * never an ordinary new sentence) that this must not widen. A sentence
+   * submitted while this is true is held and rerun once it turns false,
+   * within a bound (`runCommand`'s own gate, below) -- never true unless
+   * `BoardPage`'s own index actually holds a placeholder row, so it never
+   * delays a sentence for an unrelated reason (a plain background refetch
+   * leaves this `false`).
+   */
+  hasPendingCreate: boolean;
   dateFormat: DateFormat;
   /** `index.zone` — D88a: the plant's own zone, never optional in spirit. */
   zone: string;
@@ -870,6 +891,29 @@ const NON_ANSWER_SENTINELS = new Set(["auto", "escape"]);
  *  than hanging silently -- see `armPendingRerun`'s own doc. */
 const PENDING_RERUN_TIMEOUT_MS = 15000;
 
+/**
+ * F-233, second pass (S194-G2): how long the FIRST sentence held while a
+ * write is still settling waits before the bar gives up and refuses --
+ * "on a slow connection the window is seconds wide" (the fault's own
+ * words), so this is generous over an ordinary round trip without hanging
+ * the bar as long as a whole new window's own fetch is allowed to
+ * (`PENDING_RERUN_TIMEOUT_MS`). Starts when the FIRST sentence is held
+ * (`armHoldBound`) and is NEVER restarted by a later hold or a later
+ * create -- the bound is about how long the PERSON has been waiting, not
+ * about the latest write. Past it, the bar does not guess: it refuses in
+ * plain words (`HOLD_BOUND_MESSAGE`) rather than resolve a sentence
+ * against a board that may still be missing what it is about.
+ */
+const HOLD_BOUND_MS = 5000;
+
+/**
+ * F-233, second pass: the exact words past the bound (the main session's
+ * own choice, to be shown to the maintainer -- built exactly, never
+ * reworded). Read by both the live status and the trace/thread entry each
+ * dropped held sentence closes with, so the two can never drift apart.
+ */
+const HOLD_BOUND_MESSAGE = "The board is still saving your last change. Say it again in a moment.";
+
 /** S194-D (R-430): how many of the caller's own people or parts a dead-end
  *  person/part question offers -- the resolver's own cap for a place or part
  *  list (`offeredSuggestions`/`trackCellSuggestions`, resolve.ts: eight). */
@@ -1071,11 +1115,22 @@ function rewriteRefusal(message: string): string {
   if (ABSENCE_OVERLAP_REFUSAL.test(message)) {
     return "An absence is already recorded on some of those days.";
   }
+  // F-233 (S194-G): `describeSchedulerError`'s own catch-all for an
+  // `Unknown`-kind error (errors.ts) -- an unexpected server refusal a lot
+  // step hits (the placeholder-id race this lane fixes was one; any other
+  // unclassified error is another). Named by its own `attempted` already
+  // (`buildLotOutcome`'s "Not done: <attempted>. <reason>"), so the reason
+  // only needs to say THIS ONE step went wrong, never repeat the generic
+  // "try again" a person cannot act on mid-lot.
+  if (message === "Something went wrong. Please try again.") {
+    return "Something went wrong with that one.";
+  }
   return message;
 }
 
 export function CommandBar({
   ctx,
+  hasPendingCreate,
   dateFormat,
   zone,
   onOpen,
@@ -1195,6 +1250,114 @@ export function CommandBar({
   // see `armPendingRerun`/`clearPendingRerun` below, near the effect that
   // consumes it.
   const pendingRerunTimeoutRef = useRef<number | null>(null);
+  /**
+   * F-233, second pass (S194-G2, finding 2): sentences held because a write
+   * was still settling when they were submitted -- a QUEUE now, run in the
+   * order they were said, each to its own outcome, each with its own trace
+   * entry (`entry`, detached from `traceRef` the instant it is held --
+   * `fileOpenTurn` below posts it into the thread right away, and a later
+   * `startTrace` for the NEXT sentence must not re-finish it a second time).
+   * The single-slot ref this replaced (`pendingUnsettledRef`) dropped every
+   * held sentence but the last; this is a plain array for exactly the
+   * reason a store field is not needed for it (see the old comment's own
+   * reasoning, still true): the wait is at most a few seconds, never
+   * something that needs to survive this component remounting.
+   */
+  const heldQueueRef = useRef<
+    {
+      command: Command;
+      suffix: string | undefined;
+      options: ResolveOptions | undefined;
+      entry: TraceEntry;
+      // F-233, second pass, review fix: true once a LATER sentence's own
+      // `startTrace` -> `finishTrace()` has already flushed this entry into
+      // the thread the ordinary way (F-162's existing supersede rule) --
+      // set the moment `holdSentence` sees it happen (only the queue's
+      // previous LAST item can ever be the one superseded, since nothing
+      // else touches `store.trace` while sentences are held). `drainHeldQueue`
+      // reads it to tell `commandConversation.ts` this entry is already
+      // filed before letting it resolve again, so the SAME row is patched
+      // (`fileTurn`'s "already filed" branch) instead of appended a second
+      // time. The item that has NEVER been superseded (ordinarily the
+      // queue's own last one, at push time) stays `false`: it has no row
+      // yet, so its own first resolution is correctly a fresh append.
+      filed: boolean;
+    }[]
+  >([]);
+  /**
+   * F-233, second pass (finding 1): the bar's OWN count of writes it has
+   * itself called and not yet seen reflected on the board -- the exact
+   * signal the brief asks for, in place of the cache-derived
+   * `hasPendingCreate` prop (kept only as a fallback for a drag/pop-up's own
+   * write, which the bar never calls itself). `inFlight` is up the instant a
+   * writer prop is called (before any await -- see every call site below)
+   * and down the instant its own outcome is KNOWN (written/refused,
+   * synchronously or via its promise); at that same moment `awaitingCtx`
+   * goes up, and it is only cleared by the `[ctx]` effect below actually
+   * observing a NEW `ctx` -- "at least until the writer's promise settles
+   * AND the refetch it triggers has landed" (the brief's own words), never
+   * just the first half.
+   */
+  const barWritesInFlightRef = useRef(0);
+  const barWritesAwaitingCtxRef = useRef(0);
+  /** F-233, second pass, review fix: the `ctx` reference the `[ctx,
+   *  hasPendingCreate]` effect below last cleared `barWritesAwaitingCtxRef`
+   *  for -- see that effect's own comment for the race this closes (a
+   *  `hasPendingCreate`-only render clearing the wait against a STALE
+   *  `ctx`). `null` at mount is never mistaken for "already drained": the
+   *  effect only compares against a NON-null `ctx`. */
+  const lastDrainedCtxRef = useRef<ResolveContext | null>(null);
+  /**
+   * F-233, third pass (S194-G3): THE COUNT PROXY IS GONE. `awaitingRowCountRef`
+   * (the second pass's own fix: wait until `ctx.assignments.length`/
+   * `ctx.runs.length` had grown past a snapshot taken at dispatch) broke the
+   * app on the real walk -- every sentence after a create was held the full
+   * five seconds and refused, even minutes later, even once the row was
+   * confirmed in the database. Two real bugs, not one: (1) `dropHeldQueue`
+   * (the bound's own refusal) reset `barWritesInFlightRef`/
+   * `barWritesAwaitingCtxRef` back to zero but never cleared
+   * `awaitingRowCountRef` itself -- once the FIRST create's own wait timed
+   * out, that stale snapshot stayed armed and silently gated every LATER
+   * write's own "has ctx caught up" check for the rest of the session,
+   * whether or not that later write had anything to do with a create at
+   * all. (2) even freshly taken, a count is not the row: the FIRST render
+   * after a create's own refetch lands can already include OTHER rows this
+   * component never asked about (another person's own placement, a
+   * background sync, anything else changing in the same window) that move
+   * the count without the AWAITED row's own presence being what moved it,
+   * and conversely a `ctx` that legitimately drops a DIFFERENT row in the
+   * very same refetch can hold a count at or below the snapshot even though
+   * the awaited row is right there. Proven by mutation in this pass's own
+   * report; not repaired here on the maintainer's own instruction --
+   * replaced.
+   *
+   * The brief's own exact mechanism: the writers now answer the REAL id of
+   * the row they made (`WriteOutcome`/`PopupResult`'s own `id` field), and
+   * this ref remembers which one, and which collection (`ctx.assignments`
+   * or `ctx.runs`), the bar is waiting to see. `null` means either nothing
+   * is held for a create's own reason, or the create's own row can never
+   * legitimately appear in `ctx` at all (see `dayIsInCtxWindow` below) --
+   * either way an ordinary write's own wait (a genuinely new `ctx`,
+   * `lastDrainedCtxRef`'s own check, no id needed) is all that applies.
+   */
+  const awaitingRowIdRef = useRef<{ collection: "assignments" | "runs"; id: string } | null>(null);
+  /**
+   * F-233, third pass: which collection a create in flight would land in,
+   * set the instant the writer is called (before its own outcome is known)
+   * so `settleWrite`'s `apply`/`popupReporterFor`'s own returned function --
+   * neither of which otherwise knows whether the entry it is closing was a
+   * create at all -- can tell `awaitingRowIdRef` which array the id it is
+   * eventually handed belongs to. `null` for every write that is not a
+   * create (unassign, move, retime, headcount) and for a create whose own
+   * target day this render's `ctx` does not cover (`dayIsInCtxWindow`),
+   * since neither ever has an id worth waiting for.
+   */
+  const pendingCreateCollectionRef = useRef<"assignments" | "runs" | null>(null);
+  /** F-233, second pass: the hold's own five-second bound
+   *  (`HOLD_BOUND_MS`) -- armed once, by the FIRST sentence held while the
+   *  queue is empty, and never re-armed by a later hold (the brief: "a
+   *  later create does not restart it"). */
+  const holdBoundTimeoutRef = useRef<number | null>(null);
   // S44-b: the in-flight reading's own abort controller (null when nothing
   // is pending) and a sequence number bumped by every Enter, Escape and edit
   // so a reading that settles after a newer one has started is discarded
@@ -1270,6 +1433,286 @@ export function CommandBar({
   // produce, but this file does not get to assume that) never crashes and
   // never loses track of the board it was last actually shown.
   const lastCtxRef = useRef<ResolveContext | null>(ctx);
+  // F-233 (S194-G): mirrors the `hasPendingCreate` prop into a ref for the
+  // same reason `lastCtxRef` exists -- `runCommand`'s own retry (below) is
+  // scheduled by a `setTimeout` that may fire many renders later, and a
+  // plain captured variable in that closure would read whatever this prop
+  // was AT SCHEDULING TIME, not the current one. Assigned every render
+  // (not inside an effect): a ref mirror needs no effect, only to always
+  // hold the latest value by the time anything reads `.current`.
+  const hasPendingCreateRef = useRef(hasPendingCreate);
+  hasPendingCreateRef.current = hasPendingCreate;
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
+
+  /**
+   * F-233, third pass (item 4, "a row outside the board's window"): a
+   * create whose own target range falls entirely within the days `ctx`
+   * currently covers CAN appear in `ctx.assignments`/`ctx.runs` once the
+   * refetch lands; one that does not (a copy to another week, a repeat over
+   * next week -- R-455 moves the board for an ordinary single sentence
+   * naming an off-board day BEFORE it ever resolves, so this is mostly a
+   * safety net rather than the everyday case) never will, and arming an
+   * id-wait for it would hold every later sentence for the full five
+   * seconds, always, for a write that actually succeeded -- the same fault
+   * this pass exists to fix, wearing a different hat. `range` is in minutes
+   * from `ctx.windowStart`, the same units `buildCreateAssignmentInput`
+   * already sends the server; the window's own span is `ctx.days.length`
+   * full days.
+   */
+  function dayIsInCtxWindow(
+    range: { startMin: number; endMin: number },
+    activeCtx: ResolveContext,
+  ): boolean {
+    const windowMinutes = activeCtx.days.length * 1440;
+    return range.startMin >= 0 && range.endMin <= windowMinutes;
+  }
+
+  /**
+   * F-233, second pass: true while a sentence submitted right now would be
+   * resolved against a board that may not yet reflect a write already
+   * asked for -- the bar's own writes (`barWritesInFlightRef`/
+   * `barWritesAwaitingCtxRef`) OR the cache-derived fallback
+   * (`hasPendingCreateRef`, a drag/pop-up's own create). `runCommandBody`'s
+   * own hold gate and `drainHeldQueue`'s own loop both read this, and only
+   * this -- never `ctx.settled`.
+   */
+  function writesStillSettling(): boolean {
+    return (
+      barWritesInFlightRef.current > 0 ||
+      barWritesAwaitingCtxRef.current > 0 ||
+      hasPendingCreateRef.current
+    );
+  }
+
+  /** F-233, second pass: a writer's own outcome is now known (written or
+   *  refused -- never called for "popup", which is not an ending). Moves
+   *  the count from "in flight" to "awaiting ctx": the write happened, but
+   *  nothing may safely be said to have caught up with it until the `[ctx]`
+   *  effect below actually observes a fresh `ctx`. */
+  function barWriteSettled(): void {
+    barWritesInFlightRef.current = Math.max(0, barWritesInFlightRef.current - 1);
+    barWritesAwaitingCtxRef.current += 1;
+    // F-233, fourth pass, THE CAUSE AS SEEN IN A BROWSER (29 Sept). Every
+    // mutation the board makes keeps its promise open until the refetch after
+    // it has landed, so by the time a writer answers, the board has usually
+    // ALREADY been handed the `ctx` that holds the result: the `[ctx]` effect
+    // below ran first, found nothing to wait for, and no further `ctx` ever
+    // comes. Waiting for "the next new ctx" then waits for something that has
+    // already happened, until the bound refuses the sentence -- which is what
+    // the second and third passes did after every create. So the question
+    // "has the board caught up?" is asked of the `ctx` the bar holds NOW, one
+    // macrotask on (so a render already scheduled has committed, and so the
+    // caller, which arms `awaitingRowIdRef` right after this returns, has done
+    // so), and asked again by the effect on every later `ctx`.
+    window.setTimeout(checkCaughtUp, 0);
+  }
+
+  /** Has the board the bar holds now caught up with the bar's own last write?
+   *  For a create, when it holds the row the server answered with, by id. For
+   *  any other write, as soon as the writer has answered, because its promise
+   *  does not settle before the refetch has landed. */
+  function checkCaughtUp(): void {
+    if (barWritesAwaitingCtxRef.current === 0) {
+      drainHeldQueue();
+      return;
+    }
+    const need = awaitingRowIdRef.current;
+    const held = ctxRef.current;
+    const rowLanded =
+      need === null ||
+      (held !== null &&
+        (need.collection === "assignments"
+          ? held.assignments.some((a) => a.id === need.id)
+          : held.runs.some((r) => r.id === need.id)));
+    if (rowLanded) {
+      awaitingRowIdRef.current = null;
+      barWritesAwaitingCtxRef.current = 0;
+    }
+    drainHeldQueue();
+  }
+
+  /** F-233, second pass: a writer's own outcome resolved to nothing having
+   *  been asked of the server at all (a pop-up closed without writing) --
+   *  there is nothing new for `ctx` to catch up WITH, so this drops the
+   *  count outright rather than moving it to "awaiting ctx". */
+  function barWriteAbandoned(): void {
+    barWritesInFlightRef.current = Math.max(0, barWritesInFlightRef.current - 1);
+  }
+
+  /**
+   * F-233, second pass (finding 4): while a sentence is held, the bar shows
+   * the SAME status a write already in flight shows -- "Working…", never a
+   * new word -- and the entry is posted AT ONCE, DEF-0049's own shape (post
+   * at the ask, correct at the outcome) -- the SAME call
+   * `traceQuestionStatus`'s own "question" branch already makes,
+   * `postTrace(entry)`, to the dev trace file, not the thread.
+   *
+   * Review fix: this used to also call `fileOpenTurn` (filing a "Waiting: …"
+   * row into the THREAD right away) and null `traceRef.current`. Two bugs
+   * came from that: (1) `fileOpenTurn` marks the store's own single
+   * `filedTurnAt` slot -- a SECOND held sentence stole it from the first,
+   * so the first's row could never be patched again (`fileTurn`'s own
+   * "already filed" check only matches the LAST one marked) and drained
+   * either stale or duplicated; (2) nulling `traceRef.current` threw away
+   * "this is still the open turn", so a held sentence that resolved to a
+   * QUESTION (not a terminal write) after draining rendered as a second,
+   * separate live bubble next to the stale filed row instead of the one
+   * turn continuing.
+   *
+   * Left alone (`traceRef.current` untouched, still this entry), a held
+   * sentence is filed into the thread the SAME way an ordinary, un-held
+   * question already is when something supersedes it before it is
+   * answered (F-162): the NEXT sentence's own `startTrace` -> `finishTrace()`
+   * flushes it with a plain `appendTurn`, no special marker needed. Its
+   * real outcome, once known, then corrects that SAME row through
+   * `settleTurn`'s existing "superseded" branch (an `at`-matched
+   * `updateTurn`, not `filedTurnAt` at all). `drainHeldQueue` marks `filed`
+   * on the record above so it can tell `commandConversation.ts` this one
+   * needs that same "already filed" treatment on the way back in, since
+   * restoring it as `traceRef.current` there would otherwise look "still
+   * current" (never filed) to `settleTurn` all over again.
+   */
+  function holdSentence(
+    command: Command,
+    suffix: string | undefined,
+    options: ResolveOptions | undefined,
+  ): void {
+    const entry = traceRef.current;
+    if (entry) {
+      entry.outcome = "popup: the board to finish saving your last change";
+      postTrace(entry);
+      const queue = heldQueueRef.current;
+      // This sentence's own `startTrace` (called by `submitText` just
+      // before `runCommand` reached this hold gate) already flushed
+      // whatever was `store.trace` a moment ago -- the queue's previous
+      // last item, if there is one.
+      if (queue.length > 0) queue[queue.length - 1].filed = true;
+      queue.push({ command, suffix, options, entry, filed: false });
+    }
+    setStatus({ kind: "reading", message: "Working…" });
+    armHoldBound();
+  }
+
+  /** F-233, second pass: the hold's own bound -- armed once, by the first
+   *  sentence held while nothing else is already waiting; a later hold
+   *  never restarts it (the brief's own words). */
+  function armHoldBound(): void {
+    if (holdBoundTimeoutRef.current !== null) return;
+    holdBoundTimeoutRef.current = window.setTimeout(() => {
+      holdBoundTimeoutRef.current = null;
+      dropHeldQueue();
+    }, HOLD_BOUND_MS);
+  }
+
+  function clearHoldBound(): void {
+    if (holdBoundTimeoutRef.current !== null) {
+      window.clearTimeout(holdBoundTimeoutRef.current);
+      holdBoundTimeoutRef.current = null;
+    }
+  }
+
+  /**
+   * F-233, second pass ("Past the bound"): every sentence still held past
+   * the five-second bound is refused with the SAME plain sentence,
+   * `HOLD_BOUND_MESSAGE` -- never resolved against a board that may still
+   * be missing what it is about. Each one's own trace entry is closed with
+   * that reason; the live status shows it too, once, for the last one (the
+   * person's own most recent wait).
+   *
+   * F-233, third pass (S194-G3): THE LEAK THAT BROKE THE REAL APP.
+   * `awaitingRowIdRef`/`pendingCreateCollectionRef` were never reset here in
+   * the second pass -- once the FIRST create's own wait timed out (this
+   * function ran), its stale id stayed armed and silently gated the `[ctx,
+   * hasPendingCreate]` effect's own "has the board caught up" check for
+   * every write after it, for the rest of the session, whether or not that
+   * later write had anything to do with a create at all. That is why the
+   * real walk took over four minutes where it takes thirty seconds: not one
+   * sentence held, every sentence after the first create held, each for the
+   * full five seconds. Cleared here now, the same as the write counters
+   * just above.
+   */
+  function dropHeldQueue(): void {
+    const held = heldQueueRef.current;
+    heldQueueRef.current = [];
+    barWritesInFlightRef.current = 0;
+    barWritesAwaitingCtxRef.current = 0;
+    pendingCreateCollectionRef.current = null;
+    awaitingRowIdRef.current = null;
+    for (const h of held) {
+      h.entry.outcome = `refused: ${HOLD_BOUND_MESSAGE}`;
+      settleTurn(store, h.entry);
+    }
+    if (held.length > 0) {
+      setStatus({ kind: "shape", message: HOLD_BOUND_MESSAGE });
+    }
+  }
+
+  /**
+   * F-233, second pass (finding 3): Escape, or a typed cancel word, while
+   * one or more sentences are held -- every one of them is dropped, write
+   * nothing, each closed with `outcome: "cancelled"` (the same word every
+   * other cancel in this file uses, `cancelStanding`'s own). UNLIKE
+   * `dropHeldQueue` (the bound's own refusal), the write counters are left
+   * alone: the ORIGINAL write the hold was waiting on is not itself
+   * cancelled by this -- only the sentences said while it was still
+   * settling are. Returns whether anything was actually dropped, so the
+   * caller (Escape, a cancel word) can decide whether it still owes the
+   * rest of its own usual handling.
+   */
+  function dropHeldQueueAsCancelled(answeredWith: string): boolean {
+    const held = heldQueueRef.current;
+    heldQueueRef.current = [];
+    clearHoldBound();
+    for (const h of held) {
+      setAnswered(h.entry, answeredWith);
+      h.entry.outcome = "cancelled";
+      settleTurn(store, h.entry);
+    }
+    return held.length > 0;
+  }
+
+  /**
+   * F-233, second pass (finding 2): drains the queue in order, one
+   * sentence at a time, stopping the instant a write is settling again
+   * (the sentence just drained started one of its own) OR a question/lot
+   * is standing (F-162's existing rule: a sentence typed while one stands
+   * is not a new sentence to resolve -- the ones still queued wait for a
+   * person to answer or cancel it, exactly as they would if they had been
+   * typed just now instead of held).
+   *
+   * Review fix: the standing check reads `status?.kind === "question"`
+   * (the SAME predicate the rest of this file already uses for F-162, see
+   * `handleKeyDown`/`submitText`'s own reads of it) rather than a blanket
+   * `status === null`. Finding 4 has `holdSentence` set `status` to its own
+   * "Working…" (`kind: "reading"`) for as long as something is held -- a
+   * plain `=== null` check would read THAT as if it were a standing
+   * question too, and nothing ever drains: the hold's own status would be
+   * mistaken forever for the very thing draining is supposed to replace.
+   */
+  function drainHeldQueue(): void {
+    while (
+      heldQueueRef.current.length > 0 &&
+      !writesStillSettling() &&
+      store.getState().status?.kind !== "question" &&
+      lotRef.current === null
+    ) {
+      const held = heldQueueRef.current.shift()!;
+      traceRef.current = held.entry;
+      // See `holdSentence`'s own doc: an item already flushed into the
+      // thread (every one except an un-superseded last) needs
+      // `filedTurnAt` set so its real outcome PATCHES that same row
+      // instead of a second `appendTurn` for the same `at`. `fileTurn`
+      // clears this itself once it reads it, so nothing here undoes it
+      // for the next item.
+      if (held.filed) store.getState().set({ filedTurnAt: held.entry.at });
+      runCommand(held.command, held.suffix, held.options);
+    }
+    // F-233, second pass: the bound is about a SENTENCE sitting in the
+    // queue, not about whatever write happens to be pending right now --
+    // once nothing is held, there is nothing left for it to be timing.
+    if (heldQueueRef.current.length === 0) clearHoldBound();
+  }
 
   /** S59-e (R-421): the sentence's life ends here -- posts whatever the
    *  entry holds and clears it. F-163 moved the post itself into the
@@ -1612,8 +2055,64 @@ export function CommandBar({
       clearPendingRerun();
       runCommand(command, undefined, options);
     }
+    // F-233, second pass (S194-G2): a NEW `ctx` is exactly "the board caught
+    // up with itself" -- `barWritesAwaitingCtxRef`'s own wait ends here,
+    // whatever write it was for (the bar's own, or the cache-derived
+    // fallback's), and the held queue gets a chance to drain. No
+    // `isTargetOnBoard` check: this was never about a day/place target,
+    // only about a pending write catching up with itself.
+    //
+    // Review fix, found by the reviewer's own reproduction ("Cell 1 has
+    // nobody on it" over a block just placed) surviving the first version of
+    // this fix: this effect's own dependency array is `[ctx, hasPendingCreate]`
+    // -- `hasPendingCreate` can flip false on a render where `ctx` ITSELF is
+    // still the SAME, stale, pre-write reference (`pendingCreateCount`, the
+    // module-level store `optimisticId.ts` keeps, is its own subscription,
+    // `useSyncExternalStore`, entirely separate from the query the board's
+    // own `ctx` is built from -- the two can notify React on different
+    // ticks). The old code cleared `barWritesAwaitingCtxRef` unconditionally
+    // whenever EITHER dependency changed, using whatever `ctx` this render
+    // happened to carry -- so a `hasPendingCreate`-only render could clear
+    // the wait a render early, before `ctx` had actually caught up, exactly
+    // the gap the held "clear Cell 1" fell into. `lastDrainedCtxRef` remembers
+    // which `ctx` reference this effect has already drained against; the
+    // wait is only considered over when `ctx` is a GENUINELY NEW one this
+    // effect has not yet seen -- a `hasPendingCreate`-only firing still calls
+    // `drainHeldQueue()` (harmless: its own loop re-checks `writesStillSettling()`
+    // itself), but never clears `barWritesAwaitingCtxRef` on that ctx's account
+    // twice.
+    if (ctx !== null && ctx !== lastDrainedCtxRef.current) {
+      lastDrainedCtxRef.current = ctx;
+      // `awaitingRowIdRef`'s own doc: a create's own wait needs the REAL
+      // row, by id, not merely a `ctx` this effect has not seen before.
+      const need = awaitingRowIdRef.current;
+      const rowLanded =
+        need === null ||
+        (need.collection === "assignments"
+          ? ctx.assignments.some((a) => a.id === need.id)
+          : ctx.runs.some((r) => r.id === need.id));
+      if (rowLanded) {
+        awaitingRowIdRef.current = null;
+        barWritesAwaitingCtxRef.current = 0;
+      }
+    }
+    drainHeldQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx]);
+  }, [ctx, hasPendingCreate]);
+
+  // F-233, second pass: the twin trigger `drainHeldQueue` also needs --
+  // `status` clearing back to `null` is "a standing question or lot just
+  // concluded with nothing further to write" (a cancel, an answered
+  // question with no write, a lot's own settle already cleared it via
+  // `finishTrace`), the one case the `[ctx]` effect above cannot see on its
+  // own (no write means no new `ctx` ever arrives to trigger it). Reads the
+  // reactive `status`, not a ref -- this is a plain "try draining whenever
+  // the standing thing goes away" watch, not a value `runCommand` itself
+  // needs synchronously.
+  useEffect(() => {
+    if (status === null) drainHeldQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   /**
    * F-153: this used to build `new Date(iso + "T00:00:00Z")` and format
@@ -1743,6 +2242,32 @@ export function CommandBar({
         return;
       }
       fired = true;
+      if (result.kind === "written" || result.kind === "refused") {
+        // F-233, second pass: the write this reporter was handed to a
+        // pop-up for has NOW actually settled -- brings the count
+        // `barWritesInFlightRef` took when the writer was first called
+        // (above, `runCommandBody`) down, and starts the "wait for ctx to
+        // catch up" half instead.
+        barWriteSettled();
+        // F-233, third pass: a WRITTEN create with an id is what
+        // `awaitingRowIdRef` waits for; anything else (a refusal, or a
+        // written answer with no id -- `pendingCreateCollectionRef` was
+        // never armed, or the writer genuinely made no row) clears it, so
+        // the plain "a genuinely new ctx" wait every other write already
+        // uses is what applies instead.
+        const collection = pendingCreateCollectionRef.current;
+        pendingCreateCollectionRef.current = null;
+        awaitingRowIdRef.current =
+          result.kind === "written" && collection !== null && result.id !== undefined
+            ? { collection, id: result.id }
+            : null;
+      } else {
+        // "cancelled": the pop-up closed without asking the server
+        // anything -- nothing for `ctx` to catch up WITH.
+        barWriteAbandoned();
+        pendingCreateCollectionRef.current = null;
+        awaitingRowIdRef.current = null;
+      }
       if (entry) {
         if (result.kind === "written") {
           entry.ran.push(result.readout ?? readout);
@@ -1754,6 +2279,7 @@ export function CommandBar({
         }
       }
       if (entry) settleTurn(store, entry);
+      drainHeldQueue();
     };
   }
 
@@ -1794,6 +2320,10 @@ export function CommandBar({
     heldRef.current = null;
     heldOptionsRef.current = {};
     lotRef.current = null;
+    // F-233, second pass (finding 3): a typed cancel word is THE ONE CANCEL
+    // this file has -- drops every sentence still queued behind whatever
+    // this word just cancelled, the same as Escape does.
+    dropHeldQueueAsCancelled(value);
   }
 
   /** F-164: true for anything a writer prop answered with that has to be
@@ -1836,6 +2366,33 @@ export function CommandBar({
   function settleWrite(readout: string, readoutStatus: Status, answer: WriteAnswer): void {
     const entry = traceRef.current;
     const apply = (outcome: WriteOutcome | void): void => {
+      // F-233, second pass (finding 1): the count this writer's own call
+      // took (`runCommandBody`, above) comes back down here -- REGARDLESS
+      // of whether there is a trace entry to record the outcome in, since
+      // the write itself, and the board's own need to catch up with it,
+      // does not depend on that. `WriteOutcome` carries no "cancelled" of
+      // its own (unlike `PopupResult`, `popupReporterFor`'s own union) --
+      // "popup" is the one non-terminal case here (returns early below,
+      // before this would even matter); "written" and "refused" both
+      // settled a real write, so both bring the count down the same way.
+      if (outcome === undefined || outcome.kind !== "popup") {
+        barWriteSettled();
+        // F-233, third pass: only a WRITTEN create with an id keeps
+        // `awaitingRowIdRef` armed -- an undefined answer or a refusal
+        // will never produce a row for `ctx` to hold, so falling back to
+        // the plain "a genuinely new ctx" wait (every other write's own
+        // contract) is what actually lets a held sentence resolve once the
+        // board is simply told the create did not happen (Proving item 3).
+        const collection = pendingCreateCollectionRef.current;
+        pendingCreateCollectionRef.current = null;
+        awaitingRowIdRef.current =
+          outcome !== undefined &&
+          outcome.kind === "written" &&
+          collection !== null &&
+          outcome.id !== undefined
+            ? { collection, id: outcome.id }
+            : null;
+      }
       if (entry) {
         // F-157 item 5, unchanged: a single that ran straight off its own
         // readout was never asked anything and never answered by a word or
@@ -1855,6 +2412,9 @@ export function CommandBar({
           // if it never does, until the page tears down (F-157). The turn is
           // filed into the thread straight away so the person can see it
           // waiting rather than nothing at all.
+          // F-233, second pass: NOT settled either -- `barWritesInFlightRef`
+          // stays up until `popupReporterFor`'s own returned function fires
+          // with a terminal result.
           entry.outcome = `popup: ${outcome.waitingFor}`;
           fileOpenTurn(store);
           return;
@@ -1866,6 +2426,7 @@ export function CommandBar({
         }
       }
       if (entry) settleTurn(store, entry);
+      drainHeldQueue();
     };
     if (isThenable(answer)) {
       answer.then(apply, (err: unknown) =>
@@ -1906,6 +2467,21 @@ export function CommandBar({
       // mounted until its first ctx lands).
       const activeCtx = lastCtxRef.current;
       if (activeCtx === null) return;
+      // F-233, second pass (S194-G2): a write the bar itself asked for (or,
+      // as a fallback, a drag/pop-up's own create) may not be reflected on
+      // the board yet -- a sentence said the instant after placing someone
+      // ("remove Lena") must not resolve against a board that is
+      // momentarily missing the row it is about. Held here, in order,
+      // behind whatever else is already waiting (`holdSentence`/
+      // `heldQueueRef`), and drained once the board catches up
+      // (`drainHeldQueue`, the `[ctx]` effect below) -- bounded
+      // (`HOLD_BOUND_MS`) so a connection slow enough to never settle at
+      // all still gets a plain refusal instead of hanging or answering
+      // wrongly (`dropHeldQueue`).
+      if (writesStillSettling()) {
+        holdSentence(command, suffix, options);
+        return;
+      }
       // DEF-0048 / R-409 (S194-D): THE one place both paths meet -- the rules
       // (`fallbackToRules`/`submitText`) and the model (`applyReading`) both
       // land here. The grammar already marks a typed absence ("Sam Patel is
@@ -1991,28 +2567,54 @@ export function CommandBar({
         // single write's "Written:" line showed "2026-09-03".
         const spoken = renderReadout(resolved.readout);
         const report = popupReporterFor(traceRef.current, spoken);
+        // F-233, second pass (finding 1): up the instant a writer is
+        // called, synchronously, before any of them has a chance to
+        // await anything -- `settleWrite`'s own `apply` (written/refused)
+        // or `popupReporterFor`'s own returned function (a hand-off's own
+        // eventual written/refused/cancelled) is what brings it back down.
+        barWritesInFlightRef.current += 1;
         let answer: WriteAnswer;
         if (resolved.intent === "book") {
           if (resolved.target.kind === "retime_run") {
+            pendingCreateCollectionRef.current = null;
             answer = onRetimeRun(resolved, anchorOfInput(), report);
           } else {
+            // A job/run create -- see `awaitingRowIdRef`'s own doc. Armed
+            // only when the row's own day is inside this `ctx`'s window;
+            // outside it (item 4: a copy to another week, a repeat) the id
+            // could never appear here, and waiting for it would be exactly
+            // today's fault (a five-second refusal for ever) for a write
+            // that actually succeeded.
+            pendingCreateCollectionRef.current = dayIsInCtxWindow(resolved.range, activeCtx)
+              ? "runs"
+              : null;
             answer = onBook(resolved, anchorOfInput(), report);
           }
         } else if (resolved.intent === "unassign") {
+          pendingCreateCollectionRef.current = null;
           answer = onUnassign(resolved, anchorOfInput(), report);
         } else if (resolved.intent === "move") {
           // S41-c: BOTH targets go through onMove -- the caller narrows on
           // `resolved.target.kind` (keep the types honest: never build a
           // ResolvedCommand-shaped call to reach onRetime from here).
+          pendingCreateCollectionRef.current = null;
           answer = onMove(resolved, anchorOfInput(), report);
         } else if (resolved.intent === "headcount") {
           // S58 (R-415, D132 item 4): one existing write, never a create or a
           // re-time -- see `onSetHeadcount`'s own doc above.
+          pendingCreateCollectionRef.current = null;
           answer = onSetHeadcount(resolved, anchorOfInput(), report);
         } else {
           if (resolved.target.kind === "retime") {
+            pendingCreateCollectionRef.current = null;
             answer = onRetime(resolved, anchorOfInput(), report);
           } else {
+            // An assignment create -- see `awaitingRowIdRef`'s own doc, and
+            // `onBook`'s own identical comment just above for the window
+            // check.
+            pendingCreateCollectionRef.current = dayIsInCtxWindow(resolved.range, activeCtx)
+              ? "assignments"
+              : null;
             answer = onOpen(resolved, anchorOfInput(), report);
           }
         }
@@ -2572,6 +3174,11 @@ export function CommandBar({
         setStatus({ kind: "shape", message: lotOutcome });
       }
       finishTrace();
+      // F-233, second pass: the lot's own write (however many of its steps
+      // actually ran) has settled either way -- bring `barWritesInFlightRef`
+      // back down and let the queue try to drain.
+      barWriteSettled();
+      drainHeldQueue();
     };
     // S194-D (lane E's open item): the runner's promise used to have no
     // catch, so a REJECTION (a writer that threw past the runner's own
@@ -2598,6 +3205,10 @@ export function CommandBar({
       reportBarCrash(err, null, "lot");
     };
     let answer: Promise<LotResult>;
+    // F-233, second pass: up the instant `onRunLot` is called, synchronously
+    // -- the lot's own settle/fail (above) or a crash caught below is what
+    // brings it back down; see those for why.
+    barWritesInFlightRef.current += 1;
     try {
       answer = onRunLot(resolved);
     } catch (err) {
@@ -3874,6 +4485,18 @@ export function CommandBar({
     setText("");
     heldRef.current = null;
     heldOptionsRef.current = {};
+    // F-233, second pass: `wrote` non-null means a writer WAS already
+    // called (`runCommandBody`'s own increment, above) before this crash --
+    // and a lot crash (`during === "lot"`) always means `onRunLot` was
+    // called too. Either way the count that call took must come back down
+    // here, or a single crashed write would hold every later sentence for
+    // the rest of the session. Neither case means nothing happened server
+    // side (the message above already says so), so this settles rather
+    // than abandons.
+    if (wrote !== null || during === "lot") {
+      barWriteSettled();
+      drainHeldQueue();
+    }
     console.error("CommandBar: caught while resolving/running a command:", detail, err);
   }
 
@@ -4719,6 +5342,17 @@ export function CommandBar({
       // S59 (R-419): Escape always drops a "Show that day" press's pending
       // rerun, whichever of the branches below actually fires.
       clearPendingRerun();
+      // F-233, second pass (finding 3): checked BEFORE the "a lot writing
+      // in the background" guard just below, on purpose -- a held sentence
+      // has NOT started (it is only queued, waiting its turn), unlike a lot
+      // actually running, which this Escape still leaves alone either way.
+      // The two can stand at once (a lot in flight is itself a write the
+      // bar is waiting on, so a sentence said while it runs is held behind
+      // it) -- dropping the queue here cancels only what has not started.
+      if (dropHeldQueueAsCancelled("escape")) {
+        setStatus(null);
+        return;
+      }
       // S51 review fix: a lot writing in the background cannot be
       // cancelled by Escape either -- not even the launcher's own
       // "nothing left, close the panel" signal (`onEscapeIdle`) fires here,

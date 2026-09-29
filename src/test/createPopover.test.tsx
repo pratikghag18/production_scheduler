@@ -643,10 +643,12 @@ describe("CreatePopover — what it tells the command bar (F-167)", () => {
       presetOperatorId: operator.id,
       onResult: (r) => written.push(r),
     });
-    first.onSubmitDirect.mockResolvedValue("written");
+    // F-233, third pass (S194-G3): `onSubmitDirect` answers the row's own
+    // real id now, not the bare literal "written".
+    first.onSubmitDirect.mockResolvedValue({ kind: "written", id: "new-assignment-1" });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await act(async () => {});
-    expect(written).toEqual([{ kind: "written" }]);
+    expect(written).toEqual([{ kind: "written", id: "new-assignment-1" }]);
     // A close after a successful Create must not turn it into a cancel.
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(written).toHaveLength(1);
@@ -812,8 +814,10 @@ describe("CreatePopover — F-205: no flash while a clean auto-press is pending"
   });
 
   it("CP-flash-6: autoCreate + clean, a click elsewhere on the page during the write's round trip does not cancel it -- onResult reports written exactly once, never cancelled", async () => {
-    let resolveWrite!: (v: "written") => void;
-    const pending = new Promise<"written">((resolve) => {
+    // F-233, third pass (S194-G3): `onSubmitDirect` answers the row's own
+    // real id now, not the bare literal "written".
+    let resolveWrite!: (v: { kind: "written"; id: string }) => void;
+    const pending = new Promise<{ kind: "written"; id: string }>((resolve) => {
       resolveWrite = resolve;
     });
     const onSubmitDirect = vi.fn<OnSubmitDirect>().mockReturnValue(pending);
@@ -836,10 +840,10 @@ describe("CreatePopover — F-205: no flash while a clean auto-press is pending"
     expect(results).toEqual([]);
 
     await act(async () => {
-      resolveWrite("written");
+      resolveWrite({ kind: "written", id: "new-assignment-1" });
     });
 
-    expect(results).toEqual([{ kind: "written" }]);
+    expect(results).toEqual([{ kind: "written", id: "new-assignment-1" }]);
   });
 });
 

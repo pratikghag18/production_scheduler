@@ -274,7 +274,25 @@ export type Status =
  * `CreatePopover` can take the type without importing the bar.
  */
 export type PopupResult =
-  | { kind: "written"; readout?: string }
+  | {
+      kind: "written";
+      readout?: string;
+      /**
+       * F-233, third pass (S194-G3): the real id of the row this write
+       * created, when it created one -- `undefined` for a write that
+       * updates an existing row (a move, a retime, a headcount) rather
+       * than creating a new one. `CommandBar.tsx`'s own hold now waits for
+       * THIS id to appear in `ctx.assignments`/`ctx.runs`, not a count or a
+       * timer -- see `awaitingRowIdRef`'s own doc there for why a count
+       * was wrong (S194-G2's own regression, found on the real app: a
+       * refetch that legitimately lands a DIFFERENT row first, or one
+       * whose day the window does not count the way the snapshot assumed,
+       * moved the count without the actual awaited row ever landing,
+       * holding every sentence after a create for the full five seconds
+       * every time).
+       */
+      id?: string;
+    }
   | { kind: "refused"; message: string }
   | { kind: "cancelled" }
   /**

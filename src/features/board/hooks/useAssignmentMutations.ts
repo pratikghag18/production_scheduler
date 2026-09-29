@@ -17,6 +17,12 @@ import {
   type SplitCoverageInput,
 } from "@/lib/api";
 import { boardKeys } from "./useBoardWindow";
+import {
+  makePlaceholderId,
+  beginPendingCreate,
+  endPendingCreate,
+  withPendingCreateCounting,
+} from "../lib/optimisticId";
 
 type BoardKey = ReturnType<typeof boardKeys.window>;
 
@@ -37,14 +43,16 @@ export function useCreateAssignment(rootPath: string, from: Date, to: Date) {
   const queryClient = useQueryClient();
   const key = boardKeys.window(rootPath, from, to);
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: (input: CreateAssignmentInput) => createAssignment(input),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: key });
       const previous = snapshotBoard(queryClient, key);
       if (previous) {
         const optimistic: Assignment = {
-          id: `optimistic-${crypto.randomUUID()}`,
+          // F-233: the one place this id is built -- `isPlaceholderId`
+          // (optimisticId.ts) is the one place it is checked.
+          id: makePlaceholderId(),
           orgId: previous.org.id,
           nodeId: input.nodeId,
           operatorId: input.operatorId,
@@ -81,17 +89,31 @@ export function useCreateAssignment(rootPath: string, from: Date, to: Date) {
     onError: (_err, _input, context) => {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
+    // F-233, third pass (S194-G3): RETURNED, not merely awaited internally
+    // -- React Query keeps a mutation `isPending` until whatever `onSettled`
+    // itself returns has settled, so returning `invalidateQueries`'s own
+    // promise (chained with `.finally` rather than an `async`/`await` body,
+    // so there is no question of what this function's own returned promise
+    // actually is) is what makes "a create mutation is pending" mean "the
+    // board's own data still holds only the placeholder, never yet the real
+    // row" for the WHOLE life of the write, not just until the server has
+    // answered. `endPendingCreate` (paired with the synchronous
+    // `beginPendingCreate` `withPendingCreateCounting` below puts on
+    // `mutate`/`mutateAsync`) rides the same promise down.
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      return queryClient.invalidateQueries({ queryKey: key }).finally(() => {
+        endPendingCreate();
+      });
     },
   });
+  return withPendingCreateCounting(mutation);
 }
 
 export function useApplySplitCoverage(rootPath: string, from: Date, to: Date) {
   const queryClient = useQueryClient();
   const key = boardKeys.window(rootPath, from, to);
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: (input: SplitCoverageInput) => applySplitCoverage(input),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: key });
@@ -106,7 +128,7 @@ export function useApplySplitCoverage(rootPath: string, from: Date, to: Date) {
         if (input.newAssignment) {
           const na = input.newAssignment;
           const optimistic: Assignment = {
-            id: `optimistic-${crypto.randomUUID()}`,
+            id: makePlaceholderId(),
             orgId: previous.org.id,
             nodeId: na.nodeId,
             operatorId: na.operatorId,
@@ -137,10 +159,33 @@ export function useApplySplitCoverage(rootPath: string, from: Date, to: Date) {
     onError: (_err, _input, context) => {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+    // F-233, third pass (S194-G3): RETURNED -- see `useCreateAssignment`'s
+    // own identical comment above for why. Paired with the conditional
+    // `beginPendingCreate` on `mutate`/`mutateAsync` below -- only a call
+    // whose own `newAssignment` was present counted one up, so this always
+    // counts the same call back down, success or failure alike.
+    onSettled: (_data, _err, input) => {
+      return queryClient.invalidateQueries({ queryKey: key }).finally(() => {
+        if (input.newAssignment) endPendingCreate();
+      });
     },
   });
+  return {
+    ...mutation,
+    // F-233, second pass: ONLY when `newAssignment` is present does this
+    // call add a placeholder row at all (`onMutate` above, `if
+    // (input.newAssignment)`) -- an adjustment-only split (dialling down
+    // existing crew, nothing new) creates no row to wait for, so it must
+    // not hold a later sentence for five seconds over nothing.
+    mutate: (...args: Parameters<typeof mutation.mutate>) => {
+      if (args[0].newAssignment) beginPendingCreate();
+      return mutation.mutate(...args);
+    },
+    mutateAsync: (...args: Parameters<typeof mutation.mutateAsync>) => {
+      if (args[0].newAssignment) beginPendingCreate();
+      return mutation.mutateAsync(...args);
+    },
+  };
 }
 
 export function useUpdateAssignmentFields(rootPath: string, from: Date, to: Date) {
@@ -179,7 +224,9 @@ export function useUpdateAssignmentFields(rootPath: string, from: Date, to: Date
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }
@@ -235,7 +282,9 @@ export function useReassignAssignment(rootPath: string, from: Date, to: Date) {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }
@@ -291,7 +340,9 @@ export function useMoveAssignment(rootPath: string, from: Date, to: Date) {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }
@@ -333,7 +384,9 @@ export function useDeleteAssignment(rootPath: string, from: Date, to: Date) {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }

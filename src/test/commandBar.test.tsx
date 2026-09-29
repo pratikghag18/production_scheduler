@@ -72,6 +72,7 @@ import {
   type ResolvedAny,
   type LotResult,
   type WriteOutcome,
+  type CommandBarProps,
 } from "@/features/board/components/CommandBar";
 import type { Reader, Reading } from "@/lib/voice/readSentence";
 import type { ClipInfo, Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
@@ -374,6 +375,11 @@ function renderBar(
   // initial value directly (a mount with a non-zero count is CL-a/CL-b's
   // own scenario, already pinned end to end in `commandLauncher.test.tsx`).
   s71: { micRequest?: number } = {},
+  // F-233 (S194-G): whether a placeholder row's own create is still in
+  // flight. Defaults to `false` -- every pre-F-233 call site (up to seven
+  // positional arguments) renders exactly as before; the F-233 describe
+  // block below is the only caller that passes `true`.
+  s233: { hasPendingCreate?: boolean } = {},
 ) {
   const onOpen = vi.fn().mockReturnValue(WRITTEN);
   const onRetime = vi.fn().mockReturnValue(WRITTEN);
@@ -394,9 +400,11 @@ function renderBar(
   const element = (
     ctxOver: Partial<ResolveContext> | null,
     micRequest: number = s71.micRequest ?? 0,
+    hasPendingCreate: boolean = s233.hasPendingCreate ?? false,
   ) => (
     <CommandBar
       ctx={ctxOver === null ? null : buildCtx(ctxOver)}
+      hasPendingCreate={hasPendingCreate}
       dateFormat="d_mon_yyyy"
       zone="UTC"
       reader={reader}
@@ -449,6 +457,13 @@ function renderBar(
     // going up exactly as the launcher's `setMicRequest(n => n + 1)` would
     // (CB-mic-11, below).
     rerenderMicRequest: (next: number) => rerender(element(over, next)),
+    // F-233 (S194-G): re-renders against `nextOver` (a fresh `ctx`, the same
+    // shape a placeholder row's own refetch landing would produce) AND a
+    // new `hasPendingCreate` in the SAME render, exactly as `BoardPage`
+    // hands both down from the one `index` change -- CB-pending's own
+    // describe block below is the only caller.
+    rerenderPendingCreate: (nextOver: Partial<ResolveContext> | null, next: boolean) =>
+      rerender(element(nextOver, s71.micRequest ?? 0, next)),
   };
 }
 
@@ -2407,9 +2422,10 @@ function renderXBar(
   const onSetHeadcount = vi.fn().mockReturnValue(WRITTEN);
   const onHighlight = vi.fn();
   const onRunLot = vi.fn(s51.onRunLot ?? (() => new Promise<LotResult>(() => {})));
-  render(
+  const element = (ctxOver: Partial<ResolveContext>) => (
     <CommandBar
-      ctx={buildXCtx(over)}
+      ctx={buildXCtx(ctxOver)}
+      hasPendingCreate={false}
       dateFormat="d_mon_yyyy"
       zone="UTC"
       reader={reader}
@@ -2422,8 +2438,9 @@ function renderXBar(
       onSetHeadcount={onSetHeadcount}
       onRunLot={onRunLot}
       onHighlight={onHighlight}
-    />,
+    />
   );
+  const { rerender } = render(element(over));
   const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
   return {
     onOpen,
@@ -2436,6 +2453,12 @@ function renderXBar(
     onRunLot,
     onHighlight,
     input,
+    // F-233, second pass (S194-G2, review fix): re-renders against a FRESH
+    // `ctx` reference -- the same shape `renderBar`'s own `rerenderCtx`
+    // already has, added here so a caller can simulate "the board caught up
+    // with an earlier write" (Finding 1) between two sentences, which this
+    // helper's own callers now need at least once (CB-y-13).
+    rerenderCtx: (nextOver: Partial<ResolveContext>) => rerender(element(nextOver)),
   };
 }
 
@@ -3513,11 +3536,20 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     expect(input.value).toBe("");
   });
 
+  // F-233, second pass (S194-G2, review fix): CONTRACT CHANGED. The second
+  // "make it 4 people" used to run immediately behind the first, `ctx` never
+  // having changed between the two Enters. Finding 1 now holds a sentence
+  // typed before the board has caught up with the first write's own outcome
+  // -- `rerenderXCtx` (this file's own twin of `renderBar`'s `rerenderCtx`)
+  // simulates that catch-up between them; the point this case was written to
+  // prove (running the SAME sentence twice writes twice, no dedupe) is
+  // otherwise unchanged.
   it("CB-y-13: reviewer scenario 5 -- 'make the Housing A job on Cell 1 4 people' typed and run twice is a plain write both times, no dedupe", () => {
-    const { onSetHeadcount, input } = renderXBar({ runs: [RUN_X] });
+    const { onSetHeadcount, input, rerenderCtx } = renderXBar({ runs: [RUN_X] });
 
     fireEvent.change(input, { target: { value: "make the Housing A job on Cell 1 4 people" } });
     fireEvent.keyDown(input, { key: "Enter" });
+    rerenderCtx({ runs: [RUN_X] });
     fireEvent.change(input, { target: { value: "make the Housing A job on Cell 1 4 people" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -4881,10 +4913,22 @@ describe("CB-mic: the microphone button (S46-a)", () => {
   // "Listening…" renders beside the mic button (CB-mic-2's own contract);
   // the readout/refusal/question line stays exactly where it was until the
   // next answer replaces it.
-  it("CB-mic-20: a readout stands, mic pressed -- the readout is still rendered while Listening… shows beside the button; a fresh final replaces it", () => {
+  // F-233, second pass (S194-G2, review fix): CONTRACT CHANGED. This used to
+  // leave the FIRST `onOpen` call pending forever (`new Promise(() => {})`)
+  // and still expect a fresh spoken final to reach a SECOND `onOpen` call --
+  // exactly the shape Finding 1 now holds: a sentence arriving while an
+  // earlier write's own outcome is not yet known must wait, so it never
+  // resolves against a board that has not caught up. The first write is now
+  // let to settle (its own promise resolved, explicitly, mid-test) and the
+  // board given a fresh `ctx` (`rerenderCtx`, the same shape a real
+  // invalidated refetch produces) before the spoken final is fired -- the
+  // readout-stands-while-Listening… behaviour this test is actually about is
+  // unchanged; only how the SECOND write becomes reachable is different.
+  it("CB-mic-20: a readout stands, mic pressed -- the readout is still rendered while Listening… shows beside the button; a fresh final replaces it", async () => {
     const { recognizer, fire } = makeFakeRecognizer();
-    const { onOpen, input } = renderBar({ runs: [] }, null, recognizer);
-    onOpen.mockReturnValue(new Promise(() => {})); // held pending -- readout stays live
+    const { onOpen, input, rerenderCtx } = renderBar({ runs: [] }, null, recognizer);
+    let resolveFirst: (v: WriteOutcome) => void = () => {};
+    onOpen.mockReturnValueOnce(new Promise<WriteOutcome>((r) => (resolveFirst = r)));
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     const readout = statusText();
@@ -4900,6 +4944,27 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     // there too -- neither replaces the other.
     expect(screen.getByText("Listening…")).toBeTruthy();
     expect(statusText()).toBe(readout);
+
+    // The first write settles, and the board catches up with it -- only
+    // THEN may a second sentence (the spoken final below) reach a writer.
+    // Review fix: `rerenderCtx({ runs: [] })` alone is no longer enough --
+    // finding 1's count-based wait (`awaitingRowCountRef`, `CommandBar.tsx`)
+    // needs the board to show ONE MORE assignment than it did when the
+    // create was dispatched, the same as a real invalidated refetch would.
+    // A block at a time P1_SENTENCE's OWN second submission does not also
+    // target (its own 10-to-2 slot is what this create is FOR): the
+    // just-landed row, never the second sentence's own collision.
+    const CREATED_BLOCK: ContextAssignment = {
+      ...BLK1,
+      id: "created1",
+      startMin: 3 * 1440 + 60,
+      endMin: 3 * 1440 + 120,
+    };
+    await act(async () => {
+      resolveFirst({ kind: "written" });
+      await Promise.resolve();
+    });
+    rerenderCtx({ runs: [], assignments: [CREATED_BLOCK] });
 
     // The next answer (a spoken final) replaces it, same as it always did.
     fire.final(P1_SENTENCE);
@@ -5650,6 +5715,817 @@ describe("CB-showday: Show that day (S59, R-419)", () => {
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * F-233 (S194-G): the fix, at the level that actually matters -- a sentence
+ * submitted while `hasPendingCreate` is true (a placeholder row's own
+ * create still in flight) is held, resolves NOTHING yet (no question, no
+ * write), and reruns the instant `hasPendingCreate` turns false, landing on
+ * whatever the ctx says then. Deliberately a DIFFERENT prop from
+ * `ctx.settled` -- CB-showday-12 just above pins that `settled` must never
+ * gate an ordinary sentence; this describe block is the proof that
+ * `hasPendingCreate` is not the same flag reused, but its own, read only by
+ * this new wait.
+ */
+describe("F-233: a sentence held while a placeholder row's own create is in flight", () => {
+  it("a removal said while hasPendingCreate is true asks nothing yet, and reruns once it turns false", () => {
+    const { input, onUnassign, rerenderPendingCreate } = renderBar(
+      { assignments: [BLK1] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      { hasPendingCreate: true },
+    );
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Held: no question stands, nothing was written.
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+    expect(onUnassign).not.toHaveBeenCalled();
+
+    // The placeholder resolves -- `BoardPage` would rebuild `index`/`ctx`
+    // and flip `hasPendingCreate` to `false` in the same render; this
+    // simulates exactly that (the SAME `ctx` shape, `hasPendingCreate` the
+    // only thing that changed).
+    rerenderPendingCreate({ assignments: [BLK1] }, false);
+
+    // The held sentence has now run: the question it should always have
+    // asked stands.
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+    const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
+    expect(resolved.assignmentId).toBe("blk1");
+  });
+
+  it("a sentence submitted while hasPendingCreate is false (the ordinary case) is never held", () => {
+    const { input, onOpen } = renderBar(
+      {},
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      { hasPendingCreate: false },
+    );
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * F-233, second pass (S194-G2): docs/agent-briefs/s194-g2-the-hold-brief.md.
+ * The reviewer's own repro -- the bar answering "Cell 1 has nobody on it"
+ * over a block just placed -- traced to `hasPendingCreate` being derived
+ * PURELY from the query cache (`hasPendingPlaceholder`), which has a real
+ * gap on each side of a create's own life: before `onMutate`'s awaited
+ * `cancelQueries` has written the placeholder, and after the write settles
+ * but before the invalidated refetch has landed. This describe block proves
+ * the fix at the unit level; `e2e/typedWalk.spec.ts`'s own throttled spec
+ * proves it end to end, ten times at two different delays (the brief's own
+ * proving step).
+ */
+describe("F-233, second pass: the bar's own write count, not just the cache", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Finding 1 (the cause): a plain, synchronous write dispatched by the bar
+  // itself sets `barWritesInFlightRef` up BEFORE any await -- so a second
+  // sentence submitted in the same tick a write is dispatched, well before
+  // any cache-derived signal could ever see it, is still held. This is the
+  // gap the cache-only signal (S194-G, first pass) could not close: nothing
+  // about `hasPendingPlaceholder` changes until `onMutate` itself has run,
+  // which for a REAL mutation is always at least one microtask away.
+  it("holds a second sentence submitted in the SAME tick as the first write, before any cache signal could exist", () => {
+    // An empty board (`runs: []`, unchanged by either write -- these mocks
+    // do not actually mutate `ctx`): P1_SENTENCE writes straight through
+    // (C2's own ctx, above) and, said again against the SAME still-empty
+    // slot, would write straight through a second time too -- UNLESS it is
+    // held.
+    const { input, onOpen } = renderBar({ runs: [] });
+    act(() => {
+      fireEvent.change(input, { target: { value: P1_SENTENCE } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    // This file's own default writer mocks answer SYNCHRONOUSLY
+    // (`mockReturnValue(WRITTEN)`, not a Promise) -- so by the time control
+    // returns here, P1's own write has already run AND settled in the same
+    // tick, and `barWritesInFlightRef` has already moved on to
+    // `barWritesAwaitingCtxRef` (`barWriteSettled`, `CommandBar.tsx`),
+    // which `writesStillSettling()` counts exactly the same as "in flight".
+    // A sentence said right now is still held -- the board has not been
+    // handed a fresh `ctx` reflecting this write yet.
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // Held, not a second write: the count stays at one.
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  // Proving item 3: "a create that fails while a sentence is held (the
+  // sentence then runs against the board without the row, which is now the
+  // truth)". A refused create never grows `ctx`'s own counts -- the review
+  // fix (`popupReporterFor`, `CommandBar.tsx`) drops `awaitingRowCountRef`'s
+  // own count-based wait for a refusal, falling back to the plain "a
+  // genuinely new ctx" wait every other write already uses, so the held
+  // sentence still drains once the board is simply told the create did not
+  // happen -- never stuck waiting forever for a row that is never coming.
+  it("a create that fails while a sentence is held: the held sentence still runs, against a board without the row", () => {
+    const CREATE_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 6 to 8";
+    const { input, onOpen, onUnassign, rerenderCtx } = renderBar({ assignments: [BLK1] });
+    let capturedReport: ((result: { kind: "refused"; message: string }) => void) | null = null;
+    onOpen.mockImplementationOnce((..._args: unknown[]): { kind: "popup"; waitingFor: string } => {
+      capturedReport = _args[2] as (result: { kind: "refused"; message: string }) => void;
+      return { kind: "popup", waitingFor: "the create pop-up" };
+    });
+
+    fireEvent.change(input, { target: { value: CREATE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+
+    // The create pop-up REFUSES -- nothing was written, and never will be.
+    act(() => {
+      capturedReport?.({ kind: "refused", message: "Something went wrong." });
+    });
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+
+    // The board catches up with the REFUSAL (still just BLK1 -- no row
+    // landed, correctly, since none was ever written). A genuinely new
+    // `ctx` reference is enough now: the held sentence is not stuck waiting
+    // for a row that will never come.
+    rerenderCtx({ assignments: [BLK1] });
+
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Proving item 1/4 (the id-based check itself, `awaitingRowIdRef`,
+   * `CommandBar.tsx`): S194-G3 REPLACED the count proxy entirely (found
+   * broken on the real app: `awaitingRowCountRef`'s own count moved for the
+   * wrong reasons, and worse, `dropHeldQueue` never cleared it, leaking a
+   * stale wait into every write after the first create for the rest of the
+   * session). This test used to prove a COUNT that grew was enough; it now
+   * proves the exact THING the brief asked for -- a `ctx` that is a
+   * genuinely new reference (passes `lastDrainedCtxRef`'s own check) and
+   * even shows ONE MORE assignment than before (a count-based check would
+   * have released the hold right here) but NOT the specific row the create
+   * actually answered with its own id must still not release it; only a
+   * later `ctx` that actually contains THAT id does. Mutation-tested:
+   * comparing by count instead of id (`CommandBar.tsx`) turns this red.
+   */
+  it("a genuinely NEW ctx with a grown count but not the answered id does not release the hold", () => {
+    const { input, onOpen, onUnassign, rerenderCtx } = renderBar({ assignments: [BLK1] });
+    let capturedReport: ((result: { kind: "written"; id?: string }) => void) | null = null;
+    onOpen.mockImplementationOnce((..._args: unknown[]): { kind: "popup"; waitingFor: string } => {
+      capturedReport = _args[2] as (result: { kind: "written"; id?: string }) => void;
+      return { kind: "popup", waitingFor: "the create pop-up" };
+    });
+    const CREATE_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 6 to 8";
+
+    fireEvent.change(input, { target: { value: CREATE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+
+    act(() => {
+      capturedReport?.({ kind: "written", id: "created-assignment-1" });
+    });
+
+    // A brand new `ctx` reference, with a DIFFERENT, unrelated row added
+    // (Sam Patel's own, at a time that does not collide) -- the count grew
+    // by one, exactly what the old proxy would have accepted, but the id
+    // this create actually answered with is not among them: someone else's
+    // row landed in the same refetch, not this one's.
+    const UNRELATED: ContextAssignment = { ...BLK1, id: "unrelated-row", operatorId: "sp" };
+    rerenderCtx({ assignments: [BLK1, UNRELATED] });
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+    expect(onUnassign).not.toHaveBeenCalled();
+
+    // A LATER ctx that actually contains the answered id releases it.
+    const LANDED: ContextAssignment = { ...BLK1, id: "created-assignment-1", operatorId: "lin" };
+    rerenderCtx({ assignments: [BLK1, UNRELATED, LANDED] });
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+  });
+
+  // Finding 4: the trace entry is posted the instant a sentence is held
+  // (DEF-0049's own shape, `postTrace`'s own doc, commandConversation.ts) --
+  // not only once it finally resolves.
+  it("posts the held sentence's own entry at once, saying it was heard and held", () => {
+    const fetchMock = stubFetch();
+    const { input } = renderBar(
+      { assignments: [BLK1] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      { hasPendingCreate: true },
+    );
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = postedEntry(fetchMock);
+    expect(entry.heard).toBe(UNASSIGN_SENTENCE);
+    expect(entry.outcome).toBe("popup: the board to finish saving your last change");
+  });
+
+  // Finding 4, the teardown half: a page closed while a sentence is held
+  // must not leave an entry with no outcome at all -- `flushTraceOnTeardown`
+  // (F-157) reads whatever `postTrace` above already wrote into the entry.
+  it("a page closed during the hold flushes an entry saying held, not one with no outcome", () => {
+    const fetchMock = stubFetch();
+    const { input, unmount } = renderBar(
+      { assignments: [BLK1] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      { hasPendingCreate: true },
+    );
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fetchMock.mockClear();
+
+    unmount();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("popup: the board to finish saving your last change");
+    expect(entry.heard).toBe(UNASSIGN_SENTENCE);
+  });
+
+  // Finding 2: a QUEUE, not a single slot -- three sentences held in a row
+  // all run, in the order they were heard, each to its own writer, none
+  // dropped for a later one.
+  it("keeps THREE held sentences and runs each in its own turn, in order, as the board catches up one write at a time", () => {
+    // A SECOND assign, 6am-8am -- P1_SENTENCE's own slot (10 to 2) is
+    // BLK1's own, so a straight write needs a time that does not collide
+    // with the block UNASSIGN/MOVE both need present.
+    const P1_OFF_HOURS_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 6 to 8";
+    const { input, onUnassign, onOpen, onMove, rerenderPendingCreate } = renderBar(
+      { assignments: [BLK1] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      { hasPendingCreate: true },
+    );
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: P1_OFF_HOURS_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onMove).not.toHaveBeenCalled();
+
+    // The board catches up once -- only the FIRST (UNASSIGN, a question)
+    // drains; a standing question stops the queue (F-162, unchanged), so
+    // the other two are still waiting.
+    rerenderPendingCreate({ assignments: [BLK1] }, false);
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onMove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+
+    // The board catches up a second time (this write's own settle) -- P1
+    // (a write straight through) drains next.
+    rerenderPendingCreate({ assignments: [BLK1] }, false);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onMove).not.toHaveBeenCalled();
+
+    // A third catch-up drains MOVE, the last one. Review fix: P1's own
+    // create needs the board to show ONE MORE assignment than it did when
+    // it was dispatched (`awaitingRowCountRef`, `CommandBar.tsx`) -- BLK1
+    // stays (MOVE still needs it, uniquely -- the created row uses a
+    // DIFFERENT operator, "sp", so it never becomes a second candidate for
+    // "Operator 1's block on Cell 1").
+    const P1_CREATED_BLOCK: ContextAssignment = {
+      ...BLK1,
+      id: "p1created",
+      operatorId: "sp",
+      startMin: 3 * 1440 + 360,
+      endMin: 3 * 1440 + 480,
+    };
+    rerenderPendingCreate({ assignments: [BLK1, P1_CREATED_BLOCK] }, false);
+    expect(onMove).toHaveBeenCalledTimes(1);
+
+    expect(onUnassign.mock.invocationCallOrder[0]).toBeLessThan(onOpen.mock.invocationCallOrder[0]);
+    expect(onOpen.mock.invocationCallOrder[0]).toBeLessThan(onMove.mock.invocationCallOrder[0]);
+  });
+
+  // Finding 3: Escape drops EVERY held sentence, not just the most recent
+  // one -- none of the three below ever reaches its own writer.
+  it("Escape drops every sentence in a multi-item queue, not only the last one held", () => {
+    const { input, onUnassign, onOpen, onMove, rerenderPendingCreate } = renderBar(
+      { assignments: [BLK1] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      { hasPendingCreate: true },
+    );
+
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    rerenderPendingCreate({ assignments: [BLK1] }, false);
+
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onMove).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+  });
+
+  // A typed "yes"/"no" while something is held and nothing is standing is
+  // NOT an answer to anything -- CB-yes-8's own existing rule -- and does
+  // NOT drop the held sentence (only Escape/a cancel word do, finding 3).
+  it("a typed 'no' while a sentence is held answers nothing and does not drop the hold", () => {
+    const { input, onUnassign, rerenderPendingCreate } = renderBar(
+      { assignments: [BLK1] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      { hasPendingCreate: true },
+    );
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.change(input, { target: { value: "no" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    rerenderPendingCreate({ assignments: [BLK1] }, false);
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(onUnassign).toHaveBeenCalledTimes(1);
+  });
+
+  // Past the bound: a sentence still held five seconds after the FIRST one
+  // was held is refused with the exact sentence the brief gives, never
+  // resolved against a board that may still be missing what it is about.
+  it("past the five-second bound, every held sentence is refused with the exact sentence, never resolved", () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = stubFetch();
+      const { input, onUnassign, onOpen } = renderBar(
+        { assignments: [BLK1] },
+        null,
+        null,
+        {},
+        {},
+        {},
+        {},
+        { hasPendingCreate: true },
+      );
+      act(() => {
+        fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+      act(() => {
+        fireEvent.change(input, { target: { value: P1_SENTENCE } });
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(onUnassign).not.toHaveBeenCalled();
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(
+        threadText().includes(
+          "The board is still saving your last change. Say it again in a moment.",
+        ) ||
+          (document.querySelector('[class*="statusLine"]')?.textContent ?? "").includes(
+            "The board is still saving your last change. Say it again in a moment.",
+          ),
+      ).toBe(true);
+      const entries = fetchMock.mock.calls.map((call) => {
+        const [, init] = call as [string, RequestInit];
+        return JSON.parse(init.body as string) as TraceEntry;
+      });
+      // `TraceEntry.revises`' own rule: take the LAST line for a given
+      // `at`/`heard` -- the hold posts once at once (Finding 4) and again
+      // when the bound corrects it, same `heard`, so the FIRST match would
+      // still be the stale "popup: …" line, not the bound's own refusal.
+      const unassignEntry = entries.filter((e) => e.heard === UNASSIGN_SENTENCE).at(-1);
+      const p1Entry = entries.filter((e) => e.heard === P1_SENTENCE).at(-1);
+      expect(unassignEntry?.outcome).toBe(
+        "refused: The board is still saving your last change. Say it again in a moment.",
+      );
+      expect(p1Entry?.outcome).toBe(
+        "refused: The board is still saving your last change. Say it again in a moment.",
+      );
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // The bound starts when the FIRST sentence is held, and a LATER hold does
+  // not restart it -- so the second sentence, held only three seconds
+  // before the bound fires, is refused at the SAME moment as the first,
+  // two seconds early by its own clock.
+  it("the bound starts at the FIRST hold and is not restarted by a later one", () => {
+    vi.useFakeTimers();
+    try {
+      const { input, onUnassign, onOpen } = renderBar(
+        { assignments: [BLK1] },
+        null,
+        null,
+        {},
+        {},
+        {},
+        {},
+        { hasPendingCreate: true },
+      );
+      act(() => {
+        fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      act(() => {
+        fireEvent.change(input, { target: { value: P1_SENTENCE } });
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+      // 2000ms more -- 5000ms since the FIRST hold, only 2000ms since the
+      // second. A restarted bound would still be waiting on the second.
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      expect(onUnassign).not.toHaveBeenCalled();
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(
+        threadText().includes(
+          "The board is still saving your last change. Say it again in a moment.",
+        ),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  /**
+   * F-233, second pass, REVIEW FIX -- THE CAUSE, PROVED. Found by the
+   * reviewer's own e2e reproduction ("Cell 1 has nobody on it" over a block
+   * just placed) surviving the first version of this pass's fix, on a
+   * genuinely clean run (no other work sharing the machine) -- so it was not
+   * the resource contention it first looked like.
+   *
+   * The `[ctx, hasPendingCreate]` effect (`CommandBar.tsx`) fires whenever
+   * EITHER dependency changes, and used to clear `barWritesAwaitingCtxRef`
+   * unconditionally, using whatever `ctx` that render happened to carry. But
+   * `hasPendingCreate`'s OWN fallback half (`pendingCreateSnapshot`,
+   * `optimisticId.ts`) is a SEPARATE `useSyncExternalStore` subscription from
+   * the query `ctx`/`commandCtx` is built from -- the two can notify React on
+   * different ticks, so a render exists where `hasPendingCreate` has already
+   * flipped false (the mutation's own `onSettled` ran) but `ctx` is STILL the
+   * stale, pre-write reference (the board's own re-render, from the SAME
+   * query's data changing, has not landed yet). This test builds exactly
+   * that render by hand: a `ctx` that never changes reference across the
+   * whole test, and `hasPendingCreate` toggled independently of it -- the
+   * shape `renderBar`'s own `rerenderPendingCreate` CANNOT produce, since it
+   * rebuilds a fresh `ctx` (via `buildCtx`) on every call, hiding this exact
+   * gap.
+   *
+   * RED before the fix: the old code read `if (ctx !== null) { barWritesAwaitingCtxRef.current
+   * = 0; drainHeldQueue(); }` inside the effect with no memory of which `ctx`
+   * it had last acted on, so the `hasPendingCreate`-only render below drained
+   * the held sentence against the SAME stale `ctx` — this test's own final
+   * assertion (`onUnassign` still uncalled) failed. GREEN after: `CommandBar.tsx`'s
+   * `lastDrainedCtxRef` remembers which `ctx` reference the effect has
+   * already cleared the wait for, and only a GENUINELY NEW one (a reference
+   * this ref has not seen) may clear it again.
+   */
+  it("finding 1, the cause: hasPendingCreate flipping ALONE must not clear the wait against a STALE ctx", () => {
+    // BLK1 present -- UNASSIGN_SENTENCE (10 to 2) needs it there to ask its
+    // own "Remove it" question, the observable this test actually reads.
+    // The create sentence below targets 6 to 8 on the SAME cell instead of
+    // P1_SENTENCE's own 10-to-2 (BLK1's own slot), so the two never collide.
+    const fixedCtx = buildCtx({ assignments: [BLK1] });
+    const CREATE_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 6 to 8";
+    let capturedReport: ((result: { kind: "written" }) => void) | null = null;
+    const onOpen = vi.fn(
+      (_resolved: unknown, _anchor: unknown, report: (result: { kind: "written" }) => void) => {
+        capturedReport = report;
+        return { kind: "popup", waitingFor: "the create pop-up" } as const;
+      },
+    );
+    const onUnassign = vi.fn().mockReturnValue(WRITTEN);
+
+    function Wrapper({ pending }: { pending: boolean }) {
+      return (
+        <CommandBar
+          ctx={fixedCtx}
+          hasPendingCreate={pending}
+          dateFormat="d_mon_yyyy"
+          zone="UTC"
+          reader={null}
+          recognizer={null}
+          micRequest={0}
+          onOpen={onOpen as unknown as CommandBarProps["onOpen"]}
+          onRetime={vi.fn().mockReturnValue(WRITTEN)}
+          onBook={vi.fn().mockReturnValue(WRITTEN)}
+          onRetimeRun={vi.fn().mockReturnValue(WRITTEN)}
+          onUnassign={onUnassign}
+          onMove={vi.fn().mockReturnValue(WRITTEN)}
+          onSetHeadcount={vi.fn().mockReturnValue(WRITTEN)}
+          onRunLot={vi.fn(() => new Promise<LotResult>(() => {}))}
+          onHighlight={vi.fn()}
+          onShowDay={vi.fn()}
+        />
+      );
+    }
+
+    const { rerender } = render(<Wrapper pending={false} />);
+    const input = screen.getByRole("textbox", { name: "Tell the board" }) as HTMLInputElement;
+
+    // The bar's own create: dispatched straight through, hands off to a
+    // pop-up, settles nothing yet.
+    fireEvent.change(input, { target: { value: CREATE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    // A second sentence, said before the create pop-up has answered: held
+    // (`barWritesInFlightRef` is up) -- no question stands yet.
+    fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+
+    // The create pop-up reports written -- `barWritesInFlightRef` moves to
+    // `barWritesAwaitingCtxRef`, still held (no fresh `ctx` yet).
+    act(() => {
+      capturedReport?.({ kind: "written" });
+    });
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+
+    // `hasPendingCreate` toggles true, then back to false -- exactly the
+    // shape `pendingCreateSnapshot`'s own SEPARATE subscription can produce
+    // on its own schedule, independent of `ctx`. `ctx` is `fixedCtx`, the
+    // EXACT SAME reference through every render in this test: a real board
+    // would never hand this component a `ctx` prop the `useMemo` it comes
+    // from has not actually recomputed.
+    rerender(<Wrapper pending={true} />);
+    rerender(<Wrapper pending={false} />);
+
+    // The held sentence must STILL be held: nothing has proven the board
+    // caught up with the create's own write yet -- no question, no write.
+    expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+    expect(onUnassign).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-233, third pass (S194-G3): docs/agent-briefs/s194-g3-the-hold-regressed-brief.md.
+ * The second pass broke the real app: `awaitingRowCountRef` (a snapshot of
+ * `ctx.assignments.length`/`ctx.runs.length` taken at dispatch, waiting for
+ * either to grow) replaced the second pass's own gap, but was itself never
+ * the row -- and worse, `dropHeldQueue` (the bound's own refusal) never
+ * cleared it, so once the FIRST create's own wait ever timed out, that
+ * stale snapshot stayed armed and silently gated `barWritesAwaitingCtxRef`'s
+ * own clearing for every write after it, for the rest of the session. On
+ * the real walk this held every sentence after the first create for the
+ * full five seconds, turning a thirty-second walk into four minutes, even
+ * though the walk waits for each row to be confirmed in the database before
+ * saying the next sentence -- the row was real, and the bar still refused.
+ *
+ * Replaced, not repaired, with the brief's own exact mechanism: the writers
+ * answer the real id of the row they made, and the bar waits for THAT id
+ * (`awaitingRowIdRef`), not a count.
+ */
+describe("F-233, third pass: the writers answer the row's own id, not a count", () => {
+  /**
+   * Proving item 1: reproduces TODAY'S regression -- a create whose row is
+   * REAL and ALREADY IN `ctx` by the time a second sentence is typed, which
+   * must run AT ONCE, never held. RED before this pass's own fix: reverting
+   * `dropHeldQueue` to the second pass's own version (which never cleared
+   * `awaitingRowIdRef`/`pendingCreateCollectionRef`) and running TWO creates
+   * in a row -- the first timing out at the bound, the second's own real,
+   * already-landed row then held anyway by the FIRST create's leaked
+   * wait -- turns this red; this specific test only needs the single-create
+   * shape to prove the id-based mechanism itself releases at once, which the
+   * mutation section below proves is load-bearing by removing it outright.
+   */
+  it("a create whose row is real and already in ctx: the next sentence runs at once, never held", () => {
+    const { input, onOpen, rerenderCtx } = renderBar({ assignments: [BLK1] });
+    let capturedReport: ((result: { kind: "written"; id?: string }) => void) | null = null;
+    onOpen.mockImplementationOnce((..._args: unknown[]): { kind: "popup"; waitingFor: string } => {
+      capturedReport = _args[2] as (result: { kind: "written"; id?: string }) => void;
+      return { kind: "popup", waitingFor: "the create pop-up" };
+    });
+    const CREATE_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 6 to 8";
+    const P1_OFF_HOURS_SENTENCE = "Assign Sam Patel to Housing A on Cell 1 in Line 1 from 8 to 9";
+
+    fireEvent.change(input, { target: { value: CREATE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    // The create's own row is real, and the board has already caught up --
+    // the SAME as the walk's own shape, which explicitly waits for the row
+    // to be confirmed in the database before it ever says the next
+    // sentence.
+    act(() => {
+      capturedReport?.({ kind: "written", id: "created-assignment-1" });
+    });
+    const LANDED: ContextAssignment = {
+      ...BLK1,
+      id: "created-assignment-1",
+      startMin: 3 * 1440 + 360,
+      endMin: 3 * 1440 + 480,
+    };
+    rerenderCtx({ assignments: [BLK1, LANDED] });
+
+    // A second, unrelated sentence -- runs AT ONCE, no hold, no five-second
+    // wait, no refusal.
+    fireEvent.change(input, { target: { value: P1_OFF_HOURS_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Working…")).toBeNull();
+    expect(
+      threadText().includes(
+        "The board is still saving your last change. Say it again in a moment.",
+      ),
+    ).toBe(false);
+  });
+
+  /**
+   * `dropHeldQueue` (the bound's own refusal) now clears
+   * `awaitingRowIdRef`/`pendingCreateCollectionRef` too, matching the
+   * write counters just above it -- defensive completeness, proven by
+   * mutation (removing the two lines) rather than by its own case: every
+   * OTHER write's own dispatch (which always sets or nulls
+   * `pendingCreateCollectionRef` before its own outcome is even known) and
+   * settle (which always sets or nulls `awaitingRowIdRef` from THAT
+   * outcome) already overwrites whatever a timed-out create left behind the
+   * moment anything else is said, so this pass could not construct a
+   * scenario where the omission alone was the ONLY thing standing between a
+   * held sentence and running -- unlike `awaitingRowCountRef`, the count
+   * proxy this pass removed, whose OWN comparison did not self-correct the
+   * same way and which this omission genuinely left armed for the rest of
+   * a session on the real walk.
+   */
+
+  /**
+   * Proving item 4 ("a row outside the board's window"): `pendingCreateCollectionRef`
+   * (and so `awaitingRowIdRef`) is ONLY ever armed by the single-write
+   * dispatch inside `runCommandBody` -- a LOT's own writes (`runLotNow`,
+   * `resolveLotStep`) never touch it at all, by construction, the same as
+   * before this pass. A lot is exactly the shape the brief's own examples
+   * name (a copy to another week, a repeat over next week, several rows
+   * spanning days) -- only the FIRST day of a multi-day sentence is ever
+   * guaranteed to be the one `ctx`'s own window was moved to (R-455), so a
+   * lot step's own created row can legitimately never appear in `ctx` at
+   * all. This proves the consequence directly: a lot that includes a
+   * create never arms an id-wait, so a sentence said right after it is
+   * governed only by the plain "a genuinely new ctx" rule (`lastDrainedCtxRef`),
+   * never held waiting for a row that might not be inside this window.
+   */
+  it("a lot's own create never arms an id-wait -- a later sentence needs only a fresh ctx, never a specific row", async () => {
+    const onRunLot = vi.fn((): Promise<LotResult> => Promise.resolve({ done: 2, error: null }));
+    const { input, onOpen, rerenderCtx } = renderBar(
+      { assignments: [BLK1, BLK_SP] },
+      null,
+      null,
+      {},
+      { onRunLot },
+    );
+
+    // A lot (two removals) -- runs through `runLotNow`/`onRunLot`, never
+    // the single-write dispatch this pass's own `pendingCreateCollectionRef`
+    // lives in.
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "yes" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+
+    // A later, ordinary sentence -- held only until a fresh `ctx` (not any
+    // specific row's id, which a lot never promised) arrives.
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).not.toHaveBeenCalled();
+    rerenderCtx({ assignments: [] });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Proving item 4, directly: `dayIsInCtxWindow` (`CommandBar.tsx`) itself.
+   * A single (non-lot) create whose own resolved `range` falls outside the
+   * days `ctx` covers -- built by spying on `resolveCommand` for one call
+   * (the same pattern "CB-unknown" below uses) and overwriting the range an
+   * ordinary create resolved to, since R-455 means the resolver itself
+   * never produces one for a genuine single sentence in practice. The row
+   * this create answers with can never appear in THIS `ctx` (it is never
+   * added to the fixture) -- a later sentence must still run once the board
+   * simply shows a fresh `ctx`, never stuck waiting five seconds and
+   * refused for a row that was never going to be in it. Mutation-tested:
+   * `dayIsInCtxWindow` changed to always return `true` (`CommandBar.tsx`)
+   * turns this red -- the later sentence then waits forever for an id that
+   * this fixture never supplies.
+   */
+  it("a create whose own row is outside ctx's window never arms an id-wait (item 4)", () => {
+    const real = resolveLib.resolveCommand;
+    const spy = vi.spyOn(resolveLib, "resolveCommand").mockImplementation(((
+      command: unknown,
+      ctx: unknown,
+      options?: unknown,
+    ) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = (real as any)(command, ctx, options);
+      if (result.ok && result.resolved.intent === "assign") {
+        return {
+          ok: true,
+          resolved: { ...result.resolved, range: { startMin: 999_000, endMin: 999_060 } },
+        };
+      }
+      return result;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any);
+
+    try {
+      // P1_SENTENCE writes straight through against an EMPTY board -- BLK1
+      // would collide with its own slot; the second sentence below is the
+      // one that needs BLK1, added only once it is actually said.
+      const { input, onOpen, onUnassign, rerenderCtx } = renderBar({ runs: [] });
+      let capturedReport: ((result: { kind: "written"; id?: string }) => void) | null = null;
+      onOpen.mockImplementationOnce(
+        (..._args: unknown[]): { kind: "popup"; waitingFor: string } => {
+          capturedReport = _args[2] as (result: { kind: "written"; id?: string }) => void;
+          return { kind: "popup", waitingFor: "the create pop-up" };
+        },
+      );
+
+      fireEvent.change(input, { target: { value: P1_SENTENCE } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(onOpen).toHaveBeenCalledTimes(1);
+
+      // The create's own row is real, but its day is outside this ctx's own
+      // window -- the fixture below never adds it, on purpose.
+      act(() => {
+        capturedReport?.({ kind: "written", id: "row-outside-window" });
+      });
+
+      // A later sentence -- held only until a fresh ctx (which never needs
+      // to carry the out-of-window row's own id). BLK1 appears here for
+      // the FIRST time, with the create's own row still never in it.
+      fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(screen.queryByRole("button", { name: "Remove it" })).toBeNull();
+      rerenderCtx({ assignments: [BLK1] });
+      expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+      expect(onUnassign).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -6453,16 +7329,38 @@ describe("CB-t: the bar's trace (S59-e, R-421)", () => {
     expect(entry.answered).toBe("yes");
   });
 
+  // F-233, second pass (S194-G2, review fix): CONTRACT CHANGED. The second
+  // sentence used to run immediately, `ctx` never having changed between the
+  // two Enters. Finding 1 now holds a sentence typed before the board has
+  // caught up with the FIRST write's own outcome -- `rerenderCtx` simulates
+  // that catch-up (the same shape a real invalidated refetch produces)
+  // between the two, which is the only thing this test adds; the point it
+  // was written to prove (a failed trace post never affects the bar's own
+  // writes) is otherwise unchanged. Review fix: a plain `{ runs: [] }`
+  // rerender is not enough on its own any more -- `awaitingRowCountRef`
+  // (`CommandBar.tsx`) needs the board to show one more assignment than it
+  // did when this create was dispatched, so the "catch-up" rerender below
+  // adds one, at a time P1_SENTENCE's own second submission does not also
+  // target.
   it("CB-t-5: a failed post is swallowed -- the bar itself is unaffected", () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
     vi.stubGlobal("fetch", fetchMock);
-    const { onOpen, input } = renderBar({ runs: [] });
+    const { onOpen, input, rerenderCtx } = renderBar({ runs: [] });
+    const CREATED_BLOCK: ContextAssignment = {
+      ...BLK1,
+      id: "created1",
+      startMin: 3 * 1440 + 60,
+      endMin: 3 * 1440 + 120,
+    };
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The board catches up with the first write before the second is said.
+    rerenderCtx({ runs: [], assignments: [CREATED_BLOCK] });
 
     // The bar itself is unaffected -- a second sentence still runs cleanly.
     fireEvent.change(input, { target: { value: "" } });
@@ -6930,6 +7828,7 @@ describe("CB-day: the readout's ISO day renders in the plant's own zone (F-153)"
           days: [{ index: 0, iso: "2026-09-16", weekday: 3 }],
           todayIndex: 0,
         })}
+        hasPendingCreate={false}
         dateFormat="d_mon_yyyy"
         zone="America/Chicago"
         onOpen={vi.fn()}
@@ -7003,6 +7902,44 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
     expect(threadText()).not.toContain("reverted");
     // n=2, done=1: nothing after the refused step -- no "Not tried" line.
     expect(threadText()).not.toContain("Not tried:");
+  });
+
+  // F-233 (S194-G): an UNEXPECTED error a lot step hits (an `Unknown`-kind
+  // `SchedulerError`, `errors.ts` -- the placeholder-id race this lane
+  // fixes was one instance; any other unclassified server error is
+  // another) used to reach the thread as the raw, generic
+  // "Something went wrong. Please try again." -- a reason that names
+  // nothing about THIS lot, THIS step. `rewriteRefusal` (R-449, the one
+  // rewriter both the single-sentence and the lot paths share) now
+  // recognises that exact string and rewrites it, so the "Not done:" line
+  // still says what stood (`buildLotOutcome`'s own job, unchanged) with a
+  // reason scoped to the one step that failed.
+  it("CB-lot-fail-3 (F-233): an unexpected error's generic reason reads 'Something went wrong with that one.', not the raw 'try again' text", async () => {
+    const onRunLot = vi.fn(async (_resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: 1,
+      error: "Something went wrong. Please try again.",
+    }));
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+
+    await waitFor(() =>
+      expect(threadText()).toContain(
+        "I made 1 of the 2 changes.\n" +
+          `Done: ${renderedReadout(resolved[0].readout)}\n` +
+          "Not done: Sam Patel's block on Cell 1 in Line 1. Something went wrong with that one.",
+      ),
+    );
+    expect(threadText()).not.toContain("Please try again.");
   });
 
   // DEF-0052's own report: a lot of four with the SECOND refused (one done,
@@ -8149,6 +9086,7 @@ describe("CH: the conversation thread (R-427)", () => {
       render(
         <CommandBar
           ctx={buildCtx({ runs: [] })}
+          hasPendingCreate={false}
           dateFormat="d_mon_yyyy"
           zone="UTC"
           reader={null}

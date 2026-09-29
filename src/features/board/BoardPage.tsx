@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { HierarchyLevel, ShiftTemplate } from "@/lib/api";
 import {
   describeSchedulerError,
@@ -49,6 +49,12 @@ import {
   MIN_DURATION_MINUTES,
 } from "./lib/interaction";
 import { commandAssignments } from "./lib/commandAssignments";
+import {
+  isPlaceholderId,
+  hasPendingPlaceholder,
+  subscribePendingCreate,
+  pendingCreateSnapshot,
+} from "./lib/optimisticId";
 import { launcherFor } from "./lib/commandBarGate";
 import { cycleTimeKey, standardTargetQty } from "./lib/standardTarget";
 import {
@@ -706,6 +712,11 @@ export default function BoardPage() {
     const runs: ContextRun[] = [];
     for (const [nodeId, list] of index.runsByNode) {
       for (const r of list) {
+        // F-233 (S194-G): a job whose own create has not been answered for
+        // yet carries a placeholder id (optimisticId.ts) -- skipped here
+        // the same way `commandAssignments.ts` skips a placeholder block,
+        // so the resolver can never name it either.
+        if (isPlaceholderId(r.id)) continue;
         const p = productViewFor(r, index.productById);
         const span = `${formatClock(addMinutes(index.windowStart, r.startMin), index.zone)}–${formatClock(addMinutes(index.windowStart, r.endMin), index.zone)}`;
         runs.push({
@@ -820,6 +831,19 @@ export default function BoardPage() {
       // gates a "Show that day" rerun on, alongside `isTargetOnBoard` --
       // never a reason for the bar to unmount or go null (R-424): the ctx
       // still carries a full, if stale, board.
+      //
+      // F-233 (S194-G): left UNCHANGED on purpose, not widened to cover a
+      // pending create too, however tempting that reads next to R-455's own
+      // doc above -- CB-showday-12 (commandBar.test.tsx) already pins the
+      // opposite: `settled` gates the REROUN effect only, and resolve.ts
+      // reads it nowhere, so an ordinary NEW sentence must resolve and
+      // write exactly as it always would even while `settled` is false for
+      // an unrelated reason (a plain background refetch of the window).
+      // Overloading it here would have delayed every sentence typed during
+      // ANY refetch, not just the one this lane's own fault is about. The
+      // pending-create signal is its own prop instead --
+      // `hasPendingCreate`, below -- read only by the NEW wait this lane
+      // adds, never by the rerun effect.
       settled: !boardQuery.isPlaceholderData,
       // DEF-0048 / R-431 (S194-D): known only once BOTH reads have answered --
       // the server's recordable set, and the absences already there (for the
@@ -850,6 +874,36 @@ export default function BoardPage() {
     absencesQuery.data,
     absencesQuery.isSuccess,
   ]);
+
+  /**
+   * F-233 (S194-G, widened in the second pass): true while any assignment
+   * or run in the window is still a placeholder (`optimisticId.ts`) -- its
+   * own create not yet replaced by the real row -- OR a create mutation is
+   * between its own call and its post-settle refetch landing
+   * (`pendingCreateSnapshot`, read reactively through `useSyncExternalStore`
+   * so a change re-renders this without `index` itself having to change
+   * first). The OR closes the cache-derived half's own first gap (S194-G2's
+   * own finding): `hasPendingPlaceholder` alone only sees a create once its
+   * `onMutate` has actually written the placeholder into the query cache,
+   * and `onMutate` is async -- `pendingCreateSnapshot` is counted up the
+   * moment `mutate`/`mutateAsync` is called instead, closing the window
+   * before the placeholder exists at all.
+   *
+   * A prop of its own, not part of `commandCtx`/`ResolveContext`
+   * (`commandCtx.settled` keeps its EXISTING, narrower meaning -- see that
+   * memo's own comment on why): `CommandBar`'s own FALLBACK wait (for a
+   * create a drag or a manually-opened pop-up started, which the bar has no
+   * direct knowledge of) reads this, and only this, never `ctx.settled`. A
+   * create the bar itself calls is covered exactly by the bar's own write
+   * counter instead (`CommandBar.tsx`), which needs no cache signal at all.
+   */
+  const anyPlaceholderInWindow = useMemo(
+    () =>
+      index !== null && hasPendingPlaceholder(index.assignmentById.keys(), index.runById.keys()),
+    [index],
+  );
+  const anyPendingCreateCall = useSyncExternalStore(subscribePendingCreate, pendingCreateSnapshot);
+  const hasPendingCreate = anyPlaceholderInWindow || anyPendingCreateCall;
 
   /**
    * S59-c (brief §3, design-plan §19.104 / D133 item 4): the same four
@@ -1219,6 +1273,7 @@ export default function BoardPage() {
                 session?.user.id && rootPath ? historyStorageKey(session.user.id, rootPath) : null
               }
               ctx={commandCtx}
+              hasPendingCreate={hasPendingCreate}
               dateFormat={dateFormat}
               zone={index.zone}
               reader={COMMAND_BAR_READER}

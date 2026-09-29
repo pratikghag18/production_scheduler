@@ -179,4 +179,24 @@ describe("commandAssignments (R-385, brief §7)", () => {
     const out = commandAssignments(indexOf([a], [run]));
     expect(out[0].runId).toBe("run-1");
   });
+
+  // ---------------------------------------------------------------------
+  // F-233 (S194-G, R-431): a row whose own create has not been answered
+  // for yet (an `optimistic-<uuid>` id, `optimisticId.ts`) is skipped
+  // entirely -- the resolver must never be able to name one.
+  // ---------------------------------------------------------------------
+
+  it("A10: a placeholder row (id starting optimistic-) is excluded from the resolver's own view", () => {
+    const real = baseAssignment({ id: "asg-1" });
+    const placeholder = baseAssignment({ id: "optimistic-abc123", operatorId: "op-2" });
+    const out = commandAssignments(indexOf([real, placeholder]));
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe("asg-1");
+  });
+
+  it("A11: a window with ONLY a placeholder row carries no assignment at all to the resolver", () => {
+    const placeholder = baseAssignment({ id: "optimistic-solo" });
+    const out = commandAssignments(indexOf([placeholder]));
+    expect(out).toEqual([]);
+  });
 });

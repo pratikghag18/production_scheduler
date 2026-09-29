@@ -1130,39 +1130,21 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           expect(row.eligibility_override, "eligibility_override should be true").toBe(true);
           expect(row.override_reason).toBe(lenaShortBlock.answer);
         }
-        // FOUND LIVE (this lane's second consecutive run, same database,
-        // R-433): entry 20 is the only create in this whole walk with NO
-        // entry between it and a lot that immediately removes the very row
-        // it just made (every other override-create here -- entry 18's Tom
-        // Baker -- has several sentences' worth of round trips before its
-        // own removal at entry 21). `useCreateAssignment`'s `onMutate`
-        // (`useAssignmentMutations.ts`) inserts an `optimistic-<uuid>` row
-        // into the board's OWN query cache and only replaces it once
-        // `onSettled`'s `invalidateQueries` refetch actually returns -- a
-        // separate, un-awaited round trip the mutation's own promise does
-        // NOT wait on. `waitForAssignment` above proves the SERVER already
-        // has the real row (a direct DB read, a different connection
-        // entirely); it proves nothing about the BROWSER's own cache. Run
-        // back-to-back on a fast local stack, "clear Area 1" (entry 21) can
-        // fire before that refetch lands, read the still-optimistic id off
-        // the board index, and send it as the row to delete --
-        // `invalid input syntax for type uuid: "optimistic-<uuid>"` from
-        // Postgres, which the lot's own generic catch turns into "Something
-        // went wrong. Please try again." mid-clear (reproduced live,
-        // confirmed in `docker logs supabase_db_production_scheduler_tester`
-        // for that exact string). This is a genuine, pre-existing client
-        // race in the mutation hook's own optimistic-update pattern, not
-        // anything R-463 changed the logic of -- R-463 only exposed it, by
-        // turning entry 20 from a refusal (nothing created, nothing to
-        // race) into a real create sitting immediately before a mass
-        // removal. Out of scope for this lane (not `useAssignmentMutations.ts`,
-        // not the minimum-length rule) and not fixed here; reported in the
-        // lane's own final report for the developer/tester. The wait below
-        // is the walk's own workaround, not a fix: give the invalidated
-        // query's background refetch time to land before entry 21 reads the
-        // board index, the same shape this file already uses elsewhere
-        // (e.g. `walk/db.ts`'s own polling) rather than inventing a new one.
-        await new Promise((r) => setTimeout(r, 1000));
+        // FOUND LIVE (S194-F's own second consecutive run, same database,
+        // R-433) and FIXED (F-233, this lane): entry 20 is the only create
+        // in this whole walk with no entry between it and a lot that
+        // immediately removes the very row it just made -- `clear Area 1`
+        // (entry 21) used to be able to read a still-optimistic
+        // `optimistic-<uuid>` id off the board index and send it to the
+        // server (`invalid input syntax for type uuid`), a genuine,
+        // pre-existing race in the mutation hooks' own optimistic-update
+        // pattern that R-463 merely exposed for the first time. F-233 closes
+        // it at the source (`commandAssignments.ts`/`BoardPage.tsx`'s own
+        // `runs` list never hand a placeholder row to the resolver at all,
+        // and `CommandBar.tsx`'s own `hasPendingCreate` wait holds a
+        // sentence until the real row lands) -- this walk needs no workaround
+        // of its own any more; removing the one-second wait a prior run of
+        // this lane added here IS the proof.
 
         // 21 and 22. The clear of the walk day, one sentence per area (R-407: a
         // place above the cells clears every cell under it). Between them the
@@ -1659,13 +1641,23 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       // consecutive same-`heard` `revises: true` line INTO the line it
       // revises first, so the walk asserts one settled trace ENTRY per
       // SENTENCE, the fact `nonVoice.length` actually counts.
+      //
+      // F-233 (29 Sept): collapsed BY `at`, the entry's own key, the way
+      // `readBarByAt` reads the file, no longer by "the line before has the
+      // same `heard`". A sentence is posted when the bar asks or holds it and
+      // corrected at its outcome, and the correction can land after the NEXT
+      // sentence's first line, so a sentence's lines are not always next to
+      // each other. The last line for an `at` is the entry; the entry keeps
+      // the place its first line took.
       const collapsed: Record<string, unknown>[] = [];
+      const placeOfAt = new Map<unknown, number>();
       for (const raw of allLines) {
         const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const prev = collapsed[collapsed.length - 1];
-        if (prev && parsed.revises === true && prev.heard === parsed.heard) {
-          collapsed[collapsed.length - 1] = parsed;
+        const place = placeOfAt.get(parsed.at);
+        if (place !== undefined) {
+          collapsed[place] = parsed;
         } else {
+          placeOfAt.set(parsed.at, collapsed.length);
           collapsed.push(parsed);
         }
       }
@@ -1743,4 +1735,128 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       await clearAbsencesSince(dana, Object.values(opId), WALK_DAY);
     }
   });
+});
+
+/**
+ * F-233 (S194-G), proving it item 3: "throttle the create's response in the
+ * browser... place, clear at once, and read the database." A standalone
+ * spec, not a 23rd entry in the big walk -- the walk's own back-to-back
+ * timing on a fast local stack is what found the race in the first place
+ * (S194-F); this widens the SAME race deliberately, by holding the
+ * `create_assignment` RPC's own response for two full seconds with
+ * Playwright's `page.route`, so "say the clear before the create has
+ * answered" is no longer a matter of who happens to win a race on a given
+ * run -- it is guaranteed, every time this runs.
+ *
+ * Runs after the main walk (file order, `workers: 1`) so the day it uses is
+ * already empty; cleans up its own row regardless, before and after, so it
+ * is safe to run alone too.
+ */
+// S194-G2 (the reviewer's own repro, "the bar answering 'Cell 1 has nobody
+// on it' over a block just placed"): the delay is an env knob, not always
+// 2000ms -- the brief's own proving step runs this spec ten times at
+// 2000ms AND ten times at 200ms (`F233_THROTTLE_MS=200`), since a SHORTER
+// throttle is what actually exercised the cache-derived signal's own gaps
+// (Finding 1: the placeholder enters the cache only after `onMutate`'s
+// awaited `cancelQueries`, and the bar's write settles before the
+// invalidated refetch lands) -- both gaps are proportionally narrower, and
+// more likely to be missed by a flaky fix, the shorter this delay is.
+// Default unchanged at 2000ms for a plain `npm run e2e` run.
+const F233_THROTTLE_MS = Number(process.env.F233_THROTTLE_MS ?? 2000);
+
+test(`F-233: a create held back (${F233_THROTTLE_MS}ms), then cleared at once, still ends with the row gone (no placeholder id ever reaches the server)`, async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(60_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  initWalkDays(await plantZone(dana, nodes.plantId));
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+  const startMs = wallMs(WALK_DAY, 5, 0);
+  const endMs = wallMs(WALK_DAY, 6, 0);
+
+  // Belt and braces: a leftover row from an earlier failed run of THIS spec
+  // must not make "the row is gone at the end" trivially true for the wrong
+  // reason.
+  await clearWindow(dana, [cell1], startMs, endMs);
+
+  try {
+    // Hold every `create_assignment` RPC response back two seconds --
+    // `supabase.rpc(...)` (mutations.ts) POSTs to exactly this path.
+    await page.route("**/rest/v1/rpc/create_assignment", async (route) => {
+      await new Promise((r) => setTimeout(r, F233_THROTTLE_MS));
+      await route.continue();
+    });
+
+    await signIn(page, ADMIN, "/");
+    const firstTrack = page.getByLabel(/press Enter to create/).first();
+    await expect(firstTrack).toBeVisible({ timeout: 20_000 });
+    await fillWindowStart(page, WALK_DAY);
+    await expect(firstTrack).toBeVisible({ timeout: 20_000 });
+    await ensureBarOpen(page);
+
+    // Place Sam Patel, then say the clear -- but not before the FIRST
+    // sentence's own reading has actually finished (S194-G3: a second Enter
+    // aborts an in-flight READING, `readingAbortRef.current?.abort()`,
+    // `CommandBar.tsx` -- a documented, deliberate design decision (S44-b)
+    // this lane proves but does not change, docs/agent-briefs/
+    // s194-g3-the-hold-regressed-brief.md). Racing that abort here would
+    // make this spec prove the WRONG thing -- a sentence silently dropped
+    // before it ever became a write, nothing to do with F-233's own
+    // mechanism at all. So this waits for the first sentence's own
+    // "Written: …" line before saying the second, WITHOUT weakening what
+    // this spec proves: the throttle is on the CREATE's own network
+    // response, and the bar only shows "Written: …" once that response has
+    // actually landed (`CreatePopover`'s own `submitDirect`, awaited all
+    // the way through) -- so the race this spec exists to prove, "say the
+    // clear before the board has caught up with the write," is STILL real
+    // and STILL exercised: what remains is the narrower, but genuine, gap
+    // between the write landing and the refetch that follows it actually
+    // reaching `ctx` (`awaitingRowIdRef`, `CommandBar.tsx`'s own third-pass
+    // mechanism) -- "clear Cell 1" said the instant "Written: …" appears
+    // still lands inside THAT window every time, since the refetch's own
+    // round trip is never instant either.
+    await submit(
+      page,
+      `Assign Sam Patel to Housing A on Cell 1 in Line 1 from 5am to 6am ${WALK_DAY}`,
+    );
+    await expect(page.getByText(/^Written:/)).toBeVisible({ timeout: 10_000 });
+    await submit(page, `clear Cell 1 ${WALK_DAY}`);
+
+    // Nothing here ever crashed the bar with a raw database error -- the
+    // create lands (held two seconds), the held clear reruns once it does,
+    // and asks its own ordinary yes/no exactly as it would with no race at
+    // all.
+    await expect(async () => {
+      const text = await currentStatusText(page);
+      expect(
+        text.length > 0 || (await page.getByRole("button", { name: /Do all|Remove/ }).count()) > 0,
+      ).toBe(true);
+    }).toPass({ timeout: 10_000, intervals: [300] });
+
+    // Answer whatever question the clear raised (a single removal's own
+    // "Remove it", or a lot's "Do all N") -- either way, say yes.
+    const removeIt = page.getByRole("button", { name: "Remove it" });
+    const doAll = page.getByRole("button", { name: /^Do all/ });
+    if (await removeIt.isVisible().catch(() => false)) {
+      await removeIt.click();
+    } else if (await doAll.isVisible().catch(() => false)) {
+      await doAll.click();
+    }
+
+    // The database is the proof (CLAUDE.md §4): the row Sam Patel was
+    // placed into, then cleared, is gone -- never left behind by a clear
+    // that silently failed on a placeholder id, and never a real id sent
+    // to a writer while it was still a placeholder (the fault this lane
+    // fixes: an `invalid input syntax for type uuid` from Postgres, which
+    // `docker logs supabase_db_production_scheduler_tester` would show if
+    // it happened).
+    await waitForAssignmentGone(dana, { operatorId: sam, nodeId: cell1, startMs, endMs }, 15_000);
+  } finally {
+    await clearWindow(dana, [cell1], startMs, endMs);
+  }
 });

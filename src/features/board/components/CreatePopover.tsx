@@ -360,10 +360,13 @@ export function CreatePopover({
     range: { startMin: number; endMin: number },
     productId: string,
     plannedHeadcount: number | undefined,
-    // F-167: `"written"` once the row is in; a rejection carries the
-    // refusal. A caller that answers nothing (a test double, a drag's own
-    // wiring) is read as written, which is the pre-F-167 assumption.
-  ) => void | Promise<"written" | void>;
+    // F-167: written once the row is in; a rejection carries the refusal.
+    // A caller that answers nothing (a test double, a drag's own wiring) is
+    // read as written, which is the pre-F-167 assumption.
+    // F-233, third pass (S194-G3): carries the row's own real id now --
+    // `submitRun` below relays it into `report({kind:"written", id})` so
+    // `CommandBar.tsx` can wait for that exact row, never a count.
+  ) => void | Promise<{ kind: "written"; id: string } | void>;
   onSubmitDirect: (
     nodeId: string,
     range: { startMin: number; endMin: number },
@@ -380,11 +383,13 @@ export function CreatePopover({
     areaOverride: boolean,
     areaOverrideReason: string | undefined,
     anchor: { x: number; y: number },
-    // F-167: `"written"` once the row is in; `"handed-off"` when this Create
+    // F-167: written once the row is in; `"handed-off"` when this Create
     // opened ANOTHER pop-up (D61's split coverage) and nothing has been
     // written yet, so nothing is reported and the sentence keeps waiting; a
     // rejection carries the server's own refusal.
-  ) => void | Promise<"written" | "handed-off" | void>;
+    // F-233, third pass (S194-G3): carries the row's own real id now -- see
+    // `onSubmitRun`'s own identical comment above.
+  ) => void | Promise<{ kind: "written"; id: string } | "handed-off" | void>;
   /**
    * S41-c: called instead of `onSubmitDirect` when `presetMove` is set --
    * `move_assignment`'s own argument shape (no operator, no target, no
@@ -704,7 +709,12 @@ export function CreatePopover({
         report({ kind: "handed_off", what: "split coverage" });
         return;
       }
-      report({ kind: "written" });
+      // F-233, third pass (S194-G3): `verdict` is `{kind:"written", id}` for
+      // a real caller, or `undefined` for a test double/drag wiring that
+      // answers nothing (F-167's own pre-existing "read as written"
+      // fallback) -- either way this relays whatever id there is, `undefined`
+      // included, straight through to the reporter.
+      report({ kind: "written", id: verdict?.id });
     } catch (err) {
       report({ kind: "refused", message: refusalMessage(err) });
     }
@@ -717,8 +727,10 @@ export function CreatePopover({
     const hc = Math.max(1, Math.round(Number(plannedHeadcount)) || 1);
     // F-167: same shape as `submitDirect`'s own await -- see its note.
     try {
-      await onSubmitRun(nodeId, range, productId, hc);
-      report({ kind: "written" });
+      const verdict = await onSubmitRun(nodeId, range, productId, hc);
+      // F-233, third pass (S194-G3): see `submitDirect`'s own identical
+      // comment just above.
+      report({ kind: "written", id: verdict?.id });
     } catch (err) {
       report({ kind: "refused", message: refusalMessage(err) });
     }

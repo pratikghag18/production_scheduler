@@ -1,6 +1,7 @@
 import type { BoardIndex } from "./boardIndex";
 import type { ContextAssignment } from "@/lib/command/resolve";
 import { addMinutes, formatClock } from "./time";
+import { isPlaceholderId } from "./optimisticId";
 
 /**
  * R-385 / S41-b: the command bar's view of the window's blocks. The
@@ -16,6 +17,13 @@ export function commandAssignments(
 ): ContextAssignment[] {
   const out: ContextAssignment[] = [];
   for (const a of index.assignmentById.values()) {
+    // F-233 (S194-G): a row whose own create has not been answered for yet
+    // carries a placeholder id (optimisticId.ts) -- the resolver must never
+    // be able to name one, the same as a person the server has not
+    // actually placed cannot be removed, moved or swapped. The board still
+    // DRAWS it at once (BoardIndex itself is untouched); only this view of
+    // it, the one the bar reads, skips it.
+    if (isPlaceholderId(a.id)) continue;
     const productId =
       a.productId ?? (a.runId ? (index.runById.get(a.runId)?.productId ?? null) : null);
     out.push({

@@ -47,6 +47,7 @@ import { ZOOMS, pxToMinutes, shiftSnapPoints, type ZoomIndex } from "../lib/geom
 import type { DayAxis } from "../lib/time";
 import { formatClock, addMinutes } from "../lib/time";
 import { leaveLine } from "../lib/leave";
+import { isPlaceholderId } from "../lib/optimisticId";
 import { absenceGaps, type AbsenceRow } from "@/lib/absence";
 import { useAbsences, absenceKeys } from "./useAbsences";
 import type { DateFormat } from "@/lib/format/dates";
@@ -100,6 +101,17 @@ export type DragSubject =
   /** D65/§7 "panel-drag origin": a fresh operator picked up from
    *  `OperatorPanel`, not yet attached to anything on the board. */
   | { kind: "panel"; operator: BoardOperator };
+
+/**
+ * F-233 (S194-G): the subject's own row id, for `isPlaceholderId` -- `null`
+ * for "new"/"panel", which name no existing row at all yet (a "new" subject
+ * IS the create in flight; nothing to check an id against until it exists).
+ */
+function subjectRowId(subject: DragSubject): string | null {
+  if (subject.kind === "run") return subject.run.id;
+  if (subject.kind === "assignment") return subject.assignment.id;
+  return null;
+}
 
 /** Public shape a renderer reads to decide whether IT is the row/block
  *  currently mid-drag (D34) — a superset of brief §5.1's `ActiveDrag`. */
@@ -835,6 +847,16 @@ export function useDragGesture(args: UseDragGestureArgs) {
   // --------------------------------------------------------------------
 
   const beginBlockDrag = useCallback((d: BlockDragDescriptor, e: React.PointerEvent) => {
+    // F-233 (S194-G): a row the server has not answered for yet (its own
+    // create still in flight, `optimisticId.ts`) is drawn at once but not
+    // yet grabbable -- no pointer capture, no drag state, no popover (the
+    // click-to-open-popover path below only runs once this has). The
+    // person sees the same chip they just placed; it simply does not move
+    // for them until the real row lands, at which point an ordinary
+    // refetch replaces this handler's own descriptor with a real id and
+    // the block becomes a normal one.
+    const rowId = subjectRowId(d.subject);
+    if (rowId !== null && isPlaceholderId(rowId)) return;
     e.stopPropagation();
     setPopover(null);
     const hit = hitTestBlock(d.offsetXPx, d.blockWidthPx, d.handlePx);
@@ -1279,6 +1301,12 @@ export function useDragGesture(args: UseDragGestureArgs) {
       // can never become true for them (updateBlockDrag/handleBlockKeyDown are
       // both gated), so this is defence-in-depth on the one write path.
       if (!canPlaceRef.current) return;
+      // F-233 (S194-G): same defence-in-depth, for a placeholder subject --
+      // `beginBlockDrag`/`handleBlockKeyDown` already refuse to start a
+      // drag or nudge on one, so `moved` cannot become true for it either
+      // in practice; this is the one write path's own belt and braces.
+      const guardRowId = subjectRowId(d.subject);
+      if (guardRowId !== null && isPlaceholderId(guardRowId)) return;
       const candidate = d.candidate!;
       if (d.subject.kind === "run") {
         const run = d.subject.run;
@@ -1597,6 +1625,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
       e: React.KeyboardEvent,
       ctxDescriptor: Omit<BlockDragDescriptor, "handlePx" | "blockWidthPx" | "offsetXPx">,
     ) => {
+      // F-233 (S194-G): same door as `beginBlockDrag`'s own guard, for the
+      // keyboard path -- Enter/Space would otherwise open a popover on a
+      // row with no real id, and an arrow key would nudge it.
+      const rowId = subjectRowId(ctxDescriptor.subject);
+      if (rowId !== null && isPlaceholderId(rowId)) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2014,14 +2047,18 @@ export function useDragGesture(args: UseDragGestureArgs) {
        *  eligibility pair: they are two different rules and the server keeps
        *  two different columns for them. */
       areaOverride?: { reason: string };
-    }): Promise<void> => {
+      // F-233, third pass (S194-G3): the real id of the row `create_assignment`
+      // made -- `openCreateFromCommand`'s own override branch answers the
+      // bar's `WriteOutcome` with it so `CommandBar.tsx` can wait for that
+      // exact row, never a count.
+    }): Promise<{ id: string }> => {
       const input = buildCreateAssignmentInput(index.windowStart, r, {
         ...(r.override ? { eligibilityOverride: true, overrideReason: r.override.reason } : {}),
         ...(r.areaOverride
           ? { areaOverride: true, areaOverrideReason: r.areaOverride.reason }
           : {}),
       });
-      return createAssignment.mutateAsync(input).then(() => undefined);
+      return createAssignment.mutateAsync(input).then((result) => ({ id: result.assignment.id }));
     },
     [index, createAssignment],
   );
@@ -2077,7 +2114,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
           override: r.override,
           areaOverride: r.areaOverride,
         })
-          .then((): WriteOutcome => ({ kind: "written" }))
+          .then((result): WriteOutcome => ({ kind: "written", id: result.id }))
           .catch((err: unknown): WriteOutcome => {
             const se = isSchedulerError(err) ? err : toSchedulerError(err);
             const { message, kind } = buildSchedulerErrorToast(se, ctx);
@@ -2268,7 +2305,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
       plannedHeadcount: number | undefined,
       // F-167: same contract as `submitCreateDirect`'s -- the pop-up awaits
       // this so a sentence's trace can say what became of the write.
-    ): Promise<"written"> => {
+      // F-233, third pass (S194-G3): carries the run's own real id now --
+      // `CreatePopover.tsx`'s `submitRun` relays it into
+      // `report({kind:"written", id})`.
+    ): Promise<{ kind: "written"; id: string }> => {
       const overlap = findRunOverlap(range, index.runsByNode.get(nodeId) ?? [], null);
       if (overlap) {
         const p = productViewFor(overlap, index.productById);
@@ -2284,9 +2324,9 @@ export function useDragGesture(args: UseDragGestureArgs) {
           end: minuteDate(index.windowStart, range.endMin),
           plannedHeadcount,
         })
-        .then((): "written" => {
+        .then((result): { kind: "written"; id: string } => {
           toast.info("Run created — drag operators onto the band to staff it");
-          return "written";
+          return { kind: "written", id: result.run.id };
         })
         .catch((err: unknown) => {
           const se = isSchedulerError(err) ? err : toSchedulerError(err);
@@ -2369,7 +2409,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
       // coverage) and nothing has been written yet, so the sentence's entry
       // must stay open rather than be told either story; a rejection carries
       // the server's own refusal.
-    ): Promise<"written" | "handed-off"> => {
+      // F-233, third pass (S194-G3): `"written"` carries the row's own real
+      // id now -- `CreatePopover.tsx`'s `submitDirect` relays it into
+      // `report({kind:"written", id})`, which is what lets
+      // `CommandBar.tsx` wait for THIS exact row, never a count.
+    ): Promise<{ kind: "written"; id: string } | "handed-off"> => {
       // S51: built through the one shared helper (`buildCreateAssignmentInput`,
       // above `useDragGesture`) so this popover-driven Create and the
       // several-lot's `createFromCommand` can never send two different
@@ -2390,12 +2434,12 @@ export function useDragGesture(args: UseDragGestureArgs) {
       // F-167: `mutateAsync`, not `mutate` -- the SAME mutation, the SAME
       // failure toast, but the caller (and through it the command bar) can
       // now hear whether the row actually landed.
-      const sendCreate = (): Promise<"written"> =>
+      const sendCreate = (): Promise<{ kind: "written"; id: string }> =>
         createAssignment
           .mutateAsync(input)
-          .then((): "written" => {
+          .then((result): { kind: "written"; id: string } => {
             setPopover(null);
-            return "written";
+            return { kind: "written", id: result.assignment.id };
           })
           .catch((err: unknown) => {
             const se = isSchedulerError(err) ? err : toSchedulerError(err);
@@ -2409,12 +2453,12 @@ export function useDragGesture(args: UseDragGestureArgs) {
             throw se;
           });
       return probeCapacity({ operatorId, start: input.start, end: input.end, efficiencyPercent })
-        .then((probe) => {
+        .then((probe): Promise<{ kind: "written"; id: string } | "handed-off"> => {
           if (probe.fits) return sendCreate();
           openSplitPopover(probe, input, anchor);
-          return "handed-off" as const;
+          return Promise.resolve("handed-off" as const);
         })
-        .catch((err: unknown) => {
+        .catch((err: unknown): Promise<{ kind: "written"; id: string } | "handed-off"> => {
           // The probe is a convenience, never a gate (docs/api.md §2: it
           // "raises nothing"; a thrown error here is a network blip, not a
           // capacity answer). Fall back to the authoritative write -- its

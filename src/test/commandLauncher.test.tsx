@@ -145,6 +145,7 @@ function renderLauncher(over: Partial<ResolveContext> = {}, recognizer: Recogniz
   render(
     <CommandLauncher
       ctx={buildCtx(over)}
+      hasPendingCreate={false}
       dateFormat="d_mon_yyyy"
       zone="UTC"
       recognizer={recognizer}
