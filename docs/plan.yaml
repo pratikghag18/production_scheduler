@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-29'
-  tip: 'e122727'
+  tip: '4cde4cc'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13162,7 +13162,123 @@ requirements:
     of the supervisor's rail and not of the plant: "Nobody on Shift 1 on this board" (and "Nobody on
     Shift 1 or Shift 2 on this board"). The rail lists the people of the board's own place; the "show
     other people" control under it still brings in the rest of the plant.
+- id: R-463
+  title: A job or a person's block has no minimum length beyond one minute --- anything from one minute up can be scheduled
+  source:
+  - 'session 194 conversation (the maintainer, 29 Sept, asked whether the server should enforce the app''s 15-minute minimum for a job, F-230): "There is no limit to schedule a job, if such a rule exists, please change it. Anything positive and greater than 1 is good."'
+  stated_by: maintainer
+  claim: >-
+    The app does not refuse a job for being short. The 15-minute floor (MIN_DURATION_MINUTES, D31, one
+    constant in src/features/board/lib/interaction.ts that the drag, the pop-ups and the bar all read) is
+    not a rule of the plant and goes. What remains is what the server already holds: a range that is
+    empty is refused, anything longer is accepted. So the client and the server agree again (CLAUDE.md
+    §4), by the client dropping its rule and not by the server gaining one. A DRAG by hand floors at the
+    zoom's own snap step, never a one-minute sliver; Alt, which already means whole minutes and no grid,
+    reaches the true floor. A short job's band is drawn at least as wide as a person's short block (46
+    pixels) so it can be clicked.
+  verified_by:
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "R2, R2b, RB10, RB12, RB13, F146-R2, F146-R2b, AJ8, SP4, SP4b, SP4c, MIN1, MIN4, MIN5 (a ten, five and one minute span is written; a span of no length is refused in the singular)"
+  - kind: vitest
+    file: src/test/interaction.test.ts
+    cases: "case6, case6b, case11, case11b, case12, case12b, case19c, case19d"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "a pointer resize toward an off-grid fixed edge stops one snap step away, not one minute"
+  - kind: e2e
+    file: e2e/typedWalk.spec.ts
+    cases: "a five-minute block said to the bar is written and read back from the database"
+  status: covered
+  note: >-
+    STATED 29 Sept (session 194). It answers F-230 the other way round from the developer's
+    recommendation: no constraint is added to the database. TWO POINTS WERE ASKED THE SAME TURN, each
+    with two candidates, and answered: it holds for a person's block as well as a job ("Both"), and the
+    shortest length is one minute ("1 minute"), the smallest positive length a board that works in whole
+    minutes can show. The developer's database holds no job and
+    no block under 15 minutes today (113 jobs, 116 blocks, read 29 Sept), so nothing existing changes.
 findings:
+- id: F-236
+  title: A second sentence entered while the bar is still reading the first throws the first away, and its line in the thread stays blank
+  tag: A silent drop
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-434
+  - R-435
+  - F-233
+  story: >-
+    29 Sept (session 194), found while chasing F-233 and at first mistaken for it. The bar was built (S44-b) so
+    that a second Enter aborts whatever it is still reading, on the thought that a person correcting themselves
+    wants the new sentence. The aborted reading has no catch: the first sentence never becomes a command, writes
+    nothing, and its turn is filed with no outcome, which reads as if the board were still thinking. "Place Sam
+    on Cell 1" then quickly "clear Cell 1" answers, truthfully, "Cell 1 has nobody on it". Proved by a case
+    on the parked branch (wip/f233-hold, s194fgReview.test.tsx). PUT TO THE MAINTAINER with two candidates ---
+    run both in order with Escape to take one back, or keep the replacement and say Cancelled on the dropped
+    one --- and not yet answered; the developer recommends the first.
+- id: F-235
+  title: Twelve test files still carry their own "15" for the minimum length, where the app's is now 1
+  tag: A number written twice
+  status: open
+  found_by: agent
+  refs:
+  - R-463
+  story: >-
+    29 Sept (session 194). The resolver's fixtures each typed minDurationMinutes 15 themselves. Where the
+    lane swapped the literal for the app's constant, eight cases turned out to have been pinning the old rule
+    while staying green. Twelve files still type it: commandBar.test.tsx, commandLauncher.test.tsx, the two
+    reviewers' files, and six pins under src/test/defects (the tester's). None asserts the threshold, so
+    nothing false is claimed today; it is CLAUDE.md §4's "a column list that appears twice", waiting.
+- id: F-234
+  title: '"Assign Sam to Cell 1 from 10 pm to 2 am" is answered "That is -1200 minutes; a block is at least 1 minute"'
+  tag: A wrong question answered
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-459
+  - R-435
+  - R-461
+  story: >-
+    29 Sept (session 194). The adjust path checks that an end comes after its start before it checks the
+    length; the plain assign and book path does not, so a span said across midnight on one day reaches the
+    length check with a negative number. It did the same before R-463 with "at least 15 minutes". A supervisor
+    who says 10 pm to 2 am means a night shift; the bar should read it as one (the shift grammar already does
+    for "for shift 3") or ask, never count backwards. Pinned as R2c so the sentence cannot change unnoticed.
+- id: F-233
+  title: A block the server has not yet answered for can be cleared, dragged or removed --- its placeholder id goes to the server and the clear stops half-way with "Something went wrong"
+  tag: A row that is drawn but not yet real
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-431
+  - R-432
+  - R-463
+  story: >-
+    29 Sept (session 194), found by running the typed walk twice over one database after R-463 turned a refused
+    sentence into a written one directly before a clear of the same place. A create draws its row at once under
+    the id "optimistic-<uuid>" and swaps it when a refetch lands; "clear Area 1" said in that gap read the row,
+    sent the placeholder to the server (invalid input syntax for type uuid, in the database's own log), did 4
+    of 9 and stopped. A person placing someone and clearing, or grabbing the new chip, on a slow connection has
+    seconds to do the same. NOT FIXED. The typed walk carries a one-second wait between the two sentences,
+    marked in the spec as a workaround, and it stays until this is fixed. THREE ATTEMPTS WERE MADE ON 29 SEPT
+    AND NONE WORKS; they are parked on the branch wip/f233-hold (427da1e), off Development, not to be merged.
+    The first filtered the placeholder from the bar's view and held a sentence while a create was pending:
+    green on the developer's three runs of its own browser check, red on the reviewer's two, the same code.
+    The second waited for the count of rows on the board to grow: unit suite green, and on the real app the
+    sentence after ANY create was held five seconds and refused ("The board is still saving your last
+    change"), both typed walks red, four minutes each where they take thirty seconds. The third waited for
+    the created row's own id: unit suite green again (4705), the walk red in exactly the same way. So the hold
+    does not release on the real app and no unit case written so far can see why. WHAT THE NEXT ATTEMPT
+    SHOULD DO DIFFERENTLY: start from the walk's failing sentence in a browser with the bar's refs logged,
+    find which condition never comes true, and only then write the unit case; do not accept a unit suite as
+    proof of anything that depends on when a render happens. WHAT IS WORTH KEEPING from the branch: waiting
+    sentences queued in order, Escape cancelling them, the status shown while one waits, the refusal past the
+    bound, the one helper that knows a placeholder id, the drag and keyboard guards, and the reviewer's cases.
+    The machine ran short of memory twice during the proofs and the harness stopped them; the walks need
+    about 2 GB free beside the two stacks.
 - id: F-232
   title: A database test passes or fails by the hour it runs --- it books Cell 1 from "now" for two hours, and the seed already has a job there at some hours of the week
   tag: A test on the machine's clock
@@ -18657,9 +18773,9 @@ sessions:
   date: 2026-09-28
   title: "The tester's sixteen defects, fix-claimed the day they were filed: a night shift split at midnight, an absence recorded from the bar, a lot that says what it did and did not, the New pop-up on the plant's clock, and the typed walk green on a fresh seed (DEF-0037 to DEF-0052)"
   shipped: []
-  commits: ['504a74b', 'a381b01', 'f84fbd3', 'e122727']
+  commits: ['504a74b', 'a381b01', 'f84fbd3', 'e122727', '4cde4cc']
   numbers:
-    app_tests: 4647
+    app_tests: 4660
     app_test_files: 184
     tsc: 0
     eslint: 0
@@ -18669,11 +18785,11 @@ sessions:
   confirmed: true
   numbers_note: >-
     npm run test copied from the runner on the developer's own run, after the last lane and after formatting:
-    `Test Files  3 failed | 181 passed (184)`, `Tests  3 failed | 4647 passed (4650)` (4642 before the last commit's five cases). The three failures are
+    `Test Files  3 failed | 181 passed (184)`, `Tests  3 failed | 4660 passed (4663)`, read again on 29 Sept on two workers after the unfinished F-233 work was taken out of the tree (4642 at the first four commits, 4647 after the fifth). The three failures are
     known and named: DEF-0040's pin and DEF-0043's headcount pin, neither of which can reach its assertion now
     that a clear across midnight asks a question first (each defect file carries a developer note), and
     DEF-0020's live pin, which needs the invite edge function and the developer's stack has no edge runtime
-    container running. So the count the next session should expect is 4647 passing with those three red until
+    container running. So the count the next session should expect is 4660 passing with those three red until
     the tester rewrites the two pins. tsc -b and eslint clean; no migration, so tsc is conclusive. db_checks is
     MEASURED on 29 Sept, once the maintainer had the leftover scratch database dropped (F-231): every file in
     supabase/tests and the demo seed's checks, on scratch databases in the tester's container, per-file tally
@@ -18715,7 +18831,18 @@ sessions:
     verifies it (the validator holds this, and it is right). The others the tester set contradicted (R-350, R-357, R-360, R-407, R-409, R-426, R-430, R-431, R-433,
     R-434, R-435, R-436, R-450, R-452, R-453, R-455, R-456, R-459) are left contradicted for the tester to restore
     when it verifies each defect by its own reproduction; the developer does not mark its own work verified.
-    FOUND ON THE WAY, queued as findings: F-225 to F-231. NOT RUN: the scorer against the real Whisper (the
+    THE MINIMUM LENGTH, 29 SEPT. Asked whether the server should enforce the app's fifteen minutes, the
+    maintainer answered that there is no such rule; the app's floor is one minute now, for a job and a block
+    (R-463, 4cde4cc), with no migration. A drag by hand still floors at the grid's step.
+    F-233, NOT FIXED, AND THE LESSON OF THE DAY. R-463 put a create directly before a clear in the typed walk
+    and showed that a row the server has not answered for can be acted on. Three attempts to fix it, each
+    green on the unit suite, none working on the real app; the second and third made the bar refuse the
+    sentence after every create. They were caught only because the developer ran the walks itself; the lane
+    had reported on units alone when the machine was short of memory. The work is parked on wip/f233-hold
+    and the tree is back at 4cde4cc. The developer also reported the first attempt to the maintainer as
+    passing on three green runs of a timing check, which a reviewer then failed twice on the same code:
+    a check that depends on timing is proved by many runs at more than one delay, never by a few.
+    FOUND ON THE WAY, queued as findings: F-225 to F-236. NOT RUN: the scorer against the real Whisper (the
     container is the maintainer's to start); the whole SQL suite; the e2e specs not named above.
 - id: 193t
   date: 2026-09-28
