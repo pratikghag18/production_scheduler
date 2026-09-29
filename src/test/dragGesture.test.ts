@@ -1224,6 +1224,66 @@ describe("useDragGesture", () => {
     });
   });
 
+  /**
+   * R-463 (29 Sept): the constant a POINTER resize is floored against is no
+   * longer the bare `MIN_DURATION_MINUTES` (1) -- it is the zoom's own snap
+   * step, computed in `computeBlockCandidate` and passed as `resizeRange`'s
+   * new 5th argument (`interaction.ts`'s own comment on that parameter
+   * explains why: the block's FIXED edge need not itself be on the grid, so
+   * clamping only against a 1-minute floor could land the moving edge a
+   * single minute from an off-grid fixed edge, a sliver nobody dragged to).
+   * This drives a REAL pointer resize through the hook, the same shape the
+   * R-031 cases above do, against a block whose fixed edge is deliberately
+   * off the Standard zoom's 30-minute grid (607, not a multiple of 30) --
+   * `interaction.test.ts`'s own cases 11b/12b prove `resizeRange`'s
+   * parameter in isolation; this proves the WIRING that picks the value it
+   * is called with.
+   */
+  describe("R-463: a pointer resize's floor is the zoom's own snap step, not the bare 1-minute floor", () => {
+    it("dragging the start edge toward an off-grid fixed end stops one whole snap step short, not one minute short", () => {
+      const a: IndexedAssignment = { ...crewFixture(), startMin: 360, endMin: 607 };
+      const index = buildIndex([]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(index)), { wrapper });
+
+      act(() => {
+        result.current.beginBlockDrag(
+          {
+            nodeId: "cell-1",
+            // homeRun: null -- a direct assignment, so `boundsFor` returns
+            // the full window and the ONLY clamp in play is `resizeRange`'s
+            // own, isolating exactly the floor this case is about.
+            subject: { kind: "assignment", assignment: a, homeRun: null },
+            original: { startMin: a.startMin, endMin: a.endMin },
+            pxPerHour: 100,
+            windowMinutes: WINDOW_MINUTES,
+            template: null,
+            dayCount: 1,
+            dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
+            zoomIndex: 1, // Standard, 30-minute snap
+            handlePx: 8,
+            blockWidthPx: 200,
+            offsetXPx: 2, // the start grip (hitTestBlock: <= 8)
+            runsOnNode: [],
+            crew: [],
+          },
+          fakePointerEvent(500, 300),
+        );
+      });
+      act(() => {
+        // +450px at 100px/hour = +270min; raw target 360+270 = 630, already
+        // a multiple of 30 (no snapping ambiguity). 630 is only 607-630 =
+        // -23 min BEFORE the fixed end -- i.e. past it -- so the floor clamp
+        // fires: the mutated (bare 1-minute) floor would land the start at
+        // 607-1=606 (OFF the 30-minute grid, a 1-minute block); the real
+        // floor (30, the zoom's own step) lands it at 607-30=577, a whole
+        // snap step short of the fixed end.
+        result.current.updateBlockDrag(fakePointerEvent(950, 300));
+      });
+
+      expect(result.current.activeDrag?.candidate).toEqual({ startMin: 577, endMin: 607 });
+    });
+  });
+
   describe("R-365: a drop that changes a chip's run asks first", () => {
     const runFixtureB: IndexedRun = {
       ...runFixture,

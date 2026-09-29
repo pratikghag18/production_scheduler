@@ -159,8 +159,12 @@ export interface WalkDates {
    *  F-182: `day` is the Monday of NEXT week (`walkDayInZone`), never
    *  today -- every sentence below that names a day says it as its ISO
    *  date, the shape entry 19 always used, so the walk's writes and its
-   *  closing clears land on a day nobody is using. The one sentence that
-   *  still means "today" (entry 20, day-less) asks and writes nothing. */
+   *  closing clears land on a day nobody is using. R-463 (29 Sept) retired
+   *  the last day-less sentence (entry 20): its old too_short refusal was
+   *  day-independent and wrote nothing regardless of which day it landed
+   *  on, but the new one-minute floor turns that same span into a real
+   *  write, so entry 20 now names its day explicitly too, like every other
+   *  writing entry here. */
   day: string;
   tomorrow: string;
   far: string;
@@ -436,45 +440,69 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       expect: assignReadoutRe("Maria Lopez", "Bracket A", "Cell 3", "08:00", "12:00"),
     },
 
-    // 20. RETIRED, 24 Sept (R-459 review, S72-d): this used to be a
-    // day-LESS sentence (defaults to "today") that the walk deliberately
-    // left UNMOVED (F-182) -- the window sat on the walk's own week, today
-    // was off it, "Show that day" stood unpressed, and the standing
-    // question was the proof: pressing it would have moved the window to
-    // the day a real person might be using and written there.
+    // 20. RETIRED AGAIN, 29 Sept (R-463, S194-F): this entry's whole reason
+    // for existing (see the 24 Sept history just below, kept for the
+    // record) was a REFUSAL that had nothing to do with the day -- a
+    // five-minute span used to be `too_short` unconditionally, so a
+    // day-less sentence could still prove R-455's no-press move fires for
+    // "today" while writing nothing anywhere. R-463 deleted the fifteen-
+    // minute floor: five minutes is now a perfectly good block, so this
+    // sentence, left day-less, would WRITE Lena Novak's block onto the REAL
+    // machine's actual current day on the maintainer's live server -- the
+    // exact hazard the 24 Sept repoint (and F-182 before it) both exist to
+    // avoid. There is no longer a same-cell refusal this walk can lean on
+    // that is BOTH unconditional and day-independent (every other Cell 1
+    // refusal in this walk -- not_certified, outside-area -- sets an
+    // override-reason flag the bar would then misread entry 21's own
+    // sentence through, per the 24 Sept note below).
     //
-    // R-455 (lane S72-b, d5a8829) removed that door: a day_off_board move
-    // now fires with no press at all, for "today" exactly as for any other
-    // day (that IS the maintainer's own complaint the row records: "why
-    // would it not go to it on its own?"). So a day-less sentence run here
-    // would no longer stop at a question -- it would move the window to the
-    // REAL machine's actual current day and WRITE Maria Lopez's block
-    // there, on the maintainer's live shared dev server, the one thing
-    // `WalkDates`' own doc says this whole walk is built to avoid ("so the
-    // walk's writes and its closing clears land on a day nobody is using").
-    // There is no way left to observe "today is off the board" from the bar
-    // without also letting it write to today.
+    // So this entry is repointed AGAIN, this time onto an ordinary, dated,
+    // successful write -- proving the new floor itself (R-463's "New cases:
+    // a 1-minute block assigned... is written", the block form of RB13 in
+    // `commandResolve.test.ts`) instead of a refusal. It carries the walk's
+    // own day explicitly (`${dates.day}`) rather than defaulting to "today"
+    // -- R-455's day-less move is no longer anything this entry needs to
+    // prove (entry 19 already covers a day past the window; the day-less
+    // path itself has no more day-independent refusal left to pair it
+    // with), and a REAL write needs the walk's own synthetic day so the
+    // closing "clear Area 1/2" sentences (21, 22) actually clean it up --
+    // otherwise it would land on, and stay on, whatever day the machine
+    // running the walk calls "today". The hour is 2pm-2:05pm, not 1pm-1:05pm
+    // as the original sentence read: Cell 1 already holds Sam Patel's own
+    // two blocks 8am-1pm and 1pm-2pm by this point (entries 9 and 11 above,
+    // the "end"/"split" pair) and Tom Baker's 3pm-5pm block follows (entry
+    // 18) -- 2pm-2:05pm is the one gap on Cell 1 that afternoon nothing else
+    // in this walk touches.
     //
-    // This entry is repointed at a target that is refused for a reason that
-    // has nothing to do with the day AND captures no follow-up text: NOT a
-    // certificate or area refusal (both of those, outside a lot, set an
-    // `awaitingOverrideReason`/`awaitingAreaReason` flag on the bar that
-    // reads entry 21's next typed sentence as the override's free-text
-    // reason instead of a command -- confirmed by reading `submitText`'s own
-    // handling of those flags, CommandBar.tsx, before picking this). A
-    // five-minute span is `too_short` instead (row #22 of the R-459
-    // inventory, `docs/walks/bar-sentences.md`): a plain informational
-    // refusal, day-independent, no candidates, no flag. Cell 1 still needs a
-    // day resolved before the span can even be checked (`resolveDaySpanStep`
-    // computes the day index first), so the day-less sentence still reaches
-    // `resolveDay`, still gets `day_off_board` on the first pass (today off
-    // the board), still proves R-455's own move fires with no press for
-    // "today" too -- and still writes nothing, on the walk's own day or the
-    // real machine's, because the span itself is refused on the rerun.
+    // FOUND LIVE (running this lane's own rewrite, 29 Sept): Lena Novak is
+    // not certified for Cell 1 (Welding, Line 1's own requirement) -- the
+    // bar answers `not_certified` under `warn` before it ever reaches the
+    // span/floor check at all, the exact same refusal entry 18 already
+    // exercises for Tom Baker on this same cell. Rather than pick a
+    // different, certified person (which would stop this entry proving what
+    // R-463 actually changed for an UNCERTIFIED write too), this entry now
+    // answers the certificate question the same way entry 18 does -- a
+    // typed override reason -- so the 5-minute write still lands, proven by
+    // the same `eligibility_override` read.
+    //
+    // History (24 Sept, R-459 review, S72-d): this used to be a day-LESS
+    // sentence (defaults to "today") that the walk deliberately left
+    // UNMOVED (F-182) -- the window sat on the walk's own week, today was
+    // off it, "Show that day" stood unpressed, and the standing question was
+    // the proof. R-455 (lane S72-b, d5a8829) removed that door: a
+    // day_off_board move fires with no press at all now, so a day-less
+    // sentence would move the window to the real machine's actual current
+    // day and write there -- which is why this entry was repointed off its
+    // original Maria Lopez/Cell 3 target onto a target refused for a reason
+    // that had nothing to do with the day (a five-minute span, then
+    // `too_short` unconditionally). R-463 is what retired THAT refusal in
+    // turn, above.
     {
-      say: "Assign Lena Novak to Housing A on Cell 1 in Line 1 from 1pm to 1:05pm",
-      note: 'no day word at all (defaults to "today"); repointed off the original Maria Lopez/Cell 3 target after R-455 removed the decline path -- see the long comment above. A 5-minute span is too_short regardless of which day it lands on and captures no override flag, so the day-less-defaults-and-moves-on-its-own fact is proven with no write, even if the move lands on the real machine\'s actual current day.',
-      expect: /^That is 5 minutes; a block is at least \d+ minutes\.$/,
+      say: `Assign Lena Novak to Housing A on Cell 1 in Line 1 from 2pm to 2:05pm ${dates.day}`,
+      answer: "the line supervisor approved the cover",
+      note: "R-463: proves the new one-minute floor itself -- a 5-minute block now WRITES. Lands on Cell 1's one free slot that afternoon (2pm-2:05pm, between Sam Patel's 1pm-2pm and Tom Baker's 3pm start), and, found live, Lena Novak needs the same not_certified override Tom Baker needed at entry 18 -- so this proves the floor AND an overridden write together, the DB read after asserting eligibility_override = true.",
+      expect:
+        /^Not done: Lena Novak is not certified for Cell 1, missing Welding\. Say the reason to schedule anyway, or no\.$/,
     },
 
     // 21 and 22. The clear of the walk day, at the end -- TWO sentences,

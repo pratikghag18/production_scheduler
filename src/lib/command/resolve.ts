@@ -914,6 +914,14 @@ function peopleCount(n: number): string {
   return n === 1 ? "1 person" : `${n} people`;
 }
 
+/** R-463 (29 Sept): the same rule as `peopleCount`, for a length in minutes
+ *  -- "1 minute" is singular, "0 minutes"/"10 minutes" are not. Only
+ *  `too_short` needs this (the one place a minute count near the new
+ *  one-minute floor reads back to a person as a bare number). */
+function minutesCount(n: number): string {
+  return n === 1 ? "1 minute" : `${n} minutes`;
+}
+
 type Node = { id: string; name: string; path: string };
 type ProductLike = ResolveContext["products"][number];
 
@@ -6548,8 +6556,8 @@ function describeQuestionRaw(q: Question): string {
       return `${q.text} is not on the board. Move the board to that day first.`;
     case "too_short":
       return q.subject === undefined
-        ? `That is ${q.minutes} minutes; a block is at least ${q.min} minutes.`
-        : `That would leave ${q.subject} ${q.minutes} minutes; a job is at least ${q.min} minutes.`;
+        ? `That is ${minutesCount(q.minutes)}; a block is at least ${minutesCount(q.min)}.`
+        : `That would leave ${q.subject} ${minutesCount(q.minutes)}; a job is at least ${minutesCount(q.min)}.`;
     case "job_hole":
       return q.text;
     case "run_exists":

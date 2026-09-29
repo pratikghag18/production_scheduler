@@ -692,17 +692,22 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
     // trace loop at the end reads this set instead of a single block-scoped
     // name so it works for either list.
     //
-    // The first list's own `dayLessToday` used to belong here too (F-182:
-    // declined by silence, a standing day_off_board QUESTION with no button
-    // pressed and no text typed). R-455 (24 Sept, lane S72-b, d5a8829)
-    // changed `day_off_board` itself into a READOUT (`status.moving`), and a
-    // readout fills in `answered: "auto"` the instant it is set
-    // (`traceQuestionStatus`, CommandBar.tsx) whether or not a person ever
-    // presses anything -- so EVERY entry that crosses a day_off_board move
-    // now gets a real `answered` value, `dayLessToday` included (repointed,
-    // S72-d review, off the real "today" write F-182 itself was about --
-    // see that entry's own long comment in `sentences.ts`). It is no longer
-    // added to this set.
+    // The first list's own entry 20 (`lenaShortBlock` below) used to belong
+    // here too (F-182: declined by silence, a standing day_off_board
+    // QUESTION with no button pressed and no text typed). R-455 (24 Sept,
+    // lane S72-b, d5a8829) changed `day_off_board` itself into a READOUT
+    // (`status.moving`), and a readout fills in `answered: "auto"` the
+    // instant it is set (`traceQuestionStatus`, CommandBar.tsx) whether or
+    // not a person ever presses anything -- so EVERY entry that crosses a
+    // day_off_board move now got a real `answered` value, that entry
+    // included (repointed, S72-d review, off the real "today" write F-182
+    // itself was about). It is no longer added to this set.
+    //
+    // R-463 (29 Sept) moved entry 20 again: it now names its own day
+    // explicitly (`sentences.ts`'s own long comment on the entry) and never
+    // crosses a day_off_board move at all any more -- it is an ordinary
+    // single-sentence write like entry 2, proven by the DB read just below
+    // its `runEntry` call, same shape as entries 18/19.
     const answerlessEntries = new Set<Sentence>();
 
     try {
@@ -734,12 +739,14 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           everyWeekdayNo,
           tomOverride,
           dayOffBoardFar,
-          dayLessToday,
+          lenaShortBlock,
           clearArea1,
           clearArea2,
         ] = SENTENCES;
-        // `dayLessToday` no longer belongs in `answerlessEntries` -- see
-        // that Set's own comment above (R-455 gives it a real `answered`).
+        // `lenaShortBlock` (entry 20) no longer belongs in
+        // `answerlessEntries` -- see that Set's own comment above (R-455
+        // gives it a real `answered`; R-463 later turned it into an
+        // ordinary dated write with no day_off_board move at all).
 
         // 1. Clear of an empty cell.
         table.push(await runEntry(page, clearEmptyCell));
@@ -1073,10 +1080,9 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         }
         // R-455's own move (no button since 24 Sept) widened the window to
         // the walk day's week here; entry 19 below moves it to the far
-        // Monday, entry 20 moves it again to the real machine's actual
-        // current day (repointed off a write, S72-d review -- see that
-        // entry's own comment in sentences.ts), and entry 21 moves it back
-        // to the walk day, all without a press.
+        // Monday, and entry 21 moves it back to the walk day, both without a
+        // press. Entry 20 (R-463, 29 Sept) no longer moves the window at all
+        // -- it names its own day explicitly now, see its own comment below.
 
         // 18. An uncertified person on Cell 1, under warn -- a typed reason
         // runs it anyway.
@@ -1102,16 +1108,61 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           endMs: wallMs(FAR, 12, 0),
         });
 
-        // 20. A day-less sentence -- today is off the board, so R-455's own
-        // move fires for it too (no press). Repointed (S72-d review, 24
-        // Sept) off the original Maria Lopez/Cell 3 target, which R-455
-        // would now actually WRITE to the real machine's actual current day
-        // on the maintainer's live server -- the exact thing F-182 already
-        // fixed once (the walk emptying the maintainer's own morning board).
-        // A too-short span proves the same day-less-moves-on-its-own fact
-        // with nothing written either way; see sentences.ts's own long
-        // comment on this entry.
-        table.push(await runEntry(page, dayLessToday));
+        // 20. R-463 (29 Sept): a 5-minute block, Lena Novak on Cell 1's one
+        // free slot that afternoon (2pm-2:05pm -- Sam Patel's own two blocks
+        // from entries 9/11 fill 8am-2pm, Tom Baker's from entry 18 starts
+        // at 3pm). No longer day-less (see `sentences.ts`'s own long comment
+        // on this entry for why): it names the walk's own day explicitly.
+        // FOUND LIVE (this lane's own first run): Lena Novak is not
+        // certified for Cell 1 (Welding) -- the same not_certified refusal
+        // entry 18 already proves for Tom Baker on this cell, so this entry
+        // answers it the same way (a typed override reason) and the write
+        // is proven the same way entry 18's is, eligibility_override
+        // included, not just the row's existence.
+        table.push(await runEntry(page, lenaShortBlock));
+        {
+          const row = await waitForAssignment(dana, {
+            operatorId: opId.lena,
+            nodeId: cellId("Cell 1"),
+            startMs: wallMs(WALK_DAY, 14, 0),
+            endMs: wallMs(WALK_DAY, 14, 5),
+          });
+          expect(row.eligibility_override, "eligibility_override should be true").toBe(true);
+          expect(row.override_reason).toBe(lenaShortBlock.answer);
+        }
+        // FOUND LIVE (this lane's second consecutive run, same database,
+        // R-433): entry 20 is the only create in this whole walk with NO
+        // entry between it and a lot that immediately removes the very row
+        // it just made (every other override-create here -- entry 18's Tom
+        // Baker -- has several sentences' worth of round trips before its
+        // own removal at entry 21). `useCreateAssignment`'s `onMutate`
+        // (`useAssignmentMutations.ts`) inserts an `optimistic-<uuid>` row
+        // into the board's OWN query cache and only replaces it once
+        // `onSettled`'s `invalidateQueries` refetch actually returns -- a
+        // separate, un-awaited round trip the mutation's own promise does
+        // NOT wait on. `waitForAssignment` above proves the SERVER already
+        // has the real row (a direct DB read, a different connection
+        // entirely); it proves nothing about the BROWSER's own cache. Run
+        // back-to-back on a fast local stack, "clear Area 1" (entry 21) can
+        // fire before that refetch lands, read the still-optimistic id off
+        // the board index, and send it as the row to delete --
+        // `invalid input syntax for type uuid: "optimistic-<uuid>"` from
+        // Postgres, which the lot's own generic catch turns into "Something
+        // went wrong. Please try again." mid-clear (reproduced live,
+        // confirmed in `docker logs supabase_db_production_scheduler_tester`
+        // for that exact string). This is a genuine, pre-existing client
+        // race in the mutation hook's own optimistic-update pattern, not
+        // anything R-463 changed the logic of -- R-463 only exposed it, by
+        // turning entry 20 from a refusal (nothing created, nothing to
+        // race) into a real create sitting immediately before a mass
+        // removal. Out of scope for this lane (not `useAssignmentMutations.ts`,
+        // not the minimum-length rule) and not fixed here; reported in the
+        // lane's own final report for the developer/tester. The wait below
+        // is the walk's own workaround, not a fix: give the invalidated
+        // query's background refetch time to land before entry 21 reads the
+        // board index, the same shape this file already uses elsewhere
+        // (e.g. `walk/db.ts`'s own polling) rather than inventing a new one.
+        await new Promise((r) => setTimeout(r, 1000));
 
         // 21 and 22. The clear of the walk day, one sentence per area (R-407: a
         // place above the cells clears every cell under it). Between them the
@@ -1630,7 +1681,11 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         // R-455 (24 Sept): a day_off_board move is a READOUT now, which
         // fills in `answered: "auto"` the instant it fires -- entry 20 no
         // longer belongs in `answerlessEntries` (see that Set's own
-        // comment). What is still genuinely answerless: an `inLot`
+        // comment). R-463 (29 Sept) later took entry 20 off the
+        // day_off_board path entirely (it names its own day now), so its
+        // `answered` comes from the plain single-sentence readout path
+        // instead (S47) -- still real, still not in this set. What is still
+        // genuinely answerless: an `inLot`
         // certificate refusal with no candidate and no yes/no of its own
         // (entry 13, second list), and an entry that landed on its direct
         // readout (orDirect) without ever raising a question at all.

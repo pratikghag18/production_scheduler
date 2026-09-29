@@ -69,7 +69,13 @@ export function RunBand({
   const effHc = effectiveHeadcount(assignments);
   const under = isUnderstaffed(effHc, run.plannedHeadcount);
   const left = minutesToPx(range.startMin, pxPerHour);
-  const width = minutesToPx(range.endMin, pxPerHour) - left;
+  // R-463: same floor as `DirectBlock.tsx`/`AssignmentChip.tsx` (46px,
+  // reused verbatim, not a new number) -- with the minimum length down to
+  // one minute, a job the bar books short (or a run trimmed to a small
+  // remnant) can be a fraction of a pixel wide at Compact zoom without
+  // this; every other block shape on the board already floors its own
+  // drawn width the same way.
+  const width = Math.max(46, minutesToPx(range.endMin, pxPerHour) - left);
   const productName = product?.name ?? "(unknown product)";
 
   const title =

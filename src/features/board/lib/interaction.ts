@@ -25,7 +25,21 @@
  * the empty set is vacuously "only types plus geometry values".
  */
 
-export const MIN_DURATION_MINUTES = 15; // D31
+/**
+ * R-463 (the maintainer, 29 Sept): "There is no limit to schedule a job...
+ * Anything positive and greater than 1 is good", for a job AND a person's
+ * block alike -- the app's old 15-minute floor (D31) goes. This is now the
+ * smallest length the board can show at all: a whole-minute board cannot
+ * draw or store a fraction of a minute, so `1` is the floor a range of any
+ * positive length must still clear. It still exists, and is still checked,
+ * because a range of NO length (`isempty(p_timerange)`) is the one thing
+ * every server writer refuses regardless (migration 20260918000082 and
+ * earlier) -- the client's own zero-length refusal (`too_short`, `minutes:
+ * 0`) is what lets a person read why in a plain sentence instead of a raw
+ * database error. D31's old comments below (D38, the grip math) still hold
+ * unchanged; only this number moved.
+ */
+export const MIN_DURATION_MINUTES = 1; // R-463 (was D31's 15)
 
 /**
  * D32, and it now lives in `src/lib/interaction.ts` (brief P1-5l §4.1) because
@@ -105,10 +119,18 @@ export function snapMinute(
 /**
  * Create: two ALREADY-SNAPPED instants in either drag direction -> a
  * normalized range, or `null` if it is shorter than
- * `MIN_DURATION_MINUTES` (D31) once clamped to the window. The caller
+ * `MIN_DURATION_MINUTES` once clamped to the window. The caller
  * (`useDragGesture`) is responsible for snapping `anchorMin`/`currentMin`
  * via `snapMinute` before calling this — this function only normalizes,
  * clamps, and enforces the minimum.
+ *
+ * R-463: with the floor at 1, this null branch is now reached only when
+ * `anchorMin === currentMin` (the same snap point both ends, a click with no
+ * real drag) -- two DIFFERENT snapped instants are already at least one
+ * snap step apart (`snapMinute`'s own grid, or one shift-boundary point to
+ * the next), which is always well above 1. A drag can therefore never
+ * create a sub-step sliver; the smallest a create-drag can still produce is
+ * one whole snap step, unchanged from before this rule.
  */
 export function createRange(
   anchorMin: number,
@@ -137,23 +159,40 @@ export function moveWithinTrack(original: Range, deltaMin: number, windowMinutes
 }
 
 /**
- * Resize: moves one edge only; the other is fixed. Enforces D31 against
- * the FIXED edge (§4's second easy-to-get-wrong rule) and clamps to the
- * window.
+ * Resize: moves one edge only; the other is fixed. Enforces a minimum
+ * against the FIXED edge (§4's second easy-to-get-wrong rule) and clamps to
+ * the window.
+ *
+ * R-463: `minDurationMinutes` defaults to the module floor (1) for every
+ * caller that does not pass one explicitly -- `interaction.test.ts`'s own
+ * pure-arithmetic cases among them. `useDragGesture.ts`'s POINTER resize
+ * passes the zoom's own snap step instead (falling back to the floor only
+ * with Alt held, which already disables snapping to whole minutes): the
+ * snapped TARGET this function's own caller computes is always a real grid
+ * point, but the FIXED edge a drag resizes against is not (a block can start
+ * or end off-grid, typed or bar-placed) -- clamping only against the 1-minute
+ * floor would let the edge land on a non-grid minute nobody dragged it to,
+ * a sliver-sized, invisible-seeming jump right at the limit. Clamping
+ * against a whole snap step instead means the smallest a POINTER drag can
+ * ever produce is one grid step, exactly as before this rule existed; typed
+ * and spoken paths never call this function at all (they go through
+ * `resolve.ts`'s own `too_short`, straight off `ctx.minDurationMinutes`), so
+ * they still reach the true 1-minute floor untouched.
  */
 export function resizeRange(
   original: Range,
   edge: "start" | "end",
   deltaMin: number,
   windowMinutes: number,
+  minDurationMinutes: number = MIN_DURATION_MINUTES,
 ): Range {
   if (edge === "start") {
     let newStart = original.startMin + deltaMin;
-    newStart = Math.max(0, Math.min(newStart, original.endMin - MIN_DURATION_MINUTES));
+    newStart = Math.max(0, Math.min(newStart, original.endMin - minDurationMinutes));
     return { startMin: newStart, endMin: original.endMin };
   }
   let newEnd = original.endMin + deltaMin;
-  newEnd = Math.min(windowMinutes, Math.max(newEnd, original.startMin + MIN_DURATION_MINUTES));
+  newEnd = Math.min(windowMinutes, Math.max(newEnd, original.startMin + minDurationMinutes));
   return { startMin: original.startMin, endMin: newEnd };
 }
 
@@ -320,8 +359,10 @@ export function planCrewShift<T extends { id: string; startMin: number; endMin: 
  * `a.startMin >= run.startMin && a.endMin <= run.endMin`. Do NOT add a
  * third `a.startMin < run.endMin` clause — with any positive-duration
  * assignment it is implied by the other two, and the design session
- * verified it is unreachable (`MIN_DURATION_MINUTES` is 15, so a
- * zero-length assignment cannot exist). A redundant guard reads as a case
+ * verified it is unreachable (`MIN_DURATION_MINUTES` is at least 1, so a
+ * zero-length assignment cannot exist — R-463 changed the number, 29 Sept,
+ * not this reasoning: the guard needs the floor to be POSITIVE, not any
+ * particular value, and 1 still is). A redundant guard reads as a case
  * someone thought about, which is worse than not writing it.
  */
 export function assignmentFitsRun(

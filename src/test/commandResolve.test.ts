@@ -8,6 +8,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
+// R-463: the fixture's own minimum, taken from the one constant rather than
+// retyped (CLAUDE.md §4, "a column list that appears twice is a bug with a
+// delay on it") -- every ctx builder below passes this, never a literal.
+import { MIN_DURATION_MINUTES } from "@/features/board/lib/interaction";
 import type {
   ResolveContext,
   ContextRun,
@@ -191,7 +195,7 @@ function baseCtx(overrides: Partial<ResolveContext> = {}): ResolveContext {
     wallToOffset,
     runs: [],
     fitsRun,
-    minDurationMinutes: 15,
+    minDurationMinutes: MIN_DURATION_MINUTES,
     assignments: [],
     overlaps,
     findRunOverlap,
@@ -363,12 +367,62 @@ describe("commandResolve: brief §5 worked examples", () => {
     });
   });
 
-  it("R2: too_short -- 9:00-9:10 is only 10 minutes", () => {
+  // CONTRACT CHANGED (R-463, 29 Sept): the old fifteen-minute floor is gone
+  // -- 9:00-9:10 (10 minutes) is now a perfectly good block, so this no
+  // longer reads too_short at all. R2b (just below) is the genuine
+  // too_short case that remains under the new floor: a span of NO length.
+  it("R2: 9:00-9:10 (10 minutes) now succeeds -- the old fifteen-minute floor is gone", () => {
     const res = resolveCommand(
       cmd({ start: { hour: 9, minute: 0 }, end: { hour: 9, minute: 10 } }),
       baseCtx({ runs: [] }),
     );
-    expect(res).toEqual({ ok: false, question: { kind: "too_short", minutes: 10, min: 15 } });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 3 * 1440 + 540, endMin: 3 * 1440 + 550 });
+    }
+  });
+
+  it("R2b (R-463, new): a zero-length span (9:00-9:00) is too_short -- 'That is 0 minutes; a block is at least 1 minute.'", () => {
+    const res = resolveCommand(
+      cmd({ start: { hour: 9, minute: 0 }, end: { hour: 9, minute: 0 } }),
+      baseCtx({ runs: [] }),
+    );
+    expect(res).toEqual({ ok: false, question: { kind: "too_short", minutes: 0, min: 1 } });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "That is 0 minutes; a block is at least 1 minute.",
+      );
+    }
+  });
+
+  // R-463 brief item 2 ("check the negative case"): does an ordinary
+  // assign/book span with END before its own START on the same day (no
+  // across-midnight handling in this grammar at all -- "from 10pm to 2am")
+  // still reach `too_short` with a NEGATIVE minute count, the way the
+  // now-fixed F-199/F-146 bugs once did elsewhere? Answer, found by driving
+  // it rather than reading it: YES. `resolveDaySpanStep` (the plain
+  // assign/book path) has no `newEndMin <= newStartMin` guard ahead of its
+  // own `too_short` check the way the ADJUST path does (see AJ7's own
+  // `adjust_inverts`, resolve.ts) -- so this reaches the person as "That is
+  // -1200 minutes; a block is at least 1 minute.", which is not a sentence
+  // anyone would say. Not fixed here: the brief scopes this lane to the
+  // minimum-length rule, not to teaching the plain span path a `day_order`/
+  // `across_midnight` question of its own (that is a `parse.ts`/grammar
+  // change, R-435's territory -- "from 10pm to 2am" should almost certainly
+  // ask which day the 2am belongs to, never silently compute a negative
+  // span). Reported, not invented: this pin records exactly what happens
+  // today so the gap is not lost.
+  it("R2c (R-463, reported not fixed): 'from 10pm to 2am' same-day has no day_order/across_midnight guard -- too_short reads a negative minute count", () => {
+    const res = resolveCommand(
+      cmd({ start: { hour: 22, minute: 0 }, end: { hour: 2, minute: 0 } }),
+      baseCtx({ runs: [] }),
+    );
+    expect(res).toEqual({ ok: false, question: { kind: "too_short", minutes: -1200, min: 1 } });
+    if (!res.ok) {
+      expect(describeQuestion(res.question)).toBe(
+        "That is -1200 minutes; a block is at least 1 minute.",
+      );
+    }
   });
 
   it("R3: 'Cell 1' alone, no qualifier -- ambiguous place, cells order", () => {
@@ -1093,21 +1147,71 @@ describe("commandResolve: brief §5 worked examples", () => {
     });
   });
 
-  it("RB10: part not offered -- not_offered; too short -- too_short", () => {
+  it("RB10: part not offered -- not_offered; a zero-length span -- too_short", () => {
     const notOffered = resolveCommand(bookCmd({ product: "Cover" }), baseCtx());
     expect(notOffered).toEqual({
       ok: false,
       question: { kind: "not_offered", product: "Cover", cell: "Cell 1" },
     });
 
-    const tooShort = resolveCommand(
+    // CONTRACT CHANGED (R-463, 29 Sept): a 10-minute job now books clean --
+    // the too_short half of this case moved to a genuine zero-length span
+    // (the book path's own version of R2b above), since 10 minutes no
+    // longer means anything special.
+    const tenMinutes = resolveCommand(
       bookCmd({ start: { hour: 6, minute: 0 }, end: { hour: 6, minute: 10 } }),
+      baseCtx(),
+    );
+    expect(tenMinutes.ok).toBe(true);
+
+    const tooShort = resolveCommand(
+      bookCmd({ start: { hour: 6, minute: 0 }, end: { hour: 6, minute: 0 } }),
       baseCtx(),
     );
     expect(tooShort).toEqual({
       ok: false,
-      question: { kind: "too_short", minutes: 10, min: 15 },
+      question: { kind: "too_short", minutes: 0, min: 1 },
     });
+  });
+
+  // R-463 ("New cases"): a job the bar books at 5 minutes, and a block the
+  // bar assigns at 1 minute (the new floor itself), both resolve clean --
+  // no `too_short`, no other question -- which is what lets
+  // `openCreateFromCommand`'s R-384 auto-press write them with no pop-up
+  // warning shown at all (a resolveCommand this clean is exactly the signal
+  // that function reads before pressing Create on the person's behalf).
+  it("RB12 (R-463, new): a 5-minute job the bar books resolves clean, ready to write with no question asked", () => {
+    const res = resolveCommand(
+      bookCmd({ start: { hour: 6, minute: 0 }, end: { hour: 6, minute: 5 } }),
+      baseCtx(),
+    );
+    expect(res).toEqual({
+      ok: true,
+      resolved: {
+        intent: "book",
+        nodeId: "c1a",
+        productId: "ha",
+        target: { kind: "run_create", productId: "ha", headcount: null },
+        range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 365 },
+        readout: "Cell 1 in Line 1 is booked 2026-09-03 from 6 am to 6:05 am, making Housing A.",
+        attempted: "The Housing A job on Cell 1 in Line 1",
+        notTried: "No Housing A job is booked on Cell 1 in Line 1.",
+      },
+    });
+  });
+
+  it("RB13 (R-463, new): a 1-minute block the bar assigns (the new floor itself) resolves clean, ready to write", () => {
+    const res = resolveCommand(
+      cmd({ start: { hour: 10, minute: 0 }, end: { hour: 10, minute: 1 } }),
+      baseCtx({ runs: [] }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 601 });
+      expect(res.resolved.readout).toBe(
+        "Operator 1 is on Cell 1 in Line 1 2026-09-03 from 10 am to 10:01 am, making Housing A.",
+      );
+    }
   });
 
   it("RB11: the assign path (R1, R34) is byte-identical after the sharing refactor", () => {
@@ -2420,7 +2524,7 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       wallToOffset: zWallToOffset,
       runs: [],
       fitsRun: zFitsRun,
-      minDurationMinutes: 15,
+      minDurationMinutes: MIN_DURATION_MINUTES,
       assignments: [],
       overlaps: zOverlaps,
       findRunOverlap: zFindRunOverlap,
@@ -2690,17 +2794,33 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
     }
   });
 
-  it("F146-R2: the minimum-duration check still runs against a DAY_END span -- 23:50 to midnight is only 10 minutes", () => {
+  // CONTRACT CHANGED (R-463, 29 Sept): 23:50 to midnight is 10 minutes,
+  // comfortably over the new 1-minute floor -- it now succeeds. F146-R2b
+  // (just below) is the genuine too_short case that still proves the
+  // minimum-duration check runs against a DAY_END span: START and END both
+  // DAY_END is a zero-length span.
+  it("F146-R2: 23:50 to midnight (10 minutes) now succeeds against a DAY_END span", () => {
     const res = resolveCommand(
       zAssign({
         start: { hour: 23, minute: 50 },
         end: { hour: 23, minute: 59 }, // DAY_END -- 23:50 to 24:00 is 10 minutes
       }),
-      zCtx({ minDurationMinutes: 15 }),
+      zCtx({ minDurationMinutes: MIN_DURATION_MINUTES }),
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it("F146-R2b (R-463, new): DAY_END to DAY_END is a zero-length span -- too_short still runs against it", () => {
+    const res = resolveCommand(
+      zAssign({
+        start: { hour: 23, minute: 59 }, // DAY_END read as this day's own 1440
+        end: { hour: 23, minute: 59 }, // DAY_END, the same instant
+      }),
+      zCtx({ minDurationMinutes: MIN_DURATION_MINUTES }),
     );
     expect(res).toEqual({
       ok: false,
-      question: { kind: "too_short", minutes: 10, min: 15 },
+      question: { kind: "too_short", minutes: 0, min: 1 },
     });
   });
 
@@ -4199,15 +4319,28 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       });
     });
 
-    it("AJ8: too short -- the new span is under the minimum", () => {
+    // CONTRACT CHANGED (R-463, 29 Sept): a new span of 10 minutes is no
+    // longer under the minimum -- it now succeeds. This is also, as far as
+    // this lane could tell by reading (`resolve.ts`, the adjust branch just
+    // above `adjust_inverts`/`too_short`), the LAST live case this
+    // function's own `too_short` branch could still reach: `newEndMin <=
+    // newStartMin` (adjust_inverts) is checked FIRST and catches every
+    // zero-or-negative span, and every positive integer span is now >= the
+    // 1-minute floor by construction -- so with the floor at 1, that
+    // `too_short` return (resolve.ts, the adjust branch) looks unreachable
+    // for THIS caller now. Left in place (it costs nothing and the function
+    // is shared with other callers that still reach it, e.g. the plain
+    // assign/book span and the split path's own checks above); reported,
+    // not removed, per the brief.
+    it("AJ8: a new span of 10 minutes now succeeds -- the old fifteen-minute floor is gone", () => {
       const res = resolveCommand(
         adjustMove({ adjust: { edge: "end", by: -230 } }),
-        zCtx({ assignments: [zBlk()], minDurationMinutes: 15 }),
+        zCtx({ assignments: [zBlk()], minDurationMinutes: MIN_DURATION_MINUTES }),
       );
-      expect(res).toEqual({
-        ok: false,
-        question: { kind: "too_short", minutes: 10, min: 15 },
-      });
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.resolved.range).toEqual({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 610 });
+      }
     });
 
     it("AJ9: off the day -- the new range would cross the block's own day's midnight", () => {
@@ -4336,7 +4469,15 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       });
     });
 
-    it("SP4: a part too short -- too_short, neither half built", () => {
+    // CONTRACT CHANGED (R-463, 29 Sept): a part of 10 minutes is no longer
+    // too_short (10 >= 1) -- both halves of an even shorter block now split
+    // clean. SP4 keeps its old name/number (a reviewer diffing this file
+    // against the design brief's own SP4 should still find it) but now
+    // asserts the split BUILDS, the same shape SP1 proves for a longer
+    // block; SP4b is the genuine too_short split that remains -- `at`
+    // landing exactly on one of the block's own edges makes a zero-length
+    // half.
+    it("SP4: a part of 10 minutes now splits clean (both halves >= the new 1-minute floor)", () => {
       const shortBlk = zBlk({
         startMin: 2 * 1440 + 600,
         endMin: 2 * 1440 + 620,
@@ -4346,8 +4487,59 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         splitCmd({ at: { hour: 10, minute: 10 } }),
         zCtx({ assignments: [shortBlk] }),
       );
-      expect(res.ok).toBe(false);
-      if (!res.ok) expect(res.question.kind).toBe("too_short");
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const [move, assign] = res.command.commands;
+        expect(move.intent).toBe("move");
+        const m = move as MoveCommand;
+        expect(m.existing).toEqual({ kind: "move", assignmentId: "zblk" });
+        expect(m.span).toEqual({ start: { hour: 10, minute: 0 }, end: { hour: 10, minute: 10 } });
+        expect(assign.intent).toBe("assign");
+        const a = assign as AssignCommand;
+        expect(a.start).toEqual({ hour: 10, minute: 10 });
+        expect(a.end).toEqual({ hour: 10, minute: 20 });
+      } else {
+        throw new Error("expected a several of two");
+      }
+    });
+
+    it("SP4b (R-463, new): `at` exactly on the block's own start makes a zero-length first half -- too_short, neither half built", () => {
+      const shortBlk = zBlk({
+        startMin: 2 * 1440 + 600,
+        endMin: 2 * 1440 + 620,
+        label: "10:00–10:20",
+      });
+      const res = expandCommand(
+        splitCmd({ at: { hour: 10, minute: 0 } }),
+        zCtx({ assignments: [shortBlk] }),
+      );
+      expect(res).toEqual({
+        ok: false,
+        question: { kind: "too_short", minutes: 0, min: 1 },
+      });
+    });
+
+    // R-463 ("New cases"): a split whose first half is exactly one minute
+    // (the new floor itself) and the rest -- both halves clear the floor,
+    // so the split builds, the same shape SP1 proves for two even halves.
+    it("SP4c (R-463, new): a split with a 1-minute first half and the rest both clear the floor and build", () => {
+      const res = expandCommand(
+        splitCmd({ at: { hour: 10, minute: 1 } }),
+        zCtx({ assignments: [zBlk()] }),
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok && res.command.intent === "several") {
+        const [move, assign] = res.command.commands;
+        expect(move.intent).toBe("move");
+        const m = move as MoveCommand;
+        expect(m.span).toEqual({ start: { hour: 10, minute: 0 }, end: { hour: 10, minute: 1 } });
+        expect(assign.intent).toBe("assign");
+        const a = assign as AssignCommand;
+        expect(a.start).toEqual({ hour: 10, minute: 1 });
+        expect(a.end).toEqual({ hour: 14, minute: 0 });
+      } else {
+        throw new Error("expected a several of two");
+      }
     });
 
     it("SP5: no block at all -- no_block, cell named", () => {
@@ -7231,7 +7423,7 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
       wallToOffset: w,
       runs: [],
       fitsRun: (a, r) => a.startMin >= r.startMin && a.endMin <= r.endMin,
-      minDurationMinutes: 15,
+      minDurationMinutes: MIN_DURATION_MINUTES,
       assignments: [],
       overlaps: (a, b) => a.startMin < b.endMin && b.startMin < a.endMin,
       findRunOverlap: () => null,
@@ -7725,10 +7917,26 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
   // -------------------------------------------------------------------------
   // MIN1-MIN5 (S194-D third pass): a job kept to a remnant under the minimum
   // asks exactly as a block's does (`too_short`), the job named. The server
-  // enforces no minimum on a run; the minimum is the client's own D31 value.
+  // enforces no minimum on a run; the minimum is the client's own R-463
+  // value (was D31's 15).
+  //
+  // CONTRACT CHANGED (R-463, 29 Sept): a ten-minute remnant is no longer
+  // under the minimum -- MIN1, and the second half of MIN4, and MIN5, all
+  // now BUILD the trim instead of asking too_short. There is no longer a way
+  // to construct a genuine too_short JOB TRIM through this path at all: the
+  // "kept" span this loop checks (`resolve.ts`, the S194-D pass just above
+  // its own `too_short` return) comes from `cutAgainst`'s strict `<`/`>`
+  // comparison, which already excludes a zero-length kept side before a
+  // trim record is even built (MIN2/MIN3, unchanged below, are exactly that
+  // exact-edge case, routed to `nothing_to_do`/"goes whole" instead of a
+  // trim) -- so `kept` is always a real positive integer-minute span, always
+  // >= 1 now. That `too_short` return for a job trim reads as unreachable
+  // under a whole-minute board; left in place (it costs nothing, and a
+  // fractional-minute board is not something this lane is asked to rule
+  // out), reported rather than removed, per the brief.
   // -------------------------------------------------------------------------
 
-  it("MIN1: 'after 10:10 am' on a 10 am to 4 pm job would keep ten minutes -- too_short, the job named", () => {
+  it("MIN1: 'after 10:10 am' on a 10 am to 4 pm job now keeps its ten-minute remnant (trimmed, not refused)", () => {
     const res = expandCommand(
       {
         ...clear("2026-10-12"),
@@ -7737,19 +7945,21 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
       ndCtx({ runs: [dayJob] }),
     );
     expect(res).toEqual({
-      ok: false,
-      question: {
-        kind: "too_short",
-        minutes: 10,
-        min: 15,
-        subject: "the Housing A job on Cell 4",
-      },
+      ok: true,
+      command: { intent: "several", commands: [] },
+      runTrims: [
+        {
+          intent: "trim_run",
+          runId: "dayJob",
+          nodeId: "cell4",
+          range: { startMin: w(1, 600), endMin: w(1, 610) },
+          readout:
+            "The Housing A job on Cell 4 keeps 10 am to 10:10 am; the part from 10:10 am to 4 pm is cleared.",
+          attempted: "The Housing A job on Cell 4",
+          notTried: "The Housing A job on Cell 4 stays as it was, 10 am to 4 pm.",
+        },
+      ],
     });
-    if (!res.ok) {
-      expect(describeQuestion(res.question)).toBe(
-        "That would leave the Housing A job on Cell 4 10 minutes; a job is at least 15 minutes.",
-      );
-    }
   });
 
   it("MIN2: a job that ENDS exactly at the window's start is untouched -- no step at all", () => {
@@ -7779,17 +7989,26 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     });
     expect(res.runTrims?.[0].range).toEqual({ startMin: w(1, 600), endMin: w(1, 780) });
 
+    // CONTRACT CHANGED (R-463, 29 Sept): the crew's own ten-minute remnant
+    // is no longer under the minimum either -- it now moves instead of
+    // asking too_short (the same shape the first half of this case already
+    // proves for a THIRTY-minute remnant).
     const late = blk("c1250", "priya", w(1, 770), w(1, 900), { runId: "dayJob" });
     const ctx2 = ndCtx({ assignments: [late], runs: [dayJob] });
     const res2 = expandCommand(afterOnePm(), ctx2);
     if (!res2.ok) throw new Error("expected a lot");
-    expect(resolveCommand(flat(res2)[0], ctx2)).toEqual({
-      ok: false,
-      question: { kind: "too_short", minutes: 10, min: 15 },
+    const moved2 = resolveCommand(flat(res2)[0], ctx2);
+    expect(moved2.ok && moved2.resolved.intent === "move" && moved2.resolved.range).toEqual({
+      startMin: w(1, 770),
+      endMin: w(1, 780),
     });
   });
 
-  it("MIN5: the night of a clock change (America/Chicago, 8 March 2026) -- a job from Saturday 11:50 pm kept to its Saturday part would be ten minutes: too_short at midnight too", () => {
+  // CONTRACT CHANGED (R-463, 29 Sept): a ten-minute remnant is no longer
+  // under the minimum -- the Saturday part now keeps its trim instead of
+  // asking too_short, the same DST clock this file's own ND11 case already
+  // exercises.
+  it("MIN5: the night of a clock change (America/Chicago, 8 March 2026) -- a job from Saturday 11:50 pm kept to its Saturday part (ten minutes) now trims clean", () => {
     const march = realCtx(
       "America/Chicago",
       [2026, 3, 6],
@@ -7800,10 +8019,10 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
     const end = march.axis.wallToOffset(2, 360);
     const ctx = march.make({ runs: [job("late", start, end, "11:50 pm to 6 am")] });
     const res = expandCommand(clear("2026-03-08"), ctx, { previousDayPart: "keep" });
-    expect(res).toMatchObject({
-      ok: false,
-      question: { kind: "too_short", minutes: 10, subject: "the Housing A job on Cell 4" },
-    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.runTrims?.[0].range).toEqual({ startMin: start, endMin: start + 10 });
+    }
   });
 
   it("NW4: a job wholly inside the window goes whole as before, its crew listed", () => {

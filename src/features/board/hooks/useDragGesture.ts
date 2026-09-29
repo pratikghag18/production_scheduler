@@ -910,16 +910,29 @@ export function useDragGesture(args: UseDragGestureArgs) {
         shiftPoints: d.snap.shiftPoints,
       });
       const snappedDelta = snapped - (edge === "start" ? original.startMin : original.endMin);
-      let candidate = resizeRange(original, edge, snappedDelta, d.windowMinutes);
+      // R-463: a POINTER resize's floor is the zoom's own snap step, not the
+      // bare `MIN_DURATION_MINUTES` (1) -- `snapped` above is always a real
+      // grid point, but the FIXED edge (`original.startMin`/`endMin`) is not
+      // (a block can start or end off-grid), so clamping against only the
+      // 1-minute floor could land the moving edge on a non-grid minute right
+      // at the limit, a sliver nobody actually dragged to. Holding Alt
+      // already disables snapping entirely (`snapMinute`'s own rule, "gives
+      // whole minutes") -- the same escape hatch now also drops the floor to
+      // the true minimum, since a person holding Alt is explicitly asking
+      // for finer-than-grid control. See `resizeRange`'s own comment
+      // (interaction.ts) for why this is a drag-only floor: the typed/spoken
+      // paths never call this function.
+      const dragFloorMinutes = altKey ? MIN_DURATION_MINUTES : d.snap.snapMinutes;
+      let candidate = resizeRange(original, edge, snappedDelta, d.windowMinutes, dragFloorMinutes);
       if (!(bounds.startMin === 0 && bounds.endMin === d.windowMinutes)) {
         candidate = {
           startMin: Math.max(candidate.startMin, bounds.startMin),
           endMin: Math.min(candidate.endMin, bounds.endMin),
         };
         if (edge === "start") {
-          candidate.startMin = Math.min(candidate.startMin, original.endMin - MIN_DURATION_MINUTES);
+          candidate.startMin = Math.min(candidate.startMin, original.endMin - dragFloorMinutes);
         } else {
-          candidate.endMin = Math.max(candidate.endMin, original.startMin + MIN_DURATION_MINUTES);
+          candidate.endMin = Math.max(candidate.endMin, original.startMin + dragFloorMinutes);
         }
       }
       return candidate;
@@ -1654,7 +1667,12 @@ export function useDragGesture(args: UseDragGestureArgs) {
       if (mode === "move") {
         candidate = moveWithinTrack(cur, step, base.windowMinutes);
       } else {
-        candidate = resizeRange(cur, "end", step, base.windowMinutes);
+        // R-463: same reasoning as the pointer resize's own `dragFloorMinutes`
+        // (above, `computeBlockCandidate`) -- a keyboard nudge moves by one
+        // whole snap step at a time, so its floor is that same step, never
+        // the bare 1-minute floor (which would let one keystroke shrink a
+        // block to a sliver when it starts close to its own fixed edge).
+        candidate = resizeRange(cur, "end", step, base.windowMinutes, base.snap.snapMinutes);
       }
       setActiveDrag({ ...base, candidate, moved: true });
     },
