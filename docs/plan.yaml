@@ -12092,7 +12092,7 @@ requirements:
     cases: "an uncertified person on Cell 1 asks, a typed reason writes the block with eligibility_override true; the same inside a swap is refused before the yes"
   - kind: manual
     steps: "the reviewer typed the reason in the real bar and read eligibility_override and override_reason back from the database (session 176)"
-  status: covered
+  status: contradicted
   note: >-
     STATED 16 Sept (session 176): "People not trained are being assigned" --- Lena Novak and Tom Baker
     hold no Welding, which Line 1 requires; the single opened the reason pop-up, the swap wrote three
@@ -12240,9 +12240,15 @@ requirements:
     yes, with the server's reason in the plant's words. This is CLAUDE.md §4's "a screen that shows what the
     server will refuse" applied to words as well as buttons, made a standard.
   verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-pre-1 to CB-pre-12 (a create, a move, a re-time, the join question, the which-shift question and a lot's steps are each refused before any readout or question when the person is busy on a place the caller cannot read; tester run 197t broke the three precheck doors and the two gates, each went red by name)"
+  - kind: e2e
+    file: e2e/typedWalk.spec.ts
+    cases: "DEF-0060 and F-239 (as Ana on the real board: one Not done, no readout, no join question, trace refused; a slow write reads Working and says nothing as done until it is)"
   - kind: manual
     steps: "the audit this standard triggers (queued 17 Sept): capacity and absence checked before the yes in the bar, each pinned; area and certificates already are (R-425, F-165)"
-  status: contradicted
+  status: covered
   note: >-
     STATED 17 Sept (session 178): "2. Yes".
 - id: R-432
@@ -12270,7 +12276,7 @@ requirements:
   - kind: vitest
     file: src/test/commandResolve.test.ts
     cases: "every resolved step kind carries who and where and what stays (27 cases gained the two fields)"
-  status: covered
+  status: contradicted
   note: >-
     BUILT 28 Sept (session 194, 504a74b), DEF-0052 fix-claimed. STATED 17 Sept (session 178): "3. Yes". RESTATED 28 Sept by the maintainer when shown the two
     columns side by side (the revert the rule asked for, and what the app does). Today's answer is "Did k
@@ -13270,7 +13276,7 @@ requirements:
     cases: "R-465: Ana's rail says booked on Cell 4 as the plant admin's says booked, at 10 am with the clock frozen; at the rail's narrowest the name and the word stay readable"
   - kind: manual
     steps: "node src/test/defects/DEF-0053.live.mjs on the tester's stack exits 0 (held: the same answer for both); as Ana in the browser, 'put Priya Shah on Housing A at Cell 1 today from 10 am to noon' then Separate block answers 'Not done: Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.' and her rail reads 'booked (Cell 4, 6 am to 2 pm)'"
-  status: contradicted
+  status: covered
   note: >-
     BUILT 30 Sept (session 195, ecfb3e2 and aee2746), DEF-0053 fix-claimed. The probe answers an operator the
     caller cannot read as the invoker did (no verdict, no rows) rather than refusing: the copy-week planners
@@ -18982,6 +18988,61 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 197t
+  date: 2026-09-30
+  title: "Tester run over session 196: DEF-0060 verified in the browser as Ana, the claims in the brief held, one new major defect (DEF-0061: a lot with a person short a certificate drops the other person or swallows the reason)"
+  shipped: []
+  commits: []
+  numbers:
+    app_tests: 4921
+    app_test_files: 191
+    tsc: 0
+    eslint: 0
+    db_checks: 937
+    migrations: 85
+    e2e: 58
+  confirmed: true
+  numbers_note: >-
+    Copied from the runner's own report: `Test Files  191 passed (191)`, `Tests  4921 passed (4921)`, and
+    `ok    count matches the plan: 4921 in 191`, equal to session 196 exactly. SQL: every file ok, the per-file
+    lines sum to 937 passed, 0 failed, 0 hard-errors (read from a second `--sql` run, the first report having been
+    deleted by Playwright's own output clean-up). db:types ran against the tester's stack and regenerated the
+    committed file with only a BOM difference (restored). typecheck and lint ok on the first run. e2e: `Running 58
+    tests using 6 workers`, `51 passed`, `6 skipped`, `1 failed`: copyWeek.spec.ts:68 timed out finding the Copy week
+    button under six workers; run alone with --workers=1 together with the typed walk, `9 passed (1.5m)`, so a
+    load flake, not a regression. format:check failed only on the untracked .claude/settings.local.json, not on
+    committed work. The working tree held only the brief file (untracked) at the start; later runs in the session were
+    made with my own scratch folder present, so the second report's red lines are not evidence.
+  summary: >-
+    Merged Development (fast-forward to 62c4193), started the tester stack for this one run, stopped it at the end.
+    DEF-0060 re-verified cold as Ana with a one-off Playwright script: both sentences end in exactly one board
+    bubble "Not done: Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.", no readout before it,
+    no join question, no buttons, trace outcome refused, Priya's blocks 19 before and 19 after (one that day).
+    VERIFIED; R-431 and R-465 back to covered (R-431 given its non-manual proof, the CB-pre cases and the e2e
+    case). Claims judged as Ana: a lot with one step busy elsewhere says "Not doing Priya Shah on Cell 2 ...:
+    Priya Shah is already on Cell 4 ..." and lists the rest; with capacity_probe held four
+    seconds reads "Working…" at 1.5 s with no readout in the thread and the trace entry "writing", then the one
+    refusal; the override's "The reason given: covering an absence." suffix reappears on the written readout; a
+    person busy on another line only outside her hours (Priya 2 pm to 4 pm on Cell 2) is NOT refused up front and
+    is written through the join question (no stale refusal); every sentence read plainly, no ISO date or arrow.
+    With the probe aborted (network error) the bar prints the readout and then "Not done: Something went wrong with
+    that one." -- the developer's stated trade (the write is the gate), noted but not filed: it needs the probe alone
+    to fail. MUTATIONS, each on the working tree, each restored with git checkout and the tree confirmed clean:
+    the single-step precheck removed (CB-pre-1, CB-pre-2, CB-pre-3, CB-pre-7 red), the question precheck
+    removed (CB-pre-4, CB-pre-6 red), the lot precheck removed (CB-pre-11, CB-pre-12 red), the outside flag
+    flipped in isBusyElsewhere (BE-11, BE-12, BE-17, R-465-1, R-465-3, PC-1, PC-2 red), the fits flip (BE-11, BE-12,
+    BE-17, BE-20, R-465-1, R-465-2, PC-1, PC-2 red). ADVERSARIAL PASS on the precheck and its doors: a question whose
+    answers are a mix is not refused (only when every answer is), the reason question and join question and
+    which-shift are covered, a lot is prechecked as a whole; nothing turned up on the drag or the create pop-up
+    doors, which keep their own probe. What turned up is a door the precheck does not cover, lots that stop at a
+    question: DEF-0061 (major), a lot of two people where one is short a certificate, reproduced in both orders:
+    Lena first writes Lena and drops Sam without a word; Sam first asks for a reason the bar then ignores. The
+    same on f0f4a4b, so it is older than 196; no pin (needs the developer's bar harness). A question for the
+    maintainer, not filed: "replace Sam Patel with Priya Shah on Cell 1" with Priya busy on a line Ana cannot read
+    drops the incoming half up front and offers only "Sam Patel is off Cell 1"; one press removed Sam's block and
+    left the cell uncovered (disclosed in words, consistent with R-432, but the two halves are one intent).
+    My own walk removed Sam's Cell 1 block on the tester's demo data; the next fresh seed restores it.
+    Housekeeping: a throwaway worktree I made for the before-196 comparison held node_modules by junction and its removal emptied node_modules/.bin; npm ci restored it (tester worktree only).
 - id: '196'
   date: 2026-09-30
   title: "The bar refuses before it speaks: a person busy on a line the supervisor cannot see gets one Not done and no readout or join question in front of it, and a write in flight reads Working until the server answers (DEF-0060 fix-claimed, F-239 fixed)"
