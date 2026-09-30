@@ -11,12 +11,15 @@ import { supabase } from "@/lib/supabase";
 import { shapeMismatch, toSchedulerError } from "./errors";
 import {
   parseBoardWindow,
+  parseBlocksElsewhere,
   parseCapacityProbe,
   parseEligibilityResult,
+  type BlockElsewhere,
   type BoardWindow,
   type CapacityProbe,
   type EligibilityResult,
 } from "./shapes";
+import type { Json } from "@/lib/database.types";
 import { toEfficiency, toTstzRange } from "./serde";
 
 /**
@@ -71,6 +74,29 @@ export async function probeCapacity(input: CapacityProbeInput): Promise<Capacity
   const parsed = parseCapacityProbe(data);
   if (parsed === null)
     throw shapeMismatch("capacity_probe", "expected a CapacityProbe object (see shapes.ts)");
+  return parsed;
+}
+
+/**
+ * `operator_blocks_elsewhere(p_from timestamptz, p_to timestamptz)` (migration
+ * 0085, R-465). Generated signature: `{ p_from: string; p_to: string } ->
+ * { operator_id, node_name, parent_name, timerange, efficiency }[]`. The blocks
+ * of people the caller can read that sit on places the caller cannot read; an
+ * empty set for a caller who reads the whole plant.
+ */
+export async function fetchBlocksElsewhere(from: Date, to: Date): Promise<BlockElsewhere[]> {
+  const { data, error } = await supabase.rpc("operator_blocks_elsewhere", {
+    p_from: from.toISOString(),
+    p_to: to.toISOString(),
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseBlocksElsewhere(data as Json);
+  if (parsed === null) {
+    throw shapeMismatch(
+      "operator_blocks_elsewhere",
+      "expected an array of BlockElsewhere rows (see shapes.ts)",
+    );
+  }
   return parsed;
 }
 

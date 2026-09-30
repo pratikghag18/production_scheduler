@@ -166,8 +166,44 @@ function isSweepingUnassign(command: { operator: string; place: string[] }): boo
  * Data below, one small matcher (`hasRemovalPhrase`).
  */
 const SWEEP_PEOPLE = ["everyone", "everybody"];
-/** Shape (1): a removal verb, then a people word within this many words. */
-const SWEEP_VERB_REACH = 3;
+/** DEF-0056 (30 Sept, tester), THE RULE's second half: the phrase must be what
+ *  the clause SAYS, from its head. Before it, only an opener that leaves an
+ *  order an order may stand (each a word sequence; they may chain, "could you
+ *  please"). Anything else in front -- a negation ("do not", "never", "did not
+ *  say"), a question ("should I", "is", "did we get"), a first-person preamble
+ *  ("I will", "let me", "I would like to") -- makes it a sentence ABOUT
+ *  clearing, not the order, and refuses. Nothing is checked for what is
+ *  after the clause head except the phrase itself. */
+const SWEEP_OPENERS: ReadonlyArray<readonly string[]> = [
+  ["please"],
+  ["ok"],
+  ["okay"],
+  // S195 review: the fillers a person says before an order ("yeah clear the
+  // board"). Each leaves an order an order; none is a negation or a question.
+  ["yeah"],
+  ["yes"],
+  ["yep"],
+  ["alright"],
+  ["so"],
+  ["well"],
+  ["um"],
+  ["uh"],
+  ["now"],
+  ["then"],
+  ["and"],
+  ["just"],
+  ["go", "ahead", "and"],
+  ["can", "you"],
+  ["could", "you"],
+  ["would", "you"],
+  ["will", "you"],
+];
+/** Between a removal verb and its object only these may sit ("clear OUT
+ *  everyone", "clear ALL OF the board"), never a pronoun or a preposition
+ *  phrase ("clear IT WITH everyone", "clear IT UP with everyone"). At most
+ *  this many of them. */
+const SWEEP_BETWEEN = ["all", "of", "the", "out", "off"];
+const SWEEP_BETWEEN_MAX = 3;
 const SWEEP_VERBS = ["clear", "remove", "unassign", "empty", "wipe", "delete"];
 /** Shape (1), the board: only these word sequences, directly after the verb. */
 const SWEEP_BOARD_OBJECTS = [
@@ -207,8 +243,24 @@ const SWEEP_TAIL_WORDS = [
   "friday",
   "saturday",
   "sunday",
+  "thanks",
 ];
 const BREAK = "|";
+/** Words that take an order back (S195 review). "don" is "don't" cut at the
+ *  apostrophe by `sweepTokens`. */
+const SWEEP_RETRACTIONS = [
+  "no",
+  "wait",
+  "stop",
+  "nevermind",
+  "cancel",
+  "don",
+  "never",
+  "not",
+  "hold",
+  "sorry",
+  "oops",
+];
 
 function startsWithAt(tokens: readonly string[], at: number, seq: readonly string[]): boolean {
   return seq.every((w, k) => tokens[at + k] === w);
@@ -218,6 +270,12 @@ function startsWithAt(tokens: readonly string[], at: number, seq: readonly strin
 function endsClause(t: readonly string[], at: number): boolean {
   const next = t[at];
   if (next === undefined || next === BREAK || SWEEP_TAIL_WORDS.includes(next)) return true;
+  // "clear the board for today": "for" only before a word that says when,
+  // never "for the meeting". And "thank you" closes a polite order.
+  if (next === "for" && t[at + 1] !== undefined && SWEEP_TAIL_WORDS.includes(t[at + 1])) {
+    return endsClause(t, at + 2);
+  }
+  if (next === "thank" && t[at + 1] === "you") return endsClause(t, at + 2);
   if (startsWithAt(t, at, ["the", "board"])) return endsClause(t, at + 2);
   for (const lead of ["of", "from", "off"]) {
     if (startsWithAt(t, at, [lead, "the", "board"])) return endsClause(t, at + 3);
@@ -239,29 +297,50 @@ function isPeople(t: readonly string[], at: number): boolean {
   return SWEEP_PEOPLE.includes(t[at]) && t[at + 1] !== "s";
 }
 
-/** The one matcher for the three shapes of THE RULE, over whole words. */
-function hasRemovalPhrase(heard: string): boolean {
-  const t = sweepTokens(heard);
-  for (let i = 0; i < t.length; i++) {
-    const w = t[i];
-    if (SWEEP_VERBS.includes(w)) {
-      for (let k = 1; k <= SWEEP_VERB_REACH && t[i + k] !== BREAK; k++) {
-        if (!isPeople(t, i + k)) continue;
+/** True when a removal phrase (the three shapes) BEGINS at word `i`. */
+function phraseAt(t: readonly string[], i: number): boolean {
+  const w = t[i];
+  if (SWEEP_VERBS.includes(w)) {
+    for (let k = 0; k <= SWEEP_BETWEEN_MAX; k++) {
+      const j = i + 1 + k;
+      if (isPeople(t, j)) {
         // "clear everyone", "clear everyone out", "remove everyone from the
         // board" -- never "remove everyone from the group chat".
-        const after = i + k + 1;
+        const after = j + 1;
         const tail =
           SWEEP_ORDER_PARTICLES.includes(t[after]) || t[after] === "away" ? after + 1 : after;
         if (endsClause(t, tail)) return true;
       }
-      const board = SWEEP_BOARD_OBJECTS.find((seq) => startsWithAt(t, i + 1, seq));
-      if (board && endsClause(t, i + 1 + board.length)) return true;
+      const board = SWEEP_BOARD_OBJECTS.find((seq) => startsWithAt(t, j, seq));
+      if (board && endsClause(t, j + board.length)) return true;
+      if (!SWEEP_BETWEEN.includes(t[j])) break;
     }
-    const pv = SWEEP_PARTICLE_VERBS.find((p) => p.verb === w);
-    if (pv && isPeople(t, i + 1) && pv.particles.includes(t[i + 2]) && endsClause(t, i + 3)) {
-      return true;
+  }
+  const pv = SWEEP_PARTICLE_VERBS.find((p) => p.verb === w);
+  if (pv && isPeople(t, i + 1) && pv.particles.includes(t[i + 2]) && endsClause(t, i + 3)) {
+    return true;
+  }
+  return isPeople(t, i) && SWEEP_ORDER_PARTICLES.includes(t[i + 1]) && endsClause(t, i + 2);
+}
+
+/** The one matcher for THE RULE, over whole words: the phrase must begin a
+ *  clause, after nothing but openers (`SWEEP_OPENERS`). */
+function hasRemovalPhrase(heard: string): boolean {
+  const t = sweepTokens(heard);
+  for (let s = 0; s < t.length; s++) {
+    if (s > 0 && t[s - 1] !== BREAK) continue; // not a clause head
+    let at = s;
+    for (let moved = true; moved;) {
+      const opener = SWEEP_OPENERS.find((seq) => startsWithAt(t, at, seq));
+      moved = opener !== undefined;
+      if (opener) at += opener.length;
     }
-    if (isPeople(t, i) && SWEEP_ORDER_PARTICLES.includes(t[i + 1]) && endsClause(t, i + 2)) {
+    if (phraseAt(t, at)) {
+      // S195 review: an order taken back in the same breath ("clear everyone?
+      // no", "clear the board, no wait, don't") is not an order. A word of
+      // retraction anywhere after the phrase begins refuses; refusing more is
+      // the safe side (a refusal only asks the person to say it again).
+      if (t.slice(at).some((w) => SWEEP_RETRACTIONS.includes(w))) continue;
       return true;
     }
   }

@@ -31,8 +31,12 @@ import {
   rootBand,
   resolveHomeBand,
   overtimeMinutes,
+  asRailBlocks,
+  blocksInBand,
   type RailBlock,
 } from "@/features/board/lib/railWords";
+import { elsewhereBrackets, elsewhereTitle } from "@/features/board/lib/busyElsewhere";
+import type { BlockElsewhere } from "@/lib/api";
 import { buildDayAxis } from "@/features/board/lib/time";
 import type { Shift, ShiftTemplate } from "@/lib/api";
 
@@ -353,5 +357,146 @@ describe("overtimeMinutes (R-441/R-448)", () => {
     // 06:30-06)', 'America/Chicago') returns 60 (verified live via psql,
     // read-only, 18 Sept) -- the whole block, none of it inside the band.
     expect(overtimeMinutes(range, band, chicagoAxis)).toBe(60);
+  });
+});
+
+/**
+ * R-465 (DEF-0053, S195-E): a person busy on a place the viewer cannot read is
+ * still booked. `operator_blocks_elsewhere` rows count as coverage exactly like
+ * a block the viewer can read, and the chip names the place and the hours --
+ * never the product, the job or the parent -- in brackets. The window here is
+ * Chicago's 15 Jan 2026 (local midnight is 06:00Z, CST = UTC-6); Priya is on
+ * Cell 4 (Line 2) from 6 am to 2 pm local, which is 12:00Z to 20:00Z.
+ */
+describe("R-465: the blocks elsewhere count as coverage and are named in brackets", () => {
+  const CHICAGO = "America/Chicago";
+  const TOKYO = "Asia/Tokyo";
+  const WIN_START = new Date("2026-01-15T06:00:00.000Z"); // Chicago's local midnight
+  const WIN = { start: WIN_START, minutes: 1440 };
+  const NOW = new Date("2026-01-15T16:00:00.000Z"); // 10 am in Chicago
+
+  // One constant, every row built from it -- no column list typed twice.
+  const PRIYA_CELL_4: BlockElsewhere = {
+    operatorId: "op-priya",
+    nodeName: "Cell 4",
+    parentName: "Line 2",
+    timerange: '["2026-01-15 12:00:00+00","2026-01-15 20:00:00+00")',
+    efficiency: 1,
+  };
+  const row = (over: Partial<BlockElsewhere> = {}): BlockElsewhere => ({
+    ...PRIYA_CELL_4,
+    ...over,
+  });
+  const range = (from: string, to: string): string => `["${from}","${to}")`;
+
+  it("RE-1: asRailBlocks converts a range to minutes since the window's first instant", () => {
+    const [b] = asRailBlocks([row()], WIN_START);
+    expect(b.startMin).toBe(360);
+    expect(b.endMin).toBe(840);
+    expect(b.nodeName).toBe("Cell 4");
+  });
+
+  it("RE-2: a range that does not parse is left out, as the board's own index leaves one out", () => {
+    expect(asRailBlocks([row({ timerange: "not a range" })], WIN_START)).toEqual([]);
+  });
+
+  it("RE-3: a block elsewhere covering the whole band reads 'booked'", () => {
+    const blocks = asRailBlocks([row()], WIN_START);
+    expect(bookingWords(blocks, WIN, { startMin: 360, endMin: 840 }, CHICAGO)).toBe("booked");
+  });
+
+  it("RE-4: one covering the START of the band reads 'free' with the minute it ends", () => {
+    const blocks = asRailBlocks([row()], WIN_START);
+    expect(bookingWords(blocks, WIN, { startMin: 360, endMin: 1320 }, CHICAGO)).toBe("free 14:00");
+  });
+
+  it("RE-5: one in the MIDDLE of the band leaves the band's own start uncovered: plain 'free'", () => {
+    const blocks = asRailBlocks([row()], WIN_START);
+    expect(bookingWords(blocks, WIN, { startMin: 0, endMin: 1440 }, CHICAGO)).toBe("free");
+  });
+
+  it("RE-6: one that touches none of the band is not coverage and is not named", () => {
+    const blocks = asRailBlocks([row()], WIN_START);
+    const night = { startMin: 1320, endMin: 1800 };
+    expect(bookingWords(blocks, WIN, night, CHICAGO)).toBe("free");
+    expect(blocksInBand(blocks, WIN, night)).toEqual([]);
+    // A block that only ENDS where the band begins does not touch it.
+    expect(blocksInBand(blocks, WIN, { startMin: 840, endMin: 1320 })).toEqual([]);
+  });
+
+  it("RE-7: a block across midnight covers the night band's first half and is named", () => {
+    // 10 pm to 6 am local: 04:00Z to 12:00Z on the 16th.
+    const blocks = asRailBlocks(
+      [row({ timerange: range("2026-01-16 04:00:00+00", "2026-01-16 12:00:00+00") })],
+      WIN_START,
+    );
+    const night = { startMin: 1320, endMin: 1800 }; // 22:00 to 06:00 the next day
+    expect(bookingWords(blocks, WIN, night, CHICAGO)).toBe("booked");
+    expect(blocksInBand(blocks, WIN, night)).toHaveLength(1);
+  });
+
+  it("RE-8: two blocks elsewhere that join up cover the band together", () => {
+    const blocks = asRailBlocks(
+      [
+        row(),
+        row({
+          nodeName: "Cell 5",
+          timerange: range("2026-01-15 20:00:00+00", "2026-01-16 04:00:00+00"),
+        }),
+      ],
+      WIN_START,
+    );
+    expect(bookingWords(blocks, WIN, { startMin: 360, endMin: 1320 }, CHICAGO)).toBe("booked");
+  });
+
+  it("RE-9: a block elsewhere and a block she can read cover the band together", () => {
+    const mine: RailBlock[] = [{ startMin: 840, endMin: 1320 }];
+    const theirs = asRailBlocks([row()], WIN_START);
+    expect(bookingWords([...mine, ...theirs], WIN, { startMin: 360, endMin: 1320 }, CHICAGO)).toBe(
+      "booked",
+    );
+  });
+
+  it("RE-10: the brackets name the cell and the hours only, never the parent or a product", () => {
+    const text = elsewhereBrackets([row()], CHICAGO);
+    expect(text).toBe("(Cell 4, 6 am to 2 pm)");
+    expect(text).not.toMatch(/Line 2/);
+  });
+
+  it("RE-11: two blocks in the band read the first, then 'and 1 more'; three read 'and 2 more'", () => {
+    const later = row({
+      nodeName: "Cell 5",
+      timerange: range("2026-01-15 20:00:00+00", "2026-01-16 02:00:00+00"),
+    });
+    const latest = row({
+      nodeName: "Cell 6",
+      timerange: range("2026-01-16 02:00:00+00", "2026-01-16 04:00:00+00"),
+    });
+    expect(elsewhereBrackets([later, row()], CHICAGO)).toBe("(Cell 4, 6 am to 2 pm and 1 more)");
+    expect(elsewhereBrackets([latest, later, row()], CHICAGO)).toBe(
+      "(Cell 4, 6 am to 2 pm and 2 more)",
+    );
+    expect(elsewhereBrackets([], CHICAGO)).toBeNull();
+  });
+
+  it("RE-12: the hours are the PLANT'S zone, west and east of UTC -- same block, different clocks (R-426)", () => {
+    expect(elsewhereBrackets([row()], CHICAGO)).toBe("(Cell 4, 6 am to 2 pm)");
+    expect(elsewhereBrackets([row()], TOKYO)).toBe("(Cell 4, 9 pm to 5 am)");
+  });
+
+  it("RE-13: the hover sentence names the parent and the day, in the plant's zone, with the clock frozen", () => {
+    expect(elsewhereTitle("Priya Shah", [row()], CHICAGO, "d_mon_yyyy", NOW)).toBe(
+      "Priya Shah is on Cell 4 in Line 2 today from 6 am to 2 pm.",
+    );
+    // The same instant is already 1 am on the 16th in Tokyo: the block started on the 15th there.
+    expect(elsewhereTitle("Priya Shah", [row()], TOKYO, "d_mon_yyyy", NOW)).toBe(
+      "Priya Shah is on Cell 4 in Line 2 yesterday from 9 pm to 5 am the next day.",
+    );
+    expect(elsewhereTitle("Priya Shah", [], CHICAGO, "d_mon_yyyy", NOW)).toBeNull();
+  });
+
+  it("RE-14: the sentence never carries a product, a run or an id", () => {
+    const text = elsewhereTitle("Priya Shah", [row()], CHICAGO, "d_mon_yyyy", NOW) ?? "";
+    expect(text).not.toMatch(/op-priya|efficiency|100/);
   });
 });

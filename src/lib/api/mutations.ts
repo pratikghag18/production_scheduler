@@ -11,7 +11,7 @@
  */
 import { supabase } from "@/lib/supabase";
 import type { Json, TablesUpdate } from "@/lib/database.types";
-import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
+import { requireWritten, shapeMismatch, toSchedulerError, type SchedulerError } from "./errors";
 import {
   parseAssignment,
   parseCreateAssignmentResult,
@@ -394,7 +394,17 @@ export async function deleteRun(
     p_run_id: runId,
     p_mode: mode,
   });
-  if (error) throw toSchedulerError(error);
+  if (error) {
+    const se = toSchedulerError(error);
+    // DEF-0052 (30 Sept): `delete_run` raises `invalid_argument` on p_run_id
+    // ("run not found") when the job is gone, and `not_permitted` when the
+    // caller may not edit its cell -- two facts, two sentences.
+    if (se.kind === "InvalidArgument" && se.field === "p_run_id" && se.reason === "not found") {
+      const gone: SchedulerError = { kind: "WriteRefused", gone: "job" };
+      throw gone;
+    }
+    throw se;
+  }
   const parsed = parseDeleteRunResult(data);
   if (parsed === null)
     throw shapeMismatch("delete_run", "expected a DeleteRunResult object (see shapes.ts)");
@@ -431,7 +441,11 @@ export async function updateRunFields(runId: string, edit: RunFieldEdit): Promis
     .eq("id", runId)
     .select()
     .single();
-  if (error) throw toSchedulerError(error);
+  if (error) {
+    // DEF-0052: zero rows matched -- gone, or forbidden? Read it back.
+    if ((error as { code?: string }).code === NO_ROWS_CODE) await throwIfGone("runs", runId, "job");
+    throw toSchedulerError(error);
+  }
   const parsed = parseRun(data as unknown as Json);
   if (parsed === null) throw shapeMismatch("runs.update", "expected a Run row (see shapes.ts)");
   return parsed;
@@ -471,6 +485,30 @@ export interface AssignmentFieldEdit {
 }
 
 /**
+ * DEF-0052 (30 Sept): a write that changed no row is either FORBIDDEN (RLS
+ * filtered it; the caller can still read the row) or GONE (someone else
+ * removed it first; the caller reads nothing). Read the row back by id AS THE
+ * CALLER and say which -- the two must never read the same ("You cannot change
+ * that from here" about a block that is not there is a sentence about
+ * permission for a fact about the board). Throws only for GONE; the caller
+ * falls through to its own forbidden refusal otherwise.
+ */
+async function throwIfGone(
+  table: "assignments" | "runs",
+  id: string,
+  what: "block" | "job",
+): Promise<void> {
+  const { data, error } = await supabase.from(table).select("id").eq("id", id).maybeSingle();
+  if (error === null && data === null) {
+    const gone: SchedulerError = { kind: "WriteRefused", gone: what };
+    throw gone;
+  }
+}
+
+/** PostgREST's "no rows" answer to a `.single()` update: zero rows matched. */
+const NO_ROWS_CODE = "PGRST116";
+
+/**
  * Delete an assignment. R-323: the row is REMOVED, not marked.
  *
  * ⭐ THIS REPLACED A SOFT DELETE, and the maintainer's reason is worth keeping
@@ -502,6 +540,9 @@ export async function deleteAssignment(assignmentId: string): Promise<void> {
     .eq("id", assignmentId)
     .select("id");
   if (error) throw toSchedulerError(error);
+  if (data !== null && data.length === 0) {
+    await throwIfGone("assignments", assignmentId, "block");
+  }
   requireWritten(data as unknown[] | null);
 }
 
@@ -523,7 +564,12 @@ export async function updateAssignmentFields(
     .eq("id", assignmentId)
     .select()
     .single();
-  if (error) throw toSchedulerError(error);
+  if (error) {
+    // DEF-0052: zero rows matched -- gone, or forbidden? Read it back.
+    if ((error as { code?: string }).code === NO_ROWS_CODE)
+      await throwIfGone("assignments", assignmentId, "block");
+    throw toSchedulerError(error);
+  }
   const parsed = parseAssignment(data as unknown as Json);
   if (parsed === null)
     throw shapeMismatch("assignments.update", "expected an Assignment row (see shapes.ts)");

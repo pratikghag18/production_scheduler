@@ -77,6 +77,7 @@ import {
 import type { Reader, Reading } from "@/lib/voice/readSentence";
 import type { ClipInfo, Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 import type { TraceEntry } from "@/lib/voice/trace";
+import { CREATE_WAITING, attachmentWaiting, splitWaiting } from "@/features/board/lib/popupWords";
 
 /**
  * F-168 (R-421/R-427/R-434): `settleWrite` no longer reads an `undefined`
@@ -766,9 +767,11 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "A Housing A job is already booked on Cell 1, Housing A 8 am to 4 pm. Join it, or make a separate block?",
+      "A Housing A job is already booked on Cell 1, 8 am to 4 pm. Join it, or make a separate block?",
     );
-    expect(screen.getByRole("button", { name: "Housing A 08:00–16:00" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Join the Housing A job, 8 am to 4 pm" }),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
     expect(onOpen).not.toHaveBeenCalled();
   });
@@ -777,7 +780,7 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     const { onOpen, input } = renderBar({ runs: [RUN1] });
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Housing A 08:00–16:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Join the Housing A job, 8 am to 4 pm" }));
 
     // F-162 (CONTRACT CHANGED, CLAUDE.md 4 -- "say in writing whether they
     // were wrong or the contract changed"): the contract changed. While a
@@ -818,7 +821,9 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(statusText()).toBe(
       "Operator 1 is already on Housing A at Cell 1 10 am to 2 pm. Change it to 10 am to 3 pm, or add a separate block?",
     );
-    expect(screen.getByRole("button", { name: "Change 10:00–14:00" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Change Housing A on Cell 1, 10 am to 2 pm" }),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
     expect(onOpen).not.toHaveBeenCalled();
     expect(onRetime).not.toHaveBeenCalled();
@@ -828,7 +833,9 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     const { onOpen, onRetime, input } = renderBar({ assignments: [BLK1] });
     fireEvent.change(input, { target: { value: P1_RETIME_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Change 10:00–14:00" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Change Housing A on Cell 1, 10 am to 2 pm" }),
+    );
 
     // F-162 (CONTRACT CHANGED, CLAUDE.md 4 -- "say in writing whether they
     // were wrong or the contract changed"): the contract changed. While a
@@ -869,9 +876,9 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Separate block" }));
 
     expect(statusText()).toBe(
-      "A Housing A job is already booked on Cell 1, Housing A 8 am to 4 pm. Join it, or make a separate block?",
+      "A Housing A job is already booked on Cell 1, 8 am to 4 pm. Join it, or make a separate block?",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Housing A 08:00–16:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Join the Housing A job, 8 am to 4 pm" }));
     expect(second.onOpen).toHaveBeenCalledTimes(1);
     const [resolvedRun] = second.onOpen.mock.calls[0] as [
       ResolvedCommand,
@@ -930,10 +937,12 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(statusText()).toBe(
       "A Housing A job is already booked on Cell 1 8 am to 4 pm. Change it to 6 am to 2 pm, or pick other hours?",
     );
-    expect(screen.getByRole("button", { name: "Change 08:00–16:00" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Change the Housing A job, 8 am to 4 pm" }),
+    ).toBeTruthy();
     expect(onBook).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Change 08:00–16:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change the Housing A job, 8 am to 4 pm" }));
 
     // F-162 (CONTRACT CHANGED, CLAUDE.md 4 -- "say in writing whether they
     // were wrong or the contract changed"): the contract changed. While a
@@ -972,11 +981,13 @@ describe("CommandBar (P1-7a, brief §9)", () => {
 
     fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByRole("button", { name: "Change 08:00–16:00" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Change the Housing A job, 8 am to 4 pm" }),
+    ).toBeTruthy();
 
     runsRef.length = 0;
 
-    fireEvent.click(screen.getByRole("button", { name: "Change 08:00–16:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change the Housing A job, 8 am to 4 pm" }));
     expect(statusText()).toBe(
       "That Housing A job on Cell 1 is no longer on the board. Book it again?",
     );
@@ -1041,11 +1052,11 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.change(input, { target: { value: UNASSIGN_WHOLE_DAY_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(screen.getByRole("button", { name: "Remove Housing A 10:00–14:00" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Remove Housing A 14:00–16:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Housing A 10 am to 2 pm" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Housing A 2 pm to 4 pm" })).toBeTruthy();
     expect(onUnassign).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove Housing A 14:00–16:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Housing A 2 pm to 4 pm" }));
     expect(onUnassign).toHaveBeenCalledTimes(1);
     const [resolved] = onUnassign.mock.calls[0] as [ResolvedUnassign, { x: number; y: number }];
     expect(resolved.assignmentId).toBe("blk2");
@@ -1115,11 +1126,11 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(screen.getByRole("button", { name: "Move Housing A 10:00–14:00" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Move Housing A 14:00–16:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move Housing A 10 am to 2 pm" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move Housing A 2 pm to 4 pm" })).toBeTruthy();
     expect(onMove).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 14:00–16:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 2 pm to 4 pm" }));
     expect(onMove).toHaveBeenCalledTimes(1);
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
     expect(resolved.assignmentId).toBe("blk2");
@@ -1219,7 +1230,7 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toBe(
-      "Which one? Remove Housing A 10:00–14:00, Remove Housing A 14:00–16:00",
+      "Which one? Remove Housing A 10 am to 2 pm, Remove Housing A 2 pm to 4 pm",
     );
     expect(onUnassign).not.toHaveBeenCalled();
   });
@@ -1321,7 +1332,7 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onMove).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 14:00–16:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 2 pm to 4 pm" }));
 
     expect(onMove).toHaveBeenCalledTimes(1);
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
@@ -1417,16 +1428,18 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
       kind: "move",
       assignmentIds: ["blk1", "blk2"],
     });
-    expect(screen.getByRole("button", { name: "Move Housing A 10:00–14:00" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Move Housing A 14:00–16:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move Housing A 10 am to 2 pm" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move Housing A 2 pm to 4 pm" })).toBeTruthy();
 
     fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.change(input, { target: { value: "move it" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toBe("Which one? Move Housing A 10:00–14:00, Move Housing A 14:00–16:00");
-    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 10:00–14:00" }));
+    expect(statusText()).toBe(
+      "Which one? Move Housing A 10 am to 2 pm, Move Housing A 2 pm to 4 pm",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Move Housing A 10 am to 2 pm" }));
 
     expect(onMove).toHaveBeenCalledTimes(1);
     const [resolved] = onMove.mock.calls[0] as [ResolvedMove, { x: number; y: number }];
@@ -1460,7 +1473,9 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     expect(onRetime).not.toHaveBeenCalled();
     expect(statusText()).toBe('That question is about a move; say "move it", yes, or no.');
     expect(onHighlight).toHaveBeenLastCalledWith({ kind: "retime", assignmentIds: ["blk1"] });
-    expect(screen.getByRole("button", { name: "Change 10:00–14:00" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Change Housing A on Cell 1, 10 am to 2 pm" }),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
   });
 
@@ -1604,7 +1619,7 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     await act(async () => {});
     expect(reader).toHaveBeenCalledTimes(1);
     expect(statusText()).toBe(
-      "A Housing A job is already booked on Cell 1, Housing A 8 am to 4 pm. Join it, or make a separate block?",
+      "A Housing A job is already booked on Cell 1, 8 am to 4 pm. Join it, or make a separate block?",
     );
     // The placeholder names what this question actually takes -- never "yes",
     // which it does not (reviewer fix A's other half).
@@ -1638,7 +1653,9 @@ describe("CB-yes: the outline and the spoken yes (S47, R-395)", () => {
     expect(onOpen).not.toHaveBeenCalled();
     expect(statusText()).toBe("Say which one.");
     // The question stands, with both its buttons.
-    expect(screen.getByRole("button", { name: "Housing A 08:00–16:00" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Join the Housing A job, 8 am to 4 pm" }),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
   });
 
@@ -1881,7 +1898,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
     expect(statusText()).toBe(
       "Ready to do 2 things: " +
-        `1. Operator 1 is off Cell 1 in Line 1 ${dayLabel}; that was 10 am to 2 pm, making Housing A.; ` +
+        `1. Operator 1 is off Cell 1 in Line 1 ${dayLabel}; that was 10 am to 2 pm, making Housing A. ` +
         `2. Sam Patel is off Cell 1 in Line 1 ${dayLabel}; that was 10 am to 2 pm, making Housing A.` +
         " Say yes to do them, or no.",
     );
@@ -1923,6 +1940,29 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     expect((resolvedList[1] as ResolvedUnassign).assignmentId).toBe("blkSp");
     expect(input.value).toBe("");
     expect(onHighlight).toHaveBeenLastCalledWith(null);
+  });
+
+  // S195-A (DEF-0043, tester 30 Sept): the list's joins. Every readout already
+  // ends in its own full stop, so the readouts join with a SPACE -- never
+  // ".; " -- in the listing, in the "Written:" line, and after "And N more."
+  // the next sentence is its own. A lot of one is not numbered and says "1
+  // thing", "do it".
+  it("CB-lot-join: the listing and the 'Written:' line join whole sentences with a space -- no '.;' anywhere -- and 'Done, 2 things.' is followed by them", async () => {
+    const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
+      done: resolved.length,
+      error: null,
+    }));
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(statusText()).not.toContain(".;");
+    expect(statusText()).toMatch(/making Housing A\. 2\. Sam Patel is off /);
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(threadText()).toContain("Done, 2 things."));
+    expect(threadText()).not.toContain(".;");
   });
 
   // DEF-0052 / R-432 (CONTRACT CHANGED, 28 Sept, CLAUDE.md §4: not wrong
@@ -1970,7 +2010,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
       expect(threadText()).toContain(
         "I made 1 of the 2 changes.\n" +
           `Done: ${renderedReadout(resolvedList[0].readout)}\n` +
-          "Not done: Sam Patel's block on Cell 1 in Line 1. boom.",
+          "Not done: Sam Patel's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. boom.",
       ),
     );
 
@@ -2014,7 +2054,7 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
       expect(threadText()).toContain(
         "I made 1 of the 2 changes.\n" +
           `Done: ${renderedReadout(resolvedList[0].readout)}\n` +
-          "Not done: Sam Patel's block on Cell 1 in Line 1. Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
+          "Not done: Sam Patel's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. Sam Patel would be over the cap today (110% of 100%). Nothing changed.",
       ),
     );
     expect(threadText()).not.toContain("try the split again");
@@ -2053,10 +2093,10 @@ describe("CB-lot: a several runs one question at a time and writes on one yes (S
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toMatch(/^1 of 2: /);
-    expect(screen.getByRole("button", { name: "Remove Housing A 10:00–14:00" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Remove Housing A 14:00–16:00" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Housing A 10 am to 2 pm" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Housing A 2 pm to 4 pm" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove Housing A 10:00–14:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Housing A 10 am to 2 pm" }));
 
     expect(statusText()).toMatch(/^2 of 2: /);
     expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
@@ -2684,7 +2724,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText().startsWith("Ready to do 8 things: 1. ")).toBe(true);
-    expect(statusText()).toContain("… and 3 more");
+    expect(statusText()).toContain("And 3 more. Say yes to do them, or no.");
     expect(statusText()).not.toContain("6. ");
 
     cleanup();
@@ -3075,7 +3115,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     await waitFor(() => expect(statusText()).toMatch(/^Ready to do 2 things: /));
   });
 
-  it("CB-x-15: exactly 100 is a lot (shows five and '… and 95 more'); 101 is still the refusal (CB-x-4)", () => {
+  it("CB-x-15: exactly 100 is a lot (shows five and 'And 95 more.'); 101 is still the refusal (CB-x-4)", () => {
     const { input } = renderXBar({
       assignments: manyBlocksOnXC1(100).map((b, i) => ({
         ...b,
@@ -3088,7 +3128,7 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText().startsWith("Ready to do 100 things: 1. ")).toBe(true);
-    expect(statusText()).toContain("… and 95 more");
+    expect(statusText()).toContain("And 95 more. Say yes to do them, or no.");
     expect(screen.getByRole("button", { name: "Do all 100" })).toBeTruthy();
   });
 
@@ -3211,12 +3251,19 @@ describe("CB-x: the bar expands before it resolves (S55, R-404/R-406 to R-410, D
     fireEvent.change(input, { target: { value: "clear Cell 1 today" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(statusText()).toMatch(/^Ready to do 1 things: /);
+    expect(statusText()).toMatch(/^Ready to do 1 thing: /);
+    // S195-A (DEF-0043): a lot of one is not numbered, and says "it".
+    expect(statusText()).not.toMatch(/^Ready to do 1 thing: 1\. /);
+    expect(statusText()).toMatch(/ Say yes to do it, or no\.$/);
     expect(statusText()).toContain("The Housing A job is off");
     expect(statusText()).not.toContain("has nobody on it");
 
-    fireEvent.click(screen.getByRole("button", { name: "Do all 1" }));
-    await waitFor(() => expect(threadText()).toContain("Done, 1 things."));
+    // S195-D (item 3, CONTRACT CHANGED, CLAUDE.md 4: the case was not wrong
+    // when written, the button label is what changed): one thing is "Do it",
+    // never "Do all 1"; two or more keep "Do all N" (CB-x-18 and its kin).
+    expect(screen.queryByRole("button", { name: "Do all 1" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Do it" }));
+    await waitFor(() => expect(threadText()).toContain("Done, 1 thing."));
 
     expect(onRunLot).toHaveBeenCalledTimes(1);
     const [resolvedList] = onRunLot.mock.calls[0] as [ResolvedAny[]];
@@ -3496,7 +3543,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toContain("Move which?");
-    const button = screen.getByRole("button", { name: /Cell 1.*10:00–14:00/ });
+    const button = screen.getByRole("button", { name: /Cell 1.*10 am to 2 pm/ });
     fireEvent.click(button);
 
     expect(onMove).toHaveBeenCalledTimes(1);
@@ -3734,11 +3781,11 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     expect(statusText()).toMatch(/^Ready to do 5 things: /);
     expect(statusText()).not.toMatch(/and \d+ more/);
     expect(statusText()).toMatch(
-      /^Ready to do 5 things: 1\. .+; 2\. .+; 3\. .+; 4\. .+; 5\. .+ Say yes/,
+      /^Ready to do 5 things: 1\. .+ 2\. .+ 3\. .+ 4\. .+ 5\. .+ Say yes/,
     );
   });
 
-  it("CB-y-20: reviewer scenario 11b -- a seven-command every-day lot shows five and '… and 2 more'", async () => {
+  it("CB-y-20: reviewer scenario 11b -- a seven-command every-day lot shows five and 'And 2 more.'", async () => {
     const onRunLot = vi.fn(async (resolved: ResolvedAny[]): Promise<LotResult> => ({
       done: resolved.length,
       error: null,
@@ -3751,7 +3798,7 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(statusText()).toMatch(/^Ready to do 7 things: /);
-    expect(statusText()).toContain("… and 2 more");
+    expect(statusText()).toContain("And 2 more. Say yes to do them, or no.");
     expect(screen.getByRole("button", { name: "Do all 7" })).toBeTruthy();
   });
 });
@@ -5842,10 +5889,12 @@ describe("F-233, second pass: the bar's own write count, not just the cache", ()
     const CREATE_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 6 to 8";
     const { input, onOpen, onUnassign, rerenderCtx } = renderBar({ assignments: [BLK1] });
     let capturedReport: ((result: { kind: "refused"; message: string }) => void) | null = null;
-    onOpen.mockImplementationOnce((..._args: unknown[]): { kind: "popup"; waitingFor: string } => {
-      capturedReport = _args[2] as (result: { kind: "refused"; message: string }) => void;
-      return { kind: "popup", waitingFor: "the create pop-up" };
-    });
+    onOpen.mockImplementationOnce(
+      (..._args: unknown[]): { kind: "popup"; waitingFor: string; standing: false } => {
+        capturedReport = _args[2] as (result: { kind: "refused"; message: string }) => void;
+        return { kind: "popup", waitingFor: "the create pop-up", standing: false };
+      },
+    );
 
     fireEvent.change(input, { target: { value: CREATE_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -5890,10 +5939,12 @@ describe("F-233, second pass: the bar's own write count, not just the cache", ()
   it("a genuinely NEW ctx with a grown count but not the answered id does not release the hold", () => {
     const { input, onOpen, onUnassign, rerenderCtx } = renderBar({ assignments: [BLK1] });
     let capturedReport: ((result: { kind: "written"; id?: string }) => void) | null = null;
-    onOpen.mockImplementationOnce((..._args: unknown[]): { kind: "popup"; waitingFor: string } => {
-      capturedReport = _args[2] as (result: { kind: "written"; id?: string }) => void;
-      return { kind: "popup", waitingFor: "the create pop-up" };
-    });
+    onOpen.mockImplementationOnce(
+      (..._args: unknown[]): { kind: "popup"; waitingFor: string; standing: false } => {
+        capturedReport = _args[2] as (result: { kind: "written"; id?: string }) => void;
+        return { kind: "popup", waitingFor: "the create pop-up", standing: false };
+      },
+    );
     const CREATE_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 6 to 8";
 
     fireEvent.change(input, { target: { value: CREATE_SENTENCE } });
@@ -6250,7 +6301,7 @@ describe("F-233, second pass: the bar's own write count, not just the cache", ()
     const onOpen = vi.fn(
       (_resolved: unknown, _anchor: unknown, report: (result: { kind: "written" }) => void) => {
         capturedReport = report;
-        return { kind: "popup", waitingFor: "the create pop-up" } as const;
+        return { kind: "popup", waitingFor: "the create pop-up", standing: false } as const;
       },
     );
     const onUnassign = vi.fn().mockReturnValue(WRITTEN);
@@ -6351,10 +6402,12 @@ describe("F-233, third pass: the writers answer the row's own id, not a count", 
   it("a create whose row is real and already in ctx: the next sentence runs at once, never held", () => {
     const { input, onOpen, rerenderCtx } = renderBar({ assignments: [BLK1] });
     let capturedReport: ((result: { kind: "written"; id?: string }) => void) | null = null;
-    onOpen.mockImplementationOnce((..._args: unknown[]): { kind: "popup"; waitingFor: string } => {
-      capturedReport = _args[2] as (result: { kind: "written"; id?: string }) => void;
-      return { kind: "popup", waitingFor: "the create pop-up" };
-    });
+    onOpen.mockImplementationOnce(
+      (..._args: unknown[]): { kind: "popup"; waitingFor: string; standing: false } => {
+        capturedReport = _args[2] as (result: { kind: "written"; id?: string }) => void;
+        return { kind: "popup", waitingFor: "the create pop-up", standing: false };
+      },
+    );
     const CREATE_SENTENCE = "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 6 to 8";
     const P1_OFF_HOURS_SENTENCE = "Assign Sam Patel to Housing A on Cell 1 in Line 1 from 8 to 9";
 
@@ -6497,9 +6550,9 @@ describe("F-233, third pass: the writers answer the row's own id, not a count", 
       const { input, onOpen, onUnassign, rerenderCtx } = renderBar({ runs: [] });
       let capturedReport: ((result: { kind: "written"; id?: string }) => void) | null = null;
       onOpen.mockImplementationOnce(
-        (..._args: unknown[]): { kind: "popup"; waitingFor: string } => {
+        (..._args: unknown[]): { kind: "popup"; waitingFor: string; standing: false } => {
           capturedReport = _args[2] as (result: { kind: "written"; id?: string }) => void;
-          return { kind: "popup", waitingFor: "the create pop-up" };
+          return { kind: "popup", waitingFor: "the create pop-up", standing: false };
         },
       );
 
@@ -7896,7 +7949,7 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
       expect(threadText()).toContain(
         "I made 1 of the 2 changes.\n" +
           `Done: ${renderedReadout(resolved[0].readout)}\n` +
-          "Not done: Sam Patel's block on Cell 1 in Line 1. Tom Baker is not certified for Welding, which Cell 1 needs.",
+          "Not done: Sam Patel's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. Tom Baker is not certified for Welding, which Cell 1 needs.",
       ),
     );
     expect(threadText()).not.toContain("reverted");
@@ -7936,7 +7989,7 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
       expect(threadText()).toContain(
         "I made 1 of the 2 changes.\n" +
           `Done: ${renderedReadout(resolved[0].readout)}\n` +
-          "Not done: Sam Patel's block on Cell 1 in Line 1. Something went wrong with that one.",
+          "Not done: Sam Patel's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. Something went wrong with that one.",
       ),
     );
     expect(threadText()).not.toContain("Please try again.");
@@ -7982,8 +8035,8 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
       expect(threadText()).toContain(
         "I made 1 of the 4 changes.\n" +
           `Done: ${renderedReadout(resolved[0].readout)}\n` +
-          "Not done: Sam Patel's block on Cell 1 in Line 1. Sam Patel is not certified for Welding, which Cell 1 needs.\n" +
-          "Not tried: Sam Ortiz stays on Cell 1 in Line 1. Priya Shah stays on Cell 1 in Line 1.",
+          "Not done: Sam Patel's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. Sam Patel is not certified for Welding, which Cell 1 needs.\n" +
+          "Not tried: Sam Ortiz stays on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. Priya Shah stays on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm.",
       ),
     );
   });
@@ -8021,8 +8074,8 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
     await waitFor(() =>
       expect(threadText()).toContain(
         "I made none of the 3 changes.\n" +
-          "Not done: Operator 1's block on Cell 1 in Line 1. Operator 1 is not certified for Welding, which Cell 1 needs.\n" +
-          "Not tried: Sam Patel stays on Cell 1 in Line 1. Sam Ortiz stays on Cell 1 in Line 1.",
+          "Not done: Operator 1's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. Operator 1 is not certified for Welding, which Cell 1 needs.\n" +
+          "Not tried: Sam Patel stays on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. Sam Ortiz stays on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm.",
       ),
     );
     expect(threadText()).not.toContain("Done:");
@@ -8068,7 +8121,7 @@ describe("CB-lot-fail: a partial lot says what stood, never a false revert (F-15
             .map((r) => renderedReadout(r.readout))
             .join(" ") +
           "\n" +
-          "Not done: Sam Ortiz's block on Cell 1 in Line 1. Sam Ortiz is not certified for Welding, which Cell 1 needs.",
+          "Not done: Sam Ortiz's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. Sam Ortiz is not certified for Welding, which Cell 1 needs.",
       ),
     );
     expect(threadText()).not.toContain("Not tried:");
@@ -8324,33 +8377,45 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     // plant's words through the one rewriter.
     expect(entry.outcome).toBe(
       `I made 1 of the 2 changes.\nDone: ${entry.ran[0]}\n` +
-        "Not done: Sam Patel's block on Cell 1 in Line 1. That person is not from this cell's area.",
+        "Not done: Sam Patel's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. That person is not from this cell's area.",
     );
     // And only the step that actually ran.
     expect(entry.ran).toHaveLength(1);
   });
 
-  it("CB-t-16: a single whose writer answers `popup` writes NOTHING under ran, and (F-167) keeps its entry OPEN until the pop-up answers", () => {
+  it("CB-t-16: a single whose writer answers `popup` writes NOTHING under ran, keeps its entry OPEN until the pop-up answers (F-167), and is POSTED at the ask (DEF-0054)", () => {
     const fetchMock = stubFetch();
     const { onOpen, input, unmount } = renderBar({ runs: [] });
-    onOpen.mockReturnValue({ kind: "popup", waitingFor: "the create pop-up" });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: CREATE_WAITING });
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onOpen).toHaveBeenCalledTimes(1);
-    // F-167 (CONTRACT CHANGED, CLAUDE.md 4): this pin used to read the posted
-    // entry HERE. Nothing is posted yet -- the write is with the pop-up and
-    // the sentence is not over. What the person sees meanwhile is the turn in
-    // the thread, waiting.
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain("Waiting: the create pop-up");
+    // DEF-0054 (CONTRACT CHANGED, CLAUDE.md 4: not wrong when written -- it
+    // pinned the F-167 shape, "nothing is posted until the pop-up answers",
+    // which is exactly the hole DEF-0054 names: a page closed with the pop-up
+    // standing left NO line in the trace): the entry is posted the moment the
+    // pop-up stands, saying what the board asked, DEF-0049's shape.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const asked = postedEntry(fetchMock);
+    expect(asked.outcome).toBe(`popup: ${CREATE_WAITING}`);
+    expect(asked.asked).toBe(CREATE_WAITING);
+    expect(asked.ran).toEqual([]);
+    // What the person sees meanwhile is the sentence, once, and never the
+    // done-form readout (R-431).
+    expect(threadText()).toContain(CREATE_WAITING);
+    expect(threadText()).not.toMatch(/making Housing A/);
 
     // A pop-up that never answers is still flushed when the bar goes away
-    // (F-157), carrying what was actually known.
+    // (F-157), carrying what was actually known -- as a correction of the
+    // ask-time line, same `at`.
     unmount();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const entry = postedEntry(fetchMock);
-    expect(entry.outcome).toBe("popup: the create pop-up");
+    expect(entry.at).toBe(asked.at);
+    expect(entry.revises).toBe(true);
+    expect(entry.outcome).toBe(`popup: ${CREATE_WAITING}`);
     expect(entry.ran).toEqual([]);
   });
 
@@ -8364,7 +8429,7 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
   it("CB-t-18: the pop-up reporting `written` fills ran and the outcome, posts ONE line, and the thread stops saying Waiting", () => {
     const fetchMock = stubFetch();
     const { onOpen, input } = renderBar({ runs: [] });
-    onOpen.mockReturnValue({ kind: "popup", waitingFor: "the create pop-up" });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: CREATE_WAITING });
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -8373,19 +8438,23 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
       { x: number; y: number },
       (r: { kind: "written"; readout?: string }) => void,
     ];
-    expect(document.body.textContent).toContain("Waiting: the create pop-up");
+    expect(document.body.textContent).toContain(CREATE_WAITING);
+    // DEF-0054: the ask-time line is already in the file.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     act(() => report({ kind: "written", readout: "Operator 1 → Housing A · Cell 1" }));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // ... and the answer CORRECTS it (same `at`, `revises`): one entry, two lines.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const entry = postedEntry(fetchMock);
+    expect(entry.revises).toBe(true);
     expect(entry.outcome).toBe("written");
     expect(entry.ran).toEqual(["Operator 1 → Housing A · Cell 1"]);
-    expect(document.body.textContent).not.toContain("Waiting: the create pop-up");
+    expect(document.body.textContent).not.toContain("Waiting:");
     expect(document.body.textContent).toContain("Written: Operator 1 → Housing A · Cell 1");
     // Reporting twice (a pop-up that submits and then closes) changes nothing.
     act(() => report({ kind: "written" }));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("CB-t-19: the pop-up reporting `refused` records the server's own message and leaves ran empty", () => {
@@ -8487,10 +8556,16 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     ];
 
     // The create pop-up hands the write to the split pop-up: still nothing
-    // written, still not over, and the thread says what it is waiting on now.
-    act(() => report({ kind: "handed_off", what: "split coverage" }));
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain("Waiting: split coverage");
+    // written, still not over, and the thread says what it is waiting on now
+    // (DEF-0054: the one plain sentence, posted at the ask).
+    const SPLIT = splitWaiting("Operator 1");
+    act(() => report({ kind: "handed_off", what: SPLIT }));
+    // Posted at EACH ask: the create pop-up's own, then the split pop-up's --
+    // one entry, the second line a correction of the first.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(postedEntry(fetchMock).outcome).toBe(`popup: ${SPLIT}`);
+    expect(postedEntry(fetchMock).revises).toBe(true);
+    expect(document.body.textContent).toContain(SPLIT);
 
     // The split pop-up's own Confirm finishes it through the SAME reporter.
     act(() => report({ kind: "written", readout: "Operator 1 → Housing A · Cell 1" }));
@@ -8513,7 +8588,7 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
       (r: { kind: string; what?: string }) => void,
     ];
 
-    act(() => report({ kind: "handed_off", what: "split coverage" }));
+    act(() => report({ kind: "handed_off", what: splitWaiting("Operator 1") }));
     act(() => report({ kind: "cancelled" }));
 
     const entry = postedEntry(fetchMock);
@@ -8596,9 +8671,9 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     ];
     report = reporter as (r: { kind: "cancelled" }) => void;
 
-    act(() => reporter({ kind: "handed_off", what: "split coverage" }));
-    expect(document.body.textContent).toContain("Waiting: split coverage");
-    expect(fetchMock).not.toHaveBeenCalled();
+    act(() => reporter({ kind: "handed_off", what: splitWaiting("Operator 1") }));
+    expect(document.body.textContent).toContain(splitWaiting("Operator 1"));
+    expect(fetchMock).toHaveBeenCalledTimes(2); // DEF-0054: posted at each ask
 
     fireEvent.change(input, { target: { value: "no" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -8609,7 +8684,7 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     const entry = postedEntry(fetchMock);
     expect(entry.outcome).toBe("cancelled");
     expect(entry.ran).toEqual([]);
-    expect(document.body.textContent).toContain("Cancelled");
+    expect(document.body.textContent).toContain("Cancelled. Nothing changed.");
     expect(document.body.textContent).not.toContain("Waiting:");
   });
 });
@@ -8661,7 +8736,9 @@ describe("CB-w: the four silent writers answer for real (F-168)", () => {
 
     fireEvent.change(input, { target: { value: P1_RETIME_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Change 10:00–14:00" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Change Housing A on Cell 1, 10 am to 2 pm" }),
+    );
     await act(async () => {});
 
     expect(onRetime).toHaveBeenCalledTimes(1);
@@ -8681,7 +8758,7 @@ describe("CB-w: the four silent writers answer for real (F-168)", () => {
 
     fireEvent.change(input, { target: { value: BOOK_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Change 08:00–16:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change the Housing A job, 8 am to 4 pm" }));
     await act(async () => {});
 
     expect(onRetimeRun).toHaveBeenCalledTimes(1);
@@ -10094,7 +10171,10 @@ describe("CB-abs: an absence sentence in the bar (S194-D, R-409, R-431)", () => 
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Do all 3" }));
-    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    // S195 review: the waits are on the machine, not the bar -- this failed once
+    // in a full run under load and never alone or in its file; RTL's 1 s default
+    // was the flake (no timer or promise in the bar is left unawaited).
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1), { timeout: 5000 });
     const [steps] = onRunLot.mock.calls[0] as [ResolvedAny[]];
     expect(steps.map((s) => s.intent)).toEqual(["unassign", "unassign", "record_absence"]);
     const done =
@@ -10102,7 +10182,7 @@ describe("CB-abs: an absence sentence in the bar (S194-D, R-409, R-431)", () => 
       renderedReadout(
         "Sam Patel is off 2026-09-03. Their 2 blocks on Cell 1 in Line 1 and Cell 2 are cleared and the absence is recorded.",
       );
-    await waitFor(() => expect(threadText()).toContain(done));
+    await waitFor(() => expect(threadText()).toContain(done), { timeout: 5000 });
     expect(postedEntry(fetchMock).outcome).toBe(done);
   });
 
@@ -10194,8 +10274,8 @@ describe("CB-432: R-432's answer, every new step kind, a refusal in the middle (
       expect(threadText()).toContain(
         "I made 1 of the 3 changes.\n" +
           "Done: Sam Patel's night shift on Cell 2 keeps its Wednesday part, 10 pm to midnight; Thursday's part, midnight to 6 am, is cleared.\n" +
-          "Not done: The Housing A job on Cell 2. You cannot change Cell 2 from here.\n" +
-          "Not tried: The Housing A job on Cell 2 stays as it was, 10 am to noon.",
+          "Not done: The Housing A job on Cell 2 Thu Sep 3, 10 pm to 6 am. You cannot change Cell 2 from here.\n" +
+          "Not tried: The Housing A job on Cell 2 Thu Sep 3 stays as it was, 10 am to noon.",
       ),
     );
   });
@@ -10236,7 +10316,9 @@ describe("CB-432: R-432's answer, every new step kind, a refusal in the middle (
     fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
     fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
     await waitFor(() =>
-      expect(threadText()).toContain("Not done: Sam Patel's block on Cell 1 in Line 1. boom."),
+      expect(threadText()).toContain(
+        "Not done: Sam Patel's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. boom.",
+      ),
     );
     expect(postedEntry(fetchMock).outcome).toMatch(/^I made 1 of the 2 changes\./);
   });
@@ -10389,7 +10471,7 @@ describe("CB-hole: a window inside a job offers the windows that would work (S19
     ]);
     fireEvent.click(screen.getByRole("button", { name: "Clear 1 pm to 4 pm" }));
     expect(statusText()).toMatch(
-      /^Ready to do 1 things: 1\. The Housing A job on Cell 2 keeps 10 am to 1 pm; /,
+      /^Ready to do 1 thing: The Housing A job on Cell 2 keeps 10 am to 1 pm; /,
     );
     // The hole question was posted AT THE ASK (R-434); the entry then moved
     // on to the lot's own question, answered by the pressed window.
@@ -10492,5 +10574,396 @@ describe("CB-held: three branches the reviewer found no test holding (S194-D thi
     expect(statusText()).toBe(
       'No person called "Qqqq" on your board. Did you mean one of these? … and more — say the person.',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S195-A (DEF-0055, R-430, R-435, R-434): "clear <a person>" is about the
+// person. The grammar hands the bar a place with the reserved "everyone"; the
+// board knows the words are a name.
+// ---------------------------------------------------------------------------
+
+describe("CB-clear: 'clear <a person>' (S195-A, DEF-0055)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-clear-1: 'clear Sam Patel today' is answered about Sam Patel -- the one-block question with 'Remove it', never 'No cell called' -- and the trace READS the person, as the sentence 'remove Sam Patel today' does", () => {
+    const fetchMock = stubFetch();
+    const { input } = renderBar({ assignments: [BLK_SP] });
+    fireEvent.change(input, { target: { value: "clear Sam Patel today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).not.toContain("No cell called");
+    expect(statusText()).toContain("Remove Sam Patel's Housing A block");
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    const entry = postedEntry(fetchMock);
+    expect(entry.read).toBe("unassign Sam Patel on today");
+    expect(entry.read).not.toContain("everyone");
+  });
+
+  it("CB-clear-2: 'clear Sam Patal today' (a slip of the tongue) offers the nearest people and places; pressing the person reads the sentence as that person", () => {
+    const fetchMock = stubFetch();
+    const { input } = renderBar({ assignments: [BLK_SP] });
+    fireEvent.change(input, { target: { value: "clear Sam Patal today" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe(
+      'No cell or person called "Sam Patal" on this board. Did you mean one of these?',
+    );
+    expect(candidateButtons().map((b) => b.textContent)).toContain("Sam Patel");
+    fireEvent.click(screen.getByRole("button", { name: "Sam Patel" }));
+    expect(statusText()).toContain("Remove Sam Patel's Housing A block");
+    expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
+    expect(postedEntry(fetchMock).read).toBe("unassign Sam Patel on today");
+  });
+
+  it("CB-clear-3: a name that is both a person and a cell asks with both as buttons; 'The place' clears the cell and is not asked again, 'The person' is the person's removal", () => {
+    const twin = { id: "twin", displayName: "Cell 2", employeeRef: null, active: true };
+    const roster = [...buildCtx().operators, twin];
+    const first = renderBar({ operators: roster });
+    fireEvent.change(first.input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(first.input, { key: "Enter" });
+    expect(statusText()).toBe(
+      '"Cell 2" is the name of a person and of a place on this board. Which did you mean?',
+    );
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "The person Cell 2",
+      "The place Cell 2",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "The place Cell 2" }));
+    expect(statusText()).not.toContain("is the name of a person");
+    cleanup();
+
+    const second = renderBar({ operators: roster });
+    fireEvent.change(second.input, { target: { value: "clear Cell 2 today" } });
+    fireEvent.keyDown(second.input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "The person Cell 2" }));
+    expect(statusText()).toContain("Cell 2 has no block");
+    expect(statusText()).not.toContain("is the name of a person");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S195-A (DEF-0052, tester 30 Sept): a block that is GONE and a block that is
+// FORBIDDEN are different facts and read differently -- through the one
+// rewriter, in a lot's "Not done" line and in a single sentence's refusal
+// alike. The writer (`deleteAssignment`, `deleteRun`) says which; see
+// `src/test/writeGoneOrForbidden.test.ts` for that half.
+// ---------------------------------------------------------------------------
+
+describe("CB-gone: a vanished block and a forbidden one are told apart (S195-A, DEF-0052)", () => {
+  async function runLotRefusedWith(error: string): Promise<string> {
+    const onRunLot = vi.fn(async (_r: ResolvedAny[]): Promise<LotResult> => ({ done: 1, error }));
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] }, null, null, {}, { onRunLot });
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.change(input, { target: { value: "yes" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onRunLot).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(threadText()).toContain("I made 1 of the 2 changes."));
+    return threadText();
+  }
+
+  it("CB-gone-1: the block was removed underneath -- 'That block is no longer on the board.', the day and the hours in the Not done line", async () => {
+    const said = await runLotRefusedWith("That block is no longer on the board.");
+    expect(said).toContain(
+      "Not done: Sam Patel's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. That block is no longer on the board.",
+    );
+    expect(said).not.toContain("You cannot change that from here.");
+  });
+
+  it("CB-gone-2: the block is still there and the person may not change it -- 'You cannot change that from here.'", async () => {
+    const said = await runLotRefusedWith("You don't have permission to change that.");
+    expect(said).toContain(
+      "Not done: Sam Patel's block on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm. You cannot change that from here.",
+    );
+    expect(said).not.toContain("no longer on the board");
+  });
+
+  it("CB-gone-3: a single sentence's removal says the same two things through the same rewriter -- gone passes through, forbidden is 'You cannot change that from here.'", async () => {
+    const cases: Array<[string, string]> = [
+      ["That block is no longer on the board.", "Not done: That block is no longer on the board."],
+      ["You don't have permission to change that.", "Not done: You cannot change that from here."],
+    ];
+    for (const [refusal, want] of cases) {
+      const { onUnassign, input } = renderBar({ assignments: [BLK1] });
+      onUnassign.mockResolvedValue({ kind: "refused", message: refusal });
+      fireEvent.change(input, { target: { value: UNASSIGN_SENTENCE } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+      await act(async () => {});
+      expect(threadText()).toContain(want);
+      cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S195-A (DEF-0043): the join button's words changed ("Join the Housing A job,
+// 8 am to 4 pm"); a person may still TYPE or SAY the button's own words as the
+// answer (F-162) -- the answer is matched against the labels the bar is showing,
+// so it follows the new words. (A block question's buttons -- Remove, Change,
+// Move -- were never answered by typing their label: the outline branch asks
+// "Say which one." That is unchanged.)
+// ---------------------------------------------------------------------------
+
+describe("CB-typed: the join button's own words, typed, are the answer (S195-A)", () => {
+  it("CB-typed-1: typing the join button's label picks that run", () => {
+    const { onOpen, input } = renderBar({ runs: [RUN1] });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "Join the Housing A job, 8 am to 4 pm" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
+    expect(resolved.target).toEqual({ kind: "run", runId: "run1" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S195-D (DEF-0054, R-434, R-431, R-459): a sentence that ends in one of the
+// board's own pop-ups is FINISHED by that pop-up's answer. Until then the thread
+// says ONE plain sentence -- what the board is asking -- and never the done-form
+// readout; the entry is posted at the ask (DEF-0049's shape); Continue settles
+// it Written, Cancel settles it "Cancelled. Nothing changed.", the server's
+// refusal settles it "Not done: ...". The writers' own answers are proved in
+// `dragGesture.test.ts` (P-1..P-12) and `createPopover.test.tsx`; this drives
+// the BAR against that contract.
+// ---------------------------------------------------------------------------
+describe("CB-pop: a sentence that ends in the board's own pop-up is finished by its answer (DEF-0054)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const ASKING = attachmentWaiting({
+    person: "Operator 1",
+    from: "Housing A",
+    to: null,
+  });
+
+  /** The retime path a Continue? pop-up opens from: BLK1 is on the board, the
+   *  sentence changes its hours, and the writer answers with the sentence. */
+  function retimeBar() {
+    const fetchMock = stubFetch();
+    const bar = renderBar({ assignments: [BLK1] });
+    bar.onMove.mockReturnValue({ kind: "popup", waitingFor: ASKING });
+    fireEvent.change(bar.input, { target: { value: MOVE_RETIME_SENTENCE } });
+    fireEvent.keyDown(bar.input, { key: "Enter" });
+    const [resolved, , report] = bar.onMove.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: string; message?: string; readout?: string }) => void,
+    ];
+    return { ...bar, fetchMock, resolved, report };
+  }
+
+  it("CB-pop-1: while the pop-up stands the thread says what the board is asking, ONCE, and never the done-form readout (R-431)", () => {
+    const { resolved, fetchMock } = retimeBar();
+    const done = renderedReadout(resolved.readout);
+
+    expect(threadText()).toContain(ASKING);
+    // Said once: the live area is empty (the turn is filed), not a second copy.
+    expect(threadText().split(ASKING)).toHaveLength(2);
+    expect(statusText()).toBe("");
+    // The done-form readout is nowhere: not in the thread, not on the live line.
+    expect(threadText()).not.toContain(done);
+    expect(document.body.textContent).not.toContain(done);
+    // The code's words are not the person's (R-459).
+    expect(threadText()).not.toMatch(/re-time|attachment|keep\/scale|pop-up|standalone/i);
+
+    // Posted AT THE ASK, with the sentence as what the turn asked (DEF-0049).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const posted = postedEntry(fetchMock);
+    expect(posted.heard).toBe(MOVE_RETIME_SENTENCE);
+    expect(posted.asked).toBe(ASKING);
+    expect(posted.answered).toBeNull(); // nobody has answered yet (DEF-0049's shape)
+    expect(posted.outcome).toBe(`popup: ${ASKING}`);
+    expect(posted.ran).toEqual([]);
+  });
+
+  it("CB-pop-2: Continue -- the server accepts -- settles the turn Written with the readout the direct path uses, and the trace outcome is written", () => {
+    const { resolved, report, fetchMock } = retimeBar();
+    const done = renderedReadout(resolved.readout);
+
+    act(() => report({ kind: "written" }));
+
+    expect(threadText()).toContain(`Written: ${done}`);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const entry = postedEntry(fetchMock);
+    expect(entry.revises).toBe(true);
+    expect(entry.outcome).toBe("written");
+    expect(entry.ran).toEqual([done]);
+    // Reported twice (Continue then the shell's own close): nothing more.
+    act(() => report({ kind: "cancelled" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("CB-pop-3: Cancel settles the turn 'Cancelled. Nothing changed.' -- the readout is NOT in the thread -- and the trace outcome is cancelled", () => {
+    const { resolved, report, fetchMock } = retimeBar();
+    const done = renderedReadout(resolved.readout);
+
+    act(() => report({ kind: "cancelled" }));
+
+    expect(threadText()).toContain("Cancelled. Nothing changed.");
+    // DEF-0054's own symptom: after Cancel the thread still said the block
+    // "now ends 5:30 pm".
+    expect(threadText()).not.toContain(done);
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-pop-4: the server refusing the write after Continue settles 'Not done: <reason>' through the one rewriter, and the trace says refused", () => {
+    const { report, fetchMock } = retimeBar();
+
+    act(() => report({ kind: "refused", message: "You don't have permission to change that." }));
+
+    expect(threadText()).toContain("Not done: You cannot change that from here.");
+    expect(threadText()).not.toContain("You don't have permission");
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("refused: You cannot change that from here.");
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-pop-5: the page closed while the pop-up stands leaves the entry in the trace, still saying what it asked (answered: null is the ask's own line)", () => {
+    const { unmount, fetchMock } = retimeBar();
+    // The ask-time line is already there BEFORE any close.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    unmount();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const last = postedEntry(fetchMock);
+    expect(last.heard).toBe(MOVE_RETIME_SENTENCE);
+    expect(last.asked).toBe(ASKING);
+    expect(last.answered).toBeNull();
+    expect(last.outcome).toBe(`popup: ${ASKING}`);
+  });
+
+  it("CB-pop-6: a second sentence while the pop-up stands is read AT ONCE (never held behind it), and the pop-up's later answer still corrects the first turn", () => {
+    const { input, onOpen, report, fetchMock, resolved } = retimeBar();
+    const done = renderedReadout(resolved.readout);
+
+    // F-162's rule, the standing question's: a new sentence ends whatever
+    // stood -- nothing is being WRITTEN while a person decides, so nothing is
+    // held ("The board is still saving your last change" would be a lie).
+    fireEvent.change(input, {
+      target: { value: "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 6 to 8" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(threadText()).not.toContain("still saving your last change");
+
+    // The first turn is filed as it stood, and the pop-up's answer arriving
+    // later corrects that SAME turn and its file line (CB-t-23's shape).
+    fetchMock.mockClear();
+    act(() => report({ kind: "written" }));
+    expect(threadText()).toContain(`Written: ${done}`);
+    expect(postedEntry(fetchMock).outcome).toBe("written");
+    expect(postedEntry(fetchMock).revises).toBe(true);
+  });
+
+  it("CB-pop-7: a create the bar may press by itself says NOTHING is waiting until the pop-up reports it stands -- then the sentence, then the answer", () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: CREATE_WAITING, standing: false });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const [resolved, , report] = onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: string; what?: string; message?: string }) => void,
+    ];
+    const done = renderedReadout(resolved.readout);
+
+    // Hidden auto-press (F-205): nothing to finish on the board, nothing done
+    // yet either -- "Working…", no done-form readout, no waiting sentence.
+    expect(statusText()).toBe("Working…");
+    expect(document.body.textContent).not.toContain(CREATE_WAITING);
+    expect(document.body.textContent).not.toContain(done);
+    expect(postedEntry(fetchMock).outcome).toBe(`popup: ${CREATE_WAITING}`);
+
+    // The pop-up reports it is on screen: now the sentence is said.
+    act(() => report({ kind: "handed_off", what: CREATE_WAITING }));
+    expect(threadText()).toContain(CREATE_WAITING);
+    expect(statusText()).toBe("");
+
+    // A decision made on the board settles it.
+    act(() => report({ kind: "written" }));
+    expect(threadText()).toContain(`Written: ${done}`);
+    expect(postedEntry(fetchMock).outcome).toBe("written");
+  });
+
+  it("CB-pop-8: an auto-pressed create that never stood ends exactly as a direct write always did -- the readout, then Written", () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    onOpen.mockReturnValue({ kind: "popup", waitingFor: CREATE_WAITING, standing: false });
+
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const [resolved, , report] = onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: string }) => void,
+    ];
+    const done = renderedReadout(resolved.readout);
+
+    act(() => report({ kind: "written" }));
+
+    // The turn's board line is the readout (as CB-t-17's direct write), and
+    // the waiting sentence was never said, so it is never in the thread.
+    expect(threadText()).toContain(done);
+    expect(threadText()).toContain(`Written: ${done}`);
+    expect(threadText()).not.toContain(CREATE_WAITING);
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("written");
+    expect(entry.asked).toBe(done);
+  });
+
+  it("CB-pop-10: a person busy on a place she cannot read is refused in the place's words -- through the writer's answer and through the pop-up's report -- untouched by the cap rewriter (R-465)", () => {
+    const SAID = "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+
+    // Through the writer's own answer (a write refused at once).
+    let fetchMock = stubFetch();
+    let bar = renderBar({ runs: [] });
+    bar.onOpen.mockReturnValue({ kind: "refused", message: SAID });
+    fireEvent.change(bar.input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(bar.input, { key: "Enter" });
+    expect(threadText()).toContain(`Not done: ${SAID}`);
+    expect(postedEntry(fetchMock).outcome).toBe(`refused: ${SAID}`);
+    expect(postedEntry(fetchMock).ran).toEqual([]);
+
+    cleanup();
+    vi.unstubAllGlobals();
+
+    // Through the create pop-up's report (an auto-press the server refused).
+    fetchMock = stubFetch();
+    bar = renderBar({ runs: [] });
+    bar.onOpen.mockReturnValue({ kind: "popup", waitingFor: CREATE_WAITING, standing: false });
+    fireEvent.change(bar.input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(bar.input, { key: "Enter" });
+    const [, , report] = bar.onOpen.mock.calls[0] as [
+      ResolvedCommand,
+      { x: number; y: number },
+      (r: { kind: string; message?: string }) => void,
+    ];
+    act(() => report({ kind: "refused", message: SAID }));
+    expect(threadText()).toContain(`Not done: ${SAID}`);
+    expect(threadText()).not.toMatch(/would be over the cap/);
+    expect(postedEntry(fetchMock).outcome).toBe(`refused: ${SAID}`);
+  });
+
+  it("CB-pop-9: a lot of ONE reads 'Do it'; two or more read 'Do all N' (S195-D item 3)", () => {
+    const { input } = renderBar({ assignments: [BLK1, BLK_SP] });
+
+    fireEvent.change(input, { target: { value: LOT_REMOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove it" }));
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
+    expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Do it" })).toBeNull();
   });
 });

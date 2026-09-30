@@ -355,8 +355,33 @@
    (`railWords.ts`'s `bookingWords`) -- pushed to line two's right edge and
    never wrapped, so a long skill list truncates the SKILLS first via
    `.line2`'s own `overflow: hidden` below, never the words themselves. */
-.words {
+/* R-465: the word and, when the person is busy on a place the viewer cannot
+   read, the place and the hours in brackets ("booked (Cell 4, 6 am to 2 pm)").
+   The wrapper takes the right edge and may SHRINK (`min-width: 0`); the word
+   never does (`.words` is `flex: none`) and the brackets are what ellipsise,
+   so a narrow rail still reads "booked" and the chip's `title` carries the
+   full sentence. */
+.wordsWrap {
   margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+.place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(9px * var(--ui-scale, 1));
+  font-weight: 500;
+  color: var(--muted);
+  padding-left: calc(3px * var(--ui-scale, 1));
+}
+
+.words {
   flex: none;
   font-size: calc(9px * var(--ui-scale, 1));
   font-weight: 600;

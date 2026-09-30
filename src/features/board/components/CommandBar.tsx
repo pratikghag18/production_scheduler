@@ -47,7 +47,14 @@ import {
   describeVerbGuess,
   spokenCommand,
 } from "@/lib/voice/verbGuess";
-import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
+import {
+  resolveCommand,
+  describeQuestion,
+  expandCommand,
+  thingsCount,
+  oneOrThem,
+  readClearAsPerson,
+} from "@/lib/command/resolve";
 import type {
   ResolveContext,
   ResolveOptions,
@@ -66,7 +73,6 @@ import type { Highlight } from "../lib/highlight";
 import { Microphone } from "@/components/icons";
 import {
   createConversationStore,
-  fileOpenTurn,
   fileMovingTurn,
   finishTrace as finishTraceIn,
   settleTurn,
@@ -384,7 +390,16 @@ export type WriteOutcome =
       id?: string;
     }
   | { kind: "refused"; message: string }
-  | { kind: "popup"; waitingFor: string };
+  /**
+   * S195-D (DEF-0054): `waitingFor` is now the ONE plain sentence the thread
+   * shows while the pop-up stands (R-459; `popupWords.ts`), never a
+   * developer's phrase. `standing: false` says the pop-up may not be on
+   * screen at all yet -- a create the bar may press by itself
+   * (R-384/F-205 keeps such a pop-up hidden) -- so nothing is said to be
+   * waiting until the pop-up itself reports that it stands
+   * (`{ kind: "handed_off" }`, `CreatePopover`).
+   */
+  | { kind: "popup"; waitingFor: string; standing?: boolean };
 
 /** What a writer prop may answer with — nothing, an outcome, or a promise of
  *  one. Still carries `void` for `onOpen`/`onBook`/`onSetHeadcount` (F-164's
@@ -836,11 +851,19 @@ function turnResultLine(turn: HistoryTurn): string {
   // it stopped (F-154's lesson, lost again on the way from the live line to
   // the thread).
   if (outcome !== null && (outcome.startsWith("Done, ") || outcome.startsWith("Did "))) {
-    return turn.ran.length > 0 ? `${outcome} Written: ${turn.ran.join("; ")}` : outcome;
+    // DEF-0043: each readout ends in its own full stop, so they join with a
+    // space -- "; " printed ".; ".
+    return turn.ran.length > 0 ? `${outcome} Written: ${turn.ran.join(" ")}` : outcome;
   }
-  if (turn.ran.length > 0) return `Written: ${turn.ran.join("; ")}`;
+  if (turn.ran.length > 0) return `Written: ${turn.ran.join(" ")}`;
   if (outcome === null) return "";
-  if (outcome.startsWith("popup: ")) return `Waiting: ${outcome.slice("popup: ".length)}`;
+  if (outcome.startsWith("popup: ")) {
+    // S195-D: while a pop-up stands the turn's own board line IS the sentence
+    // saying what it asks (`popupWords.ts`), so it is not said twice. Any
+    // other "popup: ..." outcome (a held sentence's) keeps the plain prefix.
+    const what = outcome.slice("popup: ".length);
+    return what === turn.asked ? "" : `Waiting: ${what}`;
+  }
   if (outcome.startsWith("refused: ")) {
     const message = outcome.slice("refused: ".length);
     // WR-2 (reviewer, S64-c review): `nothing_to_do`'s own outcome
@@ -866,7 +889,9 @@ function turnResultLine(turn: HistoryTurn): string {
     return `Not done: ${message}`;
   }
   // F-167: the pop-up was closed without writing -- neither done nor refused.
-  if (outcome === "cancelled") return "Cancelled";
+  // S195-D: one wording for every cancel -- a pop-up's, a standing question's,
+  // a lot's -- and it says what is true of all of them.
+  if (outcome === "cancelled") return "Cancelled. Nothing changed.";
   return `Not done: ${outcome}`;
 }
 
@@ -1490,8 +1515,14 @@ export function CommandBar({
    *  the count from "in flight" to "awaiting ctx": the write happened, but
    *  nothing may safely be said to have caught up with it until the `[ctx]`
    *  effect below actually observes a fresh `ctx`. */
-  function barWriteSettled(): void {
-    barWritesInFlightRef.current = Math.max(0, barWritesInFlightRef.current - 1);
+  function barWriteSettled(alreadyReleased = false): void {
+    // S195-D: a write that waited on a pop-up gave its "in flight" count back
+    // when the pop-up began to stand (nothing is being written while a person
+    // decides, so a new sentence must not be held behind it), and only
+    // starts the catch-up half now that the pop-up has answered.
+    if (!alreadyReleased) {
+      barWritesInFlightRef.current = Math.max(0, barWritesInFlightRef.current - 1);
+    }
     barWritesAwaitingCtxRef.current += 1;
     // F-233, fourth pass, THE CAUSE AS SEEN IN A BROWSER (29 Sept). Every
     // mutation the board makes keeps its promise open until the refetch after
@@ -2226,8 +2257,18 @@ export function CommandBar({
    * one, falling back to the readout the bar printed; `refused` and
    * `cancelled` leave `ran` empty, which is the truth.
    */
-  function popupReporterFor(entry: TraceEntry | null, readout: string): PopupReporter {
+  function popupReporterFor(
+    entry: TraceEntry | null,
+    readout: string,
+    readoutMessage: string = readout,
+  ): PopupReporter {
     let fired = false;
+    // S195-D (DEF-0054, item 1e): true once the pop-up this reporter belongs
+    // to STANDS -- the write is with a person now, nothing is in flight, and
+    // the count `runCommandBody` took for it comes back down (once), so a new
+    // sentence typed meanwhile is read at once instead of being held five
+    // seconds and refused with "still saving your last change".
+    let released = false;
     return (result: PopupResult): void => {
       if (fired) return;
       // S62-b reviewer fix (C): `handed_off` is a NOTE, not an answer -- the
@@ -2236,9 +2277,33 @@ export function CommandBar({
       // entry; it only changes what the thread says the sentence is waiting
       // on (before this, a split-coverage hand-off said "Waiting: the create
       // pop-up" for ever).
+      //
+      // S195-D (DEF-0054): `what` is the ONE plain sentence saying what the
+      // board is asking (`popupWords.ts`); it becomes the turn's board line
+      // (never the done-form readout, R-431), the entry is POSTED at this ask
+      // (DEF-0049's shape: a page closed with the pop-up standing still
+      // leaves a line), and the live area empties into the filed turn so the
+      // sentence is said once, not twice.
       if (result.kind === "handed_off") {
-        if (entry) entry.outcome = `popup: ${result.what}`;
-        fileOpenTurn(store);
+        if (!released) {
+          released = true;
+          barWriteAbandoned();
+        }
+        if (entry) {
+          // `answered` stays as it is (null): nobody has answered yet, exactly
+          // as for a question standing (DEF-0049).
+          entry.asked = result.what;
+          entry.outcome = `popup: ${result.what}`;
+          postTrace(entry);
+          if (traceRef.current === entry) {
+            fileMovingTurn(store);
+          } else {
+            store.getState().updateTurn(entry.at, {
+              asked: entry.asked,
+              outcome: entry.outcome,
+            });
+          }
+        }
         return;
       }
       fired = true;
@@ -2248,7 +2313,7 @@ export function CommandBar({
         // `barWritesInFlightRef` took when the writer was first called
         // (above, `runCommandBody`) down, and starts the "wait for ctx to
         // catch up" half instead.
-        barWriteSettled();
+        barWriteSettled(released);
         // F-233, third pass: a WRITTEN create with an id is what
         // `awaitingRowIdRef` waits for; anything else (a refusal, or a
         // written answer with no id -- `pendingCreateCollectionRef` was
@@ -2264,11 +2329,18 @@ export function CommandBar({
       } else {
         // "cancelled": the pop-up closed without asking the server
         // anything -- nothing for `ctx` to catch up WITH.
-        barWriteAbandoned();
+        if (!released) barWriteAbandoned();
         pendingCreateCollectionRef.current = null;
         awaitingRowIdRef.current = null;
       }
       if (entry) {
+        // S195-D: a pop-up that never stood (an auto-pressed create) leaves the
+        // turn with no board line yet -- the readout is what the write did or
+        // tried, as a direct write's always was. One that DID stand keeps the
+        // sentence it asked, and a cancel never gets the readout back: after
+        // Cancel nothing changed, and the thread must not say it did.
+        if (result.kind !== "cancelled" && entry.asked === null) entry.asked = readoutMessage;
+        if (entry.answered === null) entry.answered = "auto";
         if (result.kind === "written") {
           entry.ran.push(result.readout ?? readout);
           entry.outcome = "written";
@@ -2363,9 +2435,33 @@ export function CommandBar({
    * "already superseded (and so already posted)" case a no-op rather than a
    * second line for the same sentence.
    */
-  function settleWrite(readout: string, readoutStatus: Status, answer: WriteAnswer): void {
+  function settleWrite(
+    readout: string,
+    readoutStatus: Status,
+    answer: WriteAnswer,
+    report: PopupReporter,
+  ): void {
     const entry = traceRef.current;
     const apply = (outcome: WriteOutcome | void): void => {
+      // S195-D (DEF-0054): a write handed to one of the board's own pop-ups is
+      // NOT done and says nothing done -- it is settled here before anything
+      // below could file the readout as what the turn asked or ran.
+      if (outcome !== undefined && outcome.kind === "popup") {
+        if (outcome.standing === false) {
+          // Not on screen yet (an auto-pressed create): the pop-up itself
+          // says when it stands. Until then the write is simply in progress.
+          if (entry) {
+            entry.outcome = `popup: ${outcome.waitingFor}`;
+            postTrace(entry);
+          }
+          setStatus({ kind: "reading", message: "Working…" });
+          return;
+        }
+        // The one path a standing pop-up is recorded through -- the same call
+        // the pop-up's own reporter makes (`handed_off`).
+        report({ kind: "handed_off", what: outcome.waitingFor });
+        return;
+      }
       // F-233, second pass (finding 1): the count this writer's own call
       // took (`runCommandBody`, above) comes back down here -- REGARDLESS
       // of whether there is a trace entry to record the outcome in, since
@@ -2375,7 +2471,7 @@ export function CommandBar({
       // "popup" is the one non-terminal case here (returns early below,
       // before this would even matter); "written" and "refused" both
       // settled a real write, so both bring the count down the same way.
-      if (outcome === undefined || outcome.kind !== "popup") {
+      {
         barWriteSettled();
         // F-233, third pass: only a WRITTEN create with an id keeps
         // `awaitingRowIdRef` armed -- an undefined answer or a refusal
@@ -2405,19 +2501,6 @@ export function CommandBar({
           // this branch is a regression, and the trace/thread say so rather
           // than a silent Written.
           entry.outcome = "refused: no answer from the writer";
-        } else if (outcome.kind === "popup") {
-          // F-167: NOT an ending. The write is with a pop-up now, and the
-          // entry stays open until that pop-up reports back through the
-          // reporter this sentence was given (`completePopup` below) -- or,
-          // if it never does, until the page tears down (F-157). The turn is
-          // filed into the thread straight away so the person can see it
-          // waiting rather than nothing at all.
-          // F-233, second pass: NOT settled either -- `barWritesInFlightRef`
-          // stays up until `popupReporterFor`'s own returned function fires
-          // with a terminal result.
-          entry.outcome = `popup: ${outcome.waitingFor}`;
-          fileOpenTurn(store);
-          return;
         } else if (outcome.kind === "written") {
           entry.ran.push(readout);
           entry.outcome = "written";
@@ -2493,6 +2576,15 @@ export function CommandBar({
       // night shift questions (and any reason), held for the NEXT question's
       // buttons to carry forward -- see `answer_other_day_part`.
       if (options !== undefined) heldOptionsRef.current = options;
+      // DEF-0055 (R-434): "clear Maria Lopez tomorrow" -- the grammar reads
+      // the words after "clear" as a place with the reserved "everyone"; the
+      // board knows the words are a person. Rewritten HERE, before the trace
+      // records what was read, so the trace, the held command and every
+      // button pressed after all say the person reading -- the same command
+      // "remove Maria Lopez tomorrow" is. A question (both readings, or
+      // neither and a close name) is left to `expandCommand` below.
+      const clearReading = readClearAsPerson(command, activeCtx, options);
+      if (clearReading.kind === "person") command = clearReading.command;
       // S59-e (brief §3): what the bar read, regardless of how this resolves
       // (a write, a question, or a several) -- `command` here, not whatever
       // `expandCommand` turns it into below, since a lot's own numbered steps
@@ -2566,7 +2658,7 @@ export function CommandBar({
         // (DEF-0043 item 1); the single path handed the raw one on, so a
         // single write's "Written:" line showed "2026-09-03".
         const spoken = renderReadout(resolved.readout);
-        const report = popupReporterFor(traceRef.current, spoken);
+        const report = popupReporterFor(traceRef.current, spoken, readoutStatus.message);
         // F-233, second pass (finding 1): up the instant a writer is
         // called, synchronously, before any of them has a chance to
         // await anything -- `settleWrite`'s own `apply` (written/refused)
@@ -2622,12 +2714,18 @@ export function CommandBar({
         // here on a crash names this readout as done, never "nothing
         // changed" (see this function's own opening doc).
         wrote = { readout: resolved.readout };
-        setStatus(readoutStatus);
+        // S195-D (DEF-0054, R-431): a writer that answered NOW that it handed
+        // the write to a pop-up has done nothing yet, so the done-form readout
+        // is never shown for it (`settleWrite` says what is being asked).
+        // Every other answer keeps the readout as before.
+        const handedToPopup =
+          !isThenable(answer) && answer !== undefined && (answer as WriteOutcome).kind === "popup";
+        if (!handedToPopup) setStatus(readoutStatus);
         // F-164: the entry is finished by `settleWrite` now, once (and only
         // once) the writer has answered -- `resolved.readout` is the ONE
         // command this run asked for (never the `+ suffix` UI annotation,
         // which says WHY it was read, not what ran).
-        settleWrite(spoken, readoutStatus, answer);
+        settleWrite(spoken, readoutStatus, answer, report);
         return;
       }
       // `resolvedCommand`, not `command`: when `expandCommand` collapsed a
@@ -2997,19 +3095,34 @@ export function CommandBar({
     // things" question and the outline (`buildLotHighlights`, below) already
     // say what the whole lot touches.
     const shown = n > 6 ? lot.done.slice(0, 5) : lot.done;
-    const readouts = shown.map((r, i) => `${i + 1}. ${renderReadout(r.readout)}`).join("; ");
-    const readoutText = n > 6 ? `${readouts}; … and ${n - 5} more` : readouts;
+    // DEF-0043 (R-459, tester 30 Sept): a lot of ONE is not numbered; the
+    // readouts are joined with a space (each already ends in its own full
+    // stop -- "; " printed ".; "), and "And 16 more." is its own sentence, so
+    // "Say yes" never runs on from it.
+    const readouts =
+      n === 1
+        ? renderReadout(shown[0].readout)
+        : shown.map((r, i) => `${i + 1}. ${renderReadout(r.readout)}`).join(" ");
+    const readoutText = n > 6 ? `${readouts} And ${n - 5} more.` : readouts;
     // R-459 (§0's own lot example): "Ready to do N things: ... Say yes to do
     // them, or no." -- never "commands" (a developer's word for a sentence).
     // R-459: `readoutText`'s last item already ends in its own period (every
     // readout sentence does) -- a second, hardcoded one here would print
     // "making Housing A.. Say yes ..." Say yes joins with a leading space,
     // never its own leading period.
-    const message = `Ready to do ${n} things: ${readoutText} Say yes to do them, or no.`;
+    const message = `Ready to do ${thingsCount(n)}: ${readoutText} Say yes to do ${oneOrThem(n)}, or no.`;
     setStatus({
       kind: "question",
       message,
-      candidates: [{ key: "__do_all__", label: `Do all ${n}`, action: { kind: "run_lot" } }],
+      // S195-D: a lot of ONE reads "Do it" -- the sentence above already says
+      // "Say yes to do it", and "Do all 1" is no way to talk about one thing.
+      candidates: [
+        {
+          key: "__do_all__",
+          label: n === 1 ? "Do it" : `Do all ${n}`,
+          action: { kind: "run_lot" },
+        },
+      ],
       blockHighlight: buildLotHighlights(lot.done),
       lot: true,
     });
@@ -3091,8 +3204,8 @@ export function CommandBar({
     // who is off and whether the absence is recorded.
     if (result.error === null) {
       return summary === undefined
-        ? `Done, ${n} things.`
-        : `Done, ${n} things. ${renderReadout(summary)}`;
+        ? `Done, ${thingsCount(n)}.`
+        : `Done, ${thingsCount(n)}. ${renderReadout(summary)}`;
     }
     const done = result.done;
     const lines: string[] = [
@@ -3838,6 +3951,25 @@ export function CommandBar({
         })),
       };
     }
+    // DEF-0055 / R-430 / R-435: "clear Maria Lopez tomorrow" -- a person or a
+    // place? Both (or the nearest of each) are the buttons; the answer reruns
+    // the sentence as that reading (`answer_clear_reading`).
+    if (question.kind === "place_or_person") {
+      return {
+        kind: "question",
+        message,
+        candidates: question.candidates.map((c) => ({
+          key: `${c.reading ?? "place"}:${c.id}`,
+          label: c.label,
+          action: {
+            kind: "answer_clear_reading",
+            command,
+            reading: c.reading ?? "place",
+            word: c.word,
+          },
+        })),
+      };
+    }
     if (question.kind === "ambiguous") {
       const field = question.field;
       const text = question.text;
@@ -4411,6 +4543,32 @@ export function CommandBar({
         runCommand(parsed.command, undefined, { ...heldOptionsRef.current });
         return;
       }
+      case "answer_clear_reading": {
+        // DEF-0055: the person chose. The PERSON reading is the sentence
+        // "remove <name> <day>" (the words after clear become the operator);
+        // the PLACE reading is the same sentence with `clearAs: "place"`, so
+        // `readClearAsPerson` does not ask a second time.
+        const base = action.command as UnassignCommand;
+        const next: UnassignCommand =
+          action.reading === "person"
+            ? { ...base, operator: action.word, place: [] }
+            : { ...base, place: [action.word] };
+        const rendered = formatCommand(next);
+        store.getState().set({ sentence: rendered, text: "" });
+        const parsed = parseCommand(rendered);
+        if (!parsed.ok) {
+          if (traceRef.current) traceRef.current.read = parsed.failure.kind;
+          const status = failureToStatus(parsed.failure);
+          setStatus(status);
+          traceQuestionStatus(status);
+          return;
+        }
+        runCommand(parsed.command, undefined, {
+          ...heldOptionsRef.current,
+          ...(action.reading === "place" ? { clearAs: "place" as const } : {}),
+        });
+        return;
+      }
       case "answer_other_day_part": {
         // DEF-0040 / R-461 (S194-D): the Yes or No of a night shift question.
         // The entry already holds this ask and this answer (the button's
@@ -4864,7 +5022,10 @@ export function CommandBar({
         const n = lotRef.current?.done.length ?? status.candidates.length;
         setStatus({
           ...status,
-          message: `That is ${n} things at once; say yes to do them all, or no.`,
+          message:
+            n === 1
+              ? "That is 1 thing; say yes to do it, or no."
+              : `That is ${thingsCount(n)} at once; say yes to do them all, or no.`,
         });
         return;
       }

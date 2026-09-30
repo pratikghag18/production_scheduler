@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ShiftTemplate,
   BoardOperator,
+  SchedulerError,
   CreateAssignmentInput,
   AssignmentFieldEdit,
   RunFieldEdit,
@@ -38,6 +39,7 @@ import {
   probeCapacity,
   fromEfficiency,
   setAbsence,
+  toTstzRange,
 } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ResolvedLotStep, ResolvedRunTrim } from "@/lib/command/resolve";
@@ -69,6 +71,19 @@ import {
   targetResizeMessage,
 } from "../lib/interaction";
 import { scaledTarget } from "../lib/standardTarget";
+import {
+  busyElsewhereSentence,
+  explainCapacityRefusal,
+  isBusyElsewhere,
+  type CapacityAttempt,
+} from "../lib/busyElsewhere";
+import {
+  attachmentWaiting,
+  targetWaiting,
+  CREW_OUTSIDE_WAITING,
+  CREATE_WAITING,
+  splitWaiting,
+} from "../lib/popupWords";
 import { useCreateRun, useUpdateRunFields, useDeleteRun, useMoveRun } from "./useRunMutations";
 import {
   useCreateAssignment,
@@ -279,6 +294,13 @@ export type PopoverState =
       choices?: readonly ConfirmChoice[];
       /** R-031: the popover's title; "Continue?" when absent. */
       title?: string;
+      /**
+       * S195-D (DEF-0054): set ONLY when the typed command bar's sentence
+       * opened this pop-up. The SAME reporter the create and split pop-ups
+       * carry: Continue's write reports `written` or `refused`, Cancel (or
+       * closing it) reports `cancelled`, once.
+       */
+      commandResult?: PopupReporter;
     };
 
 /** R-031: one button on a multi-choice confirm prompt. */
@@ -486,6 +508,35 @@ function buildCreateAssignmentInput(
 class LotStepRefused extends Error {}
 
 /**
+ * S195-D (DEF-0054 item 1d, R-459, R-432): a lot step whose write would open
+ * one of the board's own questions is NOT asked and NOT counted done -- it is
+ * the lot's refused step, and the bar's "Not done" line says this. A lot never
+ * hangs on a pop-up nobody is watching (D127: the yes was for the readouts
+ * shown, never for a question raised after it).
+ */
+const NEEDS_AN_ANSWER_ON_THE_BOARD = "That one needs an answer on the board; say it on its own.";
+
+/**
+ * S195 review (DEF-0054, R-434): a question the bar's sentence opened (the
+ * Continue? / keep-or-scale / crew-outside pop-up, or the split pop-up) that is
+ * ended by anything OTHER than its own buttons -- a pop-up opened by hand
+ * (Enter on a track, a drag on an empty track, a panel drop), or the board
+ * changing root -- answers the sentence `cancelled`, once (the reporter's own
+ * latch), so no turn is left waiting for ever on a pop-up that is gone. A
+ * create pop-up is never ended this way: it may be an auto-pressed one whose
+ * write is in flight (see `supersedePopup`).
+ */
+const cancelledQuestions = new WeakSet<object>();
+function cancelStandingQuestion(p: PopoverState | null): void {
+  if (p === null || (p.kind !== "confirm" && p.kind !== "split")) return;
+  // Once per pop-up: `supersedePopup` and the replacement effect may both see
+  // the same one, and a reporter handed a plain function must hear one answer.
+  if (cancelledQuestions.has(p)) return;
+  cancelledQuestions.add(p);
+  p.commandResult?.({ kind: "cancelled" });
+}
+
+/**
  * S51 review fix (blocker 2): the pure decision half of `retimeAssignment`'s
  * assignment branch (attachment by containment, D66; the R-365
  * attachment-change ask; the R-031 keep-or-scale ask), extracted so the
@@ -513,6 +564,10 @@ function planAssignmentRetime(
   attachmentMessage: string | null;
   /** R-031: null when no ask is needed. */
   keepOrScale: { message: string; typed: number; unit: string | null; scaledQty: number } | null;
+  /** S195-D: the ONE plain sentence the bar says while the first of those
+   *  asks stands (the target's, which opens first, else the attachment's);
+   *  null when nothing is asked. */
+  waiting: string | null;
   /** R-361: the warn-policy mirror toasts, run once, only by a caller that
    *  has actually decided to write. */
   runWarnMirrors: () => void;
@@ -630,7 +685,18 @@ function planAssignmentRetime(
     }
   };
 
-  return { edit, attachmentMessage, keepOrScale, runWarnMirrors };
+  // A departed person's row keeps the name it was remembered under (D110).
+  const personName = operatorViewFor(a, index.operatorById)?.displayName ?? null;
+  const jobName = (run: IndexedRun | null): string | null =>
+    run === null ? null : (productViewFor(run, index.productById)?.name ?? "Run");
+  const waiting =
+    keepOrScale !== null
+      ? targetWaiting(personName)
+      : attachmentMessage !== null
+        ? attachmentWaiting({ person: personName, from: jobName(homeRun), to: jobName(targetRun) })
+        : null;
+
+  return { edit, attachmentMessage, keepOrScale, waiting, runWarnMirrors };
 }
 
 /**
@@ -713,6 +779,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
   const [activeDrag, setActiveDrag] = useState<InternalDragState | null>(null);
   const [popover, setPopover] = useState<PopoverState | null>(null);
+  // S195-D: the pop-up standing NOW, readable from a callback that must not be
+  // rebuilt on every pop-up change (the split opener's reporter, and
+  // `supersedePopup`). Assigned every render, like `dragRef` below.
+  const popoverRef = useRef<PopoverState | null>(null);
+  popoverRef.current = popover;
   // The race the review lane found: `<CreatePopover>` renders unkeyed at a
   // stable position in `BoardPage.tsx`, so a second typed command opening a
   // create popover while an earlier one is still in flight (its own write
@@ -790,6 +861,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     if (lastRootPathRef.current !== args.rootPath) {
       lastRootPathRef.current = args.rootPath;
       if (dragRef.current) setActiveDrag(null);
+      cancelStandingQuestion(popoverRef.current);
       setPopover(null);
     }
   }, [args.rootPath]);
@@ -825,6 +897,13 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const failWith = useCallback(
     (err: unknown, label: string) => {
       const se = isSchedulerError(err) ? err : toSchedulerError(err);
+      // R-465 (S195-D): busy on a place the caller cannot read -- the place and
+      // the hours, exactly as the bar says them, with nothing after it (there
+      // is no numbers to explain and no "try the split").
+      if (se.kind === "CapacityExceeded" && se.elsewhere !== undefined) {
+        toast.refused(se.elsewhere);
+        return;
+      }
       if (se.kind === "CapacityExceeded" || se.kind === "NotEligible" || se.kind === "RunOverlap") {
         // F-154 review fix (S61-a): `buildSchedulerErrorToast` no longer
         // bakes " — reverted." into its own message (that word was never
@@ -840,6 +919,52 @@ export function useDragGesture(args: UseDragGestureArgs) {
       toast.reverted(`${label}: ${describeSchedulerError(se)}`);
     },
     [toast, ctx],
+  );
+
+  /**
+   * R-465 (S195-D): after a `CapacityExceeded` refusal, ask `capacity_probe`
+   * the same question (the same person, hours and share, the block being moved
+   * left out) and, when a block the caller cannot read is what makes the person
+   * busy, hand the refusal back carrying the sentence -- the place and the
+   * hours -- which the toast, the bar and the pop-ups then say instead of the
+   * numbers (`busyElsewhere.ts`). Any other error, an `attempt` of null (the
+   * caller has no person or hours to ask about), a probe that fails and a probe
+   * that finds nothing outside all hand back the refusal as it was: today's
+   * words stand.
+   */
+  const explainRefusal = useCallback(
+    (err: unknown, attempt: CapacityAttempt | null): Promise<SchedulerError> => {
+      const se = isSchedulerError(err) ? err : toSchedulerError(err);
+      if (attempt === null) return Promise.resolve(se);
+      return explainCapacityRefusal(se, attempt, {
+        probe: probeCapacity,
+        personName: index.operatorById.get(attempt.operatorId)?.displayName ?? "That person",
+        zone: index.zone,
+        dateFormat,
+      });
+    },
+    [index, dateFormat],
+  );
+
+  /** The capacity attempt an EXISTING block's own write makes: its person, the
+   *  hours it is being given, its share, itself left out. `null` for a block
+   *  with nobody on it (a departed person's row has nobody to be busy). */
+  const attemptOfBlock = useCallback(
+    (
+      a: IndexedAssignment,
+      range: { start: Date; end: Date } | null,
+      efficiencyPercent: number = a.efficiencyPercent,
+    ): CapacityAttempt | null => {
+      if (a.operatorId === null) return null;
+      return {
+        operatorId: a.operatorId,
+        start: range?.start ?? minuteDate(index.windowStart, a.startMin),
+        end: range?.end ?? minuteDate(index.windowStart, a.endMin),
+        efficiencyPercent,
+        excludeAssignmentId: a.id,
+      };
+    },
+    [index],
   );
 
   // --------------------------------------------------------------------
@@ -1029,8 +1154,19 @@ export function useDragGesture(args: UseDragGestureArgs) {
    *  `window.confirm` — a blocking browser dialog that "cannot be styled
    *  or tested through the DOM as it stands" (brief §9 item 2). */
   const askConfirm = useCallback(
-    (message: string, anchor: { x: number; y: number }, onConfirm: () => void) => {
-      setPopover({ kind: "confirm", message, anchor, onConfirm });
+    (
+      message: string,
+      anchor: { x: number; y: number },
+      onConfirm: () => void,
+      commandResult?: PopupReporter,
+    ) => {
+      setPopover({
+        kind: "confirm",
+        message,
+        anchor,
+        onConfirm,
+        ...(commandResult ? { commandResult } : {}),
+      });
     },
     [],
   );
@@ -1042,8 +1178,17 @@ export function useDragGesture(args: UseDragGestureArgs) {
       message: string,
       anchor: { x: number; y: number },
       choices: readonly ConfirmChoice[],
+      commandResult?: PopupReporter,
     ) => {
-      setPopover({ kind: "confirm", title, message, anchor, onConfirm: () => {}, choices });
+      setPopover({
+        kind: "confirm",
+        title,
+        message,
+        anchor,
+        onConfirm: () => {},
+        choices,
+        ...(commandResult ? { commandResult } : {}),
+      });
     },
     [],
   );
@@ -1068,6 +1213,9 @@ export function useDragGesture(args: UseDragGestureArgs) {
       candidate: Range,
       anchor: { x: number; y: number },
       revert: string,
+      // S195-D (DEF-0054): the bar's reporter, set ONLY when a typed sentence
+      // is the caller -- a drag passes none and nothing below changes for it.
+      report?: PopupReporter,
     ) => {
       const plan = planAssignmentRetime(
         a,
@@ -1102,7 +1250,21 @@ export function useDragGesture(args: UseDragGestureArgs) {
         plan.runWarnMirrors();
         updateAssignmentFields.mutate(
           { assignmentId: a.id, edit },
-          { onError: (err) => failWith(err, revert) },
+          {
+            // S195-D: what became of the write, told to the sentence that
+            // asked for it (nothing to tell for a drag).
+            onSuccess: () => report?.({ kind: "written" }),
+            onError: (err) => {
+              // R-465: a refusal for a block the caller cannot see is asked
+              // about first, so the toast and the bar say the same true words.
+              void explainRefusal(err, attemptOfBlock(a, edit.timerange ?? null)).then((se) => {
+                failWith(se, revert);
+                if (report) {
+                  report({ kind: "refused", message: buildSchedulerErrorToast(se, ctx).message });
+                }
+              });
+            },
+          },
         );
       };
 
@@ -1120,7 +1282,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
           // has been written or optimistically patched — the chip is
           // already back where the (untouched) index has it. `confirmNo`
           // just closes the popover.
-          askConfirm(plan.attachmentMessage, anchor, () => commitAssignmentMove(edit));
+          askConfirm(plan.attachmentMessage, anchor, () => commitAssignmentMove(edit), report);
         }
       };
 
@@ -1132,13 +1294,19 @@ export function useDragGesture(args: UseDragGestureArgs) {
       if (plan.keepOrScale !== null) {
         const { typed, unit, scaledQty, message } = plan.keepOrScale;
         const unitSuffix = unit ? ` ${unit}` : "";
-        askChoice("Keep or scale?", message, anchor, [
-          { label: `Keep ${typed}${unitSuffix}`, onChoose: () => proceed(plan.edit) },
-          {
-            label: `Scale to ${scaledQty}${unitSuffix}`,
-            onChoose: () => proceed({ ...plan.edit, targetQty: scaledQty }),
-          },
-        ]);
+        askChoice(
+          "Keep or scale?",
+          message,
+          anchor,
+          [
+            { label: `Keep ${typed}${unitSuffix}`, onChoose: () => proceed(plan.edit) },
+            {
+              label: `Scale to ${scaledQty}${unitSuffix}`,
+              onChoose: () => proceed({ ...plan.edit, targetQty: scaledQty }),
+            },
+          ],
+          report,
+        );
         return;
       }
       proceed(plan.edit);
@@ -1153,6 +1321,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
       askChoice,
       dateFormat,
       resizeAbsences,
+      explainRefusal,
+      attemptOfBlock,
     ],
   );
 
@@ -1185,14 +1355,25 @@ export function useDragGesture(args: UseDragGestureArgs) {
         resizeAbsences,
       );
       if (plan.attachmentMessage !== null || plan.keepOrScale !== null) {
-        throw new LotStepRefused(
-          `the re-time of ${r.readout} needs a decision the pop-up asks; do it on its own`,
-        );
+        throw new LotStepRefused(NEEDS_AN_ANSWER_ON_THE_BOARD);
       }
       plan.runWarnMirrors();
-      await updateAssignmentFields.mutateAsync({ assignmentId: a.id, edit: plan.edit });
+      try {
+        await updateAssignmentFields.mutateAsync({ assignmentId: a.id, edit: plan.edit });
+      } catch (err) {
+        throw await explainRefusal(err, attemptOfBlock(a, plan.edit.timerange ?? null));
+      }
     },
-    [index, ctx, toast, updateAssignmentFields, dateFormat, resizeAbsences],
+    [
+      index,
+      ctx,
+      toast,
+      updateAssignmentFields,
+      dateFormat,
+      resizeAbsences,
+      explainRefusal,
+      attemptOfBlock,
+    ],
   );
 
   /**
@@ -1216,6 +1397,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
       candidate: Range,
       anchor: { x: number; y: number },
       revert: string,
+      // S195-D (DEF-0054): the bar's reporter -- see `retimeAssignment`.
+      report?: PopupReporter,
     ) => {
       const plan = planRunRetime(run, nodeId, candidate, index, ctx);
       // Resize: unchanged from P1-4b except the confirm step (§9 debt 2).
@@ -1226,11 +1409,20 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const commitResize = () => {
         updateRunFields.mutate(
           { runId: run.id, edit: plan.edit },
-          { onError: (err) => failWith(err, revert) },
+          {
+            onSuccess: () => report?.({ kind: "written" }),
+            onError: (err) => {
+              failWith(err, revert);
+              if (report) {
+                const se = isSchedulerError(err) ? err : toSchedulerError(err);
+                report({ kind: "refused", message: buildSchedulerErrorToast(se, ctx).message });
+              }
+            },
+          },
         );
       };
       if (plan.crewMessage !== null) {
-        askConfirm(plan.crewMessage, anchor, commitResize);
+        askConfirm(plan.crewMessage, anchor, commitResize, report);
         return;
       }
       commitResize();
@@ -1256,9 +1448,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
         throw new LotStepRefused(plan.overlapMessage);
       }
       if (plan.crewMessage !== null) {
-        throw new LotStepRefused(
-          `the re-time of ${r.readout} needs a decision the pop-up asks; do it on its own`,
-        );
+        throw new LotStepRefused(NEEDS_AN_ANSWER_ON_THE_BOARD);
       }
       await updateRunFields.mutateAsync({ runId: run.id, edit: plan.edit });
     },
@@ -1416,7 +1606,27 @@ export function useDragGesture(args: UseDragGestureArgs) {
                     );
                   }
                 },
-                onError: (err) => failWith(err, revertLabel(d.subject)),
+                onError: (err) => {
+                  // R-465: the crew member the server names is asked about
+                  // over the hours the move gives them -- the run's own shift
+                  // applied to their own block -- their block left out.
+                  const se0 = isSchedulerError(err) ? err : toSchedulerError(err);
+                  const member =
+                    se0.kind === "CapacityExceeded"
+                      ? currentCrew.find((c) => c.operatorId === se0.operatorId)
+                      : undefined;
+                  const shift = candidate.startMin - run.startMin;
+                  const attempt =
+                    member !== undefined
+                      ? attemptOfBlock(member, {
+                          start: minuteDate(index.windowStart, member.startMin + shift),
+                          end: minuteDate(index.windowStart, member.endMin + shift),
+                        })
+                      : null;
+                  void explainRefusal(se0, attempt).then((se) =>
+                    failWith(se, revertLabel(d.subject)),
+                  );
+                },
               },
             );
             return;
@@ -1464,6 +1674,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
       dateFormat,
       retimeRun,
       retimeAssignment,
+      explainRefusal,
+      attemptOfBlock,
     ],
   );
 
@@ -1517,6 +1729,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       // nothing (the quiet choice: no drag begins, no status toast). Guarded
       // here, before pointer capture, so nothing on the track ever starts.
       if (!canPlaceRef.current) return;
+      cancelStandingQuestion(popoverRef.current);
       setPopover(null);
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
       const snap = snapConfigFor(d.zoomIndex, d.template, d.dayAxis);
@@ -1772,6 +1985,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       // !canPlace), but the gesture layer refuses the drag too, so the answer
       // is decided in one place rather than resting on the panel being hidden.
       if (!canPlaceRef.current) return;
+      cancelStandingQuestion(popoverRef.current);
       setPopover(null);
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
       const next: InternalDragState = {
@@ -1883,16 +2097,33 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const closePopover = useCallback(() => setPopover(null), []);
 
   /**
-   * S62-b reviewer fix (C): the reporter belonging to the pop-up a typed
-   * sentence most recently opened, so `submitCreateDirect` can hand it on to
-   * the split-coverage pop-up it may open instead of writing. A ref rather
-   * than a read of `popover`, because `submitCreateDirect` is a `useCallback`
-   * that must not be rebuilt on every pop-up state change; it is written the
-   * moment such a pop-up opens and only ever read during that pop-up's own
-   * submit. `undefined` for every drag/keyboard-opened pop-up, which is every
-   * other opener.
+   * S195-D (DEF-0054, item 1e): a new typed sentence that opens its own
+   * question ends the one it finds standing -- the same rule a standing
+   * question of the bar's follows (F-162: a new sentence ends whatever
+   * stood). The earlier pop-up is answered as cancelled (once, through its own
+   * reporter) before the new one replaces it, so no turn is left waiting on a
+   * pop-up that is no longer there. Only a pop-up that is certainly on screen
+   * is ended this way: a create pop-up may be an auto-pressed one whose write
+   * is in flight, and that must never be reported cancelled.
    */
-  const commandResultRef = useRef<PopupReporter | undefined>(undefined);
+  const supersedePopup = useCallback((): void => {
+    cancelStandingQuestion(popoverRef.current);
+  }, []);
+
+  // S195 review: a question of a sentence's that is REPLACED by another pop-up
+  // (one opened by hand) is answered cancelled. Replaced by the same sentence's
+  // own next pop-up (keep-or-scale, then the attachment; a create, then its
+  // split) carries the same reporter and is left alone; a pop-up that simply
+  // closes (Continue, Cancel) is the answer's own business.
+  const lastPopoverRef = useRef<PopoverState | null>(null);
+  useEffect(() => {
+    const prev = lastPopoverRef.current;
+    lastPopoverRef.current = popover;
+    if (prev === null || popover === null || prev === popover) return;
+    const next = "commandResult" in popover ? popover.commandResult : undefined;
+    const before = "commandResult" in prev ? prev.commandResult : undefined;
+    if (before !== undefined && before !== next) cancelStandingQuestion(prev);
+  }, [popover]);
 
   // §9 debt 1: `saveRunFields`/`deleteRunWithMode`/`saveAssignmentFields`/
   // `removeAssignment` only ever receive an id — these two resolve a
@@ -1946,7 +2177,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
       assignmentId: string;
       range: Range;
       anchor: { x: number; y: number };
-    }): Promise<WriteOutcome> => {
+      /** S195-D (DEF-0054): the bar's own way back, handed to the confirm
+       *  pop-up this may open -- Continue reports the write, Cancel reports
+       *  the cancel. */
+      onResult?: PopupReporter;
+    }): WriteOutcome | Promise<WriteOutcome> => {
       if (!canPlaceRef.current) {
         // DEF-0015, as commitBlockDrag.
         return Promise.resolve({
@@ -1973,19 +2208,29 @@ export function useDragGesture(args: UseDragGestureArgs) {
         resizeAbsences,
       );
       if (plan.attachmentMessage !== null || plan.keepOrScale !== null) {
-        retimeAssignment(a, a.nodeId, homeRun, r.range, r.anchor, assignmentLabelById(a.id));
-        return Promise.resolve({
-          kind: "popup",
-          waitingFor: "a decision about the re-time (attachment or keep/scale)",
-        });
+        supersedePopup();
+        retimeAssignment(
+          a,
+          a.nodeId,
+          homeRun,
+          r.range,
+          r.anchor,
+          assignmentLabelById(a.id),
+          r.onResult,
+        );
+        // S195-D (DEF-0054): answered NOW, not through a promise, so the bar
+        // never prints the done-form readout for a write that is only asked
+        // about; the sentence is the board's own facts (`popupWords.ts`).
+        return { kind: "popup", waitingFor: plan.waiting ?? CREATE_WAITING };
       }
       plan.runWarnMirrors();
       return updateAssignmentFields
         .mutateAsync({ assignmentId: a.id, edit: plan.edit })
         .then((): WriteOutcome => ({ kind: "written" }))
-        .catch((err: unknown): WriteOutcome => {
-          failWith(err, assignmentLabelById(a.id));
-          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+        .catch(async (err: unknown): Promise<WriteOutcome> => {
+          // R-465: busy on a place the caller cannot read, in the place's words.
+          const se = await explainRefusal(err, attemptOfBlock(a, plan.edit.timerange ?? null));
+          failWith(se, assignmentLabelById(a.id));
           return { kind: "refused", message: buildSchedulerErrorToast(se, ctx).message };
         });
     },
@@ -1999,6 +2244,9 @@ export function useDragGesture(args: UseDragGestureArgs) {
       assignmentLabelById,
       updateAssignmentFields,
       failWith,
+      supersedePopup,
+      explainRefusal,
+      attemptOfBlock,
     ],
   );
 
@@ -2058,9 +2306,21 @@ export function useDragGesture(args: UseDragGestureArgs) {
           ? { areaOverride: true, areaOverrideReason: r.areaOverride.reason }
           : {}),
       });
-      return createAssignment.mutateAsync(input).then((result) => ({ id: result.assignment.id }));
+      return createAssignment.mutateAsync(input).then(
+        (result) => ({ id: result.assignment.id }),
+        // R-465: a refusal for a block the caller cannot see says so, in the
+        // place's words -- for the bar's override branch and a lot's step alike.
+        async (err: unknown): Promise<never> => {
+          throw await explainRefusal(err, {
+            operatorId: r.operatorId,
+            start: input.start,
+            end: input.end,
+            efficiencyPercent: input.efficiencyPercent ?? 100,
+          });
+        },
+      );
     },
-    [index, createAssignment],
+    [index, createAssignment, explainRefusal],
   );
 
   /**
@@ -2118,11 +2378,15 @@ export function useDragGesture(args: UseDragGestureArgs) {
           .catch((err: unknown): WriteOutcome => {
             const se = isSchedulerError(err) ? err : toSchedulerError(err);
             const { message, kind } = buildSchedulerErrorToast(se, ctx);
-            toast.reverted(message, kind);
+            if (se.kind === "CapacityExceeded" && se.elsewhere !== undefined) {
+              toast.refused(message, kind);
+            } else {
+              toast.reverted(message, kind);
+            }
             return { kind: "refused", message };
           });
       }
-      commandResultRef.current = r.onResult;
+      supersedePopup();
       const template = index.templateForNode.get(r.nodeId) ?? null;
       const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
       setPopover({
@@ -2147,9 +2411,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
       // is exactly where the write stops until a person answers it. The
       // maintainer's fourth step sat here, behind the bar, for want of an
       // area reason (F-165) while the bar printed the readout as done.
-      return { kind: "popup", waitingFor: "the create pop-up" };
+      // S195-D: `standing: false` -- an auto-pressed create is never on screen
+      // (F-205); the pop-up itself says when it does stand.
+      return { kind: "popup", waitingFor: CREATE_WAITING, standing: false };
     },
-    [index, runLabelById, createFromCommand, toast, ctx],
+    [index, runLabelById, createFromCommand, toast, ctx, supersedePopup],
   );
 
   /**
@@ -2186,7 +2452,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       /** F-167: see `openCreateFromCommand`'s own note. */
       onResult?: PopupReporter;
     }): WriteOutcome => {
-      commandResultRef.current = r.onResult;
+      supersedePopup();
       const template = index.templateForNode.get(r.nodeId) ?? null;
       const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
       setPopover({
@@ -2205,9 +2471,9 @@ export function useDragGesture(args: UseDragGestureArgs) {
       });
       // F-164: see `openCreateFromCommand`'s own note -- nothing is written
       // here either.
-      return { kind: "popup", waitingFor: "the create pop-up (a new job)" };
+      return { kind: "popup", waitingFor: CREATE_WAITING, standing: false };
     },
-    [index],
+    [index, supersedePopup],
   );
 
   /**
@@ -2266,7 +2532,9 @@ export function useDragGesture(args: UseDragGestureArgs) {
       runId: string;
       range: Range;
       anchor: { x: number; y: number };
-    }): Promise<WriteOutcome> => {
+      /** S195-D (DEF-0054): see `retimeAssignmentFromCommand`. */
+      onResult?: PopupReporter;
+    }): WriteOutcome | Promise<WriteOutcome> => {
       const run = index.runById.get(r.runId);
       if (!run) {
         const message = "That job is no longer on the board.";
@@ -2279,11 +2547,9 @@ export function useDragGesture(args: UseDragGestureArgs) {
         return Promise.resolve({ kind: "refused", message: plan.overlapMessage });
       }
       if (plan.crewMessage !== null) {
-        retimeRun(run, run.nodeId, r.range, r.anchor, runLabelById(run.id));
-        return Promise.resolve({
-          kind: "popup",
-          waitingFor: "a decision about the crew outside the new window",
-        });
+        supersedePopup();
+        retimeRun(run, run.nodeId, r.range, r.anchor, runLabelById(run.id), r.onResult);
+        return { kind: "popup", waitingFor: CREW_OUTSIDE_WAITING };
       }
       return updateRunFields
         .mutateAsync({ runId: run.id, edit: plan.edit })
@@ -2294,7 +2560,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
           return { kind: "refused", message: buildSchedulerErrorToast(se, ctx).message };
         });
     },
-    [index, ctx, toast, retimeRun, runLabelById, updateRunFields, failWith],
+    [index, ctx, toast, retimeRun, runLabelById, updateRunFields, failWith, supersedePopup],
   );
 
   const submitCreateRun = useCallback(
@@ -2348,6 +2614,18 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const openSplitPopover = useCallback(
     (probe: CapacityProbe, incoming: CreateAssignmentInput, anchor: { x: number; y: number }) => {
       const operator = index.operatorById.get(incoming.operatorId);
+      // S195-D: the reporter of the pop-up a sentence opened, read from the
+      // pop-up standing NOW (this runs inside that pop-up's own submit) -- a
+      // ref written by the openers used to be read here, and a drag-opened
+      // pop-up after a sentence would have answered the OLD sentence.
+      const standing = popoverRef.current;
+      const commandResult = standing?.kind === "create" ? standing.commandResult : undefined;
+      // R-465: this pop-up is only ever opened when EVERY block making the
+      // person busy is one the caller can read (`submitCreateDirect` refuses
+      // otherwise), so no row here is an outside one (it has no id to adjust).
+      // Nothing is filtered on purpose: dropping such a row would draw a split
+      // that hides load the server still counts, which is worse than the pop-up
+      // failing to draw -- the one gate is `isBusyElsewhere`, above.
       const participants: SplitParticipant[] = probe.overlapping.map((o) => ({
         assignmentId: o.assignmentId,
         label: `${o.nodeName} · ${fromEfficiency(o.efficiency)}%`,
@@ -2360,13 +2638,19 @@ export function useDragGesture(args: UseDragGestureArgs) {
       });
       setPopover({
         kind: "split",
-        commandResult: commandResultRef.current,
+        commandResult,
         operatorId: incoming.operatorId,
         operatorName: operator?.displayName ?? incoming.operatorId,
         capPercent: Math.round(probe.cap * 100),
         participants,
         incoming,
         anchor,
+      });
+      // S195-D (DEF-0054): what the sentence is waiting on now -- the ONE
+      // plain sentence, in this pop-up's own person's name.
+      commandResult?.({
+        kind: "handed_off",
+        what: splitWaiting(operator?.displayName ?? null),
       });
     },
     [index],
@@ -2441,8 +2725,15 @@ export function useDragGesture(args: UseDragGestureArgs) {
             setPopover(null);
             return { kind: "written", id: result.assignment.id };
           })
-          .catch((err: unknown) => {
-            const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          .catch(async (err: unknown) => {
+            // R-465: a refusal for a block the caller cannot see is asked about
+            // first, so the toast, the pop-up and the bar say the same words.
+            const se = await explainRefusal(err, {
+              operatorId,
+              start: input.start,
+              end: input.end,
+              efficiencyPercent,
+            });
             // §7: CapacityExceeded on create is not auto-retried, and the
             // brief explicitly wants this path exercised for real (§7).
             // With D61's proactive probe this is now the RACE fallback
@@ -2455,6 +2746,32 @@ export function useDragGesture(args: UseDragGestureArgs) {
       return probeCapacity({ operatorId, start: input.start, end: input.end, efficiencyPercent })
         .then((probe): Promise<{ kind: "written"; id: string } | "handed-off"> => {
           if (probe.fits) return sendCreate();
+          // R-465 (S195-D): a block that makes this person busy sits on a
+          // place the caller cannot read. She cannot change it, so the server
+          // would refuse any split of it -- the pop-up is NOT offered (R-431)
+          // and nothing is sent. The refusal says the place and the hours, on
+          // the board and (through the pop-up's own report) in the bar.
+          if (isBusyElsewhere(probe)) {
+            const sentence =
+              busyElsewhereSentence({
+                person: index.operatorById.get(operatorId)?.displayName ?? "That person",
+                rows: probe.overlapping,
+                zone: index.zone,
+                dateFormat,
+                now: new Date(),
+              }) ?? "That person is already booked then.";
+            toast.refused(sentence);
+            setPopover(null);
+            const refusal: SchedulerError = {
+              kind: "CapacityExceeded",
+              operatorId,
+              peak: probe.peak,
+              cap: probe.cap,
+              timerange: toTstzRange(input.start, input.end),
+              elsewhere: sentence,
+            };
+            return Promise.reject(refusal);
+          }
           openSplitPopover(probe, input, anchor);
           return Promise.resolve("handed-off" as const);
         })
@@ -2468,7 +2785,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
           return sendCreate();
         });
     },
-    [index, ctx, toast, createAssignment, openSplitPopover],
+    [index, ctx, toast, createAssignment, openSplitPopover, explainRefusal, dateFormat],
   );
 
   /** D62's "Split evenly" / live edits / confirm / cancel. */
@@ -2596,7 +2913,14 @@ export function useDragGesture(args: UseDragGestureArgs) {
     setPopover(null);
     onConfirm();
   }, [popover]);
-  const confirmNo = useCallback(() => setPopover(null), []);
+  // S195-D (DEF-0054): Cancel, and the shell's own close (Escape, the
+  // backdrop), tell the sentence that opened this pop-up nothing was
+  // written -- outside the updater (F-128), once (the reporter's own latch).
+  const confirmNo = useCallback(() => {
+    const p = popover;
+    setPopover(null);
+    if (p?.kind === "confirm") p.commandResult?.({ kind: "cancelled" });
+  }, [popover]);
   /** R-031: pick one of a multi-choice prompt's answers. Same shape as
    *  `confirmYes` (F-128): the updater only clears, the side effect runs
    *  once, outside it. */
@@ -2688,11 +3012,21 @@ export function useDragGesture(args: UseDragGestureArgs) {
       // `cancelled` never came through this path — Delete is what writes it.
       updateAssignmentFields.mutate(
         { assignmentId, edit: { efficiencyPercent, targetQty, targetUnit } },
-        { onError: (err) => failWith(err, assignmentLabelById(assignmentId)) },
+        {
+          onError: (err) => {
+            // R-465: a new share can put the person over the cap against a
+            // block the caller cannot see.
+            const a = index.assignmentById.get(assignmentId);
+            const attempt = a !== undefined ? attemptOfBlock(a, null, efficiencyPercent) : null;
+            void explainRefusal(err, attempt).then((se) =>
+              failWith(se, assignmentLabelById(assignmentId)),
+            );
+          },
+        },
       );
       setPopover(null);
     },
-    [updateAssignmentFields, failWith, assignmentLabelById],
+    [updateAssignmentFields, failWith, assignmentLabelById, index, attemptOfBlock, explainRefusal],
   );
 
   /**
@@ -2780,11 +3114,19 @@ export function useDragGesture(args: UseDragGestureArgs) {
         setPopover(null);
       } catch (err) {
         // No toast, on the same reasoning as reassignAssignment above: the
-        // pop-up is open and prints every refusal itself.
-        throw isSchedulerError(err) ? err : toSchedulerError(err);
+        // pop-up is open and prints every refusal itself. R-465: a capacity
+        // refusal for a block the caller cannot see is asked about first, so
+        // the pop-up, the bar and a lot's step all carry the place's words.
+        const moved = index.assignmentById.get(assignmentId);
+        throw await explainRefusal(
+          err,
+          moved !== undefined
+            ? attemptOfBlock(moved, { start: input.start, end: input.end })
+            : null,
+        );
       }
     },
-    [index, move],
+    [index, move, explainRefusal, attemptOfBlock],
   );
 
   /**
@@ -2841,11 +3183,15 @@ export function useDragGesture(args: UseDragGestureArgs) {
             // as `failWith` above.
             const se = isSchedulerError(err) ? err : toSchedulerError(err);
             const { message, kind } = buildSchedulerErrorToast(se, ctx);
-            toast.reverted(message, kind);
+            if (se.kind === "CapacityExceeded" && se.elsewhere !== undefined) {
+              toast.refused(message, kind);
+            } else {
+              toast.reverted(message, kind);
+            }
             return { kind: "refused", message };
           });
       }
-      commandResultRef.current = r.onResult;
+      supersedePopup();
       const template = index.templateForNode.get(r.nodeId) ?? null;
       const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
       setPopover({
@@ -2863,9 +3209,9 @@ export function useDragGesture(args: UseDragGestureArgs) {
         autoCreate: true,
       });
       // F-164: see `openCreateFromCommand`'s own note.
-      return { kind: "popup", waitingFor: "the create pop-up (a move)" };
+      return { kind: "popup", waitingFor: CREATE_WAITING, standing: false };
     },
-    [index, submitMove, toast, ctx],
+    [index, submitMove, toast, ctx, supersedePopup],
   );
 
   /** ⭐ R-323: THIS DELETES THE ROW. The comment that stood here said there was

@@ -5,10 +5,11 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Run, AbsenceRecord, Skill, BoardOperator, BoardNode, BoardWindow } from "@/lib/api";
+import { describeSchedulerError } from "@/lib/api";
 import { useDragGesture, type UseDragGestureArgs } from "@/features/board/hooks/useDragGesture";
 import { useToastStore } from "@/features/board/hooks/useSchedulerToast";
 import { absenceKeys } from "@/features/board/hooks/useAbsences";
@@ -1746,7 +1747,16 @@ describe("useDragGesture", () => {
         result.current.cancelSplit();
       });
 
-      expect(seen).toEqual([{ kind: "cancelled" }]);
+      // S195-D (CONTRACT CHANGED, CLAUDE.md 4: not wrong when written): the
+      // split pop-up now tells the sentence what it waits on (the one plain
+      // sentence, DEF-0054) the moment it opens, BEFORE the cancel.
+      expect(seen).toEqual([
+        {
+          kind: "handed_off",
+          what: "That person is already booked then. The board is asking how to split the time. Answer it on the board.",
+        },
+        { kind: "cancelled" },
+      ]);
       expect(result.current.popover).toBeNull();
     });
 
@@ -1766,7 +1776,14 @@ describe("useDragGesture", () => {
         await new Promise((r) => setTimeout(r, 20));
       });
 
-      expect(seen).toEqual([{ kind: "cancelled" }]);
+      // S195-D: the hand-off note, then the ONE cancel -- still once each.
+      expect(seen).toEqual([
+        {
+          kind: "handed_off",
+          what: "That person is already booked then. The board is asking how to split the time. Answer it on the board.",
+        },
+        { kind: "cancelled" },
+      ]);
     });
 
     it("D12 (S61-a, R-425, F-155): openMoveFromCommand with an override writes DIRECTLY through submitMove -- eligibilityOverride: true, overrideReason set, no popover opened", async () => {
@@ -2341,10 +2358,12 @@ describe("useDragGesture", () => {
         outcome = await result.current.runLot(lot);
       });
 
+      // S195-D (CONTRACT CHANGED, CLAUDE.md 4: the rule is the same -- a lot
+      // never opens a question mid-way -- the WORDS were the code's: "re-time",
+      // "pop-up"; R-459). See P-12 below for both such steps.
       expect(outcome).toEqual({
         done: 0,
-        error:
-          "the re-time of Moving Test Person's block needs a decision the pop-up asks; do it on its own",
+        error: "That one needs an answer on the board; say it on its own.",
       });
       expect(api.updateAssignmentFields).not.toHaveBeenCalled();
       expect(result.current.popover).toBeNull(); // never opened, D127
@@ -2867,5 +2886,971 @@ describe("useDragGesture", () => {
 
       expect(verdict).toEqual({ kind: "written", id: "server-assigned-id-42" });
     });
+  });
+});
+
+/**
+ * S195-D (DEF-0054, R-434, R-431, R-459): every pop-up a typed sentence opens
+ * answers the sentence back, exactly once -- Continue's write as `written` or
+ * `refused`, Cancel (or closing it) as `cancelled` -- and the writer says NOW,
+ * in one plain sentence built from the board's own facts, what is being asked.
+ * The create pop-up and the split pop-up already had a reporter (F-167, S62-b);
+ * the board's own Continue? / keep-or-scale / crew-outside questions had none.
+ */
+describe("S195-D: the board's own questions answer the sentence that opened them (DEF-0054)", () => {
+  beforeEach(() => {
+    useToastStore.setState({ toasts: [] });
+    vi.clearAllMocks();
+  });
+
+  /** An index that knows Sam Patel and Housing A by name, so the sentences the
+   *  bar says are the real ones a person would read. */
+  function namedIndex(crew: IndexedAssignment[]): BoardIndex {
+    return {
+      ...buildIndex(crew),
+      operatorById: new Map([
+        ["op-1", { id: "op-1", displayName: "Sam Patel" } as unknown as BoardOperator],
+      ]),
+      productById: new Map([["prod-1", { id: "prod-1", name: "Housing A" } as unknown as never]]),
+    };
+  }
+
+  /** `endPanelDrag` opens only over a track row the index knows about. */
+  function namedIndexWithNode(): BoardIndex {
+    const node: BoardNode = {
+      id: "cell-1",
+      parentId: null,
+      levelId: "cell",
+      name: "Cell 1",
+      path: "plant_1.line_1.cell_1",
+      sortOrder: 0,
+      active: true,
+    };
+    return { ...namedIndex([]), nodeById: new Map([["cell-1", node]]) };
+  }
+
+  function reporter() {
+    const seen: { kind: string; message?: string; what?: string }[] = [];
+    return { seen, report: (r: { kind: string }) => seen.push(r) };
+  }
+
+  it("P-1: the re-time that takes a person off their job says so in words, and Continue reports the write as written", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+    const a = crewFixture();
+    const { seen, report } = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), { wrapper });
+
+    let answer: unknown;
+    act(() => {
+      answer = result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 }, // past the job's own end: leaves it
+        anchor: { x: 10, y: 10 },
+        onResult: report as never,
+      });
+    });
+
+    // The writer answers NOW (never through a promise the bar would show the
+    // done-form readout while it waits for), with the sentence.
+    expect(answer).toEqual({
+      kind: "popup",
+      waitingFor:
+        "The board is asking whether to take Sam Patel off the Housing A job. Answer it on the board.",
+    });
+    expect(seen).toEqual([]);
+    expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+
+    act(() => result.current.confirmYes());
+    await waitFor(() => expect(seen).toEqual([{ kind: "written" }]));
+    expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1);
+  });
+
+  it("P-2: Cancel on that question reports cancelled, writes nothing, and reports once", async () => {
+    const api = await import("@/lib/api");
+    const a = crewFixture();
+    const { seen, report } = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), { wrapper });
+
+    act(() => {
+      result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+        onResult: report as never,
+      });
+    });
+    act(() => result.current.confirmNo());
+    act(() => result.current.confirmNo()); // Escape after the button: nothing more to say
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(seen).toEqual([{ kind: "cancelled" }]);
+    expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+    expect(result.current.popover).toBeNull();
+  });
+
+  it("P-2b (S195 review): a pop-up opened BY HAND while the sentence's Continue? stands replaces it -- the sentence is told cancelled, once, and Continue reports nothing more", async () => {
+    const api = await import("@/lib/api");
+    const a = crewFixture();
+    const { seen, report } = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), { wrapper });
+
+    act(() => {
+      result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+        onResult: report as never,
+      });
+    });
+    expect(result.current.popover?.kind).toBe("confirm");
+    // Enter on an empty track: the create pop-up takes the confirm's place.
+    act(() => {
+      result.current.handleTrackKeyDown(
+        {
+          key: "Enter",
+          preventDefault: () => {},
+          currentTarget: {
+            getBoundingClientRect: () => ({ left: 0, top: 0, bottom: 0, right: 0 }),
+          },
+        } as never,
+        { nodeId: "cell-1", template: null, windowMinutes: 1440 },
+      );
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(result.current.popover?.kind).toBe("create");
+    expect(seen).toEqual([{ kind: "cancelled" }]);
+    expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+  });
+
+  it("P-2c (S195 review): the same sentence's OWN next pop-up (keep-or-scale, then the attachment) is not a replacement -- nothing is reported until it is answered", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+    const a: IndexedAssignment = {
+      ...crewFixture(),
+      id: "asg-target",
+      productId: "prod-1",
+      targetQty: 100,
+      targetUnit: null,
+    };
+    const { seen, report } = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), { wrapper });
+    act(() => {
+      result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+        onResult: report as never,
+      });
+    });
+    act(() => result.current.confirmChoose(0)); // Keep: the attachment question comes next
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(result.current.popover?.kind).toBe("confirm");
+    expect(seen).toEqual([]);
+    act(() => result.current.confirmNo());
+    expect(seen).toEqual([{ kind: "cancelled" }]);
+  });
+
+  it("P-3: the server refusing the write after Continue reports refused, in the app's own words", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.updateAssignmentFields).mockRejectedValue({ kind: "WriteRefused" });
+    const a = crewFixture();
+    const { seen, report } = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), { wrapper });
+
+    act(() => {
+      result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+        onResult: report as never,
+      });
+    });
+    act(() => result.current.confirmYes());
+
+    await waitFor(() => expect(seen).toHaveLength(1));
+    expect(seen[0]).toEqual({
+      kind: "refused",
+      message: "You don't have permission to change that.",
+    });
+  });
+
+  it("P-4: the keep-or-scale question says what it asks; Scale reports written, Cancel reports cancelled", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+    const a: IndexedAssignment = {
+      ...crewFixture(),
+      id: "asg-target",
+      runId: null,
+      productId: "prod-1",
+      startMin: 360,
+      endMin: 600,
+      targetQty: 100,
+      targetUnit: null,
+    };
+    const first = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), { wrapper });
+
+    let answer: unknown;
+    act(() => {
+      answer = result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+        onResult: first.report as never,
+      });
+    });
+    expect(answer).toEqual({
+      kind: "popup",
+      waitingFor:
+        "The board is asking what to do with the target for Sam Patel's block. Answer it on the board.",
+    });
+    act(() => result.current.confirmChoose(1)); // Scale
+    await waitFor(() => expect(first.seen).toEqual([{ kind: "written" }]));
+
+    const second = reporter();
+    act(() => {
+      result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+        onResult: second.report as never,
+      });
+    });
+    act(() => result.current.confirmNo());
+    expect(second.seen).toEqual([{ kind: "cancelled" }]);
+  });
+
+  it("P-5: the crew-outside-the-job's-new-hours question says what it asks, and reports Continue and Cancel", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.updateRunFields).mockResolvedValue({} as never);
+    const crew = crewFixture();
+    const cont = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([crew]))), { wrapper });
+
+    let answer: unknown;
+    act(() => {
+      answer = result.current.retimeRunFromCommand({
+        runId: "run-1",
+        range: { startMin: 480, endMin: 600 },
+        anchor: { x: 10, y: 10 },
+        onResult: cont.report as never,
+      });
+    });
+    expect(answer).toEqual({
+      kind: "popup",
+      waitingFor:
+        "The board is asking what to do with the people outside the job's new hours. Answer it on the board.",
+    });
+    act(() => result.current.confirmYes());
+    await waitFor(() => expect(cont.seen).toEqual([{ kind: "written" }]));
+
+    const cancel = reporter();
+    act(() => {
+      result.current.retimeRunFromCommand({
+        runId: "run-1",
+        range: { startMin: 480, endMin: 600 },
+        anchor: { x: 10, y: 10 },
+        onResult: cancel.report as never,
+      });
+    });
+    act(() => result.current.confirmNo());
+    expect(cancel.seen).toEqual([{ kind: "cancelled" }]);
+    expect(api.updateRunFields).toHaveBeenCalledTimes(1);
+  });
+
+  it("P-6: the three create forms answer 'standing: false' -- the pop-up itself says when it is on screen", () => {
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([]))), { wrapper });
+    const sentence = "The board has opened the details for this one. Finish it on the board.";
+    const anchor = { x: 10, y: 10 };
+    const range = { startMin: 360, endMin: 480 };
+
+    let person: unknown;
+    let job: unknown;
+    let move: unknown;
+    act(() => {
+      person = result.current.openCreateFromCommand({
+        nodeId: "cell-1",
+        range,
+        operatorId: "op-1",
+        target: { kind: "direct", productId: "prod-1" },
+        anchor,
+      });
+    });
+    act(() => {
+      job = result.current.openCreateRunFromCommand({
+        nodeId: "cell-1",
+        range,
+        productId: "prod-1",
+        headcount: 2,
+        anchor,
+      });
+    });
+    act(() => {
+      move = result.current.openMoveFromCommand({
+        assignmentId: "asg-1",
+        nodeId: "cell-1",
+        range,
+        operatorId: "op-1",
+        productId: "prod-1",
+        anchor,
+      });
+    });
+    for (const answer of [person, job, move]) {
+      expect(answer).toEqual({ kind: "popup", waitingFor: sentence, standing: false });
+    }
+  });
+
+  it("P-7: a sentence that reaches the split pop-up is told, in the person's own name, what it waits on", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.probeCapacity).mockResolvedValue({
+      fits: false,
+      cap: 1,
+      peak: 1.5,
+      overlapping: [],
+    } as unknown as Awaited<ReturnType<typeof api.probeCapacity>>);
+    const { seen, report } = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([]))), { wrapper });
+
+    act(() => {
+      result.current.openCreateFromCommand({
+        nodeId: "cell-1",
+        range: { startMin: 360, endMin: 480 },
+        operatorId: "op-1",
+        target: { kind: "direct", productId: "prod-1" },
+        anchor: { x: 10, y: 10 },
+        onResult: report as never,
+      });
+    });
+    await act(async () => {
+      await result.current.submitCreateDirect(
+        "cell-1",
+        { startMin: 360, endMin: 480 },
+        "op-1",
+        { kind: "direct", productId: "prod-1" },
+        100,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        false,
+        undefined,
+        { x: 10, y: 10 },
+      );
+    });
+    await waitFor(() => expect(result.current.popover?.kind).toBe("split"));
+
+    expect(seen).toEqual([
+      {
+        kind: "handed_off",
+        what: "Sam Patel is already booked then. The board is asking how to split the time. Answer it on the board.",
+      },
+    ]);
+  });
+
+  it("P-8: a drag's own pop-up carries no reporter, and a drag opened AFTER a sentence never answers that sentence", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.probeCapacity).mockResolvedValue({
+      fits: false,
+      cap: 1,
+      peak: 1.5,
+      overlapping: [],
+    } as unknown as Awaited<ReturnType<typeof api.probeCapacity>>);
+    const { seen, report } = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndexWithNode())), {
+      wrapper,
+    });
+
+    // A sentence opens a create pop-up, which is then replaced by a
+    // drag-opened one (a panel drop) -- the sentence's reporter must not be
+    // what the split pop-up of THAT drag answers.
+    act(() => {
+      result.current.openCreateFromCommand({
+        nodeId: "cell-1",
+        range: { startMin: 360, endMin: 480 },
+        operatorId: "op-1",
+        target: { kind: "direct", productId: "prod-1" },
+        anchor: { x: 10, y: 10 },
+        onResult: report as never,
+      });
+    });
+    act(() => {
+      result.current.setDropRowResolver(() => ({ nodeId: "cell-1", isTrack: true, minute: 360 }));
+    });
+    act(() => {
+      result.current.beginPanelDrag(
+        {
+          id: "op-1",
+          homeNodeId: null,
+          homeShiftId: null,
+          displayName: "Sam Patel",
+          employeeRef: null,
+          active: true,
+          siteNodeId: "plant-1",
+          sitePath: "plant_1",
+          skillIds: [],
+          skillExpiries: [],
+        },
+        fakePointerEvent(100, 100),
+      );
+    });
+    act(() => {
+      result.current.endPanelDrag(fakePointerEvent(100, 100));
+    });
+    expect(result.current.popover?.kind).toBe("create");
+    await act(async () => {
+      await result.current.submitCreateDirect(
+        "cell-1",
+        { startMin: 360, endMin: 480 },
+        "op-1",
+        { kind: "direct", productId: "prod-1" },
+        100,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        false,
+        undefined,
+        { x: 10, y: 10 },
+      );
+    });
+    await waitFor(() => expect(result.current.popover?.kind).toBe("split"));
+    act(() => result.current.cancelSplit());
+
+    expect(seen).toEqual([]);
+  });
+
+  it("P-9: a new sentence that opens its own question ends the one standing -- reported cancelled, once", () => {
+    const a = crewFixture();
+    const old = reporter();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), { wrapper });
+
+    act(() => {
+      result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+        onResult: old.report as never,
+      });
+    });
+    expect(result.current.popover?.kind).toBe("confirm");
+
+    // The next sentence opens the create pop-up; the confirm is gone.
+    act(() => {
+      result.current.openCreateFromCommand({
+        nodeId: "cell-1",
+        range: { startMin: 360, endMin: 480 },
+        operatorId: "op-1",
+        target: { kind: "direct", productId: "prod-1" },
+        anchor: { x: 10, y: 10 },
+      });
+    });
+    expect(result.current.popover?.kind).toBe("create");
+    expect(old.seen).toEqual([{ kind: "cancelled" }]);
+  });
+
+  it("P-10: the reporter of a confirm fires ONCE under StrictMode (F-128's shape) with no latch of its own", async () => {
+    const a = crewFixture();
+    const { seen, report } = reporter();
+    const strictWrapper = ({ children }: { children: ReactNode }) =>
+      createElement(StrictMode, null, createElement(wrapper, null, children));
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), {
+      wrapper: strictWrapper,
+    });
+
+    act(() => {
+      result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+        onResult: report as never,
+      });
+    });
+    act(() => result.current.confirmNo());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(seen).toEqual([{ kind: "cancelled" }]);
+  });
+
+  it("P-11: a drag's own re-time (no sentence) still asks and writes exactly as before -- Continue with no reporter", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.updateAssignmentFields).mockResolvedValue({} as never);
+    const a = crewFixture();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), { wrapper });
+
+    act(() => {
+      result.current.retimeAssignmentFromCommand({
+        assignmentId: a.id,
+        range: { startMin: 360, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+      });
+    });
+    act(() => result.current.confirmYes());
+    await waitFor(() => expect(api.updateAssignmentFields).toHaveBeenCalledTimes(1));
+    expect(result.current.popover).toBeNull();
+  });
+
+  it("P-12: a lot step that would open one of these questions is the lot's refused step in plain words, written nowhere, never a pop-up", async () => {
+    const api = await import("@/lib/api");
+    const a = crewFixture();
+    const { result } = renderHook(() => useDragGesture(baseArgs(namedIndex([a]))), { wrapper });
+
+    // The attachment question (a person leaving their job) ...
+    let first: LotResult | undefined;
+    await act(async () => {
+      first = await result.current.runLot([
+        {
+          intent: "move",
+          assignmentId: a.id,
+          nodeId: "cell-1",
+          operatorId: "op-1",
+          productId: "prod-1",
+          range: { startMin: 360, endMin: 720 },
+          target: { kind: "retime" },
+          readout: "Moving Sam Patel's block",
+          attempted: "the step",
+          notTried: "it stays.",
+        },
+      ]);
+    });
+    // ... and the crew question (a job's new hours strand its crew).
+    let second: LotResult | undefined;
+    await act(async () => {
+      second = await result.current.runLot([
+        {
+          intent: "book",
+          nodeId: "cell-1",
+          range: { startMin: 480, endMin: 600 },
+          target: { kind: "retime_run", runId: "run-1" },
+          readout: "The Housing A job",
+          attempted: "the step",
+          notTried: "it stays.",
+        } as unknown as ResolvedAny,
+      ]);
+    });
+
+    const said = "That one needs an answer on the board; say it on its own.";
+    expect(first).toEqual({ done: 0, error: said });
+    expect(second).toEqual({ done: 0, error: said });
+    expect(api.updateAssignmentFields).not.toHaveBeenCalled();
+    expect(api.updateRunFields).not.toHaveBeenCalled();
+    expect(result.current.popover).toBeNull(); // D127: never opened mid-lot
+  });
+});
+
+/**
+ * R-465 (S195-D, the maintainer, 30 Sept): a person busy on a place the caller
+ * cannot read is refused in the place's words -- "Sam Patel is already on Cell 4
+ * in Line 2 today from 6 am to 2 pm." -- never offered the split pop-up against
+ * a block she cannot change, and every write that can meet the cap says the same
+ * thing after the server refuses it. The probe is SCRIPTED here: the tester's
+ * stack does not have migration 0085 yet, so no real probe returns an outside
+ * row; the main session proves it in a browser once the stack is rebuilt.
+ */
+describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
+  // The plant's own "today" is the window's first day in these cases.
+  const SAID = "Sam Patel is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+  const TODAY_NOON = new Date("2026-08-24T12:00:00.000Z");
+
+  /** The row `capacity_probe` returns for a block on a place she cannot read. */
+  const OUTSIDE_ROW = {
+    assignmentId: null,
+    nodeId: null,
+    nodeName: "Cell 4",
+    parentName: "Line 2",
+    productName: null,
+    timerange: '["2026-08-24 06:00:00+00","2026-08-24 14:00:00+00")',
+    efficiency: 1,
+    outside: true,
+  };
+  const READABLE_ROW = {
+    assignmentId: "asg-other",
+    nodeId: "cell-2",
+    nodeName: "Cell 2",
+    parentName: "Line 1",
+    productName: "Housing A",
+    timerange: '["2026-08-24 06:00:00+00","2026-08-24 10:00:00+00")',
+    efficiency: 1,
+    outside: false,
+  };
+  const CAPACITY_REFUSAL = {
+    kind: "CapacityExceeded",
+    operatorId: "op-1",
+    peak: 2,
+    cap: 1,
+    timerange: '["2026-08-24 08:00:00+00","2026-08-24 12:00:00+00")',
+  };
+  const TODAYS_WORDS =
+    "Sam Patel would reach 200% (cap 100%). Someone else changed their load — try the split again.";
+
+  beforeEach(() => {
+    useToastStore.setState({ toasts: [] });
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TODAY_NOON);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function named(crew: IndexedAssignment[]): BoardIndex {
+    return {
+      ...buildIndex(crew),
+      operatorById: new Map([
+        ["op-1", { id: "op-1", displayName: "Sam Patel" } as unknown as BoardOperator],
+      ]),
+      productById: new Map([["prod-1", { id: "prod-1", name: "Housing A" } as unknown as never]]),
+    };
+  }
+
+  function toasts(): string[] {
+    return useToastStore.getState().toasts.map((t) => t.message);
+  }
+
+  async function probeSays(rows: unknown[], fits = false) {
+    const api = await import("@/lib/api");
+    vi.mocked(api.probeCapacity).mockResolvedValue({
+      fits,
+      cap: 1,
+      peak: 2,
+      overlapping: rows,
+    } as unknown as Awaited<ReturnType<typeof api.probeCapacity>>);
+    return api;
+  }
+
+  function submitCreate(result: { current: ReturnType<typeof useDragGesture> }) {
+    return result.current.submitCreateDirect(
+      "cell-1",
+      { startMin: 480, endMin: 720 },
+      "op-1",
+      { kind: "direct", productId: "prod-1" },
+      100,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      false,
+      undefined,
+      { x: 10, y: 10 },
+    );
+  }
+
+  it("R-465-1: the create path refuses in the place's words, opens NO split pop-up and sends NOTHING", async () => {
+    const api = await probeSays([OUTSIDE_ROW]);
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+
+    let refusal: unknown;
+    await act(async () => {
+      refusal = await submitCreate(result).catch((e: unknown) => e);
+    });
+
+    // The refusal every reader of a capacity refusal says, the pop-up and the bar
+    // included (`describeSchedulerError`), and the board's toast in the same words.
+    expect(refusal).toMatchObject({
+      kind: "CapacityExceeded",
+      operatorId: "op-1",
+      elsewhere: SAID,
+    });
+    expect(describeSchedulerError(refusal as never)).toBe(SAID);
+    expect(toasts()).toEqual([SAID]);
+    expect(result.current.popover).toBeNull();
+    expect(api.createAssignment).not.toHaveBeenCalled();
+    expect(api.applySplitCoverage).not.toHaveBeenCalled();
+  });
+
+  it("R-465-2: one readable block beside the outside one does not make it splittable -- she cannot change the other", async () => {
+    const api = await probeSays([READABLE_ROW, OUTSIDE_ROW]);
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+
+    let refusal: unknown;
+    await act(async () => {
+      refusal = await submitCreate(result).catch((e: unknown) => e);
+    });
+
+    expect(refusal).toMatchObject({ elsewhere: SAID }); // only the outside block, never Cell 2 / Housing A
+    expect(result.current.popover).toBeNull();
+    expect(api.createAssignment).not.toHaveBeenCalled();
+  });
+
+  it("R-465-3: a readable overlap alone still opens the split pop-up, exactly as before", async () => {
+    await probeSays([READABLE_ROW]);
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+
+    let verdict: unknown;
+    await act(async () => {
+      verdict = await submitCreate(result);
+    });
+
+    expect(verdict).toBe("handed-off");
+    const p = result.current.popover;
+    if (p?.kind !== "split") throw new Error("expected the split pop-up");
+    expect(p.participants.map((row) => row.assignmentId)).toEqual(["asg-other", null]);
+    expect(toasts()).toEqual([]);
+  });
+
+  it("R-465-4: a re-time the server refuses over the cap says the place, in the toast and to the bar; the probe is asked about the same person and hours, the block left out", async () => {
+    const api = await probeSays([OUTSIDE_ROW]);
+    vi.mocked(api.updateAssignmentFields).mockRejectedValue(CAPACITY_REFUSAL);
+    const a: IndexedAssignment = {
+      ...crewFixture(),
+      id: "asg-direct",
+      runId: null,
+      productId: "prod-1",
+      startMin: 480,
+      endMin: 600,
+    };
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([a]))), { wrapper });
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.retimeAssignmentFromCommand({
+        assignmentId: "asg-direct",
+        range: { startMin: 480, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+      });
+    });
+
+    expect(outcome).toEqual({ kind: "refused", message: SAID });
+    expect(toasts()).toEqual([SAID]);
+    expect(vi.mocked(api.probeCapacity)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.probeCapacity).mock.calls[0][0]).toEqual({
+      operatorId: "op-1",
+      start: new Date("2026-08-24T08:00:00.000Z"),
+      end: new Date("2026-08-24T12:00:00.000Z"),
+      efficiencyPercent: 100,
+      excludeAssignmentId: "asg-direct",
+    });
+  });
+
+  it("R-465-5: the probe itself failing keeps today's words, in the toast and to the bar", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.probeCapacity).mockRejectedValue(new Error("network"));
+    vi.mocked(api.updateAssignmentFields).mockRejectedValue(CAPACITY_REFUSAL);
+    const a: IndexedAssignment = {
+      ...crewFixture(),
+      id: "asg-direct",
+      runId: null,
+      productId: "prod-1",
+      startMin: 480,
+      endMin: 600,
+    };
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([a]))), { wrapper });
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.retimeAssignmentFromCommand({
+        assignmentId: "asg-direct",
+        range: { startMin: 480, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+      });
+    });
+
+    expect(outcome).toEqual({ kind: "refused", message: TODAYS_WORDS });
+    expect(toasts()).toEqual([`${TODAYS_WORDS} — reverted.`]);
+  });
+
+  it("R-465-6: a probe that finds nothing outside keeps today's words too (the block is one she can read)", async () => {
+    const api = await probeSays([READABLE_ROW]);
+    vi.mocked(api.updateAssignmentFields).mockRejectedValue(CAPACITY_REFUSAL);
+    const a: IndexedAssignment = {
+      ...crewFixture(),
+      id: "asg-direct",
+      runId: null,
+      productId: "prod-1",
+      startMin: 480,
+      endMin: 600,
+    };
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([a]))), { wrapper });
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.retimeAssignmentFromCommand({
+        assignmentId: "asg-direct",
+        range: { startMin: 480, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+      });
+    });
+
+    expect(outcome).toEqual({ kind: "refused", message: TODAYS_WORDS });
+  });
+
+  it("R-465-7: a move the server refuses over the cap says the place (the bar's override path), the moved block left out of the probe", async () => {
+    const api = await probeSays([OUTSIDE_ROW]);
+    vi.mocked(api.moveAssignment).mockRejectedValue(CAPACITY_REFUSAL);
+    const a = crewFixture(); // op-1, 360-600
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([a]))), { wrapper });
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.openMoveFromCommand({
+        assignmentId: a.id,
+        nodeId: "cell-1",
+        range: { startMin: 480, endMin: 720 },
+        operatorId: "op-1",
+        productId: "prod-1",
+        anchor: { x: 10, y: 10 },
+        override: { reason: "Covering" },
+      });
+    });
+
+    expect(outcome).toEqual({ kind: "refused", message: SAID });
+    expect(toasts()).toEqual([SAID]);
+    expect(vi.mocked(api.probeCapacity).mock.calls[0][0]).toMatchObject({
+      operatorId: "op-1",
+      excludeAssignmentId: a.id,
+    });
+  });
+
+  it("R-465-8: the create pop-up's move door throws the refusal carrying the sentence, for the pop-up and the bar to say", async () => {
+    const api = await probeSays([OUTSIDE_ROW]);
+    vi.mocked(api.moveAssignment).mockRejectedValue(CAPACITY_REFUSAL);
+    const a = crewFixture();
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([a]))), { wrapper });
+
+    let refusal: unknown;
+    await act(async () => {
+      refusal = await result.current
+        .submitMove(
+          "cell-1",
+          { startMin: 480, endMin: 720 },
+          a.id,
+          false,
+          undefined,
+          false,
+          undefined,
+        )
+        .catch((e: unknown) => e);
+    });
+
+    expect(refusal).toMatchObject({ kind: "CapacityExceeded", elsewhere: SAID });
+    expect(describeSchedulerError(refusal as never)).toBe(SAID);
+  });
+
+  it("R-465-9: a lot's create step and its re-time step both stop with the place's words as their reason", async () => {
+    const api = await probeSays([OUTSIDE_ROW]);
+    vi.mocked(api.createAssignment).mockRejectedValue(CAPACITY_REFUSAL);
+    vi.mocked(api.updateAssignmentFields).mockRejectedValue(CAPACITY_REFUSAL);
+    const direct: IndexedAssignment = {
+      ...crewFixture(),
+      id: "asg-direct",
+      runId: null,
+      productId: "prod-1",
+      startMin: 480,
+      endMin: 600,
+    };
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([direct]))), { wrapper });
+
+    let create: LotResult | undefined;
+    await act(async () => {
+      create = await result.current.runLot([
+        {
+          intent: "assign",
+          nodeId: "cell-1",
+          operatorId: "op-1",
+          productId: "prod-1",
+          target: { kind: "direct", productId: "prod-1" },
+          range: { startMin: 480, endMin: 720 },
+          readout: "Sam Patel on Cell 1",
+          attempted: "the step",
+          notTried: "it stays.",
+        } as unknown as ResolvedAny,
+      ]);
+    });
+    let retime: LotResult | undefined;
+    await act(async () => {
+      retime = await result.current.runLot([
+        {
+          intent: "assign",
+          nodeId: "cell-1",
+          operatorId: "op-1",
+          productId: "prod-1",
+          target: { kind: "retime", assignmentId: "asg-direct" },
+          range: { startMin: 480, endMin: 720 },
+          readout: "Sam Patel on Cell 1",
+          attempted: "the step",
+          notTried: "it stays.",
+        } as unknown as ResolvedAny,
+      ]);
+    });
+
+    expect(create).toEqual({ done: 0, error: SAID });
+    expect(retime).toEqual({ done: 0, error: SAID });
+  });
+
+  it("R-465-10: a staffed run dragged over the cap names the crew member's other block by its place, in the toast", async () => {
+    const api = await probeSays([OUTSIDE_ROW]);
+    vi.mocked(api.moveRun).mockRejectedValue(CAPACITY_REFUSAL);
+    const crew = [crewFixture()];
+    const { result } = renderHook(() => useDragGesture(baseArgs(named(crew))), { wrapper });
+
+    act(() => {
+      result.current.beginBlockDrag(runDescriptor([runFixture], []), fakePointerEvent(500, 300));
+    });
+    act(() => {
+      result.current.updateBlockDrag(fakePointerEvent(560, 300));
+    });
+    act(() => {
+      result.current.endBlockDrag(fakePointerEvent(560, 300));
+    });
+
+    await waitFor(() => expect(toasts()).toEqual([SAID]));
+    expect(vi.mocked(api.probeCapacity).mock.calls[0][0]).toMatchObject({
+      operatorId: "op-1",
+      excludeAssignmentId: "asg-1",
+    });
+  });
+
+  it("R-465-11: a new share from the assignment pop-up that the server refuses over the cap says the place, with the NEW share asked about", async () => {
+    const api = await probeSays([OUTSIDE_ROW]);
+    vi.mocked(api.updateAssignmentFields).mockRejectedValue(CAPACITY_REFUSAL);
+    const a = crewFixture();
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([a]))), { wrapper });
+
+    act(() => {
+      result.current.saveAssignmentFields(a.id, 150, null, null);
+    });
+
+    await waitFor(() => expect(toasts()).toEqual([SAID]));
+    expect(vi.mocked(api.probeCapacity).mock.calls[0][0]).toMatchObject({
+      operatorId: "op-1",
+      efficiencyPercent: 150,
+      excludeAssignmentId: a.id,
+    });
+  });
+
+  it("R-465-12: the race -- the probe said it fits, the write is refused, and the second probe finds the outside block -- says the place and throws it", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.probeCapacity)
+      .mockResolvedValueOnce({
+        fits: true,
+        cap: 1,
+        peak: 1,
+        overlapping: [],
+      } as unknown as Awaited<ReturnType<typeof api.probeCapacity>>)
+      .mockResolvedValueOnce({
+        fits: false,
+        cap: 1,
+        peak: 2,
+        overlapping: [OUTSIDE_ROW],
+      } as unknown as Awaited<ReturnType<typeof api.probeCapacity>>);
+    vi.mocked(api.createAssignment).mockRejectedValue(CAPACITY_REFUSAL);
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+
+    let refusal: unknown;
+    await act(async () => {
+      refusal = await submitCreate(result).catch((e: unknown) => e);
+    });
+
+    expect(refusal).toMatchObject({ kind: "CapacityExceeded", elsewhere: SAID });
+    expect(toasts()).toEqual([SAID]);
+    expect(api.createAssignment).toHaveBeenCalledTimes(1);
   });
 });

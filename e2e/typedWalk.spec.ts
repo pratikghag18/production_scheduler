@@ -12,6 +12,7 @@ import {
   clearWindow,
   waitForAssignment,
   waitForAssignmentGone,
+  waitForRun,
   assignmentsStartingInWindow,
   runsStartingInWindow,
   parseTimerange,
@@ -23,6 +24,7 @@ import {
   PLANT_A_ADMIN,
   plantZone,
   type Db,
+  type AssignmentRow,
 } from "./walk/db";
 import { walkDayInZone, addDaysToIso, clockMsInZone } from "./walk/time";
 import { fillWindowStart } from "./boardWindow";
@@ -40,6 +42,15 @@ const isoPlusDays = addDaysToIso;
  * Skips without a backend, same shape as every other signed-in spec here.
  */
 test.skip(!hasRealBackend, NO_BACKEND_REASON);
+
+// DEF-0057: `playwright.config.ts` runs `fullyParallel: true`, which splits a
+// file's tests across workers. The F-233 case at the foot of this file types
+// its own sentences on the walk's day and Cell 1 while the walk is running, and
+// writes to the same trace file the walk's cross-check reads. File-level
+// serial mode keeps every test of THIS file in one worker, in order: the walk
+// first, F-233 after it, never beside it. (Other files' specs run in other
+// workers; the trace read below picks out the walk's own entries.)
+test.describe.configure({ mode: "serial" });
 
 const ADMIN = PLANT_A_ADMIN;
 
@@ -680,6 +691,12 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
     };
     void prodId; // read for clarity/documentation of the fixture; ids matched by name in the checks below
 
+    // DEF-0057: the trace file is shared by every bar on this machine, so the
+    // cross-check below takes only the entries THIS walk made -- the ones
+    // that began after this instant AND whose `heard` is one of the walk's own
+    // typed sentences. (A trace entry carries no session or page id; `at` and
+    // `heard` are what it has.)
+    const walkStartedAtMs = Date.now();
     const table: EntryResult[] = [];
     const surprises: string[] = [];
     // S71-n: entries whose trace line is EXPECTED to carry a null
@@ -839,19 +856,11 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         // 6. A booking with headcount -- a run, not an assignment.
         table.push(await runEntry(page, bookingHeadcount));
         {
-          const { data, error } = await dana
-            .from("runs")
-            .select("id, planned_headcount, timerange")
-            .eq("node_id", cellId("Cell 3"));
-          expect(error, error?.message).toBeNull();
-          const rows = (data ?? []) as {
-            id: string;
-            planned_headcount: number | null;
-            timerange: string;
-          }[];
-          const hit = rows.find((r) => {
-            const { startMs, endMs } = parseTimerange(r.timerange);
-            return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
+          // DEF-0057: polled -- the readout lands before the run's row does.
+          const hit = await waitForRun(dana, {
+            nodeId: cellId("Cell 3"),
+            startMs: wallMs(WALK_DAY, 13, 0),
+            endMs: wallMs(WALK_DAY, 17, 0),
           });
           expect(hit, "the booked Bracket A run on Cell 3, 13:00-17:00, should exist").toBeTruthy();
           expect(hit!.planned_headcount).toBe(3);
@@ -1036,7 +1045,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
             // fallback `listedCount` (entry 21, below) already uses.
             const listing = weekdayResult.listing ?? weekdayResult.barSaid ?? "";
             expect(
-              listing.match(/^Ready to do (\d+) things/)?.[1],
+              listing.match(/^Ready to do (\d+) things?/)?.[1],
               `the repeat day's own listing should count five: "${listing}"`,
             ).toBe("5");
             // F-158: Monday to Friday of the walk day's own week -- the five
@@ -1170,7 +1179,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
           // to press), so `runEntry`'s non-button branch never sets
           // `.listing` at all -- the lot text is `barSaid` itself, which is
           // exactly what this falls back to.
-          const match = (result.listing ?? result.barSaid).match(/^Ready to do (\d+) things/);
+          const match = (result.listing ?? result.barSaid).match(/^Ready to do (\d+) things?/);
           if (match === null) return Number.NaN; // already recorded as the finding
           return Number(match[1]);
         };
@@ -1312,19 +1321,11 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         // 8. A booking with headcount -- a run, not an assignment.
         table.push(await runEntry(page, bookHeadcount2));
         {
-          const { data, error } = await dana
-            .from("runs")
-            .select("id, planned_headcount, timerange")
-            .eq("node_id", cellId("Cell 6"));
-          expect(error, error?.message).toBeNull();
-          const rows = (data ?? []) as {
-            id: string;
-            planned_headcount: number | null;
-            timerange: string;
-          }[];
-          const hit = rows.find((r) => {
-            const { startMs, endMs } = parseTimerange(r.timerange);
-            return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
+          // DEF-0057: polled -- the readout lands before the run's row does.
+          const hit = await waitForRun(dana, {
+            nodeId: cellId("Cell 6"),
+            startMs: wallMs(WALK_DAY, 13, 0),
+            endMs: wallMs(WALK_DAY, 17, 0),
           });
           expect(
             hit,
@@ -1543,7 +1544,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
         );
         const beforeClear2 = beforeClearBlocks2.length + beforeClearJobs2.length;
         const listedCount2 = (result: EntryResult): number => {
-          const match = (result.listing ?? result.barSaid).match(/^Ready to do (\d+) things/);
+          const match = (result.listing ?? result.barSaid).match(/^Ready to do (\d+) things?/);
           if (match === null) return Number.NaN;
           return Number(match[1]);
         };
@@ -1593,6 +1594,7 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
       const traceFile = path.resolve(process.cwd(), "data/voice/trace/bar.jsonl");
       const nonVoice = SENTENCES.filter((s) => s.voice !== true);
       const lastSay = nonVoice[nonVoice.length - 1].say;
+      const ownSentences = new Set(nonVoice.map((s) => s.say));
       // `postTrace` is fire-and-forget (`CommandBar.tsx`'s own comment), so
       // the final sentence's line can still be in flight when the database
       // reads above have already settled. Poll the file until its last line
@@ -1610,7 +1612,17 @@ test.describe.serial("the typed command bar walks the real board (S61-c)", () =>
             .filter((l) => l.trim() !== "")
             .filter((l) => {
               try {
-                return (JSON.parse(l) as { by?: string }).by === "typed";
+                // DEF-0057: and only this walk's own -- one of its sentences,
+                // started after it began -- so a bar typed into by another
+                // spec in another worker never lands in this slice.
+                const e = JSON.parse(l) as { by?: string; heard?: string; at?: string };
+                return (
+                  e.by === "typed" &&
+                  e.heard !== undefined &&
+                  ownSentences.has(e.heard) &&
+                  e.at !== undefined &&
+                  Date.parse(e.at) >= walkStartedAtMs
+                );
               } catch {
                 return false;
               }
@@ -1834,14 +1846,16 @@ test(`F-233: a create held back (${F233_THROTTLE_MS}ms), then cleared at once, s
     await expect(async () => {
       const text = await currentStatusText(page);
       expect(
-        text.length > 0 || (await page.getByRole("button", { name: /Do all|Remove/ }).count()) > 0,
+        text.length > 0 ||
+          (await page.getByRole("button", { name: /Do all|Do it|Remove/ }).count()) > 0,
       ).toBe(true);
     }).toPass({ timeout: 10_000, intervals: [300] });
 
     // Answer whatever question the clear raised (a single removal's own
-    // "Remove it", or a lot's "Do all N") -- either way, say yes.
+    // "Remove it", or a lot's "Do all N", or "Do it" for a lot of one) -- either
+    // way, say yes.
     const removeIt = page.getByRole("button", { name: "Remove it" });
-    const doAll = page.getByRole("button", { name: /^Do all/ });
+    const doAll = page.getByRole("button", { name: /^(Do all|Do it)/ });
     if (await removeIt.isVisible().catch(() => false)) {
       await removeIt.click();
     } else if (await doAll.isVisible().catch(() => false)) {
@@ -1859,4 +1873,224 @@ test(`F-233: a create held back (${F233_THROTTLE_MS}ms), then cleared at once, s
   } finally {
     await clearWindow(dana, [cell1], startMs, endMs);
   }
+});
+
+/**
+ * S195-D (DEF-0054, R-434, R-431, R-459): a sentence that ends in one of the
+ * board's own pop-ups is finished by that pop-up's answer. As Ana (a line
+ * supervisor) on the real board: "extend Sam Patel by 30 minutes" takes Sam off
+ * the job his block sits on, so the board asks Continue?. While it stands the
+ * thread says what the board is asking -- once, in plain words, never "now ends
+ * ..." -- and the trace file already holds the entry (posted at the ask, not
+ * answered). Cancel writes nothing and the thread and the trace say so;
+ * Continue writes the block and both say that. The database is the proof
+ * (CLAUDE.md 4): the row is read back after each answer, and put back after.
+ *
+ * Runs on the plant's own today (the seeded board a person opens on), because
+ * that is where a supervisor's blocks sit on jobs; it restores the one row it
+ * changes, and reads nothing but Sam Patel's block on Cell 1.
+ */
+interface TraceLine {
+  at: string;
+  heard: string;
+  asked: string | null;
+  answered: string | null;
+  ran: string[];
+  outcome: string | null;
+}
+
+/** The last trace line for each `at` (the file is append-only and a later line
+ *  for an `at` corrects the earlier one), for lines heard as `heard` since
+ *  `sinceMs`. */
+async function traceEntriesFor(heard: string, sinceMs: number): Promise<TraceLine[]> {
+  const raw = await readFile(path.resolve(process.cwd(), "data/voice/trace/bar.jsonl"), "utf-8");
+  const byAt = new Map<string, TraceLine>();
+  for (const line of raw.split("\n")) {
+    if (line.trim() === "") continue;
+    const e = JSON.parse(line) as TraceLine;
+    if (e.heard === heard && Date.parse(e.at) >= sinceMs) byAt.set(e.at, e);
+  }
+  return [...byAt.values()];
+}
+
+async function threadTextOf(page: Page): Promise<string> {
+  return (
+    (await page
+      .locator('[class*="threadBody"]')
+      .textContent({ timeout: ACTION_TIMEOUT_MS })
+      .catch(() => "")) ?? ""
+  );
+}
+
+test("DEF-0054: a sentence that ends in the board's own Continue? pop-up is finished by its answer -- Cancel and Continue, in the thread, the trace and the database", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(120_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+
+  // Sam's block on Cell 1 on the plant's own today that sits on a job.
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readBlocks = async () => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, run_id, product_id, timerange")
+      .eq("operator_id", sam)
+      .eq("node_id", cell1);
+    if (error) throw new Error(`reading Sam's blocks: ${error.message}`);
+    return ((data ?? []) as unknown as AssignmentRow[]).filter(
+      (r) =>
+        new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(
+          new Date(parseTimerange(r.timerange).startMs),
+        ) === todayIso,
+    );
+  };
+  const before = (await readBlocks()).find((r) => r.run_id !== null);
+  if (!before) {
+    throw new Error(`the seed has no block of Sam Patel's on Cell 1 today (${todayIso}) on a job`);
+  }
+  const original = parseTimerange(before.timerange);
+  const SENTENCE = "extend Sam Patel by 30 minutes";
+  let restoreError: string | null = null;
+  const ASKING =
+    "The board is asking whether to take Sam Patel off the Housing A job. Answer it on the board.";
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Cancel ----------------------------------------------------------
+    const cancelFrom = Date.now();
+    await submit(page, SENTENCE);
+    await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    // The thread: what the board is asking, once, and no done-form readout.
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain(ASKING);
+      expect(thread.split(ASKING)).toHaveLength(2);
+      expect(thread).not.toMatch(/now ends|it was/);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    // The trace file already holds the entry -- posted at the ask, nobody has
+    // answered it, so a page closed now would still have left this line.
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, cancelFrom);
+      expect(entry).toBeTruthy();
+      expect(entry.outcome).toBe(`popup: ${ASKING}`);
+      expect(entry.asked).toBe(ASKING);
+      expect(entry.answered).toBeNull();
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain("Cancelled. Nothing changed.");
+      expect(thread).not.toMatch(/now ends|it was/);
+      const [entry] = await traceEntriesFor(SENTENCE, cancelFrom);
+      expect(entry.outcome).toBe("cancelled");
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    // Nothing was written: the row is exactly as it was, still on its job.
+    const afterCancel = (await readBlocks()).find((r) => r.id === before.id);
+    expect(afterCancel?.run_id).toBe(before.run_id);
+    expect(parseTimerange(afterCancel!.timerange)).toEqual(original);
+
+    // --- Continue --------------------------------------------------------
+    const continueFrom = Date.now();
+    await submit(page, SENTENCE);
+    await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toMatch(/Written: Sam Patel's block on Cell 1 now ends /);
+      const [entry] = await traceEntriesFor(SENTENCE, continueFrom);
+      expect(entry.outcome).toBe("written");
+      expect(entry.ran).toHaveLength(1);
+      expect(entry.ran[0]).toMatch(/^Sam Patel's block on Cell 1 now ends /);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+    // The database agrees: the block is 30 minutes longer and no longer on the job.
+    await expect(async () => {
+      const row = (await readBlocks()).find((r) => r.id === before.id);
+      expect(row?.run_id).toBeNull();
+      expect(parseTimerange(row!.timerange)).toEqual({
+        startMs: original.startMs,
+        endMs: original.endMs + 30 * 60_000,
+      });
+    }).toPass({ timeout: 15_000, intervals: [300] });
+  } finally {
+    // Put the seed back exactly: the job, the hours, and no product of its own
+    // (a row carries a job OR a product, `assignments_work_identified`).
+    const { error } = await dana
+      .from("assignments")
+      .update({ timerange: before.timerange, run_id: before.run_id, product_id: before.product_id })
+      .eq("id", before.id);
+    restoreError = error?.message ?? null;
+    if (restoreError !== null) console.error(`PUTTING SAM'S BLOCK BACK FAILED: ${restoreError}`);
+  }
+  expect(restoreError, "Sam's block is back as the seed had it").toBeNull();
+});
+
+/**
+ * S195 review (DEF-0054, R-434): the two ways the Continue? question of a
+ * sentence ends WITHOUT its own buttons. Nothing is written by either, so this
+ * leaves the seed alone. (1) A typed "no" is the pop-up's Cancel, through the
+ * board's own door: the thread says "Cancelled. Nothing changed." and the
+ * trace entry is cancelled. (2) A pop-up opened by hand (Enter on a track)
+ * replaces the standing one: before this case the sentence's turn was left
+ * saying "The board is asking ..." for ever, with its trace entry never
+ * answered.
+ */
+test("DEF-0054 review: a typed 'no', and a pop-up opened by hand, each end the Continue? question as cancelled", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(120_000);
+  const SENTENCE = "extend Sam Patel by 30 minutes";
+  const cont = page.getByRole("button", { name: "Continue", exact: true });
+
+  await signIn(page, "ana@example.test", "/");
+  await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+  await ensureBarOpen(page);
+
+  // --- a typed "no" ----------------------------------------------------
+  const noFrom = Date.now();
+  await submit(page, SENTENCE);
+  await expect(cont).toBeVisible({ timeout: 60_000 });
+  await submit(page, "no");
+  await expect(cont).toBeHidden({ timeout: 10_000 });
+  await expect(async () => {
+    expect(await threadTextOf(page)).toContain("Cancelled. Nothing changed.");
+    const [entry] = await traceEntriesFor(SENTENCE, noFrom);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.ran).toEqual([]);
+  }).toPass({ timeout: 10_000, intervals: [250] });
+
+  // --- a pop-up opened by hand -----------------------------------------
+  const handFrom = Date.now();
+  await submit(page, SENTENCE);
+  await expect(cont).toBeVisible({ timeout: 60_000 });
+  await page
+    .getByLabel(/press Enter to create/)
+    .nth(1)
+    .focus();
+  await page.keyboard.press("Enter");
+  await expect(cont).toBeHidden({ timeout: 10_000 });
+  await expect(async () => {
+    const [entry] = await traceEntriesFor(SENTENCE, handFrom);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.answered).not.toBeNull();
+    expect(entry.ran).toEqual([]);
+  }).toPass({ timeout: 10_000, intervals: [250] });
+  await page.keyboard.press("Escape");
 });

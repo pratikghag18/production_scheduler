@@ -569,6 +569,138 @@ test("Viewer Viva (Plant A) and admin Dana (Plant A): the same shift bands, and 
 });
 
 /**
+ * R-465 (DEF-0053, the screen half): a person busy on a line the viewer cannot
+ * read is BOOKED on the viewer's rail, with the place and the hours, and the
+ * plant admin's rail says `booked` for the same person. The tester, with the
+ * clock frozen at 10 am: Ana's rail read "Priya Shah ... free" while Dana's read
+ * "booked". Priya Shah is on Cell 4 (Line 2) from 6 am to 2 pm every day of the
+ * seeded week (supabase/dev_demo.sql); Ana supervises Line 1 and cannot read
+ * Line 2. R-465 (the maintainer, 30 Sept): the supervisor is told the place and
+ * the hours, never the product or the job.
+ *
+ * The browser clock is frozen at 10 am PLANT time (America/Chicago, Plant A's
+ * zone) today, so "Shift 1 is on now" and the read is the same on any machine
+ * at any hour.
+ */
+const PLANT_ZONE = "America/Chicago";
+
+/** The instant that is 10:00 today on the plant's wall clock -- found by asking the
+ *  zone, never by assuming an offset (CDT or CST, whichever applies today). */
+function tenAmInPlantZone(): Date {
+  const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: PLANT_ZONE }).format(new Date());
+  const [y, m, d] = ymd.split("-").map(Number);
+  const hourIn = (t: Date): string =>
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: PLANT_ZONE,
+      hour: "2-digit",
+      hour12: false,
+    }).format(t);
+  for (const utcHour of [15, 16]) {
+    const t = new Date(Date.UTC(y, m - 1, d, utcHour));
+    if (hourIn(t) === "10") return t;
+  }
+  throw new Error(`no instant is 10 am in ${PLANT_ZONE} on ${ymd}`);
+}
+
+interface RailReading {
+  /** The chip's own text, whitespace collapsed: name, tags, words, brackets. */
+  text: string;
+  /** The chip's hover title, or "" when it has none. */
+  title: string;
+}
+
+/** Sign in with the browser clock frozen at 10 am plant time and read Priya Shah's
+ *  chip on the operator rail. `railWidth`: drag the rail's edge by that many px
+ *  first (negative = narrower) to read it at another width. */
+async function priyaOnTheRail(
+  browser: Browser,
+  email: string,
+  railDragPx = 0,
+): Promise<RailReading> {
+  const context = await browser.newContext({ baseURL: BASE_URL });
+  try {
+    const page = await context.newPage();
+    await page.clock.install({ time: tenAmInPlantZone() });
+    // The rail says what it said before R-465 until the elsewhere read lands
+    // (never "booked" on a guess), so the reading waits for that answer.
+    const elsewhereAnswered = page.waitForResponse(
+      (r) => r.url().includes("operator_blocks_elsewhere") && r.request().method() === "POST",
+      { timeout: 30_000 },
+    );
+    await signIn(page, email, "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 20_000 });
+    const rail = page.getByRole("complementary", { name: "Operators" });
+    await expect(rail).toBeVisible({ timeout: 15_000 });
+    // "Show other people" is not pressed: Priya is on Shift 1, which is on at 10 am.
+    const name = rail.getByText("Priya Shah", { exact: true });
+    await expect(name).toBeVisible({ timeout: 15_000 });
+    if (railDragPx !== 0) {
+      const handle = rail.getByRole("separator", { name: "Resize operators panel" });
+      const box = await handle.boundingBox();
+      if (!box) throw new Error("the rail has no resize handle to drag");
+      const y = box.y + box.height / 2;
+      await page.mouse.move(box.x + box.width / 2, y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + railDragPx, y, { steps: 8 });
+      await page.mouse.up();
+    }
+    const chip = rail
+      .locator("div")
+      .filter({ has: page.getByText("Priya Shah", { exact: true }) })
+      .last();
+    // The booked word settles once the window AND the elsewhere read have landed.
+    await expect(chip).toContainText(/booked|free/, { timeout: 15_000 });
+    await elsewhereAnswered;
+    // Two animation frames: the answer has been painted into the chip.
+    await chip.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => done()));
+        }),
+    );
+    const text = collapseWhitespace((await chip.innerText()) ?? "");
+    const title = (await chip.getAttribute("title")) ?? "";
+    console.log(
+      `RAIL ${email} width${railDragPx >= 0 ? "+" : ""}${railDragPx} :: "${text}" title="${title.replace(/\n/g, " / ")}"`,
+    );
+    return { text, title };
+  } finally {
+    await context.close();
+  }
+}
+
+test("R-465: Ana's rail says Priya Shah is booked on Cell 4, as the plant admin's says booked, at 10 am", async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const ana = await priyaOnTheRail(browser, "ana@example.test");
+  const dana = await priyaOnTheRail(browser, "dana@example.test");
+
+  // The plant admin reads the whole plant: nothing is elsewhere for her, and the rail
+  // reads exactly as it always did.
+  expect(dana.text, "the plant admin's rail says booked").toMatch(/\bbooked\b/);
+  expect(dana.text, "the plant admin's rail has no brackets").not.toMatch(/\(/);
+
+  // Ana cannot read Line 2, and is told the place and the hours -- not free, and not the job.
+  expect(ana.text, "Ana's rail says booked, as the admin's does").toMatch(/\bbooked\b/);
+  expect(ana.text, "and names the cell and the hours").toContain("(Cell 4, 6 am to 2 pm)");
+  expect(ana.text, "never the parent line or the product").not.toMatch(/Line 2|Housing/);
+  expect(ana.title, "the hover sentence says it in full").toContain(
+    "Priya Shah is on Cell 4 in Line 2 today from 6 am to 2 pm.",
+  );
+});
+
+test("R-465: at the rail's narrowest Priya Shah's name and word stay readable and the brackets give way", async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const ana = await priyaOnTheRail(browser, "ana@example.test", -2000);
+  expect(ana.text).toContain("Priya Shah");
+  expect(ana.text).toMatch(/\bbooked\b/);
+  expect(ana.title).toContain("Cell 4 in Line 2 today from 6 am to 2 pm.");
+});
+
+/**
  * The date FORMAT a header string is in, independent of the week it names.
  * Both people compared are pinned to the same Monday, so equal formats give
  * byte-equal strings; this reduces the comparison to the shape and keeps the

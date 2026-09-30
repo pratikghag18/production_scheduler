@@ -7,7 +7,14 @@
  * for R32, `run2`) added, per row.
  */
 import { describe, it, expect } from "vitest";
-import { resolveCommand, describeQuestion, expandCommand } from "@/lib/command/resolve";
+import {
+  resolveCommand,
+  describeQuestion,
+  expandCommand,
+  readClearAsPerson,
+  thingsCount,
+  oneOrThem,
+} from "@/lib/command/resolve";
 // R-463: the fixture's own minimum, taken from the one constant rather than
 // retyped (CLAUDE.md §4, "a column list that appears twice is a bug with a
 // delay on it") -- every ctx builder below passes this, never a literal.
@@ -361,8 +368,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
-        attempted: "Operator 1 on Cell 1 in Line 1",
-        notTried: "Operator 1 is not on Cell 1 in Line 1.",
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 is not on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
   });
@@ -730,12 +737,19 @@ describe("commandResolve: brief §5 worked examples", () => {
         kind: "run_exists",
         product: "Housing A",
         cell: "Cell 1",
-        runs: [{ id: "run1", label: "Housing A 8 am to 4 pm", word: "" }],
+        runs: [
+          {
+            id: "run1",
+            label: "Join the Housing A job, 8 am to 4 pm",
+            when: "8 am to 4 pm",
+            word: "",
+          },
+        ],
       },
     });
     if (!res.ok) {
       expect(describeQuestion(res.question)).toBe(
-        "A Housing A job is already booked on Cell 1, Housing A 8 am to 4 pm. Join it, or make a separate block?",
+        "A Housing A job is already booked on Cell 1, 8 am to 4 pm. Join it, or make a separate block?",
       );
     }
   });
@@ -753,8 +767,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "run", runId: "run1" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: `${R1_READOUT} Joining the Housing A 8 am to 4 pm job already there.`,
-        attempted: "Operator 1 on Cell 1 in Line 1",
-        notTried: "Operator 1 is not on Cell 1 in Line 1.",
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 is not on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
   });
@@ -772,8 +786,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
-        attempted: "Operator 1 on Cell 1 in Line 1",
-        notTried: "Operator 1 is not on Cell 1 in Line 1.",
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 is not on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
   });
@@ -802,8 +816,18 @@ describe("commandResolve: brief §5 worked examples", () => {
         product: "Housing A",
         cell: "Cell 1",
         runs: [
-          { id: "run1", label: "Housing A 8 am to 4 pm", word: "" },
-          { id: "run2", label: "Housing A 09:00–15:00", word: "" },
+          {
+            id: "run1",
+            label: "Join the Housing A job, 8 am to 4 pm",
+            when: "8 am to 4 pm",
+            word: "",
+          },
+          {
+            id: "run2",
+            label: "Join the Housing A job, 9 am to 3 pm",
+            when: "9 am to 3 pm",
+            word: "",
+          },
         ],
       },
     });
@@ -823,7 +847,14 @@ describe("commandResolve: brief §5 worked examples", () => {
         kind: "run_exists",
         product: "Housing A",
         cell: "Cell 1",
-        runs: [{ id: "run1", label: "Housing A 8 am to 4 pm", word: "" }],
+        runs: [
+          {
+            id: "run1",
+            label: "Join the Housing A job, 8 am to 4 pm",
+            when: "8 am to 4 pm",
+            word: "",
+          },
+        ],
       },
     });
   });
@@ -842,7 +873,14 @@ describe("commandResolve: brief §5 worked examples", () => {
         product: "Housing A",
         cell: "Cell 1",
         span: "10 am to 3 pm",
-        blocks: [{ id: "blk1", label: "10 am to 2 pm", word: "" }],
+        blocks: [
+          {
+            id: "blk1",
+            label: "Housing A on Cell 1, 10 am to 2 pm",
+            when: "10 am to 2 pm",
+            word: "",
+          },
+        ],
         same: false,
       },
     });
@@ -863,7 +901,14 @@ describe("commandResolve: brief §5 worked examples", () => {
         product: "Housing A",
         cell: "Cell 1",
         span: "10 am to 2 pm",
-        blocks: [{ id: "blk1", label: "10 am to 2 pm", word: "" }],
+        blocks: [
+          {
+            id: "blk1",
+            label: "Housing A on Cell 1, 10 am to 2 pm",
+            when: "10 am to 2 pm",
+            word: "",
+          },
+        ],
         same: true,
       },
     });
@@ -887,8 +932,9 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "retime", assignmentId: "blk1" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         readout: `${R1_READOUT.replace("10 am to 2 pm", "10 am to 3 pm")} Changing the block that ran 10 am to 2 pm.`,
-        attempted: "Operator 1's block on Cell 1 in Line 1",
-        notTried: "Operator 1's block on Cell 1 in Line 1 stays as it was, 10 am to 2 pm.",
+        attempted: "Operator 1's block on Cell 1 in Line 1 2026-09-03, 10 am to 3 pm",
+        notTried:
+          "Operator 1's block on Cell 1 in Line 1 2026-09-03 stays as it was, 10 am to 2 pm.",
       },
     });
   });
@@ -909,7 +955,14 @@ describe("commandResolve: brief §5 worked examples", () => {
         kind: "run_exists",
         product: "Housing A",
         cell: "Cell 1",
-        runs: [{ id: "run1", label: "Housing A 8 am to 4 pm", word: "" }],
+        runs: [
+          {
+            id: "run1",
+            label: "Join the Housing A job, 8 am to 4 pm",
+            when: "8 am to 4 pm",
+            word: "",
+          },
+        ],
       },
     });
   });
@@ -952,8 +1005,18 @@ describe("commandResolve: brief §5 worked examples", () => {
         cell: "Cell 1",
         span: "10 am to 4 pm",
         blocks: [
-          { id: "blk1", label: "10 am to 2 pm", word: "" },
-          { id: "blk2", label: "2 pm to 4 pm", word: "" },
+          {
+            id: "blk1",
+            label: "Housing A on Cell 1, 10 am to 2 pm",
+            when: "10 am to 2 pm",
+            word: "",
+          },
+          {
+            id: "blk2",
+            label: "Housing A on Cell 1, 2 pm to 4 pm",
+            when: "2 pm to 4 pm",
+            word: "",
+          },
         ],
         same: false,
       },
@@ -1007,8 +1070,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "run_create", productId: "ha", headcount: null },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
         readout: RB1_READOUT,
-        attempted: "The Housing A job on Cell 1 in Line 1",
-        notTried: "No Housing A job is booked on Cell 1 in Line 1.",
+        attempted: "The Housing A job on Cell 1 in Line 1 2026-09-03, 6 am to 2 pm",
+        notTried: "No Housing A job is booked on Cell 1 in Line 1 2026-09-03.",
       },
     });
   });
@@ -1031,7 +1094,12 @@ describe("commandResolve: brief §5 worked examples", () => {
         product: "Housing A",
         cell: "Cell 1",
         span: "6 am to 2 pm",
-        run: { id: "run1", label: "8 am to 4 pm", word: "" },
+        run: {
+          id: "run1",
+          label: "the Housing A job, 8 am to 4 pm",
+          when: "8 am to 4 pm",
+          word: "",
+        },
         same: false,
       },
     });
@@ -1054,7 +1122,12 @@ describe("commandResolve: brief §5 worked examples", () => {
         product: "Housing A",
         cell: "Cell 1",
         span: "8 am to 4 pm",
-        run: { id: "run1", label: "8 am to 4 pm", word: "" },
+        run: {
+          id: "run1",
+          label: "the Housing A job, 8 am to 4 pm",
+          when: "8 am to 4 pm",
+          word: "",
+        },
         same: true,
       });
       expect(describeQuestion(res.question)).toBe(
@@ -1075,8 +1148,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "retime_run", runId: "run1" },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
         readout: `${RB1_READOUT} Changing the job that ran Housing A 8 am to 4 pm.`,
-        attempted: "The Housing A job on Cell 1 in Line 1",
-        notTried: "The Housing A job on Cell 1 in Line 1 stays as it was, 8 am to 4 pm.",
+        attempted: "The Housing A job on Cell 1 in Line 1 2026-09-03, 6 am to 2 pm",
+        notTried: "The Housing A job on Cell 1 in Line 1 2026-09-03 stays as it was, 8 am to 4 pm.",
       },
     });
   });
@@ -1194,8 +1267,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "run_create", productId: "ha", headcount: null },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 365 },
         readout: "Cell 1 in Line 1 is booked 2026-09-03 from 6 am to 6:05 am, making Housing A.",
-        attempted: "The Housing A job on Cell 1 in Line 1",
-        notTried: "No Housing A job is booked on Cell 1 in Line 1.",
+        attempted: "The Housing A job on Cell 1 in Line 1 2026-09-03, 6 am to 6:05 am",
+        notTried: "No Housing A job is booked on Cell 1 in Line 1 2026-09-03.",
       },
     });
   });
@@ -1226,8 +1299,8 @@ describe("commandResolve: brief §5 worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
-        attempted: "Operator 1 on Cell 1 in Line 1",
-        notTried: "Operator 1 is not on Cell 1 in Line 1.",
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 is not on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
 
@@ -1240,7 +1313,14 @@ describe("commandResolve: brief §5 worked examples", () => {
         product: "Housing A",
         cell: "Cell 1",
         span: "10 am to 3 pm",
-        blocks: [{ id: "blk1", label: "10 am to 2 pm", word: "" }],
+        blocks: [
+          {
+            id: "blk1",
+            label: "Housing A on Cell 1, 10 am to 2 pm",
+            when: "10 am to 2 pm",
+            word: "",
+          },
+        ],
         same: false,
       },
     });
@@ -1261,7 +1341,15 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         person: "Operator 1",
         cell: "Cell 1",
         when: "10 am to 2 pm",
-        blocks: [{ id: "blk1", label: "Housing A 10 am to 2 pm", word: "", part: "Housing A" }],
+        blocks: [
+          {
+            id: "blk1",
+            label: "Housing A 10 am to 2 pm",
+            when: "10 am to 2 pm",
+            word: "",
+            part: "Housing A",
+          },
+        ],
       },
     });
     if (!res.ok) {
@@ -1281,8 +1369,8 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         assignmentId: "blk1",
         readout:
           "Operator 1 is off Cell 1 in Line 1 2026-09-03; that was 10 am to 2 pm, making Housing A.",
-        attempted: "Operator 1's block on Cell 1 in Line 1",
-        notTried: "Operator 1 stays on Cell 1 in Line 1.",
+        attempted: "Operator 1's block on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 stays on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
   });
@@ -1297,8 +1385,20 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         cell: "Cell 1",
         when: "2026-09-03",
         blocks: [
-          { id: "blk1", label: "Housing A 10 am to 2 pm", word: "", part: "Housing A" },
-          { id: "blk2", label: "Housing A 2 pm to 4 pm", word: "", part: "Housing A" },
+          {
+            id: "blk1",
+            label: "Housing A 10 am to 2 pm",
+            when: "10 am to 2 pm",
+            word: "",
+            part: "Housing A",
+          },
+          {
+            id: "blk2",
+            label: "Housing A 2 pm to 4 pm",
+            when: "2 pm to 4 pm",
+            word: "",
+            part: "Housing A",
+          },
         ],
       },
     });
@@ -1401,8 +1501,8 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
-        attempted: "Operator 1 on Cell 1 in Line 1",
-        notTried: "Operator 1 is not on Cell 1 in Line 1.",
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 is not on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
 
@@ -1420,8 +1520,8 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         target: { kind: "run_create", productId: "ha", headcount: null },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
         readout: RB1_READOUT,
-        attempted: "The Housing A job on Cell 1 in Line 1",
-        notTried: "No Housing A job is booked on Cell 1 in Line 1.",
+        attempted: "The Housing A job on Cell 1 in Line 1 2026-09-03, 6 am to 2 pm",
+        notTried: "No Housing A job is booked on Cell 1 in Line 1 2026-09-03.",
       },
     });
 
@@ -1462,7 +1562,15 @@ describe("commandResolve: S41-b unassign worked examples", () => {
         person: "Operator 1",
         cell: "Cell 1",
         when: "10 am to 2 pm",
-        blocks: [{ id: "blkUnknown", label: "block 10 am to 2 pm", word: "", part: null }],
+        blocks: [
+          {
+            id: "blkUnknown",
+            label: "block 10 am to 2 pm",
+            when: "10 am to 2 pm",
+            word: "",
+            part: null,
+          },
+        ],
       },
     });
     if (!res.ok) {
@@ -1506,8 +1614,9 @@ describe("commandResolve: S41-c move worked examples", () => {
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         target: { kind: "retime" },
         readout: `${MOVE_IN_TIME_PREFIX} now runs 2026-09-03 from 10 am to 3 pm.`,
-        attempted: "Operator 1's block on Cell 1 in Line 1",
-        notTried: "Operator 1's block on Cell 1 in Line 1 stays as it was, 10 am to 2 pm.",
+        attempted: "Operator 1's block on Cell 1 in Line 1 2026-09-03, 10 am to 3 pm",
+        notTried:
+          "Operator 1's block on Cell 1 in Line 1 2026-09-03 stays as it was, 10 am to 2 pm.",
       },
     });
   });
@@ -1525,8 +1634,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         target: { kind: "move_cell" },
         readout: `${MOVE_TO_CELL_PREFIX} 10 am to 2 pm.`,
-        attempted: "Operator 1 on Cell 2",
-        notTried: "Operator 1 stays on Cell 1 in Line 1.",
+        attempted: "Operator 1 on Cell 2 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 stays on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
   });
@@ -1550,8 +1659,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         target: { kind: "move_cell" },
         readout: `${MOVE_TO_CELL_PREFIX} 10 am to 3 pm.`,
-        attempted: "Operator 1 on Cell 2",
-        notTried: "Operator 1 stays on Cell 1 in Line 1.",
+        attempted: "Operator 1 on Cell 2 2026-09-03, 10 am to 3 pm",
+        notTried: "Operator 1 stays on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
   });
@@ -1585,8 +1694,20 @@ describe("commandResolve: S41-c move worked examples", () => {
         cell: "Cell 1",
         when: "2026-09-03",
         blocks: [
-          { id: "blk1", label: "Housing A 10 am to 2 pm", word: "", part: "Housing A" },
-          { id: "blk2", label: "Housing A 2 pm to 4 pm", word: "", part: "Housing A" },
+          {
+            id: "blk1",
+            label: "Housing A 10 am to 2 pm",
+            when: "10 am to 2 pm",
+            word: "",
+            part: "Housing A",
+          },
+          {
+            id: "blk2",
+            label: "Housing A 2 pm to 4 pm",
+            when: "2 pm to 4 pm",
+            word: "",
+            part: "Housing A",
+          },
         ],
       },
     });
@@ -1644,8 +1765,9 @@ describe("commandResolve: S41-c move worked examples", () => {
         range: { startMin: 3 * 1440 + 960, endMin: 3 * 1440 + 1080 },
         target: { kind: "retime" },
         readout: `${MOVE_IN_TIME_PREFIX} now runs 2026-09-03 from 4 pm to 6 pm.`,
-        attempted: "Operator 1's block on Cell 1 in Line 1",
-        notTried: "Operator 1's block on Cell 1 in Line 1 stays as it was, 10 am to 2 pm.",
+        attempted: "Operator 1's block on Cell 1 in Line 1 2026-09-03, 4 pm to 6 pm",
+        notTried:
+          "Operator 1's block on Cell 1 in Line 1 2026-09-03 stays as it was, 10 am to 2 pm.",
       },
     });
   });
@@ -1662,8 +1784,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
-        attempted: "Operator 1 on Cell 1 in Line 1",
-        notTried: "Operator 1 is not on Cell 1 in Line 1.",
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 is not on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
 
@@ -1677,8 +1799,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         target: { kind: "run_create", productId: "ha", headcount: null },
         range: { startMin: 3 * 1440 + 360, endMin: 3 * 1440 + 840 },
         readout: RB1_READOUT,
-        attempted: "The Housing A job on Cell 1 in Line 1",
-        notTried: "No Housing A job is booked on Cell 1 in Line 1.",
+        attempted: "The Housing A job on Cell 1 in Line 1 2026-09-03, 6 am to 2 pm",
+        notTried: "No Housing A job is booked on Cell 1 in Line 1 2026-09-03.",
       },
     });
 
@@ -1693,8 +1815,8 @@ describe("commandResolve: S41-c move worked examples", () => {
         assignmentId: "blk1",
         readout:
           "Operator 1 is off Cell 1 in Line 1 2026-09-03; that was 10 am to 2 pm, making Housing A.",
-        attempted: "Operator 1's block on Cell 1 in Line 1",
-        notTried: "Operator 1 stays on Cell 1 in Line 1.",
+        attempted: "Operator 1's block on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 stays on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
       },
     });
   });
@@ -1718,7 +1840,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 2, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
@@ -1747,7 +1869,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 2, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
@@ -1776,7 +1898,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 2, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
@@ -1784,7 +1906,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
           },
           {
             id: "blkC1b",
-            label: "Cell 1 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 1, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
@@ -1818,8 +1940,8 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         intent: "unassign",
         assignmentId: "blkC2",
         readout: "Operator 1 is off Cell 2 2026-09-03; that was 10 am to 2 pm, making Housing A.",
-        attempted: "Operator 1's block on Cell 2",
-        notTried: "Operator 1 stays on Cell 2.",
+        attempted: "Operator 1's block on Cell 2 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 stays on Cell 2 2026-09-03, 10 am to 2 pm.",
       },
     });
   });
@@ -1837,7 +1959,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 2, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
@@ -1873,7 +1995,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 2, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
@@ -1929,8 +2051,8 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 900 },
         target: { kind: "retime" },
         readout: "Operator 1's Housing A block on Cell 2 now runs 2026-09-03 from 10 am to 3 pm.",
-        attempted: "Operator 1's block on Cell 2",
-        notTried: "Operator 1's block on Cell 2 stays as it was, 10 am to 2 pm.",
+        attempted: "Operator 1's block on Cell 2 2026-09-03, 10 am to 3 pm",
+        notTried: "Operator 1's block on Cell 2 2026-09-03 stays as it was, 10 am to 2 pm.",
       },
     });
   });
@@ -1947,7 +2069,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 2, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
@@ -1955,7 +2077,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
           },
           {
             id: "blkC1b",
-            label: "Cell 1 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 1, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
@@ -1980,7 +2102,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blk1",
-            label: "Cell 1 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 1, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
@@ -2074,7 +2196,7 @@ describe("commandResolve: S49 the block is elsewhere", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 2, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
@@ -2311,7 +2433,7 @@ describe("commandResolve: S52 a shift by name", () => {
         blocks: [
           {
             id: "blk1",
-            label: "Cell 1 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 1, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
@@ -2319,7 +2441,7 @@ describe("commandResolve: S52 a shift by name", () => {
           },
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 2, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
@@ -2392,7 +2514,7 @@ describe("commandResolve: S52 a shift by name", () => {
         blocks: [
           {
             id: "blkC2",
-            label: "Cell 2 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 2, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 2",
@@ -2400,7 +2522,7 @@ describe("commandResolve: S52 a shift by name", () => {
           },
           {
             id: "blk1",
-            label: "Cell 1 · Housing A 10 am to 2 pm",
+            label: "Housing A on Cell 1, 10 am to 2 pm",
             word: "",
             part: "Housing A",
             cell: "Cell 1",
@@ -3143,8 +3265,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           runId: "zrun",
           readout:
             "The Housing A job is off Cell 1 2026-09-03; that was 8 am to 4 pm, for 3 people.",
-          attempted: "The Housing A job on Cell 1",
-          notTried: "The Housing A job on Cell 1 stays as it was, 8 am to 4 pm.",
+          attempted: "The Housing A job on Cell 1 2026-09-03, 8 am to 4 pm",
+          notTried: "The Housing A job on Cell 1 2026-09-03 stays as it was, 8 am to 4 pm.",
         });
       } else {
         throw new Error("expected a several");
@@ -3247,8 +3369,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
             range: { startMin: 2 * 1440 + 480, endMin: 2 * 1440 + 780 },
             readout:
               "The Housing A job on Cell 1 keeps 8 am to 1 pm, and Sam is still on it; the part from 1 pm to 4 pm is cleared.",
-            attempted: "The Housing A job on Cell 1",
-            notTried: "The Housing A job on Cell 1 stays as it was, 8 am to 4 pm.",
+            attempted: "The Housing A job on Cell 1 2026-09-03, 8 am to 4 pm",
+            notTried: "The Housing A job on Cell 1 2026-09-03 stays as it was, 8 am to 4 pm.",
           },
         ]);
       } else {
@@ -3337,8 +3459,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           intent: "unassign",
           assignmentId: "blkMid",
           readout: "Sam is off Cell 1 2026-09-03; that was 2 pm to midnight, making Housing A.",
-          attempted: "Sam's block on Cell 1",
-          notTried: "Sam stays on Cell 1.",
+          attempted: "Sam's block on Cell 1 2026-09-03, 2 pm to midnight",
+          notTried: "Sam stays on Cell 1 2026-09-03, 2 pm to midnight.",
         });
       }
     });
@@ -3419,8 +3541,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           intent: "unassign",
           assignmentId: "blkMid",
           readout: "Sam is off Cell 1 2026-09-03; that was 2 pm to midnight, making Housing A.",
-          attempted: "Sam's block on Cell 1",
-          notTried: "Sam stays on Cell 1.",
+          attempted: "Sam's block on Cell 1 2026-09-03, 2 pm to midnight",
+          notTried: "Sam stays on Cell 1 2026-09-03, 2 pm to midnight.",
         });
       }
     });
@@ -3462,8 +3584,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
             intent: "unassign",
             assignmentId: "blkMid",
             readout: "Sam is off Cell 1 2026-09-03; that was 2 pm to midnight, making Housing A.",
-            attempted: "Sam's block on Cell 1",
-            notTried: "Sam stays on Cell 1.",
+            attempted: "Sam's block on Cell 1 2026-09-03, 2 pm to midnight",
+            notTried: "Sam stays on Cell 1 2026-09-03, 2 pm to midnight.",
           });
           expect(resolved.resolved).not.toHaveProperty("span");
           expect(resolved.resolved).not.toHaveProperty("range");
@@ -4671,7 +4793,14 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           product: "Housing A",
           cell: "Cell 1",
           span: "noon to 2 pm",
-          blocks: [{ id: "zblk2", label: "13:00–15:00", word: "" }],
+          blocks: [
+            {
+              id: "zblk2",
+              label: "Housing A on Cell 1, 1 pm to 3 pm",
+              when: "1 pm to 3 pm",
+              word: "",
+            },
+          ],
           same: false,
         },
       });
@@ -5727,8 +5856,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           headcount: 5,
           readout:
             "The Housing A job on Cell 1 now takes 5 people; it runs 2026-09-03 from 8 am to 4 pm.",
-          attempted: "The Housing A job on Cell 1",
-          notTried: "The Housing A job on Cell 1 stays at 3 people.",
+          attempted: "The Housing A job on Cell 1 2026-09-03",
+          notTried: "The Housing A job on Cell 1 2026-09-03 stays at 3 people.",
         },
       });
     });
@@ -6202,12 +6331,19 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         });
       });
 
-      it("DEF-0044 item 6 (mutation-provable): a block edge sitting exactly on the board's own last midnight is ON the board, not day_off_board", () => {
+      it("a block edge sitting exactly on the board's own last midnight is found by 'clear Sam next week' (not day_off_board)", () => {
+        // S195-A (DEF-0044 item 6, tester 30 Sept): this case used to carry
+        // the label "(mutation-provable)" for `edgeOnBoard`'s `<=`, and it was
+        // not -- the week clear plans the whole span once and no longer asks
+        // `edgeOnBoard` at all, so `<=` -> `<` left it green. The case that
+        // really holds the boundary is the next one (a replace, which does
+        // ask). This one stays as what it says: the week clear finds the
+        // edge block.
+        //
         // The board's own last day is rwDays' index 13 (2026-09-13);
-        // `wallToOffset(13, 1440)` is that day's own midnight -- the exact
-        // boundary `edgeOnBoard`'s `<=` allows. A block ending exactly there
-        // (Sun 22:00 to the board's last midnight) must be found and removed
-        // by 'clear Sam next week', never asked `day_off_board`.
+        // `wallToOffset(13, 1440)` is that day's own midnight. A block ending
+        // exactly there (Sun 22:00 to the board's last midnight) must be found
+        // and removed by 'clear Sam next week', never asked `day_off_board`.
         const edgeBlk = zBlk({
           id: "uwEdge",
           nodeId: "zc1",
@@ -6238,6 +6374,88 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         } else {
           throw new Error("expected exactly one removal (the edge block)");
         }
+      });
+
+      it("DEF-0044 item 6 (mutation-provable, S195-A): a REPLACE of a block ending exactly on the board's own last midnight is a lot, never day_off_board -- `edgeOnBoard`'s `<=`", () => {
+        // `expandReplace` carries the block WHOLE, so it asks `blockEdgesOnBoard`
+        // (`edgeOnBoard` on both real edges) before reading either through
+        // `wallOf`. The edge sitting exactly on the last midnight is ON the
+        // board: `<=`. With the bound `<` this block is refused as off the
+        // board -- the mutation the tester named -- and this case goes red.
+        const edgeBlk = zBlk({
+          id: "uwEdgeReplace",
+          nodeId: "zc1",
+          operatorId: "zsam",
+          startMin: 13 * 1440 + 1320, // Sun 2026-09-13, 22:00
+          endMin: 13 * 1440 + 1440, // exactly the board's own last midnight
+        });
+        const command: ReplaceCommand = {
+          intent: "replace",
+          operator: "Sam",
+          with: "Ana",
+          place: ["Cell 1"],
+          day: { kind: "date", iso: "2026-09-13" },
+          span: null,
+          shift: null,
+        };
+        const res = expandCommand(
+          command,
+          zCtx({ days: rwDays, todayIndex: 2, assignments: [edgeBlk] }),
+        );
+        expect(res.ok).toBe(true);
+        if (res.ok && res.command.intent === "several") {
+          expect(res.command.commands.map((c) => c.intent)).toEqual(["unassign", "assign"]);
+        } else {
+          throw new Error(
+            `expected a several of two, got ${res.ok ? res.command.intent : res.question.kind}`,
+          );
+        }
+      });
+
+      // S195-A (DEF-0052, tester 30 Sept): in a lot over several days the
+      // "Not done" and "Not tried" lines left the DAY out, so "Sam Patel
+      // stays on Cell 1." (or a job's "stays as it was, 6 am to 2 pm") was
+      // printed once per day, word for word. Every step's `attempted` and
+      // `notTried` now names its own day (the readout's ISO token, which the
+      // bar renders) and its hours -- no two lines of one answer are alike
+      // unless they are the same change.
+      it("S195-A-1 (DEF-0052): a week clear over three days -- every step's `attempted` and `notTried` names its own day, so no two lines are word for word alike", () => {
+        const blocks = [2, 3, 4].map((d) =>
+          zBlk({
+            id: `wk${d}`,
+            nodeId: "zc1",
+            operatorId: "zsam",
+            startMin: d * 1440 + 600,
+            endMin: d * 1440 + 840,
+          }),
+        );
+        const command: UnassignCommand = {
+          intent: "unassign",
+          operator: "everyone",
+          place: ["Cell 1"],
+          day: { kind: "every_day", week: "this_week" },
+          span: null,
+          existing: null,
+          shift: null,
+          until: null,
+        };
+        const ctx = zCtx({ days: rwDays, todayIndex: 2, assignments: blocks });
+        const res = expandCommand(command, ctx);
+        if (!res.ok || res.command.intent !== "several") throw new Error("expected a lot");
+        const resolved = (res.command.commands as UnassignCommand[]).map((c) => {
+          const r = resolveCommand(c, ctx);
+          if (!r.ok || r.resolved.intent !== "unassign") throw new Error("expected a removal");
+          return r.resolved;
+        });
+        expect(resolved).toHaveLength(3);
+        const notTried = resolved.map((r) => r.notTried);
+        const attempted = resolved.map((r) => r.attempted);
+        expect(new Set(notTried).size).toBe(3);
+        expect(new Set(attempted).size).toBe(3);
+        expect(notTried[0]).toContain("2026-09-02");
+        expect(notTried[1]).toContain("2026-09-03");
+        expect(notTried[2]).toContain("2026-09-04");
+        expect(attempted[0]).toMatch(/2026-09-02, 10 am to 2 pm$/);
       });
     });
   });
@@ -7351,8 +7569,8 @@ describe("commandResolve: S61-b training before the yes (R-425, F-155, F-156)", 
         target: { kind: "direct", productId: "ha" },
         range: { startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 },
         readout: R1_READOUT,
-        attempted: "Operator 1 on Cell 1 in Line 1",
-        notTried: "Operator 1 is not on Cell 1 in Line 1.",
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
+        notTried: "Operator 1 is not on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm.",
         override: { reason: "Covering a call-out, supervisor approved" },
       },
     });
@@ -7576,8 +7794,8 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
         range: { startMin: w(0, 1320), endMin: w(1, 0) },
         readout:
           "The Housing A job on Cell 4 keeps its Sunday part, 10 pm to midnight; Monday's part, midnight to 6 am, is cleared.",
-        attempted: "The Housing A job on Cell 4",
-        notTried: "The Housing A job on Cell 4 stays as it was, 10 pm to 6 am.",
+        attempted: "The Housing A job on Cell 4 2026-10-12, 10 pm to 6 am",
+        notTried: "The Housing A job on Cell 4 2026-10-12 stays as it was, 10 pm to 6 am.",
       },
     ]);
     const move = flat(no)[0] as MoveCommand;
@@ -7603,8 +7821,8 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
         runId: "run1",
         readout:
           "The Housing A job is off Cell 4 2026-10-12; that was 10 pm to 6 am, for 1 person.",
-        attempted: "The Housing A job on Cell 4",
-        notTried: "The Housing A job on Cell 4 stays as it was, 10 pm to 6 am.",
+        attempted: "The Housing A job on Cell 4 2026-10-12, 10 pm to 6 am",
+        notTried: "The Housing A job on Cell 4 2026-10-12 stays as it was, 10 pm to 6 am.",
       },
     ]);
     const removal = flat(yes)[0] as UnassignCommand;
@@ -7859,8 +8077,8 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
         range: { startMin: w(1, 600), endMin: w(1, 780) },
         readout:
           "The Housing A job on Cell 4 keeps 10 am to 1 pm, and Ahmed Ali is still on it; the part from 1 pm to 4 pm is cleared.",
-        attempted: "The Housing A job on Cell 4",
-        notTried: "The Housing A job on Cell 4 stays as it was, 10 am to 4 pm.",
+        attempted: "The Housing A job on Cell 4 2026-10-12, 10 am to 4 pm",
+        notTried: "The Housing A job on Cell 4 2026-10-12 stays as it was, 10 am to 4 pm.",
       },
     ]);
     const moved = resolveCommand(flat(res)[0], ctx);
@@ -7955,8 +8173,8 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
           range: { startMin: w(1, 600), endMin: w(1, 610) },
           readout:
             "The Housing A job on Cell 4 keeps 10 am to 10:10 am; the part from 10:10 am to 4 pm is cleared.",
-          attempted: "The Housing A job on Cell 4",
-          notTried: "The Housing A job on Cell 4 stays as it was, 10 am to 4 pm.",
+          attempted: "The Housing A job on Cell 4 2026-10-12, 10 am to 4 pm",
+          notTried: "The Housing A job on Cell 4 2026-10-12 stays as it was, 10 am to 4 pm.",
         },
       ],
     });
@@ -8470,7 +8688,7 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
       reason: "Off",
       readout: "Priya Shah is recorded as off 2026-10-12.",
       attempted: "An absence for Priya Shah 2026-10-12",
-      notTried: "No absence is recorded for Priya Shah.",
+      notTried: "No absence is recorded for Priya Shah 2026-10-12.",
     });
     expect(res.summary).toBe(
       "Priya Shah is off 2026-10-12. Their 2 blocks on Cell 4 and Cell 2 are cleared and the absence is recorded.",
@@ -8620,5 +8838,295 @@ describe("commandResolve: S194-D R-461 the night shift split at midnight (DEF-00
       expect(s).not.toMatch(/\d{1,2}:\d{2}/);
       expect(s).not.toMatch(/ -- | – |->|→/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S195-A: the bar's words. DEF-0043 (the which-block and join buttons, "1
+// things"), DEF-0055 ("clear <a person>"), both held to R-459 (every
+// sentence and every button is one a supervisor would say), R-430 (a dead end
+// offers the nearest choices) and R-435 (two honest readings are a question).
+// ---------------------------------------------------------------------------
+
+describe("commandResolve: S195-A the bar's words", () => {
+  /** A raw 24-hour clock, an en-dash span, or a middle-dot chain -- what R-459
+   *  says no button or sentence the bar shows may carry. */
+  const RAW_FORM = /\d{1,2}:\d{2}|–|·/;
+
+  // Wed 10 pm to Thu 6 am (the night shift that started yesterday) and Thu
+  // 2 pm to 10 pm: the tester's own pair, "Maria Lopez has 2 blocks Sat Oct 3".
+  const nightBlk: ContextAssignment = {
+    ...blk1,
+    id: "nightBlk",
+    startMin: 2 * 1440 + 22 * 60,
+    endMin: 3 * 1440 + 6 * 60,
+    label: "22:00–06:00",
+  };
+  const dayBlk: ContextAssignment = {
+    ...blk1,
+    id: "dayBlk",
+    startMin: 3 * 1440 + 14 * 60,
+    endMin: 3 * 1440 + 22 * 60,
+    label: "14:00–22:00",
+  };
+
+  it("W1 (DEF-0043): a which-block button with no cell named reads 'Housing A on Cell 1, 2 pm to 10 pm', a night block names both days -- no dot, no dash, no 24-hour clock", () => {
+    const res = resolveCommand(
+      unassignCmd({ place: [], span: null }),
+      withBlocks([nightBlk, dayBlk]),
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok || res.question.kind !== "remove_which") throw new Error("expected remove_which");
+    const labels = res.question.blocks.map((b) => b.label);
+    expect(labels).toEqual([
+      "Housing A on Cell 1, Wed 10 pm to Thu 6 am",
+      "Housing A on Cell 1, 2 pm to 10 pm",
+    ]);
+    for (const l of labels) expect(l).not.toMatch(RAW_FORM);
+    expect(res.question.blocks.map((b) => b.when)).toEqual([
+      "Wed 10 pm to Thu 6 am",
+      "2 pm to 10 pm",
+    ]);
+  });
+
+  it("W2 (DEF-0043): the same two blocks with the cell named -- 'Housing A Wed 10 pm to Thu 6 am', the day said for the night block only", () => {
+    const res = resolveCommand(unassignCmd({ span: null }), withBlocks([nightBlk, dayBlk]));
+    expect(res.ok).toBe(false);
+    if (res.ok || res.question.kind !== "remove_which") throw new Error("expected remove_which");
+    const labels = res.question.blocks.map((b) => b.label);
+    expect(labels).toEqual(["Housing A Wed 10 pm to Thu 6 am", "Housing A 2 pm to 10 pm"]);
+    for (const l of labels) expect(l).not.toMatch(RAW_FORM);
+  });
+
+  it("W3 (DEF-0043): a night block that started before the board's first day still names both days, read off the minutes (`wallOf` clamps its day to 0)", () => {
+    const before: ContextAssignment = {
+      ...blk1,
+      id: "beforeBlk",
+      startMin: -120,
+      endMin: 360,
+      label: "22:00–06:00",
+    };
+    const res = resolveCommand(
+      unassignCmd({ place: [], span: null, day: { kind: "date", iso: "2026-08-31" } }),
+      withBlocks([before]),
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok || res.question.kind !== "remove_which") throw new Error("expected remove_which");
+    expect(res.question.blocks[0].label).toBe("Housing A on Cell 1, Sun 10 pm to Mon 6 am");
+  });
+
+  it("W4 (DEF-0043): the join button reads 'Join the Housing A job, Wed 10 pm to Thu 6 am' for a night job; no raw form", () => {
+    const nightRun: ContextRun = {
+      ...run1,
+      id: "nightRun",
+      startMin: 2 * 1440 + 22 * 60,
+      endMin: 3 * 1440 + 6 * 60,
+      label: "Housing A 22:00–06:00",
+      span: "22:00–06:00",
+    };
+    const res = resolveCommand(
+      cmd({
+        start: { hour: 23, minute: 0 },
+        end: { hour: 23, minute: 30 },
+        day: { kind: "date", iso: "2026-09-02" },
+      }),
+      withRuns([nightRun]),
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok || res.question.kind !== "run_exists") throw new Error("expected run_exists");
+    expect(res.question.runs.map((r) => r.label)).toEqual([
+      "Join the Housing A job, Wed 10 pm to Thu 6 am",
+    ]);
+    for (const r of res.question.runs) expect(r.label).not.toMatch(RAW_FORM);
+  });
+
+  it("W5 (DEF-0043): no candidate label any question builds carries a raw clock, a dash or a middle dot", () => {
+    const shown: Candidate[] = [];
+    const ask = (r: ReturnType<typeof resolveCommand>): void => {
+      if (r.ok) return;
+      const q = r.question;
+      if (q.kind === "remove_which" || q.kind === "move_which" || q.kind === "block_exists") {
+        shown.push(...q.blocks);
+      } else if (q.kind === "run_exists") {
+        shown.push(...q.runs);
+      } else if (q.kind === "job_exists") {
+        shown.push(q.run);
+      }
+    };
+    const rawBlk: ContextAssignment = { ...blk1, id: "rawBlk", label: "10:00–14:00" };
+    const rawRun: ContextRun = { ...run1, label: "Housing A 08:00–16:00", span: "08:00–16:00" };
+    ask(resolveCommand(unassignCmd({ place: [], span: null }), withBlocks([rawBlk])));
+    ask(resolveCommand(unassignCmd({ span: null }), withBlocks([rawBlk, { ...rawBlk, id: "r2" }])));
+    ask(resolveCommand(cmd(), withBlocks([rawBlk])));
+    ask(resolveCommand(cmd(), withRuns([rawRun])));
+    ask(
+      resolveCommand(
+        bookCmd({ start: { hour: 9, minute: 0 }, end: { hour: 15, minute: 0 } }),
+        withRuns([rawRun]),
+      ),
+    );
+    expect(shown.length).toBeGreaterThanOrEqual(5);
+    for (const c of shown) {
+      expect(c.label).not.toMatch(RAW_FORM);
+      expect(c.when ?? "").not.toMatch(RAW_FORM);
+    }
+  });
+
+  it("W6 (DEF-0043): thingsCount and oneOrThem -- '1 thing' and 'it', every other count 'N things' and 'them'", () => {
+    expect(thingsCount(1)).toBe("1 thing");
+    expect(thingsCount(0)).toBe("0 things");
+    expect(thingsCount(2)).toBe("2 things");
+    expect(thingsCount(16)).toBe("16 things");
+    expect(oneOrThem(1)).toBe("it");
+    expect(oneOrThem(2)).toBe("them");
+  });
+
+  describe("DEF-0055: 'clear <a person>' is about the person", () => {
+    const clearWord = (word: string, over: Partial<UnassignCommand> = {}): UnassignCommand => ({
+      intent: "unassign",
+      operator: "everyone",
+      place: [word],
+      day: { kind: "date", iso: "2026-09-03" },
+      span: null,
+      existing: null,
+      shift: null,
+      until: null,
+      ...over,
+    });
+    const samBlk: ContextAssignment = { ...blk1, id: "samBlk", operatorId: "sp", nodeId: "c2" };
+    const samBlk2: ContextAssignment = {
+      ...samBlk,
+      id: "samBlk2",
+      startMin: 3 * 1440 + 840,
+      endMin: 3 * 1440 + 960,
+      label: "2 pm to 4 pm",
+    };
+
+    it("P1: the grammar hands over the place reading; the resolver turns it into the person's own removal ('remove Sam Patel <day>')", () => {
+      const parsed = parseCommand("clear Sam Patel today");
+      if (!parsed.ok) throw new Error("expected a parse");
+      expect(parsed.command).toMatchObject({ operator: "everyone", place: ["Sam Patel"] });
+      const reading = readClearAsPerson(parsed.command, baseCtx());
+      expect(reading.kind).toBe("person");
+      if (reading.kind !== "person") return;
+      expect(reading.command).toMatchObject({ operator: "Sam Patel", place: [] });
+      // the SAME command "remove Sam Patel today" parses to
+      const removed = parseCommand("remove Sam Patel today");
+      if (!removed.ok) throw new Error("expected a parse");
+      expect(reading.command).toEqual(removed.command);
+    });
+
+    it("P2: one block that day -- the person's removal asks the one-block question, never 'No cell called'", () => {
+      const ctx = withBlocks([samBlk]);
+      const res = expandCommand(clearWord("Sam Patel"), ctx);
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      const resolved = resolveCommand(res.command as UnassignCommand, ctx);
+      expect(resolved.ok).toBe(false);
+      if (resolved.ok) return;
+      expect(describeQuestion(resolved.question)).toBe(
+        "Remove Sam Patel's Housing A block on Cell 2, 10 am to 2 pm?",
+      );
+    });
+
+    it("P3: two blocks that day -- 'Sam Patel has 2 blocks <day>. Remove which?' with both as buttons", () => {
+      const ctx = withBlocks([samBlk, samBlk2]);
+      const res = expandCommand(clearWord("Sam Patel"), ctx);
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      const resolved = resolveCommand(res.command as UnassignCommand, ctx);
+      expect(resolved.ok).toBe(false);
+      if (resolved.ok || resolved.question.kind !== "remove_which") throw new Error("which");
+      expect(describeQuestion(resolved.question)).toBe(
+        "Sam Patel has 2 blocks 2026-09-03. Remove which?",
+      );
+      expect(resolved.question.blocks.map((b) => b.label)).toEqual([
+        "Housing A on Cell 2, 10 am to 2 pm",
+        "Housing A on Cell 2, 2 pm to 4 pm",
+      ]);
+    });
+
+    it("P4: no block that day -- the answer names the person, never the board, never a cell", () => {
+      const ctx = withBlocks([]);
+      const res = expandCommand(clearWord("Sam Patel"), ctx);
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      const resolved = resolveCommand(res.command as UnassignCommand, ctx);
+      expect(resolved.ok).toBe(false);
+      if (resolved.ok) return;
+      expect(describeQuestion(resolved.question)).toBe("Sam Patel has no block 2026-09-03.");
+    });
+
+    it("P5: 'clear Sam Patel this week' reaches the named-person branch of the week clear -- only the person's own blocks", () => {
+      const others: ContextAssignment = { ...samBlk, id: "otherBlk", operatorId: "so" };
+      const ctx = withBlocks([samBlk, others]);
+      const res = expandCommand(
+        clearWord("Sam Patel", { day: { kind: "every_day", week: "this_week" } }),
+        ctx,
+      );
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      const list =
+        res.command.intent === "several"
+          ? (res.command.commands as UnassignCommand[])
+          : [res.command as UnassignCommand];
+      const ids = list.map((c) =>
+        c.existing && "assignmentId" in c.existing ? c.existing.assignmentId : null,
+      );
+      expect(ids).toEqual(["samBlk"]);
+    });
+
+    it("P6: a name that is BOTH a person and a place -- a question with both as buttons, never a quiet pick", () => {
+      const twin = { id: "twin", displayName: "Cell 2", employeeRef: null, active: true };
+      const ctx = baseCtx({ operators: [...operators, twin] });
+      const res = expandCommand(clearWord("Cell 2"), ctx);
+      expect(res.ok).toBe(false);
+      if (res.ok || res.question.kind !== "place_or_person") throw new Error("expected both");
+      expect(res.question.exact).toBe(true);
+      expect(res.question.candidates.map((c) => [c.reading, c.label, c.word])).toEqual([
+        ["person", "The person Cell 2", "Cell 2"],
+        ["place", "The place Cell 2", "Cell 2"],
+      ]);
+      expect(describeQuestion(res.question)).toBe(
+        '"Cell 2" is the name of a person and of a place on this board. Which did you mean?',
+      );
+      // the answer "the place" is not asked again
+      const again = expandCommand(clearWord("Cell 2"), ctx, { clearAs: "place" });
+      expect(again.ok === false && again.question.kind === "place_or_person").toBe(false);
+    });
+
+    it("P7: a name that matches neither but is close to a person -- the nearest people AND places, each tagged with which it is", () => {
+      const res = expandCommand(clearWord("Sam Patal"), baseCtx());
+      expect(res.ok).toBe(false);
+      if (res.ok || res.question.kind !== "place_or_person") throw new Error("expected near");
+      expect(res.question.exact).toBe(false);
+      expect(
+        res.question.candidates.some((c) => c.reading === "person" && c.word === "Sam Patel"),
+      ).toBe(true);
+      expect(describeQuestion(res.question)).toBe(
+        'No cell or person called "Sam Patal" on this board. Did you mean one of these?',
+      );
+    });
+
+    it("P8: nothing close to a person -- unchanged: the place dead end (the bar's own fallback offers the caller's cells)", () => {
+      const res = expandCommand(clearWord("Xyzzy"), baseCtx());
+      expect(res.ok).toBe(false);
+      if (res.ok) return;
+      expect(res.question.kind).toBe("unknown");
+    });
+
+    it("P9: every existing clear reads exactly as before -- a cell, a line; only the one shape is looked at", () => {
+      for (const word of ["Cell 2", "Line 1", "Cell 1"]) {
+        expect(readClearAsPerson(clearWord(word), baseCtx()).kind).toBe("none");
+      }
+      // a named operator, or two place words, is never re-read
+      expect(
+        readClearAsPerson({ ...clearWord("Sam Patel"), operator: "Sam Patel" }, baseCtx()).kind,
+      ).toBe("none");
+      expect(
+        readClearAsPerson({ ...clearWord("Cell 1"), place: ["Cell 1", "Line 1"] }, baseCtx()).kind,
+      ).toBe("none");
+      expect(readClearAsPerson(cmd(), baseCtx()).kind).toBe("none");
+    });
   });
 });

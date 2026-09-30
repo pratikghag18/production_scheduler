@@ -65,7 +65,7 @@ function cellPhrase(cell: string): string {
  *  same flexible pattern `sentences.ts`'s own copy/repeat/clear entries use
  *  (their own comment: the exact trailing "Say yes..." suffix is not the
  *  fact under test). */
-const LOT_RE = /^Ready to do \d+ things: .+$/;
+const LOT_RE = /^Ready to do \d+ things?: .+$/;
 
 export function buildSentences2(dates: WalkDates): Sentence[] {
   return [

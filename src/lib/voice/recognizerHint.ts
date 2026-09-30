@@ -37,9 +37,12 @@
  * and "no" are added here, plus the bar's own two button labels a spoken answer most often
  * echoes back: `CommandBar.tsx`'s "Do all N" and "Show that day" (the literal label text,
  * capitalised the same way -- extract, never retype), still ahead of every board name in
- * `buildRecognizerHint`'s own ordering below. */
+ * `buildRecognizerHint`'s own ordering below.
+ *
+ * S195 (30 Sept, review): "Do it" joins "Do all" -- a lot of ONE reads "Do it"
+ * (`CommandBar.tsx`, `showLotStatus`), and a person says the label they read. */
 const VOCABULARY =
-  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, yes, no, Do all, Show that day, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
+  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, yes, no, Do all, Do it, Show that day, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
 
 /** Roughly whisper.cpp's own comfortable prompt length -- long enough to
  *  carry a full plant's worth of cells and parts, short enough that the

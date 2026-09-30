@@ -66,6 +66,10 @@ test("a plant admin opens Copy week for her plant and reads the counts", async (
 });
 
 test("a plant admin applies the copy onto a week nothing else touches", async ({ page }) => {
+  // DEF-0057: sign-in, the counts read (15s allowed) and the apply (15s
+  // allowed) add up to more than the default 30s once several workers share
+  // the one database; the steps keep their own limits, the case gets room.
+  test.setTimeout(90_000);
   await signIn(page, SITE_ADMIN, "/");
   // S67 (R-445) review (TR-3): the button lives behind "Show more" now.
   await openShowMoreIfNeeded(page);

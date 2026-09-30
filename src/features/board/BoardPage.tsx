@@ -26,7 +26,7 @@ import { browserRecognizer, type Recognizer } from "@/lib/voice/recognizer";
 import { localRecognizer, whisperServiceUrl, withFallback } from "@/lib/voice/localRecognizer";
 import { buildRecognizerHint } from "@/lib/voice/recognizerHint";
 import { operatorViewFor, productViewFor } from "./lib/history";
-import { useBoardWindow } from "./hooks/useBoardWindow";
+import { useBlocksElsewhere, useBoardWindow } from "./hooks/useBoardWindow";
 import { useAbsences } from "./hooks/useAbsences";
 import type { AbsenceRow } from "@/lib/absence";
 import { useRootPath } from "./hooks/useRootPath";
@@ -312,6 +312,17 @@ export default function BoardPage() {
   // false whenever it would be used — it exists only to keep the query key a
   // stable shape.
   const boardQuery = useBoardWindow(
+    rootPath ?? "",
+    fetchFrom,
+    fetchTo,
+    canQuery && rootPath !== null,
+  );
+
+  // R-465 (DEF-0053): the blocks of people this caller can read that sit on
+  // places she cannot -- asked of the server as a set (CLAUDE.md §4), for the
+  // board's OWN fetch window, on the board's own cadence (`useBlocksElsewhere`).
+  // Pending or failed it is `undefined` and the rail says what it said before.
+  const elsewhereQuery = useBlocksElsewhere(
     rootPath ?? "",
     fetchFrom,
     fetchTo,
@@ -1306,7 +1317,7 @@ export default function BoardPage() {
                   onResult: report,
                 });
               }}
-              onRetime={(resolved, anchor) => {
+              onRetime={(resolved, anchor, report) => {
                 // F-168: this prop now always answers a `WriteResult` -- the
                 // `target.kind !== "retime"` branch is unreachable in
                 // practice (`CommandBar`'s own `runCommand` only calls
@@ -1324,6 +1335,9 @@ export default function BoardPage() {
                   assignmentId: resolved.target.assignmentId,
                   range: resolved.range,
                   anchor,
+                  // S195-D (DEF-0054): the confirm pop-up this may open
+                  // answers the sentence through here.
+                  onResult: report,
                 });
               }}
               onBook={(resolved, anchor, report) => {
@@ -1337,7 +1351,7 @@ export default function BoardPage() {
                   onResult: report,
                 });
               }}
-              onRetimeRun={(resolved, anchor) => {
+              onRetimeRun={(resolved, anchor, report) => {
                 // F-168: see `onRetime`'s own note above -- the mismatched
                 // branch is unreachable in practice, but the prop no longer
                 // compiles a bare `return;`.
@@ -1351,6 +1365,7 @@ export default function BoardPage() {
                   runId: resolved.target.runId,
                   range: resolved.range,
                   anchor,
+                  onResult: report,
                 });
               }}
               // S41-b: no second door -- the SAME removal the assignment
@@ -1372,6 +1387,7 @@ export default function BoardPage() {
                     assignmentId: resolved.assignmentId,
                     range: resolved.range,
                     anchor,
+                    onResult: report,
                   });
                 } else {
                   return dragApi.openMoveFromCommand({
@@ -1434,6 +1450,13 @@ export default function BoardPage() {
                   dragApi.cancelSplit();
                   return true;
                 }
+                // S195-D (DEF-0054): the board's own Continue? / keep-or-scale
+                // question a sentence opened -- "no" is its Cancel, through the
+                // pop-up's own door (which reports the cancel).
+                if (popover?.kind === "confirm" && popover.commandResult) {
+                  dragApi.confirmNo();
+                  return true;
+                }
                 if (popover?.kind === "create" && popover.autoCreate) {
                   // S62-b reviewer fix (C): through the POP-UP's own cancel,
                   // never `dragApi.closePopover()` -- closing it from outside
@@ -1488,6 +1511,10 @@ export default function BoardPage() {
                      HOME node's template for the cross-pattern name match
                      (R-443), never a second walk of node ids here. */
                   templateForNode={index.templateForNode}
+                  /* R-465: people busy on a place this viewer cannot read are
+                     still booked -- the server's own answer, as a set. */
+                  blocksElsewhere={elsewhereQuery.data}
+                  dateFormat={dateFormat}
                   open={operatorPanelOpen}
                   onToggleOpen={() => setOperatorPanelOpen(!operatorPanelOpen)}
                   draggingOperatorId={

@@ -303,6 +303,58 @@ describe("OperatorAbsences — recording and removing in place (R-360)", () => {
     expect(await screen.findByText("Could not check who you may record for.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Record absence" })).toBeNull();
   });
+
+  // DEF-0044's last item (30 Sept, tester): the source says a PENDING answer
+  // "offers no Remove ... fail closed" and nothing held it -- `=== true` made
+  // `!== false` and every suite stayed green. The answer is held pending
+  // here, so a guess that a pending answer is a yes would show a Remove.
+  describe("the permission answer is still loading (DEF-0044, fail closed)", () => {
+    function pendingRecordable() {
+      let settle!: (ids: string[]) => void;
+      h.fetchRecordableAbsencePeople.mockReset().mockReturnValue(
+        new Promise<string[]>((resolve) => {
+          settle = resolve;
+        }),
+      );
+      return (ids: string[]) => settle(ids);
+    }
+    const listed = () =>
+      h.fetchAbsences.mockResolvedValue({
+        absences: [h.absence("A1", ELENA.operatorId, "2099-01-01", "2099-01-03")],
+        skipped: 0,
+      });
+
+    it("lists the absence but offers NO Remove while the answer is pending", async () => {
+      listed();
+      pendingRecordable();
+      wrap(<OperatorAbsences {...ELENA} />);
+      expect(await screen.findByText("Sick leave")).toBeTruthy();
+      await waitFor(() => expect(h.fetchRecordableAbsencePeople).toHaveBeenCalled());
+      expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    });
+
+    it("the Remove button appears when the answer arrives and names this person", async () => {
+      listed();
+      const settle = pendingRecordable();
+      wrap(<OperatorAbsences {...ELENA} />);
+      await screen.findByText("Sick leave");
+      expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+      settle([ELENA.operatorId]);
+      expect(await screen.findByRole("button", { name: "Remove" })).toBeTruthy();
+    });
+
+    it("stays absent when the answer arrives and does not name this person", async () => {
+      listed();
+      const settle = pendingRecordable();
+      wrap(<OperatorAbsences {...ELENA} />);
+      await screen.findByText("Sick leave");
+      settle([TOM.operatorId]);
+      await waitFor(() => expect(h.fetchRecordableAbsencePeople).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 30));
+      expect(screen.getByText("Sick leave")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    });
+  });
 });
 
 /* ===========================================================================

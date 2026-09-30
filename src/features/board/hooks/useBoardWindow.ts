@@ -1,5 +1,5 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { fetchBoardWindow, isSchedulerError } from "@/lib/api";
+import { fetchBlocksElsewhere, fetchBoardWindow, isSchedulerError } from "@/lib/api";
 
 /**
  * One query-key convention, exported so nothing hand-builds a key (brief
@@ -9,6 +9,15 @@ import { fetchBoardWindow, isSchedulerError } from "@/lib/api";
 export const boardKeys = {
   window: (rootPath: string, from: Date, to: Date) =>
     ["board", "window", rootPath, from.toISOString(), to.toISOString()] as const,
+  /**
+   * R-465: the blocks of people on places the caller cannot read, for the SAME
+   * window. The key EXTENDS the window's own key on purpose: every write that
+   * invalidates, cancels or snapshots `boardKeys.window(...)` (a prefix match)
+   * and every `["board"]` invalidation in the admin hooks reaches this read
+   * too, so it goes stale exactly when the board's own data does.
+   */
+  elsewhere: (rootPath: string, from: Date, to: Date) =>
+    [...boardKeys.window(rootPath, from, to), "elsewhere"] as const,
 };
 
 /**
@@ -47,6 +56,25 @@ export function useBoardWindow(rootPath: string, from: Date, to: Date, enabled: 
     // REQUIRED, not optional with a `true` default: a default would let a new
     // caller reintroduce the 401 silently, which is the whole failure being
     // removed. Callers derive it from `canQueryAsUser` (features/auth/session).
+    enabled,
+  });
+}
+
+/**
+ * R-465 (DEF-0053): `operator_blocks_elsewhere` over the board's own fetch
+ * window, with the board's own life: same `staleTime`, same retry rule, same
+ * `enabled` gate, refetched by the same invalidations (see
+ * `boardKeys.elsewhere`). NO `placeholderData`: when the window moves the old
+ * window's rows are not this window's, so the rail says what it said before
+ * this read existed until the new answer lands -- it never says "booked" on a
+ * guess and never hides a person.
+ */
+export function useBlocksElsewhere(rootPath: string, from: Date, to: Date, enabled: boolean) {
+  return useQuery({
+    queryKey: boardKeys.elsewhere(rootPath, from, to),
+    queryFn: () => fetchBlocksElsewhere(from, to),
+    staleTime: 30_000,
+    retry: (count, err) => !isSchedulerError(err) && count < 1,
     enabled,
   });
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseAbsenceInfo,
+  parseBlocksElsewhere,
   parseBoardWindow,
   parseCapacityProbe,
   parseCreateAssignmentResult,
@@ -316,12 +317,57 @@ describe("parseCapacityProbe", () => {
           assignmentId: "9000000a-0000-0000-0000-00000000000a",
           nodeId: "3000000a-0000-0000-0000-00000000000a",
           nodeName: "Cell 4",
+          // A server older than 0085 sends neither key: a readable row, no parent named.
+          parentName: null,
           productName: "Widget Y",
           timerange: '["2026-08-18 06:00:00+00","2026-08-18 12:00:00+00")',
           efficiency: 0.5,
+          outside: false,
         },
       ],
     });
+  });
+
+  // R-465 (DEF-0053): a block on a place the caller cannot read arrives with the
+  // place and the hours and nothing else.
+  const outsideRow: Record<string, Json> = {
+    assignment_id: null,
+    node_id: null,
+    node_name: "Cell 4",
+    parent_name: "Line 2",
+    product_name: null,
+    timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
+    efficiency: 1,
+    outside: true,
+  };
+
+  it("R-465: accepts an outside row with no ids and no product, and carries the parent's name", () => {
+    const parsed = parseCapacityProbe({ ...valid, overlapping: [outsideRow] } as Json);
+    expect(parsed?.overlapping).toEqual([
+      {
+        assignmentId: null,
+        nodeId: null,
+        nodeName: "Cell 4",
+        parentName: "Line 2",
+        productName: null,
+        timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
+        efficiency: 1,
+        outside: true,
+      },
+    ]);
+  });
+
+  it("R-465: refuses a READABLE row that arrives without its ids (only an outside row may)", () => {
+    const readableNoIds = { ...outsideRow, outside: false };
+    expect(parseCapacityProbe({ ...valid, overlapping: [readableNoIds] } as Json)).toBeNull();
+    const { outside: _outside, ...absentFlag } = outsideRow;
+    expect(parseCapacityProbe({ ...valid, overlapping: [absentFlag] } as Json)).toBeNull();
+  });
+
+  it("R-465: refuses an outside flag that is not a boolean", () => {
+    expect(
+      parseCapacityProbe({ ...valid, overlapping: [{ ...outsideRow, outside: "yes" }] } as Json),
+    ).toBeNull();
   });
 
   it("rejects a payload missing a required top-level key", () => {
@@ -974,5 +1020,56 @@ describe("parseBoardWindow: date_format (R-333 / migration 0062, DEF-0017)", () 
     expect(
       parseBoardWindow({ ...(boardWindowJson as object), date_format: null } as Json),
     ).toBeNull();
+  });
+});
+
+// R-465 (DEF-0053, migration 0085): `operator_blocks_elsewhere` answers a bare
+// array of rows, raw snake_case as PostgREST returns them. Every row below is
+// built from the one constant.
+describe("parseBlocksElsewhere", () => {
+  const ROW: Record<string, Json> = {
+    operator_id: "a0000000-0000-0000-0000-000000000004",
+    node_name: "Cell 4",
+    parent_name: "Line 2",
+    timerange: '["2026-01-15 12:00:00+00","2026-01-15 20:00:00+00")',
+    efficiency: 1,
+  };
+
+  it("accepts rows and converts to camelCase", () => {
+    expect(parseBlocksElsewhere([ROW] as Json)).toEqual([
+      {
+        operatorId: "a0000000-0000-0000-0000-000000000004",
+        nodeName: "Cell 4",
+        parentName: "Line 2",
+        timerange: '["2026-01-15 12:00:00+00","2026-01-15 20:00:00+00")',
+        efficiency: 1,
+      },
+    ]);
+  });
+
+  it("accepts the empty set (a caller who reads the whole plant)", () => {
+    expect(parseBlocksElsewhere([])).toEqual([]);
+  });
+
+  it("accepts a place at a root: parent_name null", () => {
+    const parsed = parseBlocksElsewhere([{ ...ROW, parent_name: null }] as Json);
+    expect(parsed?.[0].parentName).toBeNull();
+  });
+
+  it("refuses the WHOLE set when any row lacks a column or carries the wrong type, column by column", () => {
+    for (const key of Object.keys(ROW)) {
+      const { [key]: _gone, ...without } = ROW;
+      expect(parseBlocksElsewhere([ROW, without] as Json), `without ${key}`).toBeNull();
+      expect(
+        parseBlocksElsewhere([{ ...ROW, [key]: { no: 1 } }] as Json),
+        `type ${key}`,
+      ).toBeNull();
+    }
+  });
+
+  it("refuses an object, null and a scalar where the array belongs", () => {
+    expect(parseBlocksElsewhere({} as Json)).toBeNull();
+    expect(parseBlocksElsewhere(null)).toBeNull();
+    expect(parseBlocksElsewhere("rows")).toBeNull();
   });
 });

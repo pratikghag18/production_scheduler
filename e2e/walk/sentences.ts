@@ -386,7 +386,7 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     {
       say: `copy ${dates.day} to ${dates.tomorrow} for Cell 3`,
       answer: "yes",
-      expect: /^Ready to do \d+ things: .+$/,
+      expect: /^Ready to do \d+ things?: .+$/,
     },
 
     // 17. A repeat day, answered no: nothing written. R-416's rule is that
@@ -531,13 +531,13 @@ export function buildSentences(dates: WalkDates): Sentence[] {
       say: `clear Area 1 ${dates.day}`,
       answer: "yes",
       note: "R-407: a place above the cells clears every cell under it -- Area 1 is Cells 1 to 4. Reached through R-455's own move, no press.",
-      expect: /^Ready to do \d+ things: .+$/,
+      expect: /^Ready to do \d+ things?: .+$/,
     },
     {
       say: `clear Area 2 ${dates.day}`,
       answer: "yes",
       note: "the other half of the clear -- Area 2 is Cells 5 and 6.",
-      expect: /^Ready to do \d+ things: .+$/,
+      expect: /^Ready to do \d+ things?: .+$/,
     },
   ];
 }

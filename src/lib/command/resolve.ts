@@ -520,14 +520,18 @@ export type Candidate = {
    *  message doesn't have to recover it by parsing `label` back apart.
    *  Every other question leaves this undefined. */
   part?: string | null;
-  /** S49: the candidate's OWN cell name and bare hours ("10:00–14:00", the
-   *  block's own `label`) -- set ONLY on a candidate built from the
-   *  "elsewhere" gathering (a `remove_which`/`move_which` whose hits on the
-   *  named cell came up empty, or whose sentence named no cell at all), so
-   *  `describeQuestion` never parses `label` ("<cell> · <part> <hours>")
-   *  back apart. Every other candidate leaves these undefined. */
+  /** S49: the candidate's OWN cell name and its hours as a person says them
+   *  ("2 pm to 10 pm"; "Fri 10 pm to Sat 6 am" across midnight, DEF-0043) --
+   *  `cell` is set ONLY on a candidate built from the "elsewhere" gathering
+   *  (a `remove_which`/`move_which` whose hits on the named cell came up
+   *  empty, or whose sentence named no cell at all), so `describeQuestion`
+   *  never parses `label` ("<part> on <cell>, <hours>") back apart. `when`
+   *  is also set on every block/job candidate the resolver builds now. */
   cell?: string;
   when?: string;
+  /** DEF-0055: set ONLY on a `place_or_person` candidate -- which of the two
+   *  readings a press chooses. */
+  reading?: "person" | "place";
 };
 
 export type Question =
@@ -577,6 +581,13 @@ export type Question =
       more?: true;
       asPart?: true;
     }
+  /** DEF-0055 / R-430 / R-435: "clear Maria Lopez tomorrow" -- the word after
+   *  `clear` is read as a place, but it names (or is close to the name of) a
+   *  PERSON. `exact`: it matches both a place and a person, so both are the
+   *  buttons (never a quiet pick); not exact: it matches neither, and the
+   *  nearest people and places are offered. Each candidate's `reading` says
+   *  which a press chooses. */
+  | { kind: "place_or_person"; text: string; exact: boolean; candidates: Candidate[] }
   | { kind: "not_offered"; product: string; cell: string }
   | { kind: "place_mismatch"; cell: string; qualifier: string; elsewhere: Candidate[] }
   /** S61-b (R-425, F-155): a resolved write would put `person` on `cell`
@@ -912,6 +923,17 @@ const LOT_CEILING = 100;
  *  fourth site never re-hardcodes the plural. */
 function peopleCount(n: number): string {
   return n === 1 ? "1 person" : `${n} people`;
+}
+
+/** DEF-0043 (R-459): the same rule for a lot -- "1 thing", "3 things". The
+ *  bar's "Ready to do N things", "Done, N things" and "That is N things at
+ *  once" all go through this one place; `oneOrThem` is the pronoun that goes
+ *  with it ("Say yes to do it" / "to do them"). */
+export function thingsCount(n: number): string {
+  return n === 1 ? "1 thing" : `${n} things`;
+}
+export function oneOrThem(n: number): string {
+  return n === 1 ? "it" : "them";
 }
 
 /** R-463 (29 Sept): the same rule as `peopleCount`, for a length in minutes
@@ -1405,7 +1427,7 @@ function spokenClock(c: { hour: number; minute: number }): string {
  *  for the same hours. R-459: this used to return "HH:MM–HH:MM"; every
  *  caller only ever puts the result straight into a sentence, so the format
  *  changed here, once, rather than at each call site. */
-function formatSpan(
+export function formatSpan(
   start: { hour: number; minute: number },
   end: { hour: number; minute: number },
 ): string {
@@ -1435,6 +1457,39 @@ const HHMM_SPAN_RE = /(\d{1,2}):(\d{2})\s*[–-]\s*(\d{1,2}):(\d{2})/g;
 function spokenizeSpans(text: string): string {
   return text.replace(HHMM_SPAN_RE, (_all, h1, m1, h2, m2) =>
     formatSpan({ hour: Number(h1), minute: Number(m1) }, { hour: Number(h2), minute: Number(m2) }),
+  );
+}
+
+/** The short weekday of a window day index -- `weekdayNameOfIndex`, the one
+ *  reader of `ctx.days` (and of a day off the window's edge), cut to three
+ *  letters: "Fri". */
+function weekdayShort(ctx: ResolveContext, dayIndex: number): string {
+  return weekdayNameOfIndex(dayIndex, ctx).slice(0, 3);
+}
+
+/** DEF-0043 (R-459): the hours of a block or a job as a person says them,
+ *  for a button or a sentence: "2 pm to 10 pm". A block that crosses midnight
+ *  names both days -- "Fri 10 pm to Sat 6 am" -- so the night shift that
+ *  started yesterday is never offered under today with no day said. `bare` is
+ *  the board's own hours label (`ContextAssignment.label`, `ContextRun.span`),
+ *  read to words by `spokenizeSpans`; the days come from the block's own
+ *  minutes and `ctx.wallOf`, never a second clock formatter. */
+function spokenWhen(
+  x: { startMin: number; endMin: number },
+  bare: string,
+  ctx: ResolveContext,
+): string {
+  const s = ctx.wallOf(x.startMin);
+  const e = ctx.wallOf(x.endMin);
+  const crosses =
+    x.endMin > x.startMin &&
+    (x.endMin - x.startMin > 1440 || (e.minuteOfDay !== 0 && e.minuteOfDay <= s.minuteOfDay));
+  if (!crosses) return spokenizeSpans(bare);
+  // `wallOf` clamps a day before the window to day 0; the minutes say which.
+  const startDay = x.startMin < 0 ? -1 : s.dayIndex;
+  return (
+    `${weekdayShort(ctx, startDay)} ${spokenClock(shiftClockOf(s.minuteOfDay))} to ` +
+    `${weekdayShort(ctx, startDay + 1)} ${spokenClock(shiftClockOf(e.minuteOfDay))}`
   );
 }
 
@@ -1470,13 +1525,16 @@ function roundUpToQuarterHour(m: number): number {
  *  parses `label` back apart. */
 function elsewhereCandidate(x: ContextAssignment, ctx: ResolveContext): Candidate {
   const cellName = ctx.nodeById.get(x.nodeId)?.name ?? "";
+  const when = spokenWhen(x, x.label, ctx);
   return {
     id: x.id,
-    label: `${cellName} · ${x.productName ?? "block"} ${x.label}`,
+    // DEF-0043 (R-459): "Housing A on Cell 2, 2 pm to 10 pm" -- no middle dot,
+    // no 24-hour span; a night shift names both its days (`spokenWhen`).
+    label: `${x.productName ?? "block"} on ${cellName}, ${when}`,
     word: "",
     part: x.productName,
     cell: cellName,
-    when: x.label,
+    when,
   };
 }
 
@@ -1618,6 +1676,11 @@ export interface ResolveOptions {
   previousDayPart?: "clear" | "keep";
   /** DEF-0040 / R-461: the same, for the NEXT day's parts. */
   nextDayPart?: "clear" | "keep";
+  /** DEF-0055 / R-435: the answer to `place_or_person` when the person chose
+   *  the PLACE -- "clear Maria Lopez tomorrow" then reads "Maria Lopez" as a
+   *  place, and `readClearAsPerson` does not ask again. Absent until asked;
+   *  choosing the person needs no flag (the command itself is rewritten). */
+  clearAs?: "place";
 }
 
 function usableReason(raw: string | undefined): string | null {
@@ -2490,7 +2553,12 @@ function resolveAssignCommand(
       ? ownAll.filter((x) => x.id !== existing.assignmentId)
       : ownAll;
   const blockCandidates = (): Candidate[] =>
-    own.map((x) => ({ id: x.id, label: x.label, word: "" }));
+    own.map((x) => {
+      // DEF-0043 (R-459): "Housing A on Cell 2, 2 pm to 10 pm", days named
+      // across midnight; the bar puts its verb ("Change ...") in front.
+      const when = spokenWhen(x, x.label, ctx);
+      return { id: x.id, label: `${product.name} on ${cell.name}, ${when}`, word: "", when };
+    });
   const askBlock = (): Resolution => ({
     ok: false,
     question: {
@@ -2546,7 +2614,11 @@ function resolveAssignCommand(
         r.nodeId === cell.id && r.productId === product.id && ctx.fitsRun({ startMin, endMin }, r),
     );
     const runCandidates = (): Candidate[] =>
-      hits.map((r) => ({ id: r.id, label: r.label, word: "" }));
+      hits.map((r) => {
+        // DEF-0043 (R-459): "Join the Housing A job, 6 am to 2 pm".
+        const when = spokenWhen(r, r.span, ctx);
+        return { id: r.id, label: `Join the ${product.name} job, ${when}`, word: "", when };
+      });
     if (hits.length === 0) {
       target = { kind: "direct", productId: product.id };
     } else if (command.attach === null) {
@@ -2619,13 +2691,18 @@ function resolveAssignCommand(
   readout = spokenizeSpans(readout);
   // R-432: the same facts, said as the change never made or never tried.
   const ownBlock = target.kind === "retime";
-  const attempted = ownBlock
+  // DEF-0052 (30 Sept): the DAY and the hours, as the readout says them --
+  // in a week's lot the same person on the same cell is one line per day,
+  // and two lines must never be word for word the same. `iso` is the same
+  // token the readout carries, rendered by the bar.
+  const attemptedWho = ownBlock
     ? `${operator.displayName}'s block on ${cellName}`
     : `${operator.displayName} on ${cellName}`;
+  const attempted = spokenizeSpans(`${attemptedWho} ${iso}, ${timeText}`);
   const notTried =
     ownBlock && retime !== null
-      ? spokenizeSpans(`${attempted} stays as it was, ${retime.label}.`)
-      : `${operator.displayName} is not on ${cellName}.`;
+      ? spokenizeSpans(`${attemptedWho} ${iso} stays as it was, ${retime.label}.`)
+      : spokenizeSpans(`${operator.displayName} is not on ${cellName} ${iso}, ${timeText}.`);
 
   return {
     ok: true,
@@ -2692,7 +2769,13 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
           product: product.name,
           cell: cell.name,
           span: timeText,
-          run: { id: overlap.id, label: overlap.span, word: "" },
+          run: {
+            id: overlap.id,
+            // DEF-0043 (R-459): "Change the Housing A job, 8 am to 4 pm".
+            label: `the ${product.name} job, ${spokenWhen(overlap, overlap.span, ctx)}`,
+            word: "",
+            when: spokenWhen(overlap, overlap.span, ctx),
+          },
           same,
         },
       };
@@ -2743,11 +2826,13 @@ function resolveBookCommand(command: BookCommand, ctx: ResolveContext): Resoluti
     readout += ` Changing the job that ran ${retimeHit.label}.`;
   }
   readout = spokenizeSpans(readout);
-  const attempted = `The ${product.name} job on ${cellName}`;
+  // DEF-0052 (30 Sept): the day and the hours, as the readout says them.
+  const jobOn = `The ${product.name} job on ${cellName} ${iso}`;
+  const attempted = spokenizeSpans(`${jobOn}, ${timeText}`);
   const notTried =
     target.kind === "retime_run" && retimeHit !== null
-      ? spokenizeSpans(`${attempted} stays as it was, ${retimeHit.span}.`)
-      : `No ${product.name} job is booked on ${cellName}.`;
+      ? spokenizeSpans(`${jobOn} stays as it was, ${retimeHit.span}.`)
+      : `No ${product.name} job is booked on ${cellName} ${iso}.`;
 
   return {
     ok: true,
@@ -2876,12 +2961,17 @@ function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): 
             ctx.overlaps({ startMin, endMin }, x),
         );
   const blockCandidates = (): Candidate[] =>
-    hits.map((x) => ({
-      id: x.id,
-      label: `${x.productName ?? "block"} ${x.label}`,
-      word: "",
-      part: x.productName,
-    }));
+    hits.map((x) => {
+      // DEF-0043 (R-459): a night shift names both its days (`spokenWhen`).
+      const when = spokenWhen(x, x.label, ctx);
+      return {
+        id: x.id,
+        label: `${x.productName ?? "block"} ${when}`,
+        word: "",
+        part: x.productName,
+        when,
+      };
+    });
   // S49: a named cell with none of the person's blocks (or no cell named at
   // all) looks further -- the person's blocks that day/window on every OTHER
   // cell. `flagElsewhere` (the Question's `elsewhere: true`) is set ONLY
@@ -2914,8 +3004,14 @@ function resolveUnassignCommand(command: UnassignCommand, ctx: ResolveContext): 
         intent: "unassign",
         assignmentId: hit.id,
         readout,
-        attempted: `${operator.displayName}'s block on ${cellName}`,
-        notTried: `${operator.displayName} stays on ${cellName}.`,
+        // DEF-0052 (30 Sept): the day and the block's own hours, the way the
+        // readout says them -- the week clear has one of these per day.
+        attempted: spokenizeSpans(
+          `${operator.displayName}'s block on ${cellName} ${iso}, ${spokenWhen(hit, hit.label, ctx)}`,
+        ),
+        notTried: spokenizeSpans(
+          `${operator.displayName} stays on ${cellName} ${iso}, ${spokenWhen(hit, hit.label, ctx)}.`,
+        ),
       },
     };
   };
@@ -3048,12 +3144,17 @@ function resolveMoveCommand(
             ctx.overlaps({ startMin: dayStart, endMin: dayEnd }, x),
         );
   const blockCandidates = (): Candidate[] =>
-    hits.map((x) => ({
-      id: x.id,
-      label: `${x.productName ?? "block"} ${x.label}`,
-      word: "",
-      part: x.productName,
-    }));
+    hits.map((x) => {
+      // DEF-0043 (R-459): a night shift names both its days (`spokenWhen`).
+      const when = spokenWhen(x, x.label, ctx);
+      return {
+        id: x.id,
+        label: `${x.productName ?? "block"} ${when}`,
+        word: "",
+        part: x.productName,
+        when,
+      };
+    });
   // S49: `wrongCellNamed` gates both the Question's `elsewhere: true` and
   // whether one block is taken without asking -- a cell WAS named and had
   // nothing (D125: "a move that would take its one block without asking
@@ -3364,14 +3465,18 @@ function resolveMoveCommand(
       target,
       readout,
       // R-432: who and where; and what stays if this is never tried.
-      attempted:
+      // DEF-0052 (30 Sept): the day (`whenText`, the readout's own token) and
+      // the hours, so no two lines of a lot's answer are word for word alike.
+      attempted: spokenizeSpans(
         destCellName !== null
-          ? `${operator.displayName} on ${destCellName}`
-          : `${operator.displayName}'s block on ${blkCellName}`,
-      notTried:
+          ? `${operator.displayName} on ${destCellName} ${whenText}, ${arrow}`
+          : `${operator.displayName}'s block on ${blkCellName} ${whenText}, ${arrow}`,
+      ),
+      notTried: spokenizeSpans(
         destCellName !== null
-          ? `${operator.displayName} stays on ${blkCellName}.`
-          : `${operator.displayName}'s block on ${blkCellName} stays as it was, ${formatSpan(clockOfOffset(blk.startMin, ctx), clockOfBlockEnd(blk.startMin, blk.endMin, ctx))}.`,
+          ? `${operator.displayName} stays on ${blkCellName} ${whenText}, ${spokenWhen(blk, blk.label, ctx)}.`
+          : `${operator.displayName}'s block on ${blkCellName} ${whenText} stays as it was, ${formatSpan(clockOfOffset(blk.startMin, ctx), clockOfBlockEnd(blk.startMin, blk.endMin, ctx))}.`,
+      ),
       ...(override ? { override } : {}),
       ...(areaOverride ? { areaOverride } : {}),
     },
@@ -3432,11 +3537,12 @@ function resolveHeadcountCommand(command: HeadcountCommand, ctx: ResolveContext)
       nodeId: cell.id,
       headcount: command.headcount,
       readout,
-      attempted: `The ${product.name} job on ${cellName}`,
+      // DEF-0052 (30 Sept): the day the readout names, on both lines.
+      attempted: `The ${product.name} job on ${cellName} ${whenIso}`,
       notTried:
         run.headcount !== null
-          ? `The ${product.name} job on ${cellName} stays at ${peopleCount(run.headcount)}.`
-          : `The ${product.name} job on ${cellName} stays as it was.`,
+          ? `The ${product.name} job on ${cellName} ${whenIso} stays at ${peopleCount(run.headcount)}.`
+          : `The ${product.name} job on ${cellName} ${whenIso} stays as it was.`,
     },
   };
 }
@@ -4751,9 +4857,11 @@ function planClear(
       readout: spokenizeSpans(
         `The ${st.run.productName === null ? "job" : `${st.run.productName} job`} is off ${runCellName} ${iso}; that was ${st.run.span}${headcountPhrase}.`,
       ),
-      attempted: jobPhrase(st.run, runCellName),
+      // DEF-0052 (30 Sept): the day and the job's hours, as the readout
+      // says them -- the week clear removes one job per day on a cell.
+      attempted: spokenizeSpans(`${jobPhrase(st.run, runCellName)} ${iso}, ${st.run.span}`),
       notTried: spokenizeSpans(
-        `${jobPhrase(st.run, runCellName)} stays as it was, ${st.run.span}.`,
+        `${jobPhrase(st.run, runCellName)} ${iso} stays as it was, ${st.run.span}.`,
       ),
     });
   }
@@ -4852,6 +4960,8 @@ function buildRunTrim(
   const runCell = ctx.nodeById.get(run.nodeId) as Node;
   const cellName = cellDisplayName(runCell, ctx, byPath);
   const job = jobPhrase(run, cellName);
+  const cutDayIndex = side === "before" ? cut.first.startDay : cut.last.endDay;
+  const clearedIso = ctx.days.find((d) => d.index === cutDayIndex)?.iso ?? "";
   // The crew the clear leaves alone are SAID to stay (R-461: "the readout
   // says exactly which parts went and which stayed").
   const isAre = stayers.length === 1 ? "is" : "are";
@@ -4910,8 +5020,10 @@ function buildRunTrim(
     nodeId: run.nodeId,
     range: { startMin: kept.startMin, endMin: kept.endMin },
     readout,
-    attempted: job,
-    notTried: spokenizeSpans(`${job} stays as it was, ${run.span}.`),
+    // DEF-0052 (30 Sept): the day the cut lands on, as a token the bar
+    // renders, and the job's hours -- never two lines word for word alike.
+    attempted: spokenizeSpans(`${job} ${clearedIso}, ${run.span}`),
+    notTried: spokenizeSpans(`${job} ${clearedIso} stays as it was, ${run.span}.`),
   };
 }
 
@@ -6025,7 +6137,8 @@ function absenceOutcome(
     reason,
     readout: `${person.displayName} is recorded as off ${dayPhrase}.`,
     attempted: `An absence for ${person.displayName} ${dayPhrase}`,
-    notTried: `No absence is recorded for ${person.displayName}.`,
+    // DEF-0052 (30 Sept): the same day phrase the readout carries.
+    notTried: `No absence is recorded for ${person.displayName} ${dayPhrase}.`,
   };
   // The record rides BESIDE the removals (like a job step), so the lot is
   // always a several here -- even of no removal at all ("the absence is
@@ -6406,6 +6519,118 @@ function expandRepeatUnassign(
   return wrapMany(commands);
 }
 
+/** DEF-0055: what "clear <word>" with no other place turns out to be. */
+export type ClearReading =
+  | { kind: "none" }
+  | { kind: "person"; command: UnassignCommand }
+  | { kind: "ask"; question: Question };
+
+/**
+ * DEF-0055 (30 Sept, tester) / R-430 / R-435: the grammar reads whatever
+ * follows "clear" as a PLACE with the reserved person "everyone"
+ * (`parse.ts`, R-407) -- it has no board to tell it that "Maria Lopez" is a
+ * person. The resolver has `ctx`, so it decides:
+ *
+ *   - the word matches a person and no cell or line: the sentence is about
+ *     that person -- the SAME command "remove <person> ..." parses to
+ *     (operator the person, no place), so it reaches exactly the resolver
+ *     that sentence reaches (a day: which block, or the removal; a week:
+ *     `expandRepeatUnassign`'s named-person branch);
+ *   - it matches BOTH: a question with both as buttons, never a quiet pick;
+ *   - it matches NEITHER but a person's name is close: the nearest people and
+ *     the nearest places, together (`place_or_person`); with no person close
+ *     it stays `none`, and the bar's own dead end (DEF-0051's fallback, the
+ *     caller's cells) answers exactly as before.
+ *
+ * Only the one shape `operator: EVERYONE` with exactly one place word is ever
+ * looked at: "clear Cell 2 tomorrow", "clear Line 1 for the rest of the
+ * week" match a place and no person, so they stay `none`. `options.clearAs`
+ * is the person's answer "the place" to the question this asks.
+ */
+export function readClearAsPerson(
+  command: Command,
+  ctx: ResolveContext,
+  options?: ResolveOptions,
+): ClearReading {
+  if (
+    command.intent !== "unassign" ||
+    !isEveryone(command.operator) ||
+    command.place.length !== 1 ||
+    options?.clearAs === "place"
+  ) {
+    return { kind: "none" };
+  }
+  const word = command.place[0];
+  const byPath = buildPathIndex(ctx.nodeById);
+  const allNodes = [...ctx.nodeById.values()] as Node[];
+  const activeOperators = ctx.operators.filter((o) => o.active);
+  const placeHits = matchName(word, allNodes, (n) => n.name);
+  const personResult = resolvePersonStep(word, ctx);
+  const personHits: OperatorLike[] = personResult.ok
+    ? [personResult.operator]
+    : personResult.question.kind === "ambiguous"
+      ? personResult.question.candidates
+          .map((c) => activeOperators.find((o) => o.id === c.id))
+          .filter((o): o is OperatorLike => o !== undefined)
+      : [];
+
+  if (placeHits.length === 0 && personHits.length > 0) {
+    return {
+      kind: "person",
+      command: {
+        ...command,
+        operator: personHits.length === 1 ? personHits[0].displayName : word,
+        place: [],
+      },
+    };
+  }
+  if (placeHits.length > 0 && personHits.length > 0) {
+    const shownPlaces = placeHits.filter(
+      (n, i) => placeHits.findIndex((m) => m.name === n.name) === i,
+    );
+    return {
+      kind: "ask",
+      question: {
+        kind: "place_or_person",
+        text: word,
+        exact: true,
+        candidates: [
+          ...personHits.slice(0, 4).map((o) => ({
+            id: o.id,
+            label: `The person ${o.displayName}`,
+            word: o.displayName,
+            reading: "person" as const,
+          })),
+          ...shownPlaces.slice(0, 4).map((n) => ({
+            id: n.id,
+            label: `The place ${n.name}`,
+            word: n.name,
+            reading: "place" as const,
+          })),
+        ],
+      },
+    };
+  }
+  if (placeHits.length === 0 && personHits.length === 0) {
+    const nearPeople = operatorSuggestions(word, activeOperators);
+    if (nearPeople.length === 0) return { kind: "none" };
+    const nearPlaces = nodeSuggestions(word, allNodes, byPath);
+    return {
+      kind: "ask",
+      question: {
+        kind: "place_or_person",
+        text: word,
+        exact: false,
+        candidates: [
+          ...nearPeople.map((c) => ({ ...c, reading: "person" as const })),
+          ...nearPlaces.map((c) => ({ ...c, reading: "place" as const })),
+        ],
+      },
+    };
+  }
+  return { kind: "none" };
+}
+
 /**
  * S55 (D130 item 1): the board's own expansion step, called ONCE before the
  * bar's `several` intercept so the rules path and a future model path
@@ -6433,6 +6658,10 @@ export function expandCommand(
   // existing write, unchanged (`resolveCommand`'s own new branch does it).
   if (command.intent === "headcount") return { ok: true, command };
   if (command.intent === "unassign") {
+    // DEF-0055: "clear Maria Lopez tomorrow" is about the person, not a cell.
+    const reading = readClearAsPerson(command, ctx, options);
+    if (reading.kind === "person") return expandCommand(reading.command, ctx, options);
+    if (reading.kind === "ask") return { ok: false, question: reading.question };
     if (command.until !== null) return expandAbsence(command, ctx, options);
     // S72-e (F-224, R-416, R-435): "clear Cell 5 this week"/"... for the
     // whole week"/"... next week" -- checked BEFORE the plain `isEveryone`
@@ -6507,6 +6736,10 @@ function describeQuestionRaw(q: Question): string {
       return `Which ${fieldWord(q.field)}? "${q.text}" matches ${q.candidates.length}:`;
     case "unknown":
       return `No ${fieldWord(q.field)} called "${q.text}" on this board.`;
+    case "place_or_person":
+      return q.exact
+        ? `"${q.text}" is the name of a person and of a place on this board. Which did you mean?`
+        : `No cell or person called "${q.text}" on this board. Did you mean one of these?`;
     case "not_offered":
       return `${q.product} is not made at ${q.cell}, so it cannot be scheduled there.`;
     case "place_mismatch": {
@@ -6562,24 +6795,24 @@ function describeQuestionRaw(q: Question): string {
       return q.text;
     case "run_exists":
       if (q.runs.length === 1) {
-        return `A ${q.product} job is already booked on ${q.cell}, ${q.runs[0].label}. Join it, or make a separate block?`;
+        return `A ${q.product} job is already booked on ${q.cell}, ${q.runs[0].when ?? q.runs[0].label}. Join it, or make a separate block?`;
       }
       return `${q.runs.length} ${q.product} jobs are already booked on ${q.cell}. Join one, or make a separate block?`;
     case "block_exists":
       if (q.blocks.length === 1) {
         if (q.same) {
-          return `${q.person} is already on ${q.product} at ${q.cell} ${q.blocks[0].label} — nothing to change. Add a separate block?`;
+          return `${q.person} is already on ${q.product} at ${q.cell} ${q.blocks[0].when ?? q.blocks[0].label} — nothing to change. Add a separate block?`;
         }
-        return `${q.person} is already on ${q.product} at ${q.cell} ${q.blocks[0].label}. Change it to ${q.span}, or add a separate block?`;
+        return `${q.person} is already on ${q.product} at ${q.cell} ${q.blocks[0].when ?? q.blocks[0].label}. Change it to ${q.span}, or add a separate block?`;
       }
-      return `${q.person} already has ${q.blocks.length} ${q.product} blocks at ${q.cell} (${q.blocks.map((b) => b.label).join(", ")}). Change one to ${q.span}, or add a separate block?`;
+      return `${q.person} already has ${q.blocks.length} ${q.product} blocks at ${q.cell} (${q.blocks.map((b) => b.when ?? b.label).join(", ")}). Change one to ${q.span}, or add a separate block?`;
     case "block_gone":
       return `That ${q.product} block of ${q.person}'s at ${q.cell} is no longer on the board. Add it as a new block?`;
     case "job_exists":
       if (q.same) {
-        return `A ${q.product} job is already booked on ${q.cell} ${q.run.label} — nothing to change.`;
+        return `A ${q.product} job is already booked on ${q.cell} ${q.run.when ?? q.run.label} — nothing to change.`;
       }
-      return `A ${q.product} job is already booked on ${q.cell} ${q.run.label}. Change it to ${q.span}, or pick other hours?`;
+      return `A ${q.product} job is already booked on ${q.cell} ${q.run.when ?? q.run.label}. Change it to ${q.span}, or pick other hours?`;
     case "job_in_the_way":
       return `${q.cell} already runs ${q.other}; a cell runs one job at a time. Pick other hours, or change that job on the board.`;
     case "job_gone":
@@ -6603,9 +6836,11 @@ function describeQuestionRaw(q: Question): string {
         // (`part` plus one space, or the "block" fallback) is stripped to
         // get the bare time back out.
         const prefix = `${candidate.part ?? "block"} `;
-        const when = candidate.label.startsWith(prefix)
-          ? candidate.label.slice(prefix.length)
-          : candidate.label;
+        const when =
+          candidate.when ??
+          (candidate.label.startsWith(prefix)
+            ? candidate.label.slice(prefix.length)
+            : candidate.label);
         return candidate.part
           ? `Remove ${q.person}'s ${candidate.part} block on ${q.cell}, ${when}?`
           : `Remove ${q.person}'s block on ${q.cell}, ${when}?`;

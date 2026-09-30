@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import {
   buildSchedulerErrorToast,
+  useSchedulerToast,
+  useToastStore,
   type ToastResolveCtx,
 } from "@/features/board/hooks/useSchedulerToast";
-import type { SchedulerError } from "@/lib/api";
+import { describeSchedulerError, type SchedulerError } from "@/lib/api";
 
 /**
  * R-D37: "Capacity, eligibility and run-overlap errors already name the
@@ -207,5 +210,45 @@ describe("buildSchedulerErrorToast (R-D37)", () => {
       expect(t.message).toContain("Sam Torres");
       expect(t.message).toContain("on leave");
     });
+  });
+});
+
+describe("R-465 (S195-D): a capacity refusal for a block she cannot read says the place, in every reader", () => {
+  const SAID = "Sam Torres is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+  const err: SchedulerError = {
+    kind: "CapacityExceeded",
+    operatorId: "op1",
+    peak: 2,
+    cap: 1,
+    timerange: "",
+    elsewhere: SAID,
+  };
+  const ctx: ToastResolveCtx = { operatorById: new Map([["op1", { displayName: "Sam Torres" }]]) };
+
+  it("ST-1: the toast's own message is the sentence -- no numbers, no 'try the split' (there is nothing to split)", () => {
+    const t = buildSchedulerErrorToast(err, ctx);
+    expect(t).toEqual({ message: SAID, kind: "crit" });
+    expect(t.message).not.toMatch(/%|split/);
+  });
+
+  it("ST-2: describeSchedulerError says it too, for every reader that has no operator list (the pop-ups, the bar's report)", () => {
+    expect(describeSchedulerError(err)).toBe(SAID);
+    // Without it, today's words are untouched.
+    const { elsewhere: _elsewhere, ...plain } = err as SchedulerError & { elsewhere?: string };
+    expect(describeSchedulerError(plain as SchedulerError)).toBe(
+      "Operator op1 would reach 200% of capacity (limit 100%).",
+    );
+  });
+
+  it("ST-3: `refused` pushes the message exactly as said -- no ' — reverted.' after a plain fact", () => {
+    useToastStore.setState({ toasts: [] });
+    const { result } = renderHook(() => useSchedulerToast());
+    act(() => result.current.refused(SAID));
+    expect(useToastStore.getState().toasts.map((x) => x.message)).toEqual([SAID]);
+    act(() => result.current.reverted("A block"));
+    expect(useToastStore.getState().toasts.map((x) => x.message)).toEqual([
+      SAID,
+      "A block — reverted.",
+    ]);
   });
 });

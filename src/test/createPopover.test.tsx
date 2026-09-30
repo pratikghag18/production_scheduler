@@ -18,6 +18,7 @@ import {
   type PopoverConfirmHandle,
 } from "@/features/board/components/CreatePopover";
 import type { PopupReporter } from "@/features/board/store/commandConversation";
+import { CREATE_WAITING } from "@/features/board/lib/popupWords";
 import type { ShiftChip } from "@/features/board/hooks/useDragGesture";
 import type { Product, BoardOperator, Skill } from "@/lib/api";
 import type { AbsenceRow } from "@/lib/absence";
@@ -648,10 +649,16 @@ describe("CreatePopover — what it tells the command bar (F-167)", () => {
     first.onSubmitDirect.mockResolvedValue({ kind: "written", id: "new-assignment-1" });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await act(async () => {});
-    expect(written).toEqual([{ kind: "written", id: "new-assignment-1" }]);
+    // S195-D (CONTRACT CHANGED, CLAUDE.md 4: not wrong when written): a pop-up
+    // a sentence opened that is ON SCREEN now says so first, in the one plain
+    // sentence (DEF-0054) -- a note, not an answer; the answer follows it.
+    expect(written).toEqual([
+      { kind: "handed_off", what: CREATE_WAITING },
+      { kind: "written", id: "new-assignment-1" },
+    ]);
     // A close after a successful Create must not turn it into a cancel.
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(written).toHaveLength(1);
+    expect(written).toHaveLength(2);
 
     cleanup();
 
@@ -668,9 +675,10 @@ describe("CreatePopover — what it tells the command bar (F-167)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await act(async () => {});
-    expect(refused).toHaveLength(1);
-    expect(refused[0].kind).toBe("refused");
-    expect(refused[0].message).toContain(
+    expect(refused).toHaveLength(2);
+    expect(refused[0].kind).toBe("handed_off");
+    expect(refused[1].kind).toBe("refused");
+    expect(refused[1].message).toContain(
       "That person does not belong to this part of the structure.",
     );
 
@@ -685,7 +693,10 @@ describe("CreatePopover — what it tells the command bar (F-167)", () => {
       onResult: (r) => cancelled.push(r),
     });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(cancelled).toEqual([{ kind: "cancelled" }]);
+    expect(cancelled).toEqual([
+      { kind: "handed_off", what: CREATE_WAITING },
+      { kind: "cancelled" },
+    ]);
     expect(third.onSubmitDirect).not.toHaveBeenCalled();
     expect(third.onCancel).toHaveBeenCalledTimes(1);
 
@@ -706,10 +717,44 @@ describe("CreatePopover — what it tells the command bar (F-167)", () => {
     fourth.onSubmitDirect.mockResolvedValue("handed-off");
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await act(async () => {});
-    expect(handed).toEqual([{ kind: "handed_off", what: "split coverage" }]);
+    // S195-D: the hand-off itself is said by the split pop-up, in the person's
+    // own name (`openSplitPopover`) -- this pop-up says nothing more, so it
+    // can never overwrite that sentence with its own.
+    expect(handed).toEqual([{ kind: "handed_off", what: CREATE_WAITING }]);
     // Still open: a terminal result from the pop-up that took it over lands.
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(handed).toEqual([{ kind: "handed_off", what: "split coverage" }, { kind: "cancelled" }]);
+    expect(handed).toEqual([{ kind: "handed_off", what: CREATE_WAITING }, { kind: "cancelled" }]);
+  });
+
+  it("CP-S195-1: a pop-up a sentence opened that is ON SCREEN (a warning to decide) says it stands -- once under StrictMode; a hidden auto-press says nothing", () => {
+    const shown: { kind: string; what?: string }[] = [];
+    renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      strict: true,
+      onResult: (r) => shown.push(r),
+    });
+    expect(shown).toEqual([{ kind: "handed_off", what: CREATE_WAITING }]);
+
+    cleanup();
+
+    // Concealed for a clean auto-press (F-205): nothing is on screen, so the
+    // bar is not told one stands -- it would say "finish it on the board"
+    // about a form nobody can see. Only the write's own answer follows.
+    const hidden: { kind: string; what?: string }[] = [];
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      onResult: (r) => hidden.push(r),
+    });
+    expect(hidden.filter((r) => r.kind === "handed_off")).toEqual([]);
   });
 });
 

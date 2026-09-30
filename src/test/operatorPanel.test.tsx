@@ -20,7 +20,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import fs from "node:fs";
-import type { BoardOperator, ShiftTemplate } from "@/lib/api";
+import type { BlockElsewhere, BoardOperator, ShiftTemplate } from "@/lib/api";
 import { OperatorPanel } from "@/features/board/components/OperatorPanel";
 import { RAIL_MAX_WIDTH, RAIL_MIN_WIDTH } from "@/features/board/lib/railWidth";
 
@@ -489,5 +489,140 @@ describe("OperatorPanel: the shift chips and the shift-based default list (S66-c
       expect(errorSpy).not.toHaveBeenCalled();
       errorSpy.mockRestore();
     });
+  });
+});
+
+/**
+ * R-465 (DEF-0053, S195-E): the rail says "booked (Cell 4, 6 am to 2 pm)" for a
+ * person who is busy on a place the viewer cannot read. The window is Chicago's
+ * 15 Jan 2026 (local midnight = 06:00Z); Priya is on Cell 4 (Line 2) from 6 am to
+ * 2 pm local = 12:00Z to 20:00Z, and the rail's clock is frozen at 10 am there.
+ */
+describe("OperatorPanel: busy on a place the viewer cannot read (R-465)", () => {
+  const PRIYA: BoardOperator = { ...ELENA, id: "op-priya", displayName: "Priya Shah" };
+  const WINDOW_START = new Date("2026-01-15T06:00:00.000Z");
+  const NOW_FROZEN = new Date("2026-01-15T16:00:00.000Z"); // 10 am in Chicago
+  const SHIFT_ONE: ShiftTemplate = {
+    id: "t-1",
+    name: "Days",
+    shifts: [{ id: "s-1", name: "Shift 1", startMin: 360, endMin: 840, breaks: [] }],
+  } as unknown as ShiftTemplate;
+  const CELL_4: BlockElsewhere = {
+    operatorId: PRIYA.id,
+    nodeName: "Cell 4",
+    parentName: "Line 2",
+    timerange: '["2026-01-15 12:00:00+00","2026-01-15 20:00:00+00")',
+    efficiency: 1,
+  };
+
+  function renderRail(
+    blocksElsewhere: readonly BlockElsewhere[] | undefined,
+    over: { zone?: string } = {},
+  ) {
+    const ui = (blocks: readonly BlockElsewhere[] | undefined) => (
+      <OperatorPanel
+        operators={[PRIYA]}
+        hereOperatorIds={new Set([PRIYA.id])}
+        skillById={new Map()}
+        nodeById={new Map()}
+        assignmentsByOperator={new Map()}
+        windowStart={WINDOW_START}
+        windowMinutes={1440}
+        zone={over.zone ?? "America/Chicago"}
+        capacityCap={1}
+        rootTemplate={SHIFT_ONE}
+        now={NOW_FROZEN}
+        open={true}
+        onToggleOpen={vi.fn()}
+        dragApi={dragApi()}
+        blocksElsewhere={blocks}
+      />
+    );
+    const utils = render(ui(blocksElsewhere));
+    return { ...utils, again: (b: readonly BlockElsewhere[] | undefined) => utils.rerender(ui(b)) };
+  }
+
+  function chipOf(name: string): HTMLElement {
+    return screen.getByText(name).closest("div") as HTMLElement;
+  }
+
+  it("PE-1: prints the word, the place and the hours in brackets, and the full sentence as the title", () => {
+    renderRail([CELL_4]);
+    const chip = chipOf("Priya Shah");
+    expect(within(chip).getByText("booked")).not.toBeNull();
+    expect(within(chip).getByText("(Cell 4, 6 am to 2 pm)")).not.toBeNull();
+    expect(chip.getAttribute("title")).toBe(
+      "Priya Shah is on Cell 4 in Line 2 today from 6 am to 2 pm.",
+    );
+  });
+
+  it("PE-2: the brackets never carry the parent or a product", () => {
+    renderRail([CELL_4]);
+    const brackets = within(chipOf("Priya Shah")).getByText(/^\(Cell 4/);
+    expect(brackets.textContent).not.toMatch(/Line 2/);
+  });
+
+  it("PE-3: a viewer of the whole plant gets an empty set and the rail reads exactly as before", () => {
+    renderRail([]);
+    const chip = chipOf("Priya Shah");
+    expect(within(chip).getByText("free")).not.toBeNull();
+    expect(chip.textContent).not.toMatch(/\(/);
+    expect(chip.getAttribute("title")).toBeNull();
+  });
+
+  it("PE-4: while the read is pending the rail says what it said before it existed, then 'booked' when it lands", () => {
+    const { again } = renderRail(undefined);
+    const chip = chipOf("Priya Shah");
+    expect(within(chip).getByText("free")).not.toBeNull();
+    expect(chip.textContent).not.toMatch(/booked|\(/);
+    again([CELL_4]);
+    expect(within(chipOf("Priya Shah")).getByText("booked")).not.toBeNull();
+  });
+
+  it("PE-5: a read that FAILED is the same as one still pending: undefined, today's words, nobody hidden", () => {
+    // The page hands the panel `query.data`, which is undefined on an error too.
+    renderRail(undefined);
+    expect(screen.getByText("Priya Shah")).not.toBeNull();
+    expect(within(chipOf("Priya Shah")).getByText("free")).not.toBeNull();
+  });
+
+  it("PE-6: the hours are the plant's zone -- the same block reads 9 pm to 5 am in Tokyo", () => {
+    renderRail([CELL_4], { zone: "Asia/Tokyo" });
+    expect(within(chipOf("Priya Shah")).getByText("(Cell 4, 9 pm to 5 am)")).not.toBeNull();
+  });
+
+  it("PE-7: two blocks in the band read the first and 'and 1 more'", () => {
+    renderRail([
+      { ...CELL_4, timerange: '["2026-01-15 12:00:00+00","2026-01-15 16:00:00+00")' },
+      {
+        ...CELL_4,
+        nodeName: "Cell 5",
+        timerange: '["2026-01-15 16:00:00+00","2026-01-15 20:00:00+00")',
+      },
+    ]);
+    const chip = chipOf("Priya Shah");
+    expect(within(chip).getByText("booked")).not.toBeNull();
+    expect(within(chip).getByText("(Cell 4, 6 am to 10 am and 1 more)")).not.toBeNull();
+  });
+
+  it("PE-8: a block elsewhere outside the band is neither counted nor named", () => {
+    renderRail([{ ...CELL_4, timerange: '["2026-01-15 21:00:00+00","2026-01-15 23:00:00+00")' }]);
+    const chip = chipOf("Priya Shah");
+    expect(within(chip).getByText("free")).not.toBeNull();
+    expect(chip.textContent).not.toMatch(/\(/);
+  });
+
+  it("PE-9: the brackets are the part that truncates -- the word never shrinks, the place ellipsises (stylesheet)", () => {
+    const css = fs
+      .readFileSync(
+        `${process.cwd()}/src/features/board/components/OperatorPanel.module.css`,
+        "utf8",
+      )
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    const words = /\.words\s*\{([^}]*)\}/.exec(css);
+    const place = /\.place\s*\{([^}]*)\}/.exec(css);
+    expect(words![1]).toMatch(/flex:\s*none/);
+    expect(place![1]).toMatch(/text-overflow:\s*ellipsis/);
+    expect(place![1]).toMatch(/min-width:\s*0/);
   });
 });

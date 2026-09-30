@@ -246,6 +246,33 @@ describe("the panel", () => {
     expect(screen.queryByLabelText("Person")).toBeNull();
     expect(screen.queryByRole("button", { name: "Record absence" })).toBeNull();
   });
+
+  // DEF-0044's last item (30 Sept, tester): while the permission answer is
+  // pending the panel shows only "Loading…" (no table, so no Remove); the
+  // answer then decides each row. Held here so neither a table drawn early
+  // nor a Remove guessed for a pending answer goes unnoticed.
+  it("while the permission answer is pending there is no table and no Remove; it then decides per person", async () => {
+    let settle!: (ids: string[]) => void;
+    h.fetchRecordableAbsencePeople.mockReset().mockReturnValue(
+      new Promise<string[]>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    wrap(<AbsencesPanel />);
+    await waitFor(() => expect(h.fetchRecordableAbsencePeople).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(screen.queryByText("Sick leave")).toBeNull();
+    settle(["O1"]);
+    expect(await screen.findByRole("button", { name: "Remove" })).toBeTruthy();
+  });
+
+  it("an answer that does not name the row's person leaves the row listed with no Remove", async () => {
+    h.fetchRecordableAbsencePeople.mockReset().mockResolvedValue(["O2"]);
+    wrap(<AbsencesPanel />);
+    expect(await screen.findByText("Sick leave")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
 });
 
 /* ===========================================================================

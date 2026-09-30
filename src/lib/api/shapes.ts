@@ -1042,35 +1042,55 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
   };
 }
 
+/**
+ * R-465 (DEF-0053, migration 0085): the server counts every block of a person
+ * wherever it is, so a row here may sit on a place the caller cannot read.
+ * For such a row (`outside: true`) the server says the place and the hours and
+ * nothing else: `assignmentId`, `nodeId` and `productName` arrive null. A row
+ * on a place the caller reads (`outside: false`) always carries both ids --
+ * the parser refuses one that does not, so a consumer may narrow on `outside`.
+ */
 export interface CapacityProbeOverlap {
-  assignmentId: string;
-  nodeId: string;
+  assignmentId: string | null;
+  nodeId: string | null;
   nodeName: string;
+  /** The name of the node's parent ("Line 2" for Cell 4); null at a root. */
+  parentName: string | null;
   productName: string | null;
   timerange: string;
   efficiency: number;
+  outside: boolean;
 }
 
 function parseCapacityProbeOverlap(v: Json): CapacityProbeOverlap | null {
   if (!isJsonObject(v)) return null;
   const { assignment_id, node_id, node_name, product_name, timerange, efficiency } = v;
+  // `outside` and `parent_name` are absent from a server older than 0085;
+  // absent reads as a row the caller can read, with no parent named.
+  const outside = v.outside === undefined ? false : v.outside;
+  const parent_name = v.parent_name === undefined ? null : v.parent_name;
   if (
-    !isStr(assignment_id) ||
-    !isStr(node_id) ||
+    !isBool(outside) ||
+    !isStrOrNull(assignment_id) ||
+    !isStrOrNull(node_id) ||
     !isStr(node_name) ||
+    !isStrOrNull(parent_name) ||
     !isStrOrNull(product_name) ||
     !isStr(timerange) ||
     !isNum(efficiency)
   ) {
     return null;
   }
+  if (!outside && (assignment_id === null || node_id === null)) return null;
   return {
     assignmentId: assignment_id,
     nodeId: node_id,
     nodeName: node_name,
+    parentName: parent_name,
     productName: product_name,
     timerange,
     efficiency,
+    outside,
   };
 }
 
@@ -1088,6 +1108,46 @@ export function parseCapacityProbe(json: Json): CapacityProbe | null {
   const parsedOverlapping = parseArrayOf(overlapping, parseCapacityProbeOverlap);
   if (parsedOverlapping === null) return null;
   return { fits, peak, cap, overlapping: parsedOverlapping };
+}
+
+/**
+ * R-465 (DEF-0053, migration 0085): one row of `operator_blocks_elsewhere` --
+ * a block of a person the caller can read, on a place the caller CANNOT read.
+ * The place (its name and its parent's), the hours and the share; never a
+ * product, a run or an id. `parentName` is null for a place at a root.
+ */
+export interface BlockElsewhere {
+  operatorId: string;
+  nodeName: string;
+  parentName: string | null;
+  timerange: string;
+  efficiency: number;
+}
+
+function parseBlockElsewhere(v: Json): BlockElsewhere | null {
+  if (!isJsonObject(v)) return null;
+  const { operator_id, node_name, parent_name, timerange, efficiency } = v;
+  if (
+    !isStr(operator_id) ||
+    !isStr(node_name) ||
+    !isStrOrNull(parent_name) ||
+    !isStr(timerange) ||
+    !isNum(efficiency)
+  ) {
+    return null;
+  }
+  return {
+    operatorId: operator_id,
+    nodeName: node_name,
+    parentName: parent_name,
+    timerange,
+    efficiency,
+  };
+}
+
+/** The whole answer, or null when any row is malformed (never half a set). */
+export function parseBlocksElsewhere(json: Json): BlockElsewhere[] | null {
+  return parseArrayOf(json, parseBlockElsewhere);
 }
 
 export interface EligibilityResult {

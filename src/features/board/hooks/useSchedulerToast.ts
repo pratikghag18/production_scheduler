@@ -125,6 +125,9 @@ export function buildSchedulerErrorToast(
 ): { message: string; kind: ToastKind } {
   switch (err.kind) {
     case "CapacityExceeded": {
+      // R-465 (S195-D): busy on a place the caller cannot read -- the place
+      // and the hours, in the words the bar says them in.
+      if (err.elsewhere !== undefined) return { message: err.elsewhere, kind: "crit" };
       // P1-4e D61: the split popover now opens PROACTIVELY from a
       // `capacity_probe` before the write is even sent, so this path is
       // the race-only fallback — the probe said "fits" and the write
@@ -255,6 +258,9 @@ export function useSchedulerToast() {
      *  "warn", not "crit") passes it through explicitly rather than losing
      *  it now that this function, not that one, appends the suffix. */
     reverted: (message: string, kind: ToastKind = "crit") => push(`${message} — reverted.`, kind),
+    /** S195-D (R-465): a refusal that is a plain fact, with no rollback to
+     *  report -- the message exactly as said, no " — reverted." after it. */
+    refused: (message: string, kind: ToastKind = "crit") => push(message, kind),
     /** D37's one true path: a rejected edit's typed error -> a sentence,
      *  built by `buildSchedulerErrorToast` above. */
     schedulerError: (err: SchedulerError, ctx?: ToastResolveCtx) => {

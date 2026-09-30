@@ -99,6 +99,15 @@ export type SchedulerError =
       peak: number;
       cap: number;
       timerange: string;
+      /**
+       * R-465 (S195-D): set by the CLIENT, never parsed from the server --
+       * the one plain sentence "<person> is already on <place> <day> from
+       * <hours>." when a follow-up `capacity_probe` found that the block
+       * making this person busy sits on a place the caller cannot read. The
+       * place and the hours, never the product or the job. Every reader of a
+       * capacity refusal that has it says it instead of the numbers.
+       */
+      elsewhere?: string;
     }
   | {
       kind: "NotEligible";
@@ -325,7 +334,7 @@ export type SchedulerError =
    * `requireWritten`. A policy's `USING` clause FILTERS rather than raising,
    * so a refused UPDATE or DELETE succeeds with zero rows and no error at all.
    */
-  | { kind: "WriteRefused" }
+  | { kind: "WriteRefused"; gone?: "block" | "job" }
   /** SQLSTATE 23505. `constraint` is the constraint name, when the message carries one. */
   | { kind: "DuplicateValue"; constraint?: string }
   /**
@@ -924,6 +933,8 @@ export function shapeMismatch(rpc: string, detail: string): SchedulerError {
 export function describeSchedulerError(e: SchedulerError): string {
   switch (e.kind) {
     case "CapacityExceeded": {
+      // R-465: the sentence a probe found, when there is one.
+      if (e.elsewhere !== undefined) return e.elsewhere;
       const peakPct = Math.round(e.peak * 100);
       const capPct = Math.round(e.cap * 100);
       return `Operator ${e.operatorId} would reach ${peakPct}% of capacity (limit ${capPct}%).`;
@@ -1034,7 +1045,14 @@ export function describeSchedulerError(e: SchedulerError): string {
     case "RaceLost":
       return "Someone else changed this run first — refetching and retrying.";
     case "WriteRefused":
-      return "You don't have permission to change that.";
+      // DEF-0052 (30 Sept): a row that is GONE and a row that is FORBIDDEN
+      // are different facts. `gone` is set only by a writer that read the
+      // row back as the caller after a write that changed nothing and found
+      // nothing (`deleteAssignment`, `deleteRun`); every other refusal keeps
+      // the permission sentence.
+      return e.gone === undefined
+        ? "You don't have permission to change that."
+        : `That ${e.gone} is no longer on the board.`;
     case "DuplicateValue":
       return "Something here already uses that name or code.";
     case "StillInUse":

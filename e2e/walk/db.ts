@@ -316,6 +316,45 @@ export async function waitForAssignment(
   }
 }
 
+export interface RunRow {
+  id: string;
+  planned_headcount: number | null;
+  timerange: string;
+}
+
+/** DEF-0057: the run twin of `waitForAssignment`, same polling reason -- the
+ *  bar's readout lands before the booking's row does, so a single read of
+ *  `runs` straight after it is the race that comment describes. Waits for the
+ *  run on `nodeId` spanning `startMs`/`endMs` to exist and returns it. */
+export async function waitForRun(
+  dana: SupabaseClient,
+  params: { nodeId: string; startMs: number; endMs: number },
+  timeoutMs = ROW_TIMEOUT_MS,
+): Promise<RunRow> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { data, error } = await dana
+      .from("runs")
+      .select("id, planned_headcount, timerange")
+      .eq("node_id", params.nodeId);
+    if (error) throw new Error(`polling runs: ${error.message}`);
+    const rows = (data ?? []) as unknown as RunRow[];
+    const hit = rows.find((r) => {
+      const { startMs, endMs } = parseTimerange(r.timerange);
+      return startMs === params.startMs && endMs === params.endMs;
+    });
+    if (hit) return hit;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `no run on node ${params.nodeId} spanning ${new Date(params.startMs).toISOString()}-` +
+          `${new Date(params.endMs).toISOString()} appeared within ${timeoutMs}ms ` +
+          `(runs on that node: ${JSON.stringify(rows.map((r) => r.timerange))})`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
 /** Waits for the row `operatorId`+`nodeId`+`startMs`/`endMs` matched to be
  *  GONE -- the removal twin of `waitForAssignment`, same polling reason. */
 export async function waitForAssignmentGone(

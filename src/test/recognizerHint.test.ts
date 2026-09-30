@@ -18,15 +18,15 @@ import { describe, expect, it } from "vitest";
 import { buildRecognizerHint } from "@/lib/voice/recognizerHint";
 
 const VOCAB_WORD_COUNT =
-  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, yes, no, Do all, Show that day, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10".split(
+  "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, yes, no, Do all, Do it, Show that day, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10".split(
     /\s+/,
-  ).length; // 53: 28 single-word terms + "Do all"(2) + "Show that day"(3) + 10 spelled digits + 10 typed digits
+  ).length; // 55: 28 single-word terms + "Do all"(2) + "Do it"(2, S195 review: a lot of one's button) + "Show that day"(3) + 10 spelled digits + 10 typed digits
 
 describe("RHINT: buildRecognizerHint (S59-c brief §1)", () => {
   it("RHINT-1: an empty board is the vocabulary alone", () => {
     const hint = buildRecognizerHint({ cells: [], places: [], parts: [], people: [] });
     expect(hint).toBe(
-      "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, yes, no, Do all, Show that day, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10",
+      "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, yes, no, Do all, Do it, Show that day, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10",
     );
   });
 
@@ -124,5 +124,5 @@ describe("RHINT: buildRecognizerHint (S59-c brief §1)", () => {
 });
 
 function vocab(): string {
-  return "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, yes, no, Do all, Show that day, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
+  return "cell, line, shift, job, people, everyone, assign, book, remove, move, cover, swap, split, extend, end, block, clear, copy, make, until, from, to, today, tomorrow, week, on, yes, no, Do all, Do it, Show that day, one two three four five six seven eight nine ten, 1 2 3 4 5 6 7 8 9 10";
 }

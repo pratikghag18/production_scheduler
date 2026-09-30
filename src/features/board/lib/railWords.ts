@@ -33,6 +33,7 @@
  * §7's one-clock standard.
  */
 import type { Shift, ShiftTemplate } from "@/lib/api";
+import { parseTstzRange } from "@/lib/api/serde";
 import { addMinutes, formatClock } from "./time";
 import type { DayAxis } from "./time";
 
@@ -114,8 +115,7 @@ export function bookingWords<T extends RailBlock>(
 ): string {
   const b = band ?? { startMin: 0, endMin: window.minutes };
 
-  const covering = blocks
-    .filter((blk) => blk.startMin < b.endMin && blk.endMin > b.startMin)
+  const covering = blocksInBand(blocks, window, band)
     .map((blk) => ({
       start: clip(blk.startMin, b.startMin, b.endMin),
       end: clip(blk.endMin, b.startMin, b.endMin),
@@ -148,6 +148,44 @@ export function bookingWords<T extends RailBlock>(
   // the person becomes free partway through.
   if (covered === b.startMin) return "free";
   return `free ${formatClock(addMinutes(window.start, covered), zone)}`;
+}
+
+/**
+ * R-465 (DEF-0053): blocks the caller cannot read (`operator_blocks_elsewhere`)
+ * put into the rail's minute space -- real minutes since the window's first
+ * instant, the very arithmetic `boardIndex.ts`'s `parseRangeSafe` does for a
+ * block it can read, so such a block counts as coverage exactly like one. A row
+ * whose range does not parse is left out, as the index leaves one out.
+ */
+export function asRailBlocks<T extends { timerange: string }>(
+  rows: readonly T[],
+  windowStart: Date,
+): (T & RailBlock)[] {
+  const out: (T & RailBlock)[] = [];
+  for (const row of rows) {
+    try {
+      const { start, end } = parseTstzRange(row.timerange);
+      out.push({
+        ...row,
+        startMin: (start.getTime() - windowStart.getTime()) / 60_000,
+        endMin: (end.getTime() - windowStart.getTime()) / 60_000,
+      });
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
+/** The blocks that touch `band` (null: the window itself) -- the ones `bookingWords`
+ *  counts, so the ones the rail names in brackets. */
+export function blocksInBand<T extends RailBlock>(
+  blocks: readonly T[],
+  window: RailWindow,
+  band: Band | null,
+): T[] {
+  const b = band ?? { startMin: 0, endMin: window.minutes };
+  return blocks.filter((blk) => blk.startMin < b.endMin && blk.endMin > b.startMin);
 }
 
 /**

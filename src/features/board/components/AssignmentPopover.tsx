@@ -87,6 +87,10 @@ export function describeRefusal(
   zone: string,
 ): string {
   if (refusal.kind === "CapacityExceeded") {
+    // R-465 (S195 review): busy on a place the caller cannot read -- the place
+    // and the hours, in the sentence a probe found, not numbers about a block
+    // she cannot see.
+    if (refusal.elsewhere !== undefined) return refusal.elsewhere;
     return `${personName} would reach ${Math.round(refusal.peak * 100)}% of capacity at this time (limit ${Math.round(refusal.cap * 100)}%).`;
   }
   // R-357: this pop-up reassigns one person, so an `absent` refusal names that

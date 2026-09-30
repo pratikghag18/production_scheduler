@@ -8,6 +8,7 @@ import { absenceGaps, type AbsenceRow, type AbsenceHit } from "@/lib/absence";
 import { leaveLine } from "../lib/leave";
 import { DEFAULT_DATE_FORMAT, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
 import type { PopupReporter } from "../store/commandConversation";
+import { CREATE_WAITING } from "../lib/popupWords";
 import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
 import fieldStyles from "@/components/Field.module.css";
@@ -701,14 +702,12 @@ export function CreatePopover({
         anchor,
       );
       // A split-coverage hand-off has written nothing and is not over:
-      // saying either "written" or "cancelled" here would be a lie. It is
-      // reported as what it is (S62-b reviewer fix C), so the thread says
-      // what the sentence is actually waiting on and the split pop-up's own
-      // Confirm/Cancel can finish it through this same reporter.
-      if (verdict === "handed-off") {
-        report({ kind: "handed_off", what: "split coverage" });
-        return;
-      }
+      // saying either "written" or "cancelled" here would be a lie. The split
+      // pop-up itself tells the sentence what it is now waiting on
+      // (`openSplitPopover`, S195-D: in the person's own name) and finishes
+      // it through this same reporter with its own Confirm/Cancel -- this
+      // says nothing more, so it cannot overwrite that sentence.
+      if (verdict === "handed-off") return;
       // F-233, third pass (S194-G3): `verdict` is `{kind:"written", id}` for
       // a real caller, or `undefined` for a test double/drag wiring that
       // answers nothing (F-167's own pre-existing "read as written"
@@ -809,6 +808,24 @@ export function CreatePopover({
    * nothing, while a genuinely new mount of this component gets a fresh
    * ref and may fire once more.
    */
+  // S195-D (DEF-0054): a pop-up a typed sentence opened tells the bar the
+  // moment it is ON SCREEN -- the one plain sentence the thread says while it
+  // stands -- and never while it is hidden for an auto-press (F-205), which
+  // would say "finish it on the board" about a form nobody can see. A drag's
+  // pop-up carries no reporter, so this is a no-op for it.
+  // A ref latch, like `autoFiredRef`: StrictMode simulates a second mount, and
+  // "the pop-up stands" is said once.
+  const standingToldRef = useRef(false);
+  useEffect(() => {
+    if (!autoPending && !standingToldRef.current) {
+      standingToldRef.current = true;
+      onResult?.({ kind: "handed_off", what: CREATE_WAITING });
+    }
+    // Mount-only, like the auto-press effect below: `autoPending` is frozen at
+    // mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (autoCreate && clean && !autoFiredRef.current) {
       autoFiredRef.current = true;

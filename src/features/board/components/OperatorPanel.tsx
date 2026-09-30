@@ -1,9 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { BoardOperator, Shift, Skill, BoardNode, ShiftTemplate } from "@/lib/api";
+import type {
+  BlockElsewhere,
+  BoardOperator,
+  Shift,
+  Skill,
+  BoardNode,
+  ShiftTemplate,
+} from "@/lib/api";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
 import { absenceGaps, type AbsenceRow } from "@/lib/absence";
 import type { IndexedAssignment } from "../lib/boardIndex";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
-import { bookingWords, rootBand, resolveHomeBand } from "../lib/railWords";
+import {
+  asRailBlocks,
+  blocksInBand,
+  bookingWords,
+  rootBand,
+  resolveHomeBand,
+} from "../lib/railWords";
+import { elsewhereBrackets, elsewhereTitle } from "../lib/busyElsewhere";
 import { bandCoveringNow } from "../lib/shiftNow";
 import {
   clampRailWidth,
@@ -155,6 +170,8 @@ export function OperatorPanel({
   draggingOperatorId,
   dragApi,
   widthStorageKey = null,
+  blocksElsewhere,
+  dateFormat = DEFAULT_DATE_FORMAT,
 }: {
   /**
    * ⭐ THE PLANT'S PEOPLE, AS THE SERVER SENT THEM (`operatorPool` in
@@ -248,6 +265,18 @@ export function OperatorPanel({
    * persisted — `railWidth.ts`'s own contract.
    */
   widthStorageKey?: string | null;
+  /**
+   * R-465 (DEF-0053): the blocks of people this viewer can read on places she
+   * CANNOT read (`operator_blocks_elsewhere`, migration 0085), for the board's
+   * own window. They count as coverage exactly like `assignmentsByOperator`,
+   * and the chip says the place and the hours in brackets. `undefined` while
+   * the read is pending or has failed: the rail then says what it said before
+   * the read existed -- never "booked" on a guess, never a person hidden. Empty
+   * for a viewer of the whole plant, whose rail reads exactly as it always did.
+   */
+  blocksElsewhere?: readonly BlockElsewhere[];
+  /** The plant's date format, for the day a hover sentence names (R-426). */
+  dateFormat?: DateFormat;
 }) {
   const [showOthers, setShowOthers] = useState(false);
 
@@ -526,20 +555,42 @@ export function OperatorPanel({
     // The window instant is what the strings turn on; key on its time.
   }, [assignmentsByOperator, nodeById, windowStart.getTime(), zone]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // R-465: the elsewhere blocks, per person, in the rail's minute space --
+  // converted once per (read, window), never per chip.
+  const elsewhereByOperator = useMemo(() => {
+    const m = new Map<string, (BlockElsewhere & { startMin: number; endMin: number })[]>();
+    for (const b of asRailBlocks(blocksElsewhere ?? [], windowStart)) {
+      const list = m.get(b.operatorId) ?? [];
+      list.push(b);
+      m.set(b.operatorId, list);
+    }
+    return m;
+  }, [blocksElsewhere, windowStart.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function chip(o: BoardOperator, outside: boolean) {
     const mine = assignmentsByOperator.get(o.id) ?? [];
-    const title = titles.get(o.id);
+    const theirs = elsewhereByOperator.get(o.id) ?? [];
     // R-448: THIS person's own band when one resolves, else the old interim
     // whole-pattern-span reading (`fallbackBand`) exactly as before R-441 —
     // `bookingWords` itself is unchanged; only which band it is handed here
     // is new.
     const ownBand = personBand.get(o.id) ?? null;
-    const words = bookingWords(
-      mine,
-      { start: windowStart, minutes: windowMinutes },
-      ownBand ?? fallbackBand,
-      zone,
-    );
+    const railWindow = { start: windowStart, minutes: windowMinutes };
+    const bandUsed = ownBand ?? fallbackBand;
+    const words = bookingWords([...mine, ...theirs], railWindow, bandUsed, zone);
+    // R-465: the blocks elsewhere that touch the band -- the ones the word counts
+    // -- are named by place and hours only, never the product or the job.
+    const touching = blocksInBand(theirs, railWindow, bandUsed);
+    const brackets = elsewhereBrackets(touching, effectiveZone);
+    const sentence = elsewhereTitle(o.displayName, touching, effectiveZone, dateFormat, now);
+    const ownTitle = titles.get(o.id);
+    const title =
+      sentence === null
+        ? ownTitle
+        : ownTitle
+          ? `${ownTitle}
+${sentence}`
+          : sentence;
 
     // R-438: "ordered by the skills the cell requires first" — this panel has
     // no notion of a cell being dragged over (that context lives in the
@@ -599,7 +650,10 @@ export function OperatorPanel({
               title={restSkills.map((s) => s.name).join(", ")}
             >{`+${restSkills.length}`}</span>
           )}
-          <span className={styles.words}>{words}</span>
+          <span className={styles.wordsWrap}>
+            <span className={styles.words}>{words}</span>
+            {brackets !== null && <span className={styles.place}>{brackets}</span>}
+          </span>
         </div>
       </div>
     );

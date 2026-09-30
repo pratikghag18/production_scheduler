@@ -73,6 +73,12 @@ async function deleteTemplate(page: Page, name: string): Promise<void> {
 }
 
 test.afterAll(async ({ browser }) => {
+  // DEF-0057: the default hook timeout is 30s, and `fullyParallel` gives each
+  // worker its own afterAll: a worker that ran only the viewer case saved no
+  // template, so `deleteTemplate` waits its full 15s for each of the two
+  // names before it may return -- 30s of waiting plus the sign-in, over the
+  // limit. Nothing is wrong with the cleanup; it just needs room.
+  test.setTimeout(90_000);
   const page = await browser.newPage();
   try {
     await signIn(page, ADMIN, "/admin");
@@ -87,6 +93,11 @@ test.afterAll(async ({ browser }) => {
 test("an admin saves this week as a template and applies it through Copy Week", async ({
   page,
 }) => {
+  // DEF-0057: alone this case takes 22 s of the default 30 once the target week
+  // holds an earlier run's copy (42 clashes to settle, then the apply); beside
+  // five other workers on one database it ran out of budget with the dialog
+  // still reading "Applying…". The apply is not wrong, the budget was.
+  test.setTimeout(90_000);
   await signIn(page, ADMIN, "/");
   await saveTemplate(page, DANA_TPL);
 
@@ -116,7 +127,7 @@ test("an admin saves this week as a template and applies it through Copy Week", 
     else await group.getByRole("radio", { name: "Keep the prior plan" }).check();
   }
   await dialog.getByRole("button", { name: /^Apply/ }).click();
-  await expect(dialog).toBeHidden({ timeout: 15_000 });
+  await expect(dialog).toBeHidden({ timeout: 45_000 });
 });
 
 test("a supervisor is offered the controls and only the template source", async ({ page }) => {

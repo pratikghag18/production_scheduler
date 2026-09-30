@@ -182,6 +182,12 @@ export type CandidateAction =
    * left a job in two pieces.
    */
   | { kind: "pick_span"; command: Command; span: { start: ClockTime; end: ClockTime } }
+  /**
+   * DEF-0055 / R-435: the answer to `place_or_person` -- "clear Maria Lopez
+   * tomorrow" names a person AND (or nearly) a place. `word` is the name the
+   * button carries; `reading` is which of the two the person chose.
+   */
+  | { kind: "answer_clear_reading"; command: Command; reading: "person" | "place"; word: string }
   | {
       kind: "answer_other_day_part";
       command: Command;

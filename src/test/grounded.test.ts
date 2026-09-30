@@ -338,6 +338,111 @@ describe("groundReading: THE RULE for a sweeping clear (S194-D third pass)", () 
 });
 
 /**
+ * DEF-0056 (30 Sept, S195-B): THE RULE's second half -- the removal phrase must
+ * be what its clause SAYS, from its head (only an opener before it), with only
+ * an article or particle between the verb and its object. The tester's ten are
+ * in src/test/defects/DEF-0056.test.ts; these are the rule's own list.
+ */
+describe("groundReading: a sweeping clear grounds only from the head of its clause (DEF-0056)", () => {
+  const grounds = [
+    "clear the board",
+    "clear everyone",
+    "please clear the board",
+    "could you clear everyone today",
+    "could you please clear everyone",
+    "ok clear the board",
+    "okay, clear the board",
+    "go ahead and clear the board",
+    "take everyone off",
+    "everyone off",
+    "clear everyone out",
+    "clear all of the board",
+    "that is wrong. clear the board",
+    "that is wrong, take everyone off",
+  ];
+  for (const heard of grounds) {
+    it(`HC-G grounds: "${heard}"`, () => {
+      expect(groundReading(heard, unassignCmd(), VERBS)).toEqual({ ok: true });
+    });
+  }
+  const refuses = [
+    "we should not clear the board",
+    "nobody said clear everyone",
+    "can I clear the board",
+    "when do we clear everyone",
+    "I want to take everybody out for lunch",
+    "clear it up with everyone",
+    "clear that with everybody",
+    "clear everyone on Cell 2 today",
+    "is everybody out",
+    "who cleared everyone",
+  ];
+  for (const heard of refuses) {
+    it(`HC-R refuses: "${heard}"`, () => {
+      const g = groundReading(heard, unassignCmd(), VERBS);
+      expect(g.ok).toBe(false);
+      if (!g.ok) expect(g.reason).toBe("sweeping");
+    });
+  }
+  it("HC-N: 'clear everyone on Cell 2 today' with the place READ is the narrow case and keeps the any-word rule", () => {
+    const g = groundReading(
+      "clear everyone on Cell 2 today",
+      unassignCmd({ place: ["Cell 2"] }),
+      VERBS,
+    );
+    expect(g).toEqual({ ok: true });
+  });
+});
+
+/**
+ * S195 review (30 Sept): the reviewer's own sentences on both sides of THE
+ * RULE. Fillers a person says before an order ground ("yeah clear the board");
+ * "for today" and "thanks" after one do not spoil it; an order taken back in
+ * the same breath ("clear everyone? no") is not an order.
+ */
+describe("groundReading: the reviewer's sentences (S195 review)", () => {
+  const grounds = [
+    "yeah clear the board",
+    "yes clear everyone",
+    "alright clear the board",
+    "so clear the board",
+    "um clear the board",
+    "clear the board for today",
+    "clear everyone for tomorrow",
+    "clear the board thanks",
+    "clear the board thank you",
+    "right, clear everyone",
+    "clear the board please",
+    "can you please clear the board",
+    "clear out the whole board",
+  ];
+  for (const heard of grounds) {
+    it(`RV-G grounds: "${heard}"`, () => {
+      expect(groundReading(heard, unassignCmd(), VERBS)).toEqual({ ok: true });
+    });
+  }
+  const refuses = [
+    "we cleared everyone yesterday",
+    "clear everyone? no",
+    "clear the board, no wait, don't",
+    "clear the board no wait",
+    "I would never clear the board",
+    "before you clear the board check with me",
+    "clear the board is what he said",
+    "clear the board for the meeting",
+    "yeah should I clear the board",
+    "yeah do not clear the board",
+  ];
+  for (const heard of refuses) {
+    it(`RV-R refuses: "${heard}"`, () => {
+      const g = groundReading(heard, unassignCmd(), VERBS);
+      expect(g.ok).toBe(false);
+      if (!g.ok) expect(g.reason).toBe("sweeping");
+    });
+  }
+});
+
+/**
  * S72-e (docs/agent-briefs/s72-e-clear-over-a-week-brief.md §3, F-224,
  * R-435): `groundDays`'s own pins, GD-1..GD-6. `DAY_GROUNDING_WORDS` is
  * `parse.ts`'s own export, unioned with nothing here -- unlike `VerbLists`
