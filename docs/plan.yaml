@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-30'
-  tip: 'a07d2b3'
+  tip: '7afedf1'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -5805,7 +5805,7 @@ requirements:
   verified_by:
   - kind: sql
     file: supabase/tests/20_capacity_test.sql
-  status: contradicted
+  status: covered
 - id: R-034
   title: Capacity trigger uses a per-operator lock and peak math
   source:
@@ -10204,7 +10204,7 @@ requirements:
   - kind: e2e
     file: e2e/invite.spec.ts
     cases: "with the tester stack's env exported (E2E_MAIL_URL from tester-stack.mjs env) and E2E_PORT=5174, invite.spec.ts and passwordReset.spec.ts pass -- the five email-following cases DEF-0026 named among them"
-  status: contradicted
+  status: covered
   note: >-
     BUILT 9 Sept (session 114, 99ef996). DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser
     attempts reused this folder's dev server (`playwright.config.ts` `reuseExistingServer` on a fixed
@@ -11628,7 +11628,7 @@ requirements:
   - kind: vitest
     file: src/test/commandBar.test.tsx
     cases: "CB-x-1 (clear Cell 1 today: a lot of two, both outlined, one yes runs both), CB-x-5 and CB-x-17 (nobody there is a plain readout, never a duplicate)"
-  status: contradicted
+  status: covered
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 items 1, 2 and 5).
 - id: R-408
@@ -12223,7 +12223,7 @@ requirements:
   verified_by:
   - kind: manual
     steps: "the audit this standard triggers (queued 17 Sept): grep the resolver's refusals for every dead end with no choices, fix or queue each hit, and pin the ones fixed"
-  status: contradicted
+  status: uncovered
   note: >-
     STATED 17 Sept (session 178): "1. Yes". Candidate put on 17 Sept (session 177) under R-426's third duty
     after the swap's near-miss and the walk's "There is no Cell 1 in Cell 2".
@@ -12270,7 +12270,7 @@ requirements:
   - kind: vitest
     file: src/test/commandResolve.test.ts
     cases: "every resolved step kind carries who and where and what stays (27 cases gained the two fields)"
-  status: contradicted
+  status: covered
   note: >-
     BUILT 28 Sept (session 194, 504a74b), DEF-0052 fix-claimed. STATED 17 Sept (session 178): "3. Yes". RESTATED 28 Sept by the maintainer when shown the two
     columns side by side (the revert the rule asked for, and what the app does). Today's answer is "Did k
@@ -12299,7 +12299,7 @@ requirements:
     cases: "the twenty-two sentences, dated to next Monday in the plant's zone since 22 Sept (F-182, F-190); green twice on 22 Sept before the spoken list was handed over"
   - kind: manual
     steps: "each hand-over names the spec and its two green runs in the session summary"
-  status: contradicted
+  status: covered
   note: >-
     STATED 17 Sept (session 178): "4. Yes".
 - id: R-434
@@ -12316,7 +12316,7 @@ requirements:
   verified_by:
   - kind: manual
     steps: "the audit this standard triggers (queued 17 Sept): every path through the bar that ends without a trace entry, fixed or queued"
-  status: contradicted
+  status: uncovered
   note: >-
     STATED 17 Sept (session 178): "5. Yes".
 - id: R-435
@@ -12333,7 +12333,7 @@ requirements:
   verified_by:
   - kind: manual
     steps: "pinned when the bare-pair question lands (queued 17 Sept); then the grammar's own cases"
-  status: contradicted
+  status: uncovered
   note: >-
     STATED 17 Sept (session 178): "7. Yes, definitely ask, always ask when in doubt."
 - id: R-436
@@ -13047,7 +13047,7 @@ requirements:
   - kind: e2e
     file: e2e/typedWalk.spec.ts
     cases: "both sentence lists green twice against the new wording (R-433), following the board's own move (R-455)"
-  status: contradicted
+  status: covered
   note: >-
     STATED 24 Sept (session 191). Standard, CLAUDE.md section 7. The maintainer weighed two candidates ---
     the board writes every sentence from templates with pins, or the model is asked a second time to
@@ -13072,7 +13072,7 @@ requirements:
     cases: "record.mjs listens on the loopback host; serve.mjs has exactly two publishes and each begins 127.0.0.1, short or long spelling of the flag"
   - kind: manual
     steps: "node scripts/voice/clips/record.mjs --port 18097 --out <scratch>; netstat -ano | findstr :18097 reads 127.0.0.1:18097, not 0.0.0.0"
-  status: contradicted
+  status: covered
   note: >-
     BUILT 28 Sept (session 194, f84fbd3), DEF-0039 fix-claimed. Added by the tester with DEF-0039 so the defect has a rule to stand against; KEPT AS A STANDARD by
     the maintainer on 28 Sept (session 194) and written into CLAUDE.md §7. The Vite dev server already
@@ -13270,7 +13270,7 @@ requirements:
     cases: "R-465: Ana's rail says booked on Cell 4 as the plant admin's says booked, at 10 am with the clock frozen; at the rail's narrowest the name and the word stay readable"
   - kind: manual
     steps: "node src/test/defects/DEF-0053.live.mjs on the tester's stack exits 0 (held: the same answer for both); as Ana in the browser, 'put Priya Shah on Housing A at Cell 1 today from 10 am to noon' then Separate block answers 'Not done: Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.' and her rail reads 'booked (Cell 4, 6 am to 2 pm)'"
-  status: covered
+  status: contradicted
   note: >-
     BUILT 30 Sept (session 195, ecfb3e2 and aee2746), DEF-0053 fix-claimed. The probe answers an operator the
     caller cannot read as the invoker did (no verdict, no rows) rather than refusing: the copy-week planners
@@ -18978,6 +18978,58 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 196t
+  date: 2026-09-30
+  title: "Tester run over session 195: all ten fix-claimed defects verified by their own reproductions --- a supervisor can no longer double-book a person on a line she cannot see --- and one new, minor: the bar still says the booking before it says Not done (DEF-0060)"
+  commits: []
+  numbers:
+    app_tests: 4902
+    app_test_files: 191
+    tsc: 0
+    eslint: 0
+    db_checks: 937
+    migrations: 85
+    e2e: 56
+  confirmed: true
+  numbers_note: >-
+    Fast-forwarded tester onto Development at 7afedf1 (9 commits, 74 files, migration 0085); package-lock
+    unchanged. The tester's stack was rebuilt for this run and stopped at the end of it. `node
+    scripts/tester-run.mjs --sql --e2e`: plan ok; db:types regenerated from the stack, the only difference a
+    byte-order mark at the head of the committed file (seen, not filed), so tsc is conclusive; typecheck ok,
+    lint ok. vitest: `Test Files  1 failed | 190 passed (191)`, `Tests  4 failed | 4898 passed (4902)` --- the
+    count matches session 195 exactly; the four are voiceClipsScorer.test.ts, failing only because this
+    worktree still holds its old CRLF copy of score.mjs (a fresh checkout holds LF, DEF-0058; the one-time
+    rewrite of the worktree was refused by the permission guard and is the maintainer's to run). The SQL
+    suite, run with carriage returns ignored for the same reason: 67 tally lines, 937 passed, 0 failed, 0
+    hard errors. Playwright: `Running 56 tests`, `50 passed, 6 skipped` in the run, then two more full runs
+    `1 failed ... 49 passed` (absences import, a 30 s wait under load) and `50 passed`. format:check lists the
+    worktree's CRLF files, as before.
+  summary: >-
+    WHAT WAS JUDGED. Session 195's ten fix-claimed defects, each by the tester's own reproduction on its
+    stack as Ana where a supervisor reaches it, and migration 0085 by attack. ⭐ ALL TEN VERIFIED. DEF-0053:
+    the live script exits 0 (Ana and the plant admin get the same answer, Ana's write refused PT409), the bar
+    answers "Not done: Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm." and nothing is
+    written. DEF-0054: the pop-up's answer finishes the sentence --- closed, Cancel ("Cancelled. Nothing
+    changed.") and Continue each traced, the row read back. DEF-0055: "clear Maria Lopez tomorrow" is read as
+    Maria. DEF-0056: the pin plus 28 more sentences, every one on the right side. DEF-0043: no 24-hour span or
+    dot on any button, "1 thing". DEF-0052: a week clear with a block deleted behind the bar names every
+    Not done and Not tried by day and says "That block is no longer on the board." DEF-0044: the last limit
+    and the two loading gates go red by name. DEF-0057: the walk green in three parallel runs. DEF-0058: a
+    Windows-style checkout holds LF. DEF-0059: the firewall rule read back; no second device, so verified on
+    the maintainer's phone test.
+    ⛔ NEW, ONE (minor). DEF-0060: booking a person who is busy on another line, the bar first prints "Priya
+    Shah is on Cell 2 Wed Sep 30 from 10 am to noon, making Housing A." (or asks Join or separate, both of
+    which lead to the refusal) and only then "Not done". Nothing is written; R-465 says the refusal comes
+    before.
+    ADVERSARIAL PASS on 0085, on scratch databases: the trigger and the probe each lose SECURITY DEFINER ->
+    CB and RV cases red by name; the helper losing it fails only CB13, correctly, because both its callers are
+    definers. Read and not broken: the company term keyed on auth.uid(), the probe's answer for a person the
+    caller cannot read, operator_blocks_elsewhere's two predicates, EXECUTE revoked on the helper. Nothing
+    found. MUTATIONS, eight client and three SQL, all caught but the one equivalent. SEEN, NOT FILED: the
+    committed database.types.ts starts with a byte-order mark; "Cancelled. Nothing changed." then "Left it."
+    REQUIREMENTS. Restored to covered: R-033, R-366, R-407, R-432, R-433, R-459, R-460. To uncovered (their
+    only listed proof is manual): R-430, R-434, R-435. Contradicted by DEF-0060: R-431 (still) and R-465.
+  shipped: []
 - id: '195'
   date: 2026-09-30
   title: "The tester's ten: a supervisor can no longer double-book a person who is working on a line she cannot see, the bar's buttons and lot lines speak as a supervisor would, a pop-up's answer finishes its sentence, every checkout holds LF, and the database stack is closed to the network by a firewall rule (DEF-0043, 0044, 0052 to 0059 fix-claimed)"
