@@ -196,7 +196,10 @@ Each is also a `requirements` row in `docs/plan.yaml`. Three duties come with th
   buttons, never a quiet pick. "From 1 to 5" with no am/pm asks which half of the day. Restated
   30 Sept, wider: whenever the bar is in any doubt or the instruction is unclear, it asks what to do
   next rather than dropping, shrinking or reinterpreting part of what was said. A replace whose incoming
-  person cannot be placed asks whether to take the outgoing person off anyway (R-466).
+  person cannot be placed asks whether to take the outgoing person off anyway (R-466). A lot of
+  independent steps ("put A and B on ...") asks a step's certificate question, takes the reason for that
+  step alone and carries on to its one yes (R-467, 30 Sept); only a coupled lot (replace, swap, copy)
+  keeps R-425's whole refusal.
 - **Every side panel resizes and remembers (R-446).** A panel beside the board or the admin content
   (the command panel, the operator rail, the admin section rail, and any later one) resizes by its
   edge within a clamp, with pointer capture, and remembers its size per person through the one size

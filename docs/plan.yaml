@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-30'
-  tip: 'a6b1454'
+  tip: 'a637947'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -12096,7 +12096,10 @@ requirements:
   note: >-
     STATED 16 Sept (session 176): "People not trained are being assigned" --- Lena Novak and Tom Baker
     hold no Welding, which Line 1 requires; the single opened the reason pop-up, the swap wrote three
-    of four and said reverted.
+    of four and said reverted. NARROWED 30 Sept (session 198, R-467): "a lot is refused before its yes"
+    is the rule for a coupled lot (a replace, a swap, a copy --- expansions whose steps the board built
+    from one sentence); a lot of independent steps the person typed asks the step's question and carries
+    on to its one yes. "Never writes half of itself" holds for both. DEF-0061 fix-claimed (a637947).
 - id: R-426
   title: The plant's zone is the one clock --- every day and hour the app shows, reads or writes is in it, and a new standard audits the code that predates it
   source:
@@ -13307,12 +13310,147 @@ requirements:
     as they are. Nothing is written before the answer. It is R-435 applied to a sentence whose parts no
     longer fit together, and R-431 still holds: no button offers what the server would refuse.
   verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-rep-1 to CB-rep-7 (busy incoming: the sentence, both buttons, nothing written before the answer; 'Take ... off anyway' runs the removal only and the trace says answered, ran, outcome; 'Leave it' writes nothing, outcome cancelled; uncertified incoming through the resolver's gate asks the same question; an incoming who can go is the ordinary two-step listing; a swap is refused whole; a copy with a busy step lists the rest)"
+  - kind: vitest
+    file: src/test/commandResolve.test.ts
+    cases: "RB1 to RB3 (expandReplace returns replace_blocked carrying the gate's own question, the removals, outgoing, incoming and place; describeQuestion's sentence), NC6 rewritten to the new contract, SW1's coupled mark"
+  - kind: e2e
+    file: e2e/typedWalk.spec.ts
+    cases: "DEF-0062 (as Ana on the real board: the question, both buttons one width, Sam's block read back after each press and restored)"
   - kind: manual
-    steps: "as Ana on a fresh demo seed, 'replace Sam Patel with Priya Shah on Cell 1 today' asks the question with both buttons, writes nothing before the answer, and each button does what it says (Sam's block read back)"
+    steps: "as Ana on the tester's stack (session 198, the lane and the developer's own typed-walk run): 'replace Sam Patel with Priya Shah on Cell 1' asks with both buttons, nothing written before the answer, each button does what it says"
   status: contradicted
   note: >-
-    STATED 30 Sept (session 197t conversation). DEF-0062 is the defect it answers.
+    STATED 30 Sept (session 197t conversation). DEF-0062 is the defect it answers. BUILT 30 Sept (session 198,
+    a637947), DEF-0062 fix-claimed. The replace lot is marked coupled on its expansion; the busy probe and the
+    resolver's certificate and area gates both reach one question. F-248 is the edge left open (two blocks,
+    one busy).
+- id: R-467
+  title: A lot of independent placements asks a step's certificate question and carries on --- the reason is taken for that step alone, nothing is written before the one yes, and no step is dropped without being named
+  source:
+  - 'tester session 197t (30 Sept), DEF-0061: "put Lena Novak and Sam Patel on Housing A at Cell 2 ..." with Lena short Welding wrote Lena on her reason and never mentioned Sam, or asked a reason and ignored it'
+  - 'session 198 conversation (the maintainer, 30 Sept): shown two candidates side by side --- ask the reason for that step and carry on, or refuse the whole lot as R-425 reads --- the maintainer chose the first'
+  stated_by: maintainer
+  claim: >-
+    A sentence that names several people for one place ("put A and B on ...") is a lot of independent
+    steps. When one step meets the certificate question under the warn policy, the bar asks it, numbered as
+    the lot's own step ("1 of 2: Lena Novak is not certified for Cell 2, missing Welding. Say the reason to
+    schedule anyway, or no."), takes the typed reason for THAT step only, and carries on to the next step;
+    the lot's listing then names every step, the reason with the step it was given for, and asks its one
+    yes. Under the block policy the step is refused and named in the listing's own words ("Not doing Lena
+    Novak on Cell 2 ...: she is not certified for Cell 2, missing Welding.") and the rest are listed, the
+    same shape a step busy elsewhere gets (R-465); when nothing is left the refusal stands alone. "No" at
+    the question drops the whole sentence. The area question is the same shape. Nothing is written before
+    the yes (R-425's "never writes half of itself" holds); R-425's "a lot is refused before its yes" now
+    reads as the rule for a COUPLED lot only (a replace, a swap, a copy --- expansions whose steps belong
+    together), which never asks a reason (R-466 says what a replace does instead).
+  verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-lot-ask-1 to CB-lot-ask-10 (both orders: the numbered question, the reason taken for that step only, the listing naming both with the reason beside its step, one yes runs both with override.reason on one step; block policy names the step and lists the rest; every step blocked is the refusal alone; no drops the lot; yes re-asks; a reason that parses as a sentence runs as one; a day off the board re-runs the whole sentence; the trace entry at each point)"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "RL-0 (the lot writer passes a step's override and areaOverride to the same writers the single sentence uses)"
+  - kind: e2e
+    file: e2e/typedWalk.spec.ts
+    cases: "DEF-0061 (as Ana on the real board, both orders: the question, the reason, the listing, the yes, Lena's row read back with eligibility_override and the reason and Sam's without, then removed; no writes nothing)"
+  status: covered
+  note: >-
+    STATED 30 Sept (session 198). DEF-0061 is the defect it answers (filed against R-425 and R-432, which
+    carried the contradiction); R-425's claim is narrowed by it, not retired. BUILT 30 Sept (session 198,
+    a637947), DEF-0061 fix-claimed. The per-step reason lives on the lot (Lot.stepOptions, by step index),
+    never on the held single sentence. The numbered question keeps the single sentence's "Not done:" lead so
+    both come from one builder; whether to drop the lead from both is a wording question for the maintainer.
+    F-247 is the edge left open (uncertified and busy at once).
 findings:
+- id: F-248
+  title: A replace over two of the outgoing person's blocks, the incoming busy for only one --- "Take Sam Patel off anyway" also places Priya on the other block, and the sentence does not say so
+  tag: A button that does more than its label
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-466
+  - R-431
+  - R-459
+  story: >-
+    30 Sept (session 198), the reviewer of DEF-0062's fix, from the code (not run). The question is built
+    from the probe's refusal for the busy block; the button runs the kept steps, which are every removal and
+    every placement the probe allowed, so one press removes Sam from both blocks and places Priya on the one
+    she can take, while the sentence says nobody would be covering Sam's hours. Two readings: acceptable
+    (Priya goes where she can, which is what the replace meant) or a defect (the press writes what the label
+    does not say). The developer's call is the second, minor; the fix is a sentence that names the block
+    Priya can take, or one question per block. Not covered by a case yet.
+- id: F-247
+  title: A lot step that is both uncertified and busy elsewhere is asked its reason first and refused at the listing after --- a single sentence refuses before asking
+  tag: An offer the server refuses
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-431
+  - R-465
+  - R-467
+  story: >-
+    30 Sept (session 198), the reviewer of DEF-0061's fix. refusalBeforeAsking returns null while a lot
+    stands and the lot's busy probe runs once, after every step has resolved, so Lena short a certificate
+    AND busy on another line is asked "Say the reason to schedule anyway", the reason is taken, and the
+    listing then names her as not doing. Nothing is written and no yes has been given, so R-465 holds, but
+    the reason question is an offer the server would refuse (R-431) and the same person in a single
+    sentence is refused before any question. Minor; the fix is to probe a lot step's placement before its
+    reason question is shown, the way the single path does.
+- id: F-246
+  title: A lot whose first step landed on a day off the board moved the board and re-ran that one step as a single sentence, dropping the rest without a word
+  tag: A quiet loss
+  status: fixed
+  found_by: agent
+  stage: S57
+  refs:
+  - R-467
+  - R-435
+  - R-455
+  story: >-
+    30 Sept (session 198), the lane building DEF-0061, in the browser as Ana. The tester's Lena-first
+    reproduction used 2026-10-13, off the board: Lena's step asked day_off_board, the board moved, and the
+    pending rerun (R-455) re-ran THAT step alone, so the lot was gone, the reason question stood unnumbered
+    for a stale single, Lena was written and Sam never mentioned. The tester's lead named the held command;
+    that was the Sam-first cause (heldRef is null for a lot, and the reason branch's belt-and-braces return
+    swallowed the reason). Fixed by keeping the whole sentence on the lot (Lot.source) and re-running it,
+    not its current step, after the move; pinned by CB-lot-ask-10.
+- id: F-245
+  title: "\"clear <place>\" skips a departed person's block without naming it, so the block stays on the board and the answer does not say so"
+  tag: A quiet loss
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-435
+  - R-432
+  - R-436
+  story: >-
+    30 Sept (session 198), the sweep CLAUDE.md section 7 asks for after a restated standard (R-435, "ask
+    rather than drop"). expandEveryoneUnassign (resolve.ts, the departed-person skip near its block walk)
+    leaves out a block whose person has left the company and says nothing about it in the lot's listing;
+    the place reads cleared while one block stands. Not fixed in this piece (outside the two defects); the
+    fix is to name the skipped block in the listing's own words, the shape refuseBusyLotSteps uses.
+- id: F-244
+  title: A copy quietly leaves out overnight blocks and runs, blocks whose source edges are off the board, and blocks or runs with a departed person or a deleted part, and the listing does not say so
+  tag: A quiet loss
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-435
+  - R-432
+  - R-410
+  story: >-
+    30 Sept (session 198), the same sweep. expandCopy (resolve.ts, its block and run walks) skips several
+    shapes it cannot represent or place and lists only what it kept, so "copy Monday to Tuesday" reads as a
+    whole copy while some of Monday is not on Tuesday. Not fixed in this piece: more than a small change,
+    and how the skipped ones are named (one sentence each, or a count with the reason) is a wording question
+    for the maintainer. The fix is the listing's own "Not doing ...: <reason>" shape, one per skipped block.
 - id: F-243
   title: CI was red on every push since 22 Sept and nobody read it --- two audit-log cases defined "yesterday" by the machine's clock, which agrees with the plant's only in Chicago
   tag: A clock-dependent case pinned to the wrong clock
@@ -19012,6 +19150,65 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: '198'
+  date: 2026-09-30
+  title: "A lot's step that cannot go asks, and a replace asks instead of shrinking: DEF-0061 and DEF-0062 fix-claimed as one piece, R-467 stated by the maintainer, the sweep the tester asked for done (two quiet drops filed as findings)"
+  shipped: []
+  commits:
+  - 'a637947'
+  numbers:
+    app_tests: 4944
+    app_test_files: 191
+    tsc: 0
+    eslint: 0
+    db_checks: 937
+    migrations: 85
+    e2e: 58
+  confirmed: true
+  numbers_note: >-
+    Copied from `npm run test` on this machine after the piece: `Test Files  191 passed (191)`, `Tests  4944 passed
+    (4944)` --- 23 cases gained (CB-lot-ask-1 to 10, CB-rep-1 to 7, RB1 to RB3, CP2b, RL-0, and the rest are
+    additions inside existing files). Three full runs: the first had one red, CB-rep-1, which passed alone and
+    in the next two full runs and twice on its own file --- a load flake in a new pin, not a regression, noted
+    here rather than hidden. The baseline before the piece was 4921 in 191, matching 197t, once the developer
+    stack was brought up (it was down; the two reds were live pins that could not sign in). tsc exit 0 (no
+    migration, conclusive), eslint 0, prettier clean over the changed files. e2e: the lane's typed walk
+    `8 passed (1.9m)`, `8 passed (1.8m)`, WALK_SET=2 `8 passed (1.7m)`, roleWalk `7 passed (1.2m)`; the
+    developer's own run on the final code after the review `8 passed (1.8m)`. db_checks and migrations carried
+    from 197t (no SQL touched). CI on the last push (7afedf1) is green.
+  summary: >-
+    Merged tester (fast-forward to fa8abdf): DEF-0060 verified; DEF-0061 (major, a lot with a person short a
+    certificate drops the other person or swallows the reason) and DEF-0062 (major, a replace whose incoming
+    cannot go shrinks to its removal half) open. Reported both to the maintainer before any code, agreed with
+    the tester on both and on its one-fix reading. DEF-0061 had two honest readings (R-425 as written: refuse
+    the whole lot; R-435 restated: ask and carry on), so the maintainer was shown both drawn side by side and
+    chose ask-and-carry-on; written as R-467 before the code, R-425 narrowed to coupled lots by its note, and
+    CLAUDE.md section 7 carries the line. The tester's stack went up for one run with the maintainer's yes and
+    came down at the end. ONE LANE on Sonnet (docs/agent-briefs/s198-a-a-lot-step-that-cannot-go-asks-brief.md),
+    browser first as Ana: the Lena-first order was NOT the held command but a second bug in front of it ---
+    2026-10-13 was off the board, so the step's day_off_board moved the board and the rerun re-ran that one
+    step as a single, abandoning the lot (F-246, fixed: Lot.source re-runs the whole sentence); Sam-first was the
+    held command (null for a lot). The per-step reason lives on the lot (Lot.stepOptions by index); the listing
+    names it beside its step through the one suffix builder the single uses (R-449); the lot writer in
+    useDragGesture.ts never passed a step's override or areaOverride, so without that change the server refused
+    the step just answered for --- the lane's one deviation from its file list, accepted and pinned (RL-0). The
+    replace: Expansion.coupled marks replace/swap/copy; expandReplace's gates return a replace_blocked question
+    carrying the gate's own question, the removals, outgoing, incoming and place; the bar's busy probe and that
+    question reach ONE status, "<why> Take Sam Patel off Cell 1 anyway? Nobody would be covering Sam Patel's
+    hours on Cell 1." with the yesNo pair (one width, R-447), the first press the yes (runs the kept steps, no
+    second question), "Leave it" cancelled. REVIEW by a second Sonnet agent (docs/agent-briefs/s198-a-review-brief.md):
+    ship, with one correction it made --- the lane had refused a COPY whole at the busy probe; a copy is a lot of
+    independent placements so it keeps R-465's name-and-list shape (CB-rep-7); a swap alone is refused whole.
+    Two minor findings from the review filed (F-247: a step both uncertified and busy is asked its reason before
+    the probe; F-248: a two-block replace whose button also places the incoming on the other block, unsaid) and
+    two from the lane's sweep (F-244: a copy's quiet skips; F-245: a departed person's block on a clear). Stale
+    comments the review named were fixed by the developer before the commit. NOT A STANDARD, a wording question
+    left for the maintainer: the lot's numbered certificate question keeps the single's "Not done:" lead so both
+    come from one builder; the maintainer's chosen preview read without it. Absence is refused only by the
+    server today, so neither replace door can ask about it; noted, not built. Both defects fix-claimed with
+    developer notes; R-466, R-425, R-432 and R-435 stay contradicted for the tester to flip on its own
+    reproduction (session 196's practice); R-467 covered by its own cases. The branch is ahead of origin by the
+    tester's four commits and this session's; the maintainer pushes.
 - id: 197t
   date: 2026-09-30
   title: "Tester run over session 196: DEF-0060 verified in the browser as Ana, the claims in the brief held, one new major defect (DEF-0061: a lot with a person short a certificate drops the other person or swallows the reason)"
@@ -27805,10 +28002,17 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S57
-  text: "Push, then the tester verifies DEF-0060 by its own reproduction (session 195's ten are verified; the tester's worktree has been re-checked out for the line-ending rule)"
+  text: "Push, then the tester verifies DEF-0061 and DEF-0062 by its own reproductions (DEF-0060 is verified); the tester should also try the replace's sync door in the browser (an uncertified incoming), which only a unit case proves today"
   why: >-
-    Session 196 fix-claimed DEF-0060 together with F-239, browser first as Ana; the typed walk holds both. The
-    two things not seen in a browser are a slow write that is refused and a busy step inside a lot.
+    Session 198 fix-claimed both together (a637947), browser first as Ana; the typed walk holds both. The
+    sync door of the replace question (the resolver's certificate gate) has no browser proof yet.
+- kind: task
+  stage: S57
+  text: "F-244, F-245, F-247, F-248 from session 198's sweep and review: a copy's quiet skips, a departed person's block on a clear, a lot step both uncertified and busy asked its reason before the probe, a two-block replace whose button places the incoming on the other block unsaid"
+  why: >-
+    None writes anything wrong today except F-248 (a press that does more than its label); F-244 and F-245 are
+    R-435's "ask rather than drop" applied to two older expansions, and how a copy names its skipped blocks
+    (one sentence each, or a count) is a wording question for the maintainer before the lane starts.
 - kind: task
   stage: S57
   text: "F-237, F-238, F-240, F-241 from the two reviews: the planners' offer the server refuses, a guessed id priced by the trigger, a typed yes at the Continue? pop-up, two names after clear; and F-242's three sentences are a question for the maintainer"
