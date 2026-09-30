@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-29'
-  tip: '96b5a37'
+  updated: '2026-09-30'
+  tip: '953c900'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -5805,7 +5805,7 @@ requirements:
   verified_by:
   - kind: sql
     file: supabase/tests/20_capacity_test.sql
-  status: covered
+  status: contradicted
 - id: R-034
   title: Capacity trigger uses a per-operator lock and peak math
   source:
@@ -9318,7 +9318,7 @@ requirements:
       through to a button inside; T5 a viewer's finger is refused on a block and on empty track and
       scrolls nothing; T6 the tree row body does not reorder on touch; T7 the tree grip drags on
       touch; T8 the level-list grip drags on touch
-  status: contradicted
+  status: covered
 - id: R-356
   title: A named template is a whole week, jobs and people, saved relative to Monday and applied through Copy Week
   source:
@@ -9508,7 +9508,7 @@ requirements:
   - kind: vitest
     file: src/test/errors.test.ts
     cases: "absence_overlap parses the person and the requested days and is worded with them, never as Something went wrong (F-185)"
-  status: contradicted
+  status: covered
   note: >-
     CONTRADICTED until the tester verifies DEF-0035 (fix-claimed in session 184). Filed 21 Sept (DEF-0035, session 181t): the Person dropdown offered a supervisor everyone she could see while set_absence accepts only people whose home (falling back to site) she manages. Session 182 filtered the list by canEditNode on the same coalesce; the tester REOPENED it the same day (session 183t): the preview has no path for a cell on another line and fails open, so all six were still offered. Session 184: the form asks the server (absence_recordable_people, 0084, the same expression set_absence gates on), no client predicate, AB35 holds the two to each other. Found on the way in 182: the overlap refusal was not parsed (F-185); the rail's on-leave mark could shrink to nothing (F-186).
 - id: R-351
@@ -9903,7 +9903,7 @@ requirements:
     cases: >-
       the person's detail renders the absences block below "Where they can work" and every existing
       person-selecting case still holds
-  status: contradicted
+  status: covered
   note: >-
     ⭐ VERIFIED BY THE TESTER 8 Sept at `0a8da7a`, the cross-plant question every screen here has had
     to answer, live and not just by reading the RLS policy: recorded a real absence for a Plant B
@@ -10204,7 +10204,7 @@ requirements:
   - kind: e2e
     file: e2e/invite.spec.ts
     cases: "with the tester stack's env exported (E2E_MAIL_URL from tester-stack.mjs env) and E2E_PORT=5174, invite.spec.ts and passwordReset.spec.ts pass -- the five email-following cases DEF-0026 named among them"
-  status: covered
+  status: contradicted
   note: >-
     BUILT 9 Sept (session 114, 99ef996). DECIDED 9 Sept (maintainer, session 113), out of the tester's F-127: the tester's four browser
     attempts reused this folder's dev server (`playwright.config.ts` `reuseExistingServer` on a fixed
@@ -11679,7 +11679,7 @@ requirements:
   - kind: vitest
     file: src/test/voiceData.test.ts
     cases: "V4 and V6 after the held-out removals carry until: null (114 rows migrated, no sentence changed but one verb)"
-  status: contradicted
+  status: covered
   note: >-
     STATED 14 Sept (session 168), the catalogue's group 3 (S53); design §19.101 (D130 item 2). AMENDED
     28 Sept (session 194) by the maintainer, answering DEF-0048's question (remove the blocks only, or
@@ -12122,7 +12122,7 @@ requirements:
     cases: "isoPlusDays, isoMondayOfWeek, dayMarker, isCalendarDay (30 February refused: V8 normalises it silently)"
   - kind: manual
     steps: "the grep in docs/agent-briefs/s62-a-one-clock-audit-brief.md run and every hit classified in the lane's report (session 177); CLAUDE.md §7 carries the three duties"
-  status: contradicted
+  status: covered
   note: >-
     STATED 17 Sept (session 177): "can we make sure the time set by the settings for the plant is the standard
     the whole board should use for any further development happening here on after? And any kind of
@@ -12349,7 +12349,7 @@ requirements:
   verified_by:
   - kind: manual
     steps: "pinned when the clear grammar and the undo land (queued 17 Sept)"
-  status: contradicted
+  status: uncovered
   note: >-
     STATED 17 Sept (session 178): "Unless specified clear means clearing everything, we can program an undo
     option since we have the activity data, it should be easy." Today clear removes the people and leaves the
@@ -12831,7 +12831,7 @@ requirements:
     cases: "D13: Plant A resolves to America/Chicago through app_resolve_node_setting and every seeded block starts at 06:00 in that zone"
   - kind: manual
     steps: "22 Sept (session 187): proved on the scratch demo database (14 passed), the local database reset with the maintainer's word and read back (America/Chicago; 84 of 84 seeded blocks at 06:00 Chicago); the whole e2e suite on the reset stack: 36 passed, 5 skipped (the volume fixture), 1 failed --- linePeople's first assertion assumed someone homed on the current band; fixed the same session and re-run with roleWalk and viewerBoard, 9 passed"
-  status: contradicted
+  status: covered
   note: >-
     STATED 22 Sept (session 187), answering the question F-190 raised. Until then the seed wrote its hours
     as UTC and set no zone, so the plant was a UTC plant after every reset while the design (F-159, the
@@ -12877,7 +12877,7 @@ requirements:
     cases: "D13 (every seeded block starts at its operator's own band start in Chicago) and D14 (the band rebuilt as a range with the seed's own wall-clock arithmetic; no seeded minute outside it); both fail against the old fixed hours, 14 of 84 and 70 of 84"
   - kind: manual
     steps: "23 Sept (session 190): proved on the scratch demo database, 15 passed; the daylight-saving night of 7 March 2026 checked by hand against the container (420 elapsed minutes, wall-clock equal); the local database not reset --- the maintainer's app was on it"
-  status: contradicted
+  status: covered
   note: >-
     STATED 23 Sept (session 190). Built by lane S71-e (docs/agent-briefs/s71-e-demo-bands-brief.md); proved on
     the scratch demo database, the local database reset only with the maintainer's word.
@@ -12900,7 +12900,7 @@ requirements:
     cases: "VCLIP-1 onward: the scorer's normaliser (am and pm glued, dotted and spaced; spelled numbers; ordinals; apostrophes), word error rate exact, empty and partial, name hits with one misheard name"
   - kind: manual
     steps: "23 Sept (session 190): the scorer against whisper.cpp's own jfk.wav on the running base.en container, with and without a prompt --- word error rate 0, exact, about 2 to 3 s a clip; the recording page served and took a posted clip into the manifest; the maintainer's 22 clips and the six-cell matrix are the next step"
-  status: contradicted
+  status: covered
   note: >-
     STATED 23 Sept (session 190). Why the spoken walks read worse than television subtitles: the container ran
     ggml-base.en (74M parameters, the second-smallest model) with greedy decoding, no non-speech suppression and
@@ -12952,7 +12952,7 @@ requirements:
   - kind: vitest
     file: src/test/commandBar.test.tsx
     cases: "CB-showday-1 to 12: the move is one line in the thread and no button; the rerun waits for a ctx whose rows are the new window's (settled), fires on the next; Escape, a cancel word and typing drop it; a window that never loads is bounded and says so (10, 11); a fresh sentence is not blocked by an unsettled ctx (12); CB-keep-2 and CB-rr-1 the trace entry stays open across the move and the rerun's outcome closes it; CB-lot-4 a lot step landing off the board"
-  status: contradicted
+  status: covered
   note: >-
     STATED 24 Sept (session 191). Supersedes R-419 (whose rerun machinery it reuses without the press). F-219 is
     the placeholder race this row's "waits for the data" clause closes: on 24 Sept the rerun fired against the
@@ -12979,7 +12979,7 @@ requirements:
   - kind: vitest
     file: src/test/commandBar.test.tsx
     cases: "CB-verb-1 to 6: the buttons render instead of the grammar hint at both sites and on the no-reader path; a press re-submits the guess's sentence and the trace records it; a guess that fails to parse falls through; a spoken yes presses a one-candidate question and not a two-candidate one; CB-ground-2, 5, 6 rewritten for the new path"
-  status: contradicted
+  status: covered
   note: >-
     STATED 24 Sept (session 191). The trace of the third round: "Tom Baker to Cell 3 from 18 to 12 p.m. today"
     got the grammar hint; "and John Kim''s block at 10 a.m. today" got the hint twice and then a "move" the
@@ -13112,7 +13112,7 @@ requirements:
   - kind: e2e
     file: e2e/typedWalk.spec.ts
     cases: "entries 1b to 1e: a night block placed, the day cleared, No leaves the next day's part in the database, Yes removes the whole block"
-  status: contradicted
+  status: covered
   note: >-
     BUILT 28 Sept (session 194, 504a74b), DEF-0040 fix-claimed. Recorded by the tester in the turns the maintainer decided it (the previous day first, then the next
     day when asked). Today the clear trims the person's block at midnight and then deletes the whole job,
@@ -18805,6 +18805,100 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 195t
+  date: 2026-09-30
+  title: "Tester run over session 194: thirteen of the sixteen defects verified by their own reproductions, three reopened, and seven new ones --- the worst, a line supervisor can double-book a person who is working on another line, because the server's own check cannot see that line (DEF-0053 to DEF-0059)"
+  commits: ['4d0b718']
+  numbers:
+    app_tests: 4723
+    app_test_files: 189
+    tsc: 0
+    eslint: 0
+    db_checks: 906
+    migrations: 84
+    e2e: 52
+  confirmed: true
+  numbers_note: >-
+    Fast-forwarded tester onto Development at 953c900 (8 commits, 99 files); package-lock unchanged. The
+    tester's stack was started for this run and stopped at the end of it. `node scripts/tester-run.mjs --sql
+    --e2e` at 4d0b718 (the two repaired pins and the widened one committed first, so the tree was clean):
+    plan ok, `db:types` regenerated from the stack and byte-identical but for line endings, typecheck ok, lint
+    ok, so tsc is conclusive. vitest in that run: `Test Files  2 failed | 184 passed (186)`, `Tests  5 failed |
+    4704 passed (4709)` --- 4709 is session 194's 4705 passing plus its three named reds, now green (the two
+    pins R-461 left unreachable, repaired by the tester; DEF-0020's live pin, which passes on the tester's
+    stack), plus one case added to DEF-0047's pin. The five failures: four in voiceClipsScorer.test.ts, which
+    fail only because this worktree's checkout has Windows line endings (DEF-0058; with the script in LF,
+    `Tests  4 passed (4)`), and voiceTrain's VT6, a 5-second timeout under load that passes alone. WITH THIS
+    SESSION'S NEW PINS the runner's last line, read on the final tree: `Test Files  4 failed | 185 passed
+    (189)`, `Tests  16 failed | 4707 passed (4723)` --- the sixteen are the twelve new red pin cases (DEF-0053
+    one, DEF-0055 one, DEF-0056 ten) and the same four line-ending failures. So the next session should
+    expect 4723 in 189 files, twelve red by design, and on a checkout with LF files nothing else. tsc and
+    eslint clean over the pins; the four new files pass prettier. db_checks MEASURED: every SQL step of the
+    run failed to start (`set: pipefail: invalid option name`, line endings again, DEF-0058), so the suite was
+    run file by file with `bash -o igncr`: 65 tally lines (64 files and dev_demo_test's 17), 906 passed, 0
+    failed, 0 hard errors --- CS2 and CS5 of file 93 passed at this hour (F-232). e2e: Playwright's own line
+    is `Running 52 tests` (the plan's 55 counts something else; 51 plus the F-233 case is 52). Three full runs
+    of `npm run e2e`: `2 failed, 6 skipped, 44 passed`, `3 failed ... 43 passed`, `2 failed ... 44 passed` ---
+    the typed walk and weekTemplates' afterAll in all three, copyWeek once (DEF-0057). The typed walk alone,
+    one worker: list 1 twice and list 2 twice over the same database, `2 passed` each time. format:check
+    lists 507 files, the worktree's line endings as in every tester session.
+  summary: >-
+    WHAT WAS JUDGED. Session 194: the sixteen fix-claimed defects, each by the tester's own reproduction on
+    the tester's stack (fresh seed) as the person the defect names --- Ana for everything a supervisor can
+    reach --- and the four requirements the session added (R-461 to R-464). No migration in the range. No
+    lanes this run; every line below was run by the tester.
+    ⭐ VERIFIED, THIRTEEN: DEF-0037 (no Remove where the server refuses, both screens, server read back),
+    DEF-0038 (the New pop-up in the plant's zone with the browser set to Chicago, Kolkata and UTC), DEF-0039
+    (the recording page refuses the LAN address), DEF-0040 (a night shift split at midnight: No keeps the
+    other day's part for the person and the job, both directions asked separately, as the plant admin and as
+    Ana, every answer read back from the database), DEF-0041, DEF-0042 (the walk green twice per list alone),
+    DEF-0045 (people on every shift at 3 am, 10 am, 3 pm and 11 pm), DEF-0046 (no crash), DEF-0047 (the week
+    clear is one lot of 21, the night block once), DEF-0048 (one yes clears the block and records the absence;
+    a person Ana may not record for is told so; at 11:30 pm Chicago "today" is the plant's day), DEF-0049,
+    DEF-0050 (the real scorer against a fake Whisper that fails and hangs: table, file, counts, exit 1 in 3.6
+    s), DEF-0051.
+    ⛔ REOPENED, THREE. DEF-0043: the which-block and join-job buttons still read "Remove Cell 2 · Housing A
+    22:00–06:00" (the developer's note queues it; it is the defect's own reproduction), and new in the same
+    register "Ready to do 1 things ... Done, 1 things". DEF-0044: six of seven limits now go red by name;
+    item 6 does not --- the case written for it and labelled mutation-provable passes with the mutation in
+    place --- and one more was found (Remove offered while the permission answer is still loading: nothing
+    goes red). DEF-0052: the done / not done / not tried answer is there and the database matches it, but on
+    a lot over several days Not done and Not tried leave the day out ("The Housing A job on Cell 1 stays as
+    it was" five times, word for word), and a block somebody else removed is reported as "You cannot change
+    that from here".
+    ⛔ NEW, SEVEN. DEF-0053 (MAJOR), the adversarial pass: as Ana, "put Priya Shah on Cell 1 today from 10 am
+    to noon" is written while Priya is on Cell 4 from 6 am to 2 pm; the database holds her at 2.000 against a
+    cap of 1.0. The server's capacity sum is computed from the caller's view, so a supervisor's check cannot
+    see a line outside her grant: capacity_probe answers fits for Ana and does not fit for the plant admin,
+    the same question. R-033 contradicted; 20_capacity_test runs as one role that reads everything. It is
+    older than session 194 and was never looked for. DEF-0054: a sentence that ends in the board's Continue?
+    pop-up is never finished --- a write made that way has no trace entry and no Written line, and after
+    Cancel the thread still says the block "now ends 5:30 pm"; the waiting line says "attachment or
+    keep/scale". DEF-0055: "clear Maria Lopez tomorrow" is read as a place and answered with the board's
+    cells as buttons. DEF-0056: the clear-everyone guard still passes "do not clear the board", "is everyone
+    off today", "I will clear it with everyone" (ten of ten, pinned). DEF-0057: the typed walk is red under
+    npm run e2e three runs of three --- the new F-233 case writes into the trace the walk reads, and the
+    booking is read once without waiting. DEF-0058: no .gitattributes, so on this worktree's checkout the SQL
+    runner does not start and the scorer's four new tests fail. DEF-0059: the Supabase stack answers on the
+    machine's network address --- Postgres, the API, Studio, the mail catcher --- which R-460, a standard
+    since 28 Sept, says no local server does.
+    MUTATIONS, twelve, each on the tester's tree and restored: ten red by name (six of DEF-0044's seven, the
+    job removal replaced by nothing among them; Remove on every row of the Absences tab; an absence offered
+    for anyone; the absence write and the job trim each replaced by nothing); two not caught, both recorded
+    on DEF-0044.
+    HELD, WITH EVIDENCE: R-463 (a one-minute block said to the bar is written and read back); R-461 in both
+    directions; R-426 on the New pop-up and on an absence said late at night; the week clear's trace entry
+    across the board's own move; every open question in the trace at the ask. NOT SEEN LIVE: R-462's "Nobody
+    on Shift 1 on this board" (the seed has no empty shift now; unit cases only); anything with the served
+    model (not running); R-464, parked by the developer and uncovered. SEEN AND NOT FILED: "extend Sam Patel
+    today by 30 minutes" and "extend everyone on Cell 2 2026-10-03 by 30 minutes" read the day into the name
+    (F-229's family; the bar asks honestly); VT6 and clipServer's CS-4 each timed out once under a loaded
+    machine and pass alone.
+    REQUIREMENTS. Restored to covered: R-350, R-357, R-360, R-409, R-426, R-450, R-452, R-453, R-455, R-456,
+    R-461. R-436 to uncovered: its only listed proof is a manual note, though the clear of people and job
+    was read back from the database this run. Still contradicted: R-407, R-430, R-431, R-432, R-433, R-434, R-435, R-459, R-460. Newly
+    contradicted: R-033, R-366. DEF-0044's violates is narrowed to R-407, the one clause still unheld.
+  shipped: []
 - id: '194'
   date: 2026-09-28
   title: "The tester's sixteen defects, fix-claimed the day they were filed: a night shift split at midnight, an absence recorded from the bar, a lot that says what it did and did not, the New pop-up on the plant's clock, and the typed walk green on a fresh seed (DEF-0037 to DEF-0052)"
