@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-30'
-  tip: '7afedf1'
+  tip: 'a6b1454'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13351,7 +13351,7 @@ findings:
 - id: F-239
   title: The bar's live line prints a readout the moment the writer is called, seconds before the server answers
   tag: Said as done before it is done
-  status: open
+  status: fixed
   found_by: agent
   stage: S57
   refs:
@@ -13364,6 +13364,10 @@ findings:
     trace's ran are right (they wait for the answer); it is the live line and the turn's asked that jump
     ahead. The fix is the live line saying "Working..." until the server answers, which touches the readout
     that also feeds asked and many sync cases; a piece of its own, and the wording is the maintainer's.
+    FIXED the same evening (session 196, a6b1454) as one piece with DEF-0060: the live line reads the bar's
+    existing "Working…" until the writer answers, the entry is posted at the ask with outcome "writing", and
+    the readout is what the entry asked only once the write is written; a refused write asked nothing. Seen in
+    the browser with the PATCH held five seconds, and held by the typed walk's F-239 case.
 - id: F-238
   title: The trigger prices a person the supervisor cannot read if she guesses the id --- an existence oracle, not a listing
   tag: Low
@@ -18978,6 +18982,52 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: '196'
+  date: 2026-09-30
+  title: "The bar refuses before it speaks: a person busy on a line the supervisor cannot see gets one Not done and no readout or join question in front of it, and a write in flight reads Working until the server answers (DEF-0060 fix-claimed, F-239 fixed)"
+  shipped: []
+  commits: ['a6b1454']
+  numbers:
+    app_tests: 4921
+    app_test_files: 191
+    tsc: 0
+    eslint: 0
+    db_checks: 937
+    migrations: 85
+    e2e: 58
+  confirmed: true
+  numbers_note: >-
+    npm run test copied from the runner on the final tree with the tester's stack up: `Test Files  191 passed
+    (191)`, `Tests  4921 passed (4921)`. tsc -b exit 0, conclusive (no migration). eslint . exit 0 without the
+    stray .claude/worktrees folder; prettier --check . clean. db_checks unchanged from 196t (no SQL touched).
+    e2e: `Running 58 tests` (56 plus DEF-0060's and F-239's cases); `npm run e2e` once on the final tree: `52
+    passed, 6 skipped (2.2m)`; the typed walk alone by the lane, --workers=1: list 1 `6 passed (1.5m)`, list 2
+    `6 passed (1.3m)`, the role walk `7 passed (1.2m)`.
+  summary: >-
+    Merged tester (fast-forward, f0f4a4b): all ten of session 195's defects VERIFIED by the tester's own
+    reproductions, R-033, R-366, R-407, R-430 to R-435 and R-459 restored to covered, one new minor defect.
+    DEF-0060, told to the maintainer first and agreed with: as Ana, "put Priya Shah on Cell 2 today from 10 am
+    to noon" printed the readout as done and THEN "Not done: Priya Shah is already on Cell 4 in Line 2 ...",
+    and on a cell with a job the join question came first with both buttons leading to the same refusal. It is
+    the sentence the developer wrote into R-465 the day before ("refuses before the yes, never after it") and
+    the same cause as F-239: the bar printed a readout the moment the writer was called and asked the capacity
+    probe only after the server had refused. The maintainer said take it now; the tester's stack was started
+    for the run and stopped after.
+    ONE LANE, S196-A (Sonnet, docs/agent-briefs/s196-a-refuse-before-the-readout-brief.md), browser first: both
+    defects reproduced as Ana before a line changed. The bar takes a precheck from the drag hook -- the one
+    function that builds the attempt the write itself would make and asks capacity_probe through the same
+    isBusyElsewhere gate and sentence builder -- and every door passes it: a single step, a question whose
+    every answer is a placement (join or separate, which shift, block exists, the reason questions), and every
+    step of a lot before "Ready to do N things" (a busy step is named, "Not doing ...", and the rest listed).
+    A probe that fails says nothing new; the server's write is the gate. The live line reads "Working…" until
+    the writer answers; the entry is posted at the ask with outcome "writing"; the readout is what the entry
+    asked only once written. The main session sent the lane back twice: the override's "The reason given: ..."
+    had dropped off the screen (it is back on the written readout, and the walk now asserts it, which it never
+    had), and the in-flight outcome said "popup" when there was none. Seven cases that pinned the old order
+    changed with the contract (F-239, R-431). Seen again in the browser after the fix; two browser cases in
+    the typed walk. Mutations red by name: the pre-check off (4), the readout at call time (15), the lot's
+    pre-check off (2), the question before the probe (2), the suffix dropped (2).
+    Not proved in a browser: a slow write that is refused (unit only), a busy step inside a lot (unit only).
 - id: 196t
   date: 2026-09-30
   title: "Tester run over session 195: all ten fix-claimed defects verified by their own reproductions --- a supervisor can no longer double-book a person on a line she cannot see --- and one new, minor: the bar still says the booking before it says Not done (DEF-0060)"
@@ -27662,18 +27712,16 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S57
-  text: "Push, then the tester verifies DEF-0043, 0044, 0052 to 0059 by its own reproductions (its worktree needs one re-checkout for the new line-ending rule: git rm -rq --cached . then git reset --hard; DEF-0059's proof is a second device)"
+  text: "Push, then the tester verifies DEF-0060 by its own reproduction (session 195's ten are verified; the tester's worktree has been re-checked out for the line-ending rule)"
   why: >-
-    Session 195 fix-claimed all ten, DEF-0059 last on the maintainer's own phone test. The tester's
-    stack rebuilds with migration 0085, and the two stacks now print their open ports at start. The
-    requirements the tester set contradicted (R-033, R-366, R-407, R-430 to R-435, R-459) are the tester's to
-    restore; R-465 is covered by the developer's own proofs and is the tester's to confirm.
+    Session 196 fix-claimed DEF-0060 together with F-239, browser first as Ana; the typed walk holds both. The
+    two things not seen in a browser are a slow write that is refused and a busy step inside a lot.
 - kind: task
   stage: S57
-  text: "F-237 to F-241 from the two reviews: the planners' offer the server refuses, the live line said as done before the server answers, a typed yes at the Continue? pop-up, a guessed id priced by the trigger, two names after clear; and F-242's three sentences are a question for the maintainer"
+  text: "F-237, F-238, F-240, F-241 from the two reviews: the planners' offer the server refuses, a guessed id priced by the trigger, a typed yes at the Continue? pop-up, two names after clear; and F-242's three sentences are a question for the maintainer"
   why: >-
-    None writes anything wrong today; F-237 and F-239 are the two R-431 gaps and the developer would take them
-    first. F-239's fix is one wording ("Working..." until the server answers) that touches many sync cases.
+    None writes anything wrong today; F-237 is the one R-431 gap left (the week-copy and template planners,
+    three large functions to re-emit) and the developer would take it first.
 - kind: task
   stage: S57
   text: "The findings session 194 left open: F-225 to F-231 --- the certificate refusal's two wordings and the 24-hour spans on the which-block buttons, the trace file's growth, the seven spoken clears the typed grammar does not read, a person called Lin On, a day said after the shift, a minimum length for a job on the server, the scratch database's cleanup"
