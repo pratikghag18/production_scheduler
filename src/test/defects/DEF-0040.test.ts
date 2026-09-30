@@ -107,35 +107,49 @@ describe("DEF-0040: a midnight-crossing job's run removal must not delete a bloc
       shift: null,
       until: null,
     };
-    const res = expandCommand(command, ctx());
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
+    // REWRITTEN by the tester, 30 Sept (session 195t), for R-461: the clear of
+    // a day a night shift crosses asks first, so the pin answers the question
+    // both ways and holds the invariant under each answer. The two shape
+    // assertions of the defective build (one trim AND one run removal in the
+    // same lot) are gone; the invariant they led to is what stays.
+    const asked = expandCommand(command, ctx());
+    expect(asked.ok, "a clear across a night shift asks before it builds a lot").toBe(false);
 
-    const flat = (
-      res.command.intent === "several" ? res.command.commands : [res.command]
-    ) as readonly SingleCommand[];
-    const survivingMoveAssignmentIds = new Set(
-      flat
-        .filter((c): c is MoveCommand => c.intent === "move" && c.existing?.kind === "move")
-        .map((c) => (c.existing as { kind: "move"; assignmentId: string }).assignmentId),
-    );
-    const deletedRunIds = new Set((res.runRemovals ?? []).map((r) => r.runId));
+    for (const answer of ["keep", "clear"] as const) {
+      const res = expandCommand(command, ctx(), { previousDayPart: answer });
+      expect(res.ok, `answered ${answer}: a lot`).toBe(true);
+      if (!res.ok) return;
 
-    // The live shape: exactly this -- 1 move (Priya, trimmed to survive) + 1
-    // run removal (her own run, cascade-deleting the row the move just kept).
-    expect(survivingMoveAssignmentIds.has("priyaBlk")).toBe(true);
-    expect(deletedRunIds.has("run1")).toBe(true);
+      const flat = (
+        res.command.intent === "several" ? res.command.commands : [res.command]
+      ) as readonly SingleCommand[];
+      const survivingMoveAssignmentIds = new Set(
+        flat
+          .filter((c): c is MoveCommand => c.intent === "move" && c.existing?.kind === "move")
+          .map((c) => (c.existing as { kind: "move"; assignmentId: string }).assignmentId),
+      );
+      const deletedRunIds = new Set((res.runRemovals ?? []).map((r) => r.runId));
 
-    // The invariant a correct fix must restore, either direction: no block
-    // the lot says survives (a trim/move) may belong to a run the SAME lot
-    // deletes. priyaBlk belongs to run1 by construction (the fixture above).
-    const contradiction = survivingMoveAssignmentIds.has("priyaBlk") && deletedRunIds.has("run1");
-    expect(contradiction).toBe(false);
+      // The invariant, either direction: no block the lot says survives (a
+      // trim/move) may belong to a run the SAME lot deletes. priyaBlk belongs
+      // to run1 by construction (the fixture above).
+      const contradiction = survivingMoveAssignmentIds.has("priyaBlk") && deletedRunIds.has("run1");
+      expect(contradiction, `answered ${answer}`).toBe(false);
 
-    // The run removal's own readout must keep the job's real, full-crossing
-    // span ("10 pm to 6 am") -- never narrowed to only the cleared day's
-    // hours just because the sentence named one day.
-    const runRemoval = (res.runRemovals ?? []).find((r) => r.runId === "run1");
-    expect(runRemoval?.readout).toContain("10 pm to 6 am");
+      if (answer === "keep") {
+        // No: Sunday's part stays, for the person and for the job alike.
+        expect(survivingMoveAssignmentIds.has("priyaBlk")).toBe(true);
+        expect(deletedRunIds.has("run1")).toBe(false);
+        const trim = (res.runTrims ?? []).find((r) => r.runId === "run1");
+        expect(trim?.range).toEqual({ startMin: 22 * 60, endMin: 1440 });
+      } else {
+        // Yes: the whole shift goes, and the removal's readout keeps the
+        // job's real, full-crossing span -- never narrowed to the cleared day.
+        expect(survivingMoveAssignmentIds.has("priyaBlk")).toBe(false);
+        const runRemoval = (res.runRemovals ?? []).find((r) => r.runId === "run1");
+        expect(runRemoval?.readout).toContain("10 pm to 6 am");
+        expect((res.runTrims ?? []).some((r) => r.runId === "run1")).toBe(false);
+      }
+    }
   });
 });

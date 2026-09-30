@@ -133,4 +133,26 @@ describe("DEF-0047 (DST week, named-person repeat clear)", () => {
     // queues a `remove` for the SAME assignment id twice.
     expect(removalIds).toEqual(["priyaNight"]);
   });
+
+  // WIDENED by the tester, 30 Sept (session 195t), at the developer's request
+  // in the defect file: the sentence in the Reproduction ("clear Line 1 for the
+  // rest of the week") takes the EVERYONE-on-a-place branch, which the case
+  // above never reached. Same block, same real axis, named by place instead.
+  it("'clear Cell 4 every day this week' (everyone on the place) names her one night block exactly ONCE in the lot", () => {
+    const everyone: UnassignCommand = { ...command, operator: "everyone", place: ["Cell 4"] };
+    // Monday is "today" so the whole week, Saturday and Sunday both, is in the clear.
+    const res = expandCommand(everyone, ctx({ todayIndex: 0, todayIso: "2026-03-02" }), {
+      previousDayPart: "clear",
+      nextDayPart: "clear",
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const cmds = res.command.intent === "several" ? res.command.commands : [res.command];
+    const named = cmds.flatMap((c) =>
+      "existing" in c && c.existing && "assignmentId" in c.existing
+        ? [c.existing.assignmentId]
+        : [],
+    );
+    expect(named).toEqual(["priyaNight"]);
+  });
 });

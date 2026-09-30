@@ -88,7 +88,10 @@ describe("DEF-0043-headcount: a headcount of 1 reads '1 person', never '1 people
       shift: null,
       until: null,
     };
-    const res = expandCommand(command, ctx());
+    // REWRITTEN by the tester, 30 Sept (session 195t): since R-461 this clear
+    // asks about Sunday's part first; answered Yes, the job is removed whole
+    // and its readout is the sentence under test.
+    const res = expandCommand(command, ctx(), { previousDayPart: "clear" });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     const runRemoval = (res.runRemovals ?? []).find((r) => r.runId === "run1");
