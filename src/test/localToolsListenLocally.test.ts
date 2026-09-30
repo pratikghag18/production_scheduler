@@ -20,9 +20,18 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
+import {
+  beyondLoopbackWarning,
+  publishesBeyondLoopback,
+} from "../../scripts/lib/loopbackNetwork.mjs";
 
 const RECORD_SRC = readFileSync("scripts/voice/clips/record.mjs", "utf8");
 const SERVE_SRC = readFileSync("scripts/voice/serve/serve.mjs", "utf8");
+const TESTER_STACK_SRC = readFileSync("scripts/tester-stack.mjs", "utf8");
+const DB_START_SRC = readFileSync("scripts/db-start.mjs", "utf8");
+const PACKAGE_JSON = JSON.parse(readFileSync("package.json", "utf8")) as {
+  scripts: Record<string, string>;
+};
 
 describe("R-460: local tools listen on this machine only", () => {
   it("record.mjs's http server listens on the loopback host explicitly", () => {
@@ -56,5 +65,80 @@ describe("R-460: local tools listen on this machine only", () => {
     for (const value of publishValues) {
       expect(value.startsWith("127.0.0.1:")).toBe(true);
     }
+  });
+});
+
+/**
+ * DEF-0059 (30 Sept, tester): the largest server the project starts was not on
+ * session 194's list. `supabase start` publishes Postgres (default password),
+ * the API, Studio and the mail catcher on `0.0.0.0`, and `config.toml` has no
+ * bind-address setting. The Docker network whose bridge option should bind
+ * every published port to loopback is ignored by this machine's Docker Desktop
+ * (loopbackNetwork.mjs's header has the experiment), so each start script now
+ * reads `docker ps` back and says, loudly, which ports answer beyond this
+ * machine and which firewall rule closes them. These cases hold the read-back's
+ * arithmetic, the warning's words and the rule's ports; the live proof is a
+ * second device on the network, which is the defect's own reproduction.
+ */
+describe("R-460 (DEF-0059): the Supabase stacks say where they listen", () => {
+  const PS_WIDE = [
+    "supabase_db_production_scheduler_tester\t0.0.0.0:54422->5432/tcp, [::]:54422->5432/tcp",
+    "supabase_kong_production_scheduler_tester\t8001/tcp, 8088/tcp, 8443-8444/tcp, 0.0.0.0:54421->8000/tcp",
+    "supabase_db_production_scheduler\t0.0.0.0:54322->5432/tcp",
+    "stocks_app-stock-tracker-1\t0.0.0.0:8080->8080/tcp",
+  ].join("\n");
+  const PS_LOOPBACK = [
+    "supabase_db_production_scheduler_tester\t127.0.0.1:54422->5432/tcp",
+    "supabase_kong_production_scheduler_tester\t8001/tcp, 127.0.0.1:54421->8000/tcp",
+    "supabase_rest_production_scheduler_tester\t3000/tcp",
+  ].join("\n");
+
+  it("LN4: the read-back names every port of THIS stack published beyond loopback, IPv6 included", () => {
+    expect(publishesBeyondLoopback(PS_WIDE, "production_scheduler_tester")).toEqual([
+      "supabase_db_production_scheduler_tester 0.0.0.0:54422->5432/tcp",
+      "supabase_db_production_scheduler_tester [::]:54422->5432/tcp",
+      "supabase_kong_production_scheduler_tester 0.0.0.0:54421->8000/tcp",
+    ]);
+    // The developer's stack is judged by its own name; the tester's containers
+    // and an unrelated project's are not its business.
+    expect(publishesBeyondLoopback(PS_WIDE, "production_scheduler")).toEqual([
+      "supabase_db_production_scheduler 0.0.0.0:54322->5432/tcp",
+    ]);
+  });
+
+  it("LN5: a stack published on 127.0.0.1 only, with unpublished ports beside, reads clean", () => {
+    expect(publishesBeyondLoopback(PS_LOOPBACK, "production_scheduler_tester")).toEqual([]);
+  });
+
+  it("LN6: both start scripts read the ports back after the start and print the warning", () => {
+    for (const src of [TESTER_STACK_SRC, DB_START_SRC]) {
+      expect(src).toMatch(/publishesBeyondLoopback\(/);
+      expect(src).toMatch(/beyondLoopbackWarning\(/);
+      expect(src).not.toMatch(/--network-id/);
+    }
+    // `npm run db:start` is the script, not the bare CLI.
+    expect(PACKAGE_JSON.scripts["db:start"]).toBe("node scripts/db-start.mjs");
+  });
+
+  it("LN7: the read-back's warning names R-460, every open port, and the firewall rule", () => {
+    // The warning is what a person actually reads; it must say what to do.
+    const text = beyondLoopbackWarning("db-start.mjs", [
+      "supabase_db_production_scheduler 0.0.0.0:54322->5432/tcp",
+      "supabase_kong_production_scheduler [::]:54321->8000/tcp",
+    ]);
+    expect(text).toMatch(/^db-start\.mjs: WARNING \(R-460\)/);
+    expect(text).toContain("0.0.0.0:54322->5432/tcp");
+    expect(text).toContain("[::]:54321->8000/tcp");
+    expect(text).toContain("scripts/db-firewall.ps1");
+    expect(text).toContain("as an administrator");
+  });
+
+  it("LN8: the firewall rule blocks inbound TCP on both stacks' port ranges and nothing else", () => {
+    const ps1 = readFileSync("scripts/db-firewall.ps1", "utf8");
+    expect(ps1).toMatch(/-Direction Inbound -Action Block -Protocol TCP/);
+    expect(ps1).toContain('"54320-54329"');
+    expect(ps1).toContain('"54420-54429"');
+    // The tester's range is the developer's shifted by 100, as testerStack.mjs shifts it.
+    expect(ps1).not.toMatch(/-Action Allow/);
   });
 });

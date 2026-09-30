@@ -51,6 +51,7 @@ import {
   transformConfig,
   assertGeneratedConfig,
 } from "./lib/testerStack.mjs";
+import { beyondLoopbackWarning, publishesBeyondLoopback } from "./lib/loopbackNetwork.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORKDIR = resolveWorkdir(REPO_ROOT);
@@ -111,6 +112,12 @@ function supabaseInherit(args) {
   }
 }
 
+/** `docker <...args>`, captured — for the port read-back. */
+function docker(args) {
+  const r = spawnSync("docker", args, { encoding: "utf8" });
+  return { status: r.status ?? 1, stdout: r.stdout ?? "" };
+}
+
 /** Same, but captured rather than streamed — for `status -o env`. */
 function supabaseCapture(args) {
   const r = spawnSync("npx", ["supabase", "--workdir", WORKDIR, ...args], {
@@ -150,6 +157,18 @@ function cmdUp() {
     "tester-stack.mjs: loading migrations + seed.sql + dev_demo.sql (npx supabase db reset)...",
   );
   supabaseInherit(["db", "reset"]);
+
+  // R-460 / DEF-0059: a bare `supabase start` publishes every port on every
+  // interface and used to say nothing about it. The ports are read back and
+  // named, loudly, with the firewall rule that closes them on this engine
+  // (scripts/lib/loopbackNetwork.mjs says what else was tried); the stack is
+  // not refused, a tester needs it.
+  const beyond = publishesBeyondLoopback(
+    docker(["ps", "--format", "{{.Names}}\t{{.Ports}}"]).stdout,
+    projectId,
+  );
+  if (beyond.length > 0) console.error(beyondLoopbackWarning("tester-stack.mjs", beyond));
+  else console.log("tester-stack.mjs: every published port is on 127.0.0.1.");
 
   console.log("tester-stack.mjs: reading credentials (npx supabase status -o env)...");
   const env = parseEnvLines(supabaseCapture(["status", "-o", "env"]));
