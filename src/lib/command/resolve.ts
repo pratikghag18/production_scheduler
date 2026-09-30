@@ -611,6 +611,11 @@ export type Question =
       missing: string[];
       policy: "warn" | "block";
       inLot: boolean;
+      /** S198-A (R-467): who and where, the words a resolved step's own
+       *  `attempted` uses ("Lena Novak on Cell 2 Tue Oct 13, 3 pm to 5 pm"),
+       *  so a lot that refuses this step names it. Optional: a question built
+       *  by an expansion (`inLot: true`) never needs it. */
+      attempted?: string;
     }
   /**
    * F-165 (S62-b, R-425's shape for the AREA rule): a resolved write would
@@ -628,7 +633,24 @@ export type Question =
    * question raised at expansion time for a lot -- a lot never asks a reason
    * and never writes half of itself (R-425), so it is refused there.
    */
-  | { kind: "outside_area"; person: string; cell: string; inLot: boolean }
+  | { kind: "outside_area"; person: string; cell: string; inLot: boolean; attempted?: string }
+  /**
+   * S198-A (DEF-0062, R-466): "replace Sam Patel with Priya Shah on Cell 1"
+   * whose incoming person cannot be placed. A replace is ONE intent, so the
+   * bar asks instead of shrinking it to its removal: `reason` is the gate's
+   * own question (the sentence comes from `describeGateReason`, never a
+   * retype), `removals` the commands that take the outgoing person off (what
+   * the "take off anyway" button runs), `place` the cell names the outgoing
+   * person's blocks are on.
+   */
+  | {
+      kind: "replace_blocked";
+      reason: Question;
+      outgoing: string;
+      incoming: string;
+      place: string;
+      removals: SingleCommand[];
+    }
   | { kind: "day_off_board"; text: string }
   /** S194-D third pass: `subject`, set only for a JOB a clear would trim
    *  to a remnant under the minimum ("The Housing A job on Cell 1"), names
@@ -1693,6 +1715,17 @@ function usableOverrideReason(options: ResolveOptions | undefined): string | nul
   return usableReason(options?.overrideReason);
 }
 
+/** S198-A (R-467): a gate's refusal, carrying what was attempted (who and
+ *  where, the words a resolved step's own `attempted` would have used). */
+function withAttempted(
+  refusal: { ok: false; question: Question },
+  attempted: string,
+): { ok: false; question: Question } {
+  const q = refusal.question;
+  if (q.kind !== "not_certified" && q.kind !== "outside_area") return refusal;
+  return { ok: false, question: { ...q, attempted } };
+}
+
 /** S61-b (R-425, F-155): the one gate a resolved write that puts a person on
  *  a cell runs before it is ever returned `ok: true` -- `ctx.certificateGaps`
  *  (the server's own rule, transcribed) over `ctx.eligibilityPolicy`'s
@@ -2659,9 +2692,18 @@ function resolveAssignCommand(
   // place, and the person is already on this cell either way).
   let override: { reason: string } | undefined;
   let areaOverride: { reason: string } | undefined;
+  // S198-A (R-467): the gate's question names WHAT was attempted, in the same
+  // words a resolved step's own `attempted` does, so a lot that refuses this
+  // step can say "Not doing Lena Novak on Cell 2 ..." without the step ever
+  // having resolved. Built from the same three facts the readout below uses.
+  const cellName = cellDisplayName(cell, ctx, byPath);
+  const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
   if (target.kind !== "retime") {
+    const attemptedHere = spokenizeSpans(
+      `${operator.displayName} on ${cellName} ${iso}, ${timeText}`,
+    );
     const gate = certificateGate(operator, cell, endMin, false, ctx, options);
-    if (!gate.ok) return gate;
+    if (!gate.ok) return withAttempted(gate, attemptedHere);
     override = gate.override;
     // F-165 (S62-b): the AREA question, beside the certificate one and for
     // the same reason -- the server refuses this write outright without a
@@ -2669,7 +2711,7 @@ function resolveAssignCommand(
     // shape). Skipped for the same `retime` case above: the person is
     // already on this cell.
     const area = areaGate(operator, cell, false, ctx, options);
-    if (!area.ok) return area;
+    if (!area.ok) return withAttempted(area, attemptedHere);
     areaOverride = area.areaOverride;
   }
 
@@ -2677,8 +2719,6 @@ function resolveAssignCommand(
   // "Sam Patel is on Cell 1 <day> from <hours>, making Housing A." -- `iso`
   // stays a literal token here; `renderReadout` (CommandBar.tsx) is what
   // turns it into "today"/"tomorrow"/"Mon 28 Sep" in the plant's own zone).
-  const cellName = cellDisplayName(cell, ctx, byPath);
-  const iso = ctx.days.find((d) => d.index === dayIndex)?.iso ?? "";
   let readout = `${operator.displayName} is on ${cellName} ${iso} from ${timeText}, making ${product.name}.`;
   if (target.kind === "run") {
     // S58: `ctx.runs` (not `hits`, which stays empty on the job-hours
@@ -3403,14 +3443,17 @@ function resolveMoveCommand(
     // S61-b (R-425, F-155): the certificate question, before anything is
     // written -- ONLY here, moving to ANOTHER cell (never a move-in-time or
     // an adjust, which keep the block on its own cell, above).
+    const attemptedHere = spokenizeSpans(
+      `${operator.displayName} on ${destCellName} ${whenText}, ${arrow}`,
+    );
     const gate = certificateGate(operator, newCell, endMin, false, ctx, options);
-    if (!gate.ok) return gate;
+    if (!gate.ok) return withAttempted(gate, attemptedHere);
     override = gate.override;
     // F-165 (S62-b): the AREA question, same placement and same reason as
     // the assign path's -- only a move to ANOTHER cell can leave a person's
     // own area.
     const area = areaGate(operator, newCell, false, ctx, options);
-    if (!area.ok) return area;
+    if (!area.ok) return withAttempted(area, attemptedHere);
     areaOverride = area.areaOverride;
   }
 
@@ -3637,9 +3680,27 @@ export function resolveCommand(
 // bar's lot does that, unchanged, with `resolveCommand` (D127).
 // ---------------------------------------------------------------------------
 
+/**
+ * S198-A (DEF-0061/DEF-0062, R-425, R-466, R-467): an expansion the board
+ * built from one sentence -- a replace, a swap, a copy. At the resolver's own
+ * gates (certificate, area) all three refuse before the lot, never asking a
+ * reason (R-425). At the bar's busy probe they differ: a replace ASKS whether
+ * to take the outgoing person off anyway (R-466); a swap is refused whole,
+ * "Nothing changed.", because there is no half of one a supervisor would
+ * want; a copy is a lot of independent placements, so a busy step is named
+ * and the rest are listed for one yes (R-465's shape, the reviewer's
+ * correction in session 198).
+ */
+export type Coupled =
+  | { kind: "replace"; outgoing: string; incoming: string; place: string }
+  | { kind: "swap" | "copy" };
+
 export type Expansion =
   | {
       ok: true;
+      /** S198-A: set by `expandReplace`/`expandSwap`/`expandCopy` on a lot;
+       *  absent on every other expansion and on a several the person typed. */
+      coupled?: Coupled;
       // S58 (R-415, D132 item 4): `HeadcountCommand` is never itself part of
       // a lot (never wrapped in `several`), but `expandCommand` still hands
       // one back UNCHANGED (never a lot member, always the caller's own
@@ -4010,6 +4071,13 @@ function operatorById(id: string | null, ctx: ResolveContext): OperatorLike | nu
 function wrapMany(commands: SingleCommand[]): Expansion {
   if (commands.length === 1) return { ok: true, command: commands[0] };
   return { ok: true, command: { intent: "several", commands } };
+}
+
+/** S198-A: `wrapMany` for the expansions whose steps belong together -- the
+ *  lot is marked coupled (a lot of one is an ordinary single, never coupled). */
+function coupledMany(commands: SingleCommand[], coupled: Coupled): Expansion {
+  const wrapped = wrapMany(commands);
+  return wrapped.ok && wrapped.command.intent === "several" ? { ...wrapped, coupled } : wrapped;
 }
 
 /**
@@ -5279,6 +5347,8 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
 
   const removals: SingleCommand[] = [];
   const assigns: SingleCommand[] = [];
+  let blocked: Question | null = null;
+  const placeNames: string[] = [];
   for (const x of blocks) {
     const xCell = ctx.nodeById.get(x.nodeId) as Node;
     // F-152-b, rule 2: this block's own edges are about to be read through
@@ -5324,15 +5394,26 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
     // refuses (R-425: a lot never asks a reason, never writes half of
     // itself). `b` is the one being newly placed on `xCell`; `x.endMin` is
     // that block's own real end, the exact window `b` would take over.
+    //
+    // S198-A (DEF-0062, R-466) -- CONTRACT CHANGED: a replace whose incoming
+    // person fails a gate no longer answers with the gate's own "Nothing
+    // changed." refusal; it is ONE intent, so the bar ASKS (take the outgoing
+    // person off anyway, or leave it). The first gate that fails is the
+    // reason; the loop still gathers every removal so the answer takes ALL of
+    // the outgoing person's blocks in the window, not only those before it.
     const gate = certificateGate(b, xCell, x.endMin, true, ctx, undefined);
-    if (!gate.ok) return gate;
     // F-165 (S62-b): and the AREA question, at the same moment and for the
     // same reason -- a lot is refused before its one yes rather than
     // stopping half-written on the server's refusal (R-425). This is the
     // exact shape the maintainer's swap hit: three steps written, the
     // fourth refused, John's block gone and Sam never placed.
-    const area = areaGate(b, xCell, true, ctx, undefined);
-    if (!area.ok) return area;
+    const area = gate.ok ? areaGate(b, xCell, true, ctx, undefined) : null;
+    if (blocked === null) {
+      if (!gate.ok) blocked = gate.question;
+      else if (area !== null && !area.ok) blocked = area.question;
+    }
+    const cellLabel = cellDisplayName(xCell, ctx, byPath);
+    if (!placeNames.includes(cellLabel)) placeNames.push(cellLabel);
 
     removals.push({
       intent: "unassign",
@@ -5357,6 +5438,19 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
       shift: rendered.shift,
     });
   }
+  if (blocked !== null) {
+    return {
+      ok: false,
+      question: {
+        kind: "replace_blocked",
+        reason: blocked,
+        outgoing: a.displayName,
+        incoming: b.displayName,
+        place: placeNames.join(" and "),
+        removals,
+      },
+    };
+  }
   const commands = [...removals, ...assigns];
   if (commands.length > LOT_CEILING) {
     return {
@@ -5364,7 +5458,12 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
       question: { kind: "lot_too_big", count: commands.length, max: LOT_CEILING },
     };
   }
-  return wrapMany(commands);
+  return coupledMany(commands, {
+    kind: "replace",
+    outgoing: a.displayName,
+    incoming: b.displayName,
+    place: placeNames.join(" and "),
+  });
 }
 
 /** R-406, §3.4: each of A and B must have EXACTLY one block in the window;
@@ -5572,7 +5671,7 @@ function expandSwap(command: SwapCommand, ctx: ResolveContext): Expansion {
       shift: renderedA.shift,
     },
   ];
-  return wrapMany(commands);
+  return coupledMany(commands, { kind: "swap" });
 }
 
 /** Gregorian leap-year rule, spelled out here (not imported: this module
@@ -5940,7 +6039,7 @@ function expandCopy(command: CopyCommand, ctx: ResolveContext): Expansion {
       question: { kind: "lot_too_big", count: commands.length, max: LOT_CEILING },
     };
   }
-  return wrapMany(commands);
+  return coupledMany(commands, { kind: "copy" });
 }
 
 /**
@@ -6730,6 +6829,30 @@ function partHoursPhrase(c: Candidate): string {
  * individual case has to remember to convert an "HH:MM" it borrowed from a
  * board label (a candidate's own `label`, a run's own `span`) itself.
  */
+/**
+ * S198-A (R-467, R-449): the reason a gate refuses, as one plain sentence with
+ * no lead -- the ONE builder. `describeQuestionRaw` leads it with "Not done:",
+ * a lot that refuses the step leads it with "Not doing <who and where>:", and
+ * a replace that cannot place the incoming person says it before its question.
+ * `""` for any question that is not a gate's.
+ */
+export function describeGateReason(q: Question): string {
+  if (q.kind === "not_certified") {
+    return `${q.person} is not certified for ${q.cell}, missing ${q.missing.join(", ")}.`;
+  }
+  if (q.kind === "outside_area") return `${q.person} is not from ${q.cell}'s area.`;
+  return "";
+}
+
+/**
+ * S198-A (DEF-0062, R-466, R-459): what a replace asks when the incoming person
+ * cannot go -- the ONE sentence both doors build (the resolver's own gates and
+ * the bar's probe). `reason` is why she cannot go, already a sentence.
+ */
+export function describeReplaceBlocked(reason: string, outgoing: string, place: string): string {
+  return `${reason} Take ${outgoing} off ${place} anyway? Nobody would be covering ${outgoing}'s hours on ${place}.`;
+}
+
 function describeQuestionRaw(q: Question): string {
   switch (q.kind) {
     case "ambiguous":
@@ -6766,8 +6889,7 @@ function describeQuestionRaw(q: Question): string {
     // "Nothing changed." in place of the single sentence's offer to give a
     // reason.
     case "not_certified": {
-      const missing = q.missing.join(", ");
-      const base = `Not done: ${q.person} is not certified for ${q.cell}, missing ${missing}.`;
+      const base = `Not done: ${describeGateReason(q)}`;
       // S72-d review fix: `inLot` is checked FIRST, regardless of `policy`
       // -- the old CommandBar.tsx copy this lane merged away checked
       // `question.inLot` before `policy`, so a "block" refusal INSIDE a lot
@@ -6781,10 +6903,12 @@ function describeQuestionRaw(q: Question): string {
     }
     // F-165 (S62-b): the AREA twin of `not_certified`, same shape.
     case "outside_area": {
-      const base = `Not done: ${q.person} is not from ${q.cell}'s area.`;
+      const base = `Not done: ${describeGateReason(q)}`;
       if (q.inLot) return `${base} Nothing changed.`;
       return `${base} Say the reason to schedule anyway, or no.`;
     }
+    case "replace_blocked":
+      return describeReplaceBlocked(describeGateReason(q.reason), q.outgoing, q.place);
     case "day_off_board":
       return `${q.text} is not on the board. Move the board to that day first.`;
     case "too_short":

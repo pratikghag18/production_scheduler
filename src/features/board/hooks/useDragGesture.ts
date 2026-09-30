@@ -2342,10 +2342,12 @@ export function useDragGesture(args: UseDragGestureArgs) {
        *  collected -- folded into the SAME `eligibilityOverride: true,
        *  overrideReason` pair `buildCreateAssignmentInput`'s own `overrides`
        *  parameter already carries for the pop-up's own override checkbox
-       *  (no second shape). `undefined` (a lot's own call, which never
-       *  carries one, R-425: "a lot never writes half of itself", and
-       *  `openCreateFromCommand`'s own non-override branch) is
-       *  byte-identical to before this field existed. */
+       *  (no second shape). `undefined` (`openCreateFromCommand`'s own
+       *  non-override branch, and every lot step until S198-A) is
+       *  byte-identical to before this field existed. S198-A (R-467): a
+       *  several's step that answered its own reason question carries one
+       *  too, and `runLot` passes it through -- a coupled lot (a replace, a
+       *  swap, a copy) still never does (R-425). */
       override?: { reason: string };
       /** F-165 (S62-b): `ResolvedCommand.areaOverride` -- set ONLY when an
        *  `outside_area` question was answered with a reason the bar
@@ -3361,14 +3363,20 @@ export function useDragGesture(args: UseDragGestureArgs) {
                 readout: r.readout,
               });
             } else {
+              // S198-A (DEF-0061, R-467): a lot step that was asked its
+              // certificate or area question carries the reason it was given
+              // (`r.override`/`r.areaOverride`, set ONLY by that answer) --
+              // the same pair the single sentence's own override branch sends.
+              // Without it the server refused the very step the person had
+              // just answered for, after the yes.
               await submitMove(
                 r.nodeId,
                 r.range,
                 r.assignmentId,
-                false,
-                undefined,
-                false,
-                undefined,
+                r.override !== undefined,
+                r.override?.reason,
+                r.areaOverride !== undefined,
+                r.areaOverride?.reason,
               );
             }
           } else if (r.intent === "assign") {
@@ -3379,11 +3387,15 @@ export function useDragGesture(args: UseDragGestureArgs) {
                 readout: r.readout,
               });
             } else {
+              // S198-A (DEF-0061, R-467): the step's own reasons, when it was
+              // asked for them (see the move branch above).
               await createFromCommand({
                 nodeId: r.nodeId,
                 range: r.range,
                 operatorId: r.operatorId,
                 target: r.target,
+                ...(r.override ? { override: r.override } : {}),
+                ...(r.areaOverride ? { areaOverride: r.areaOverride } : {}),
               });
             }
           } else if (r.intent === "book") {

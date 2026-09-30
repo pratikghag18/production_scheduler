@@ -2413,6 +2413,48 @@ describe("useDragGesture", () => {
         },
       });
     });
+
+    it("RL-0 (S198-A, DEF-0061, R-467): a lot's create step that was asked for a reason sends it -- the eligibility pair for the certificate, the area pair for the area -- and a step with none sends neither", async () => {
+      const api = await import("@/lib/api");
+      vi.mocked(api.createAssignment).mockClear();
+      vi.mocked(api.createAssignment).mockResolvedValue({
+        assignment: { id: "new-asg" },
+      } as unknown as Awaited<ReturnType<typeof api.createAssignment>>);
+      const { result } = renderHook(() => useDragGesture(baseArgs(buildIndex([]))), { wrapper });
+      const step = (operatorId: string, extra: object): ResolvedAny => ({
+        intent: "assign",
+        nodeId: "cell-1",
+        operatorId,
+        productId: "prod-1",
+        target: { kind: "direct", productId: "prod-1" },
+        range: { startMin: 360, endMin: 480 },
+        readout: "a step",
+        attempted: "the step",
+        notTried: "it stays.",
+        ...extra,
+      });
+
+      let outcome: LotResult | undefined;
+      await act(async () => {
+        outcome = await result.current.runLot([
+          step("op-1", {
+            override: { reason: "Covering an absence" },
+            areaOverride: { reason: "Short-handed" },
+          }),
+          step("op-2", {}),
+        ]);
+      });
+
+      expect(outcome).toEqual({ done: 2, error: null });
+      const [first, second] = vi.mocked(api.createAssignment).mock.calls.map((c) => c[0]);
+      expect(first.eligibilityOverride).toBe(true);
+      expect(first.overrideReason).toBe("Covering an absence");
+      expect(first.areaOverride).toBe(true);
+      expect(first.areaOverrideReason).toBe("Short-handed");
+      expect(second.eligibilityOverride).toBe(false);
+      expect(second.overrideReason).toBeUndefined();
+      expect(second.areaOverride).toBe(false);
+    });
   });
 
   /**

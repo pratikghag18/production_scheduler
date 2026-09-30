@@ -11327,3 +11327,443 @@ describe("CB-pre: the bar refuses before it speaks (S196-A, DEF-0060, F-239)", (
     expect(postedEntry(fetchMock).outcome).toMatch(/^refused: Not doing /);
   });
 });
+
+/**
+ * S198-A (DEF-0061, R-467, R-425): a sentence that names several people for one
+ * place is a lot of INDEPENDENT steps. A step short a certificate asks its
+ * question under warn, numbered as the lot's own ("1 of 2: ..."), takes the typed
+ * reason for THAT step only and carries on; the listing names every step with
+ * its reason and asks its one yes. Under block the step is refused and named,
+ * the rest are listed. Nothing is written before the yes. "Operator 1" is the
+ * uncertified person (Lena), Sam Patel the certified one.
+ */
+describe("CB-lot-ask: a lot's step asks its reason and carries on (S198-A, DEF-0061, R-467)", () => {
+  const LENA_FIRST =
+    "Assign Operator 1 and Sam Patel to Housing A on Cell 1 in Line 1 from 10 to 2";
+  const SAM_FIRST = "Assign Sam Patel and Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2";
+  const QUESTION =
+    "Not done: Operator 1 is not certified for Cell 1, missing Welding. Say the reason to schedule anyway, or no.";
+  const LENA_LINE =
+    "Operator 1 is on Cell 1 in Line 1 Thu Sep 3 from 10 am to 2 pm, making Housing A.";
+  const SAM_LINE =
+    "Sam Patel is on Cell 1 in Line 1 Thu Sep 3 from 10 am to 2 pm, making Housing A.";
+  const gaps = (who: string[]) => (operatorId: string, nodeId: string) =>
+    who.includes(operatorId) && nodeId === "c1a"
+      ? [{ skill: "Welding", state: "never-trained" as const }]
+      : [];
+  const ctxFor = (who: string[], policy: "warn" | "block") => ({
+    runs: [],
+    certificateGaps: gaps(who),
+    eligibilityPolicy: () => policy,
+  });
+  const lotBar = (who: string[], policy: "warn" | "block") =>
+    renderBar(
+      ctxFor(who, policy),
+      null,
+      null,
+      {},
+      {
+        onRunLot: async (r) => ({ done: r.length, error: null }),
+      },
+    );
+  const say = (input: HTMLInputElement, text: string): void => {
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-lot-ask-1: Lena first -- the numbered question, the typed reason, Sam's step resolved, the listing names both with Lena's reason; one yes runs both, the reason on Lena's step only", () => {
+    const fetchMock = stubFetch();
+    const { input, onRunLot, onOpen } = lotBar(["op1"], "warn");
+    say(input, LENA_FIRST);
+    expect(statusText()).toBe(`1 of 2: ${QUESTION}`);
+    expect(postedEntry(fetchMock).asked).toBe(`1 of 2: ${QUESTION}`);
+
+    say(input, "covering an absence");
+    // Nothing is written by a reason: it carries the lot on to its listing.
+    expect(onRunLot).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(statusText()).toBe(
+      `Ready to do 2 things: 1. ${LENA_LINE} The reason given: covering an absence. 2. ${SAM_LINE} Say yes to do them, or no.`,
+    );
+    expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
+
+    say(input, "yes");
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolved).toHaveLength(2);
+    expect((resolved[0] as ResolvedCommand).operatorId).toBe("op1");
+    expect((resolved[0] as ResolvedCommand).override).toEqual({ reason: "covering an absence" });
+    expect((resolved[1] as ResolvedCommand).operatorId).toBe("sp");
+    expect((resolved[1] as ResolvedCommand).override).toBeUndefined();
+  });
+
+  it("CB-lot-ask-1b: the trace is ONE entry for the lot -- the step's question asked, the reason answered, the listing next asked, the yes next answered, then ran and outcome", async () => {
+    const fetchMock = stubFetch();
+    const { input } = lotBar(["op1"], "warn");
+    say(input, LENA_FIRST);
+    say(input, "covering an absence");
+    say(input, "yes");
+    await act(async () => {});
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toBe(
+      `1 of 2: ${QUESTION}\nReady to do 2 things: 1. ${LENA_LINE} The reason given: covering an absence. 2. ${SAM_LINE} Say yes to do them, or no.`,
+    );
+    expect(entry.answered).toBe("covering an absence\nyes");
+    expect(entry.ran).toEqual([`${LENA_LINE} The reason given: covering an absence.`, SAM_LINE]);
+    expect(entry.outcome).toBe("Done, 2 things.");
+    // One entry: every post carries the same `at`.
+    const ats = new Set(
+      fetchMock.mock.calls.map(
+        (c) => (JSON.parse((c[1] as RequestInit).body as string) as { at: string }).at,
+      ),
+    );
+    expect(ats.size).toBe(1);
+  });
+
+  it("CB-lot-ask-2: Sam first -- Sam's step resolves, Lena's question is numbered 2 of 2, the reason is taken (never swallowed), the listing names both", () => {
+    const { input, onRunLot } = lotBar(["op1"], "warn");
+    say(input, SAM_FIRST);
+    expect(statusText()).toBe(`2 of 2: ${QUESTION}`);
+
+    say(input, "covering an absence");
+    expect(statusText()).toBe(
+      `Ready to do 2 things: 1. ${SAM_LINE} 2. ${LENA_LINE} The reason given: covering an absence. Say yes to do them, or no.`,
+    );
+    expect(onRunLot).not.toHaveBeenCalled();
+    say(input, "yes");
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect((resolved[0] as ResolvedCommand).override).toBeUndefined();
+    expect((resolved[1] as ResolvedCommand).override).toEqual({ reason: "covering an absence" });
+  });
+
+  it("CB-lot-ask-3: two uncertified steps each ask their OWN question and take their OWN reason", () => {
+    const { input, onRunLot } = lotBar(["op1", "sp"], "warn");
+    say(input, LENA_FIRST);
+    expect(statusText()).toBe(`1 of 2: ${QUESTION}`);
+    say(input, "reason for Lena");
+    expect(statusText()).toBe(
+      "2 of 2: Not done: Sam Patel is not certified for Cell 1, missing Welding. Say the reason to schedule anyway, or no.",
+    );
+    say(input, "reason for Sam");
+    expect(statusText()).toContain(`${LENA_LINE} The reason given: reason for Lena.`);
+    expect(statusText()).toContain(`${SAM_LINE} The reason given: reason for Sam.`);
+    say(input, "yes");
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect((resolved[0] as ResolvedCommand).override).toEqual({ reason: "reason for Lena" });
+    expect((resolved[1] as ResolvedCommand).override).toEqual({ reason: "reason for Sam" });
+  });
+
+  it("CB-lot-ask-4: under BLOCK the step is refused and named in the listing's own words, the rest are listed -- no question, no reason", () => {
+    const { input, onRunLot } = lotBar(["op1"], "block");
+    say(input, LENA_FIRST);
+    expect(statusText()).toBe(
+      `Not doing Operator 1 on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm: Operator 1 is not certified for Cell 1, missing Welding. Ready to do 1 thing: ${SAM_LINE} Say yes to do it, or no.`,
+    );
+    say(input, "yes");
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolved).toHaveLength(1);
+    expect((resolved[0] as ResolvedCommand).operatorId).toBe("sp");
+  });
+
+  it("CB-lot-ask-5: under block with EVERY step refused -- the refusal alone, nothing to say yes to, the trace says refused", () => {
+    const fetchMock = stubFetch();
+    const { input, onRunLot } = lotBar(["op1", "sp"], "block");
+    say(input, LENA_FIRST);
+    expect(threadText()).toContain(
+      "Not doing Operator 1 on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm: Operator 1 is not certified",
+    );
+    expect(threadText()).toContain(
+      "Not doing Sam Patel on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm: Sam Patel is not certified",
+    );
+    expect(threadText()).not.toMatch(/Ready to do/);
+    expect(candidateButtons()).toHaveLength(0);
+    expect(onRunLot).not.toHaveBeenCalled();
+    expect(postedEntry(fetchMock).outcome).toMatch(/^refused: Not doing /);
+  });
+
+  it("CB-lot-ask-6: 'no' at the question drops the whole sentence -- nothing written, the trace says cancelled, and Sam is not quietly carried on with", () => {
+    const fetchMock = stubFetch();
+    const { input, onRunLot, onOpen } = lotBar(["op1"], "warn");
+    say(input, LENA_FIRST);
+    say(input, "no");
+    expect(statusText()).toBe("Left it.");
+    expect(onRunLot).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.answered).toBe("no");
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-lot-ask-7: 'yes' at the question re-asks ('Say the reason, not yes.') and the lot still stands -- a real reason then carries on", () => {
+    const { input, onRunLot } = lotBar(["op1"], "warn");
+    say(input, LENA_FIRST);
+    say(input, "yes");
+    expect(statusText()).toBe("Say the reason, not yes.");
+    expect(onRunLot).not.toHaveBeenCalled();
+    say(input, "covering an absence");
+    expect(statusText()).toMatch(/^Ready to do 2 things: /);
+  });
+
+  it("CB-lot-ask-8: a reason that parses as a sentence runs as a sentence, never swallowed as the reason (CB-nc-6's rule) -- the lot is dropped", () => {
+    const { input, onBook, onRunLot } = lotBar(["op1"], "warn");
+    say(input, LENA_FIRST);
+    say(input, BOOK_SENTENCE);
+    expect(onBook).toHaveBeenCalledTimes(1);
+    expect(onRunLot).not.toHaveBeenCalled();
+  });
+
+  it("CB-lot-ask-9: the area question is the same shape -- asked numbered, its reason taken for that step and named as 'The area reason given'", () => {
+    const { input, onRunLot } = renderBar(
+      { runs: [], outsideArea: (operatorId: string) => operatorId === "op1" },
+      null,
+      null,
+      {},
+      { onRunLot: async (r) => ({ done: r.length, error: null }) },
+    );
+    say(input, LENA_FIRST);
+    expect(statusText()).toBe(
+      "1 of 2: Not done: Operator 1 is not from Cell 1's area. Say the reason to schedule anyway, or no.",
+    );
+    say(input, "short-handed");
+    expect(statusText()).toContain(`${LENA_LINE} The area reason given: short-handed.`);
+    say(input, "yes");
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect((resolved[0] as ResolvedCommand).areaOverride).toEqual({ reason: "short-handed" });
+    expect((resolved[1] as ResolvedCommand).areaOverride).toBeUndefined();
+  });
+
+  it("CB-lot-ask-10: a step on a day off the board re-runs the WHOLE sentence once the board has moved -- never the one step alone, with the rest never mentioned", () => {
+    const YESTERDAY_LOT =
+      "Assign Operator 1 and Sam Patel to Housing A on Cell 1 in Line 1 from 10 to 2 yesterday";
+    const SHIFTED_BACK_ONE_DAY = [
+      { index: 0, iso: "2026-08-30", weekday: 0 as const },
+      { index: 1, iso: "2026-08-31", weekday: 1 as const },
+      { index: 2, iso: "2026-09-01", weekday: 2 as const },
+      { index: 3, iso: "2026-09-02", weekday: 3 as const },
+      { index: 4, iso: "2026-09-03", weekday: 4 as const },
+    ];
+    const { input, onOpen, onRunLot, onShowDay, rerenderCtx } = renderBar({
+      runs: [],
+      todayIndex: 0,
+    });
+    say(input, YESTERDAY_LOT);
+    expect(onShowDay).toHaveBeenCalledWith("yesterday");
+    rerenderCtx({ runs: [], days: SHIFTED_BACK_ONE_DAY, todayIndex: 1 });
+    // Not Operator 1 alone (the old rerun of the step, written at once): the
+    // lot of two, asked about as a lot.
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onRunLot).not.toHaveBeenCalled();
+    expect(statusText()).toMatch(/^Ready to do 2 things: 1\. Operator 1 is on Cell 1/);
+    expect(statusText()).toContain("2. Sam Patel is on Cell 1");
+  });
+});
+
+/**
+ * S198-A (DEF-0062, R-466): a replace is ONE intent. When the incoming person
+ * cannot be placed the bar says why in one sentence and ASKS -- take the outgoing
+ * person off anyway, or leave things as they are -- and writes nothing before
+ * the answer. "Operator 1" is the incoming person (Priya in the browser), Sam
+ * Patel is on Cell 1 (BLK_SP).
+ */
+describe("CB-rep: a replace whose incoming person cannot go asks (S198-A, DEF-0062, R-466)", () => {
+  const REPLACE = "Replace Sam Patel with Operator 1 on Cell 1 in Line 1";
+  const BUSY = "Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+  // Two cells are called "Cell 1" in the fixture, so the place is named by its line.
+  const ASK_BUSY = `${BUSY} Take Sam Patel off Cell 1 in Line 1 anyway? Nobody would be covering Sam Patel's hours on Cell 1 in Line 1.`;
+  const busyOp1 = vi.fn(async (step: ResolvedCommand | ResolvedMove): Promise<string | null> =>
+    step.intent === "assign" && step.operatorId === "op1" ? BUSY : null,
+  );
+  const free = vi.fn(async (): Promise<string | null> => null);
+  const runLot = vi.fn(async (r: ResolvedAny[]): Promise<LotResult> => ({
+    done: r.length,
+    error: null,
+  }));
+  const bar = (
+    over: Partial<ResolveContext>,
+    precheck: (step: ResolvedCommand | ResolvedMove) => Promise<string | null>,
+  ) =>
+    renderBar(
+      { runs: [], assignments: [BLK_SP], ...over },
+      null,
+      null,
+      {},
+      { onRunLot: runLot },
+      {},
+      {},
+      {},
+      { precheck },
+    );
+  const say = (input: HTMLInputElement, text: string): void => {
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  };
+
+  afterEach(() => {
+    busyOp1.mockClear();
+    free.mockClear();
+    runLot.mockClear();
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-rep-1: busy incoming -- the one sentence and the question, both buttons, NOTHING written before the answer", async () => {
+    const fetchMock = stubFetch();
+    const { input, onRunLot, onUnassign, onOpen } = bar({}, busyOp1);
+    say(input, REPLACE);
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+
+    expect(statusText()).toBe(ASK_BUSY);
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "Take Sam Patel off anyway",
+      "Leave it",
+    ]);
+    // R-447: the two buttons are one pair of one width (the answer pair's own class).
+    expect(document.querySelector('[class*="answerPair"]')).not.toBeNull();
+    expect(onRunLot).not.toHaveBeenCalled();
+    expect(runLot).not.toHaveBeenCalled();
+    expect(onUnassign).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(statusText()).not.toMatch(/Ready to do/);
+    // Traced as asked.
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toBe(ASK_BUSY);
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-rep-2: 'Take Sam Patel off anyway' runs the removal ONLY (the press is the yes -- no second question) and the trace says answered, ran, outcome", async () => {
+    const fetchMock = stubFetch();
+    const { input } = bar({}, busyOp1);
+    say(input, REPLACE);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Take Sam Patel off anyway" }));
+    await act(async () => {});
+    expect(runLot).toHaveBeenCalledTimes(1);
+    const [resolved] = runLot.mock.calls[0] as [ResolvedAny[]];
+    // The kept steps, never the whole lot: Sam's removal, not Operator 1's placement.
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].intent).toBe("unassign");
+    expect((resolved[0] as ResolvedUnassign).assignmentId).toBe("blkSp");
+    const entry = postedEntry(fetchMock);
+    expect(entry.answered).toBe("Take Sam Patel off anyway");
+    expect(entry.ran).toHaveLength(1);
+    expect(entry.ran[0]).toMatch(/^Sam Patel is off Cell 1/);
+    expect(entry.outcome).toBe("Done, 1 thing.");
+  });
+
+  it("CB-rep-3: 'Leave it' writes nothing -- Left it., the trace says cancelled; a typed 'no' is the same, and a typed 'yes' is the first button", async () => {
+    const fetchMock = stubFetch();
+    const { input } = bar({}, busyOp1);
+    say(input, REPLACE);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Leave it" }));
+    expect(statusText()).toBe("Left it.");
+    expect(runLot).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.answered).toBe("Leave it");
+    expect(entry.ran).toEqual([]);
+    cleanup();
+
+    const typedNo = bar({}, busyOp1);
+    say(typedNo.input, REPLACE);
+    await act(async () => {});
+    say(typedNo.input, "no");
+    expect(statusText()).toBe("Left it.");
+    expect(runLot).not.toHaveBeenCalled();
+    cleanup();
+
+    const typedYes = bar({}, busyOp1);
+    say(typedYes.input, REPLACE);
+    await act(async () => {});
+    say(typedYes.input, "yes");
+    await act(async () => {});
+    expect(runLot).toHaveBeenCalledTimes(1);
+  });
+
+  it("CB-rep-4: uncertified incoming (the resolver's own gate) -- the SAME question, the same two buttons, the removal on press", async () => {
+    const gaps = {
+      certificateGaps: (o: string, n: string) =>
+        o === "op1" && n === "c1a" ? [{ skill: "Welding", state: "never-trained" as const }] : [],
+      eligibilityPolicy: () => "warn" as const,
+    };
+    const { input, onUnassign } = bar(gaps, free);
+    say(input, REPLACE);
+    expect(statusText()).toBe(
+      "Operator 1 is not certified for Cell 1, missing Welding. Take Sam Patel off Cell 1 in Line 1 anyway? Nobody would be covering Sam Patel's hours on Cell 1 in Line 1.",
+    );
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "Take Sam Patel off anyway",
+      "Leave it",
+    ]);
+    expect(runLot).not.toHaveBeenCalled();
+    expect(onUnassign).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Take Sam Patel off anyway" }));
+    await act(async () => {});
+    expect(runLot).toHaveBeenCalledTimes(1);
+    const [resolved] = runLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolved).toHaveLength(1);
+    expect((resolved[0] as ResolvedUnassign).assignmentId).toBe("blkSp");
+  });
+
+  it("CB-rep-6: a SWAP is the line drawn for the other coupled lots -- a step busy elsewhere refuses the whole swap ('Nothing changed.'), never a half of one, no question", async () => {
+    const fetchMock = stubFetch();
+    const blkSpC2: ContextAssignment = { ...BLK1, id: "blkSpC2", operatorId: "sp", nodeId: "c2" };
+    const { input } = bar({ assignments: [BLK1, blkSpC2] }, busyOp1);
+    say(input, "swap Operator 1 and Sam Patel today");
+    await act(async () => {});
+    expect(threadText()).toMatch(
+      /Not doing Operator 1 on Cell 2[^:]*: Operator 1 is already on Cell 4/,
+    );
+    expect(threadText()).toContain("Nothing changed.");
+    expect(threadText()).not.toMatch(/Ready to do|anyway/);
+    expect(candidateButtons()).toHaveLength(0);
+    expect(runLot).not.toHaveBeenCalled();
+    expect(postedEntry(fetchMock).outcome).toMatch(/^refused: Not doing .* Nothing changed\.$/);
+  });
+
+  it("CB-rep-7: a COPY is a lot of independent placements -- a step busy elsewhere is named and the rest are listed for one yes (R-465), never refused whole", async () => {
+    const fetchMock = stubFetch();
+    const YDAY = { startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 840 };
+    const { input } = bar(
+      {
+        assignments: [
+          { ...BLK1, id: "yOp1", ...YDAY },
+          { ...BLK_SP, id: "ySp", ...YDAY },
+        ],
+      },
+      busyOp1,
+    );
+    say(input, "copy yesterday to today for Cell 1 in Line 1");
+    await act(async () => {});
+    expect(statusText()).toMatch(
+      /^Not doing Operator 1 on Cell 1[^:]*: Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm\. Ready to do 1 thing: /,
+    );
+    expect(statusText()).not.toContain("Nothing changed.");
+    expect(statusText()).toContain("Sam Patel is on Cell 1");
+    expect(screen.getByRole("button", { name: "Do it" })).toBeTruthy();
+    expect(runLot).not.toHaveBeenCalled();
+    expect(postedEntry(fetchMock).outcome ?? "").not.toMatch(/^refused/);
+    // One yes writes the kept step alone (Sam's), never Operator 1's.
+    fireEvent.click(screen.getByRole("button", { name: "Do it" }));
+    expect(runLot).toHaveBeenCalledTimes(1);
+    const [resolved] = runLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolved).toHaveLength(1);
+    expect((resolved[0] as ResolvedCommand).operatorId).toBe("sp");
+  });
+
+  it("CB-rep-5: a replace whose incoming person CAN go is unchanged -- the ordinary two-step listing, one yes", async () => {
+    const { input } = bar({}, free);
+    say(input, REPLACE);
+    await act(async () => {});
+    expect(statusText()).toMatch(/^Ready to do 2 things: 1\. Sam Patel is off Cell 1/);
+    expect(statusText()).toContain("2. Operator 1 is on Cell 1");
+    expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
+    expect(runLot).not.toHaveBeenCalled();
+  });
+});

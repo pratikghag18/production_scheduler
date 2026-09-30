@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import {
   resolveCommand,
   describeQuestion,
+  describeGateReason,
   expandCommand,
   readClearAsPerson,
   thingsCount,
@@ -3724,16 +3725,109 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
           ]),
         }),
       );
-      expect(res).toEqual({
+      // S198-A (DEF-0062, R-466) -- CONTRACT CHANGED, not wrong when written: a
+      // replace is ONE intent, so a gate that refuses the incoming person no
+      // longer answers with the gate's own "Nothing changed." refusal
+      // (`inLot: true`, which is still right for a swap and a copy: NC5, NC7);
+      // it answers `replace_blocked`, carrying the gate's own question as the
+      // reason and the removal that "take off anyway" runs. Nothing resolved.
+      expect(res).toMatchObject({
         ok: false,
         question: {
-          kind: "not_certified",
-          person: "Ana",
-          cell: "Cell 1",
-          missing: ["Welding"],
-          policy: "warn",
-          inLot: true,
+          kind: "replace_blocked",
+          reason: {
+            kind: "not_certified",
+            person: "Ana",
+            cell: "Cell 1",
+            missing: ["Welding"],
+            policy: "warn",
+            inLot: true,
+          },
+          outgoing: "Sam",
+          incoming: "Ana",
+          place: "Cell 1",
         },
+      });
+      if (res.ok || res.question.kind !== "replace_blocked")
+        throw new Error("expected replace_blocked");
+      expect(res.question.removals).toHaveLength(1);
+      expect(res.question.removals[0]).toMatchObject({
+        intent: "unassign",
+        operator: "Sam",
+        existing: { kind: "remove", assignmentId: blk.id },
+      });
+    });
+
+    it("RB1 (S198-A, R-466): the question says why she cannot go, then asks, in the plant's words -- built from the gate's own question", () => {
+      const res = expandCommand(
+        replaceCmd(),
+        zCtx({
+          assignments: [zBlk()],
+          certificateGaps: certGapsFixture([
+            ["zana", "zc1", [{ skill: "Welding", state: "never-trained" }]],
+          ]),
+        }),
+      );
+      if (res.ok) throw new Error("expected a question");
+      expect(describeQuestion(res.question)).toBe(
+        "Ana is not certified for Cell 1, missing Welding. Take Sam off Cell 1 anyway? Nobody would be covering Sam's hours on Cell 1.",
+      );
+      // The reason sentence is the gate's: the same words "Not done:" leads.
+      if (res.question.kind !== "replace_blocked") throw new Error("expected replace_blocked");
+      expect(describeGateReason(res.question.reason)).toBe(
+        "Ana is not certified for Cell 1, missing Welding.",
+      );
+      expect(describeQuestion(res.question.reason)).toBe(
+        "Not done: Ana is not certified for Cell 1, missing Welding. Nothing changed.",
+      );
+    });
+
+    it("RB2 (S198-A, R-466): the area rule is the same door -- outside_area as the reason; block policy too; and a replace with two blocks takes BOTH off", () => {
+      const blk1 = zBlk({ id: "r1", startMin: 2 * 1440 + 360, endMin: 2 * 1440 + 480 });
+      const blk2 = zBlk({ id: "r2", startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const area = expandCommand(
+        replaceCmd(),
+        zCtx({ assignments: [blk1, blk2], outsideArea: (op: string) => op === "zana" }),
+      );
+      if (area.ok || area.question.kind !== "replace_blocked")
+        throw new Error("expected replace_blocked");
+      expect(area.question.reason).toMatchObject({
+        kind: "outside_area",
+        person: "Ana",
+        inLot: true,
+      });
+      expect(area.question.removals.map((r) => (r as UnassignCommand).existing)).toEqual([
+        { kind: "remove", assignmentId: "r1" },
+        { kind: "remove", assignmentId: "r2" },
+      ]);
+      expect(describeQuestion(area.question)).toBe(
+        "Ana is not from Cell 1's area. Take Sam off Cell 1 anyway? Nobody would be covering Sam's hours on Cell 1.",
+      );
+      const block = expandCommand(
+        replaceCmd(),
+        zCtx({
+          assignments: [blk1],
+          eligibilityPolicy: () => "block",
+          certificateGaps: certGapsFixture([
+            ["zana", "zc1", [{ skill: "Welding", state: "never-trained" }]],
+          ]),
+        }),
+      );
+      if (block.ok || block.question.kind !== "replace_blocked")
+        throw new Error("expected replace_blocked");
+      expect(block.question.reason).toMatchObject({ kind: "not_certified", policy: "block" });
+    });
+
+    it("RB3 (S198-A, R-466): a replace that CAN go is unchanged (the same two-step lot) and marked coupled, so the bar never shrinks it", () => {
+      const ok = expandCommand(replaceCmd(), zCtx({ assignments: [zBlk()] }));
+      expect(ok.ok).toBe(true);
+      if (!ok.ok) return;
+      expect(ok.command.intent).toBe("several");
+      expect(ok.coupled).toEqual({
+        kind: "replace",
+        outgoing: "Sam",
+        incoming: "Ana",
+        place: "Cell 1",
       });
     });
   });
@@ -3770,6 +3864,8 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       });
       const res = expandCommand(swapCmd(), zCtx({ assignments: [samBlk, anaBlk] }));
       expect(res.ok).toBe(true);
+      // S198-A (R-425, R-466): a swap is coupled -- never shrunk, never asks.
+      if (res.ok) expect(res.coupled).toEqual({ kind: "swap" });
       if (res.ok && res.command.intent === "several") {
         const cmds = res.command.commands;
         expect(cmds).toHaveLength(4);
@@ -3949,6 +4045,28 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
         // Sam's block is skipped (already there); Ana's is copied.
         if (res.command.intent === "several") throw new Error("expected exactly one");
         expect((res.command as AssignCommand).operator).toBe("Ana");
+      }
+    });
+
+    it("CP2b (S198-A, R-425/R-466): a copy of several blocks is a lot MARKED coupled -- the bar never shrinks it, and refuses it whole", () => {
+      const a = zBlk({ startMin: 2 * 1440 + 600, endMin: 2 * 1440 + 720 });
+      const b = zBlk({
+        id: "b2",
+        operatorId: "zana",
+        startMin: 2 * 1440 + 780,
+        endMin: 2 * 1440 + 900,
+      });
+      const command: CopyCommand = {
+        intent: "copy",
+        place: ["Cell 1"],
+        from: { kind: "date", iso: "2026-09-03" },
+        to: { kind: "date", iso: "2026-09-04" },
+      };
+      const res = expandCommand(command, zCtx({ assignments: [a, b] }));
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.command.intent).toBe("several");
+        expect(res.coupled).toEqual({ kind: "copy" });
       }
     });
 
@@ -7480,6 +7598,9 @@ describe("commandResolve: S61-b training before the yes (R-425, F-155, F-156)", 
         missing: ["Welding"],
         policy: "warn",
         inLot: false,
+        // S198-A (R-467) -- CONTRACT CHANGED, additive: the question names what
+        // was attempted, so a lot can say "Not doing ..." for the step.
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
       },
     });
   });
@@ -7500,6 +7621,7 @@ describe("commandResolve: S61-b training before the yes (R-425, F-155, F-156)", 
         missing: ["Welding"],
         policy: "block",
         inLot: false,
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
       },
     };
     expect(resolveCommand(cmd(), ctx)).toEqual(expected);
@@ -7538,6 +7660,7 @@ describe("commandResolve: S61-b training before the yes (R-425, F-155, F-156)", 
         missing: ["Welding (lapsed)"],
         policy: "warn",
         inLot: false,
+        attempted: "Operator 1 on Cell 1 in Line 1 2026-09-03, 10 am to 2 pm",
       },
     });
   });

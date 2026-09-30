@@ -2261,3 +2261,275 @@ test("F-239: a slow write reads Working... and says nothing as done until it is 
   }
   expect(restoreError, "Sam's block is back as the seed had it").toBeNull();
 });
+
+/**
+ * S198-A (DEF-0061, R-467, R-425): a sentence that names two people for one place,
+ * one of them short a certificate. As Ana on the real board (Lena Novak lacks
+ * Welding, which Cell 2 needs; the policy is warn; Sam Patel is certified), in
+ * BOTH orders: the bar asks Lena's question numbered as the lot's own, takes the
+ * typed reason for her step, carries on, lists both people with her reason and
+ * writes both on the one yes -- Lena's row carrying the override and its reason,
+ * Sam's carrying none. The first sentence names a day off the board, so it also
+ * proves the board's move brings the WHOLE sentence back, never the one step. A
+ * third sentence answered "no" writes nothing. The thread, the trace (one entry,
+ * the ask, the reason and the yes in order) and the database are all read. The
+ * rows this writes are removed.
+ */
+test("DEF-0061: two people, one short a certificate -- the reason is asked for that step, taken, and both are written on one yes (both orders), 'no' writes nothing", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell2 = nodes.cellIdByName.get("Cell 2");
+  if (!cell2) throw new Error("no such cell in Plant A: Cell 2");
+  const lena = await operatorId(dana, "Lena Novak");
+  const sam = await operatorId(dana, "Sam Patel");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const DAY_A = isoPlusDays(todayIso, 14);
+  const DAY_B = isoPlusDays(todayIso, 15);
+  const DAY_C = isoPlusDays(todayIso, 16);
+  const QUESTION =
+    "Not done: Lena Novak is not certified for Cell 2, missing Welding. Say the reason to schedule anyway, or no.";
+  const readRows = async (): Promise<AssignmentRow[]> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select(
+        "id, node_id, operator_id, product_id, run_id, timerange, eligibility_override, override_reason",
+      )
+      .in("operator_id", [lena, sam])
+      .eq("node_id", cell2);
+    if (error) throw new Error(`reading Lena's and Sam's blocks: ${error.message}`);
+    return (data ?? []) as unknown as AssignmentRow[];
+  };
+  const before = new Set((await readRows()).map((r) => r.id));
+  const isOnDay = (r: AssignmentRow, iso: string): boolean => {
+    const t = parseTimerange(r.timerange);
+    return (
+      t.startMs === clockMsInZone(iso, zone, 15, 0) && t.endMs === clockMsInZone(iso, zone, 17, 0)
+    );
+  };
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Lena first, on a day off the board ---------------------------------
+    const first = `put Lena Novak and Sam Patel on Housing A at Cell 2 ${DAY_A} from 3 pm to 5 pm`;
+    const fromFirst = Date.now();
+    await submit(page, first);
+    await expect(statusLine(page)).toHaveText(`1 of 2: ${QUESTION}`, { timeout: 60_000 });
+    await submit(page, "covering an absence");
+    await expect(statusLine(page)).toHaveText(
+      /^Ready to do 2 things: 1\. Lena Novak is on Cell 2 .* from 3 pm to 5 pm, making Housing A\. The reason given: covering an absence\. 2\. Sam Patel is on Cell 2 .* from 3 pm to 5 pm, making Housing A\. Say yes to do them, or no\.$/,
+      { timeout: 30_000 },
+    );
+    // Nothing is written by the reason, nor by the listing.
+    expect((await readRows()).filter((r) => !before.has(r.id))).toHaveLength(0);
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 2 things.");
+    }).toPass({ timeout: 30_000, intervals: [250] });
+    await expect(async () => {
+      const added = (await readRows()).filter((r) => !before.has(r.id));
+      expect(added).toHaveLength(2);
+      const lenaRow = added.find((r) => r.operator_id === lena);
+      const samRow = added.find((r) => r.operator_id === sam);
+      expect(lenaRow && isOnDay(lenaRow, DAY_A)).toBe(true);
+      expect(samRow && isOnDay(samRow, DAY_A)).toBe(true);
+      // The reason belongs to Lena's step alone.
+      expect(lenaRow?.eligibility_override).toBe(true);
+      expect(lenaRow?.override_reason).toBe("covering an absence");
+      expect(samRow?.eligibility_override).toBe(false);
+      expect(samRow?.override_reason).toBeNull();
+    }).toPass({ timeout: 20_000, intervals: [300] });
+    // The file is written a moment after the rows land: read it until it says so.
+    await expect(async () => {
+      const [entry1] = await traceEntriesFor(first, fromFirst);
+      expect(entry1.asked).toContain(
+        `1 of 2: ${QUESTION}\nReady to do 2 things: 1. Lena Novak is on Cell 2`,
+      );
+      expect(entry1.answered).toBe("covering an absence\nyes");
+      expect(entry1.ran).toHaveLength(2);
+      expect(entry1.ran[0]).toContain("The reason given: covering an absence.");
+      expect(entry1.ran[1]).not.toContain("reason");
+      expect(entry1.outcome).toBe("Done, 2 things.");
+    }).toPass({ timeout: 15_000, intervals: [250] });
+
+    // --- Sam first ------------------------------------------------------------
+    const second = `put Sam Patel and Lena Novak on Housing A at Cell 2 ${DAY_B} from 3 pm to 5 pm`;
+    const fromSecond = Date.now();
+    await submit(page, second);
+    await expect(statusLine(page)).toHaveText(`2 of 2: ${QUESTION}`, { timeout: 60_000 });
+    await submit(page, "covering an absence");
+    await expect(statusLine(page)).toHaveText(
+      /^Ready to do 2 things: 1\. Sam Patel is on Cell 2 .* making Housing A\. 2\. Lena Novak is on Cell 2 .* making Housing A\. The reason given: covering an absence\. Say yes to do them, or no\.$/,
+      { timeout: 30_000 },
+    );
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 2 things.");
+      const added = (await readRows()).filter((r) => !before.has(r.id) && isOnDay(r, DAY_B));
+      expect(added).toHaveLength(2);
+      expect(added.find((r) => r.operator_id === lena)?.override_reason).toBe(
+        "covering an absence",
+      );
+      expect(added.find((r) => r.operator_id === sam)?.override_reason).toBeNull();
+    }).toPass({ timeout: 30_000, intervals: [300] });
+    await expect(async () => {
+      const [entry2] = await traceEntriesFor(second, fromSecond);
+      expect(entry2.answered).toBe("covering an absence\nyes");
+      expect(entry2.outcome).toBe("Done, 2 things.");
+    }).toPass({ timeout: 15_000, intervals: [250] });
+
+    // --- "no" at the question -------------------------------------------------
+    const third = `put Lena Novak and Sam Patel on Housing A at Cell 2 ${DAY_C} from 3 pm to 5 pm`;
+    const fromThird = Date.now();
+    const rowsBeforeNo = (await readRows()).length;
+    await submit(page, third);
+    await expect(statusLine(page)).toHaveText(`1 of 2: ${QUESTION}`, { timeout: 60_000 });
+    await submit(page, "no");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Left it.");
+      const [entry] = await traceEntriesFor(third, fromThird);
+      expect(entry.outcome).toBe("cancelled");
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+    expect((await readRows()).length, "'no' wrote nothing").toBe(rowsBeforeNo);
+  } finally {
+    const added = (await readRows()).filter((r) => !before.has(r.id));
+    if (added.length > 0) {
+      const { error } = await dana
+        .from("assignments")
+        .delete()
+        .in(
+          "id",
+          added.map((r) => r.id),
+        );
+      if (error) console.error(`REMOVING THE WALK'S ROWS FAILED: ${error.message}`);
+    }
+  }
+  expect(
+    (await readRows()).filter((r) => !before.has(r.id)),
+    "the rows it wrote are gone",
+  ).toEqual([]);
+});
+
+/**
+ * S198-A (DEF-0062, R-466): "replace Sam Patel with Priya Shah on Cell 1" as Ana,
+ * with Priya busy on Cell 4 of Line 2 (a line Ana cannot read). The bar says why
+ * in one sentence and ASKS -- take Sam off anyway, or leave it -- and writes
+ * nothing before the answer. "Leave it" leaves Sam's block where it is; "Take Sam
+ * Patel off anyway" removes Sam's Cell 1 blocks for the day and writes nothing for
+ * Priya. Sam's blocks are read back after each press and restored at the end
+ * exactly as the seed had them.
+ */
+test("DEF-0062: a replace whose incoming person is busy elsewhere asks -- Leave it writes nothing, Take Sam Patel off anyway removes Sam's block only", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(180_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+  const priya = await operatorId(dana, "Priya Shah");
+  const readSam = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("*")
+      .eq("operator_id", sam)
+      .eq("node_id", cell1);
+    if (error) throw new Error(`reading Sam's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const countPriya = async (): Promise<number> => {
+    const { data, error } = await dana.from("assignments").select("id").eq("operator_id", priya);
+    if (error) throw new Error(`reading Priya's blocks: ${error.message}`);
+    return (data ?? []).length;
+  };
+  const samBefore = await readSam();
+  const priyaBefore = await countPriya();
+  const SENTENCE = "replace Sam Patel with Priya Shah on Cell 1";
+  const ASK =
+    "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm. Take Sam Patel off Cell 1 anyway? Nobody would be covering Sam Patel's hours on Cell 1.";
+  let restoreError: string | null = null;
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Leave it ---------------------------------------------------------------
+    const fromLeave = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Take Sam Patel off anyway", "Leave it"], {
+      timeout: 60_000,
+    });
+    expect(await currentStatusText(page)).toBe(ASK);
+    // The buttons are one pair of one width (R-447).
+    const widths = await candidateButtons(page).evaluateAll((els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().width)),
+    );
+    expect(widths[0], "the two answers are one width").toBe(widths[1]);
+    // The trace has the ask, and nothing is written before the answer.
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromLeave);
+      expect(entry.asked).toBe(ASK);
+      expect(entry.answered).toBeNull();
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await readSam()).length, "nothing written before the answer").toBe(samBefore.length);
+
+    await page.getByRole("button", { name: "Leave it", exact: true }).click();
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Left it.");
+      const [entry] = await traceEntriesFor(SENTENCE, fromLeave);
+      expect(entry.outcome).toBe("cancelled");
+      expect(entry.answered).toBe("Leave it");
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await readSam()).length, "Leave it wrote nothing").toBe(samBefore.length);
+    expect(await countPriya()).toBe(priyaBefore);
+
+    // --- Take Sam Patel off anyway -----------------------------------------------
+    const fromTake = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Take Sam Patel off anyway", "Leave it"], {
+      timeout: 60_000,
+    });
+    await page.getByRole("button", { name: "Take Sam Patel off anyway", exact: true }).click();
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain("Done, 1 thing.");
+      expect(thread).toMatch(/Written: Sam Patel is off Cell 1/);
+      const [entry] = await traceEntriesFor(SENTENCE, fromTake);
+      expect(entry.answered).toBe("Take Sam Patel off anyway");
+      expect(entry.ran).toHaveLength(1);
+      expect(entry.ran[0]).toMatch(/^Sam Patel is off Cell 1/);
+      expect(entry.outcome).toBe("Done, 1 thing.");
+    }).toPass({ timeout: 20_000, intervals: [250] });
+    // The database agrees: Sam's Cell 1 block for the day is gone, Priya got nothing.
+    await expect(async () => {
+      expect((await readSam()).length).toBeLessThan(samBefore.length);
+    }).toPass({ timeout: 15_000, intervals: [300] });
+    expect(await countPriya()).toBe(priyaBefore);
+  } finally {
+    // Put Sam's blocks back exactly as the seed had them.
+    const have = new Set((await readSam()).map((r) => r.id));
+    const missing = samBefore.filter((r) => !have.has(r.id));
+    if (missing.length > 0) {
+      const { error } = await dana.from("assignments").insert(missing);
+      restoreError = error?.message ?? null;
+      if (restoreError !== null) console.error(`PUTTING SAM'S BLOCKS BACK FAILED: ${restoreError}`);
+    }
+  }
+  expect(restoreError, "Sam's blocks are back as the seed had them").toBeNull();
+  expect((await readSam()).length).toBe(samBefore.length);
+});

@@ -50,12 +50,15 @@ import {
 import {
   resolveCommand,
   describeQuestion,
+  describeGateReason,
+  describeReplaceBlocked,
   expandCommand,
   thingsCount,
   oneOrThem,
   readClearAsPerson,
 } from "@/lib/command/resolve";
 import type {
+  Coupled,
   ResolveContext,
   ResolveOptions,
   ResolvedCommand,
@@ -966,6 +969,32 @@ const WRITE_IN_FLIGHT = "writing";
  */
 function isPlacementStep(r: { intent: string }): r is ResolvedCommand | ResolvedMove {
   return r.intent === "assign" || r.intent === "move";
+}
+
+/**
+ * S198-A (R-425, R-467, R-449): the reasons a person gave for ONE write, read
+ * back as plain clauses after its readout -- the ONE builder. A single
+ * sentence builds it from the options it collected as it asked; a lot's listing
+ * and its result lines build it from the resolved step itself (its `override`
+ * and `areaOverride` ARE the reasons that step was given), so a lot of two
+ * names Lena's reason with Lena's step and never on Sam's.
+ */
+function reasonsGivenText(reasons: { overrideReason?: string; areaReason?: string }): string {
+  const parts: string[] = [];
+  if (reasons.overrideReason !== undefined)
+    parts.push(` The reason given: ${reasons.overrideReason}.`);
+  if (reasons.areaReason !== undefined)
+    parts.push(` The area reason given: ${reasons.areaReason}.`);
+  return parts.join("");
+}
+
+/** The reasons a resolved step of a lot was given, as `reasonsGivenText` reads them. */
+function reasonsOfStep(r: ResolvedAny): { overrideReason?: string; areaReason?: string } {
+  const step = r as { override?: { reason: string }; areaOverride?: { reason: string } };
+  return {
+    ...(step.override ? { overrideReason: step.override.reason } : {}),
+    ...(step.areaOverride ? { areaReason: step.areaOverride.reason } : {}),
+  };
 }
 
 /**
@@ -2669,6 +2698,10 @@ export function CommandBar({
           runTrims: expanded.runTrims,
           absenceRecord: expanded.absenceRecord,
           summary: expanded.summary,
+          // S198-A: what a day off the board re-runs (the whole sentence), and
+          // whether the steps belong together (a replace, a swap, a copy).
+          source: command,
+          coupled: expanded.coupled,
         });
         return;
       }
@@ -2940,6 +2973,10 @@ export function CommandBar({
       runTrims?: ResolvedRunTrim[];
       absenceRecord?: ResolvedAbsenceRecord;
       summary?: string;
+      // S198-A (DEF-0061/DEF-0062): see `Lot`'s own fields of these names.
+      source?: Command;
+      coupled?: Coupled;
+      runNow?: true;
     } = {},
   ): void {
     try {
@@ -2951,6 +2988,9 @@ export function CommandBar({
         runTrims: extras.runTrims ?? [],
         ...(extras.absenceRecord ? { absenceRecord: extras.absenceRecord } : {}),
         ...(extras.summary !== undefined ? { summary: extras.summary } : {}),
+        ...(extras.source ? { source: extras.source } : {}),
+        ...(extras.coupled ? { coupled: extras.coupled } : {}),
+        ...(extras.runNow ? { runNow: true as const } : {}),
       };
       resolveLotStep();
     } catch (err) {
@@ -3014,6 +3054,21 @@ export function CommandBar({
           absenceRecord: undefined,
         };
       }
+      // S198-A (DEF-0062, R-466): the lot a "take off anyway" press started --
+      // the press WAS the yes, so it runs as soon as it has resolved, with no
+      // listing and no probe (the removals place nobody).
+      if (lotRef.current !== null && lotRef.current.runNow) {
+        runLotNow();
+        return;
+      }
+      // S198-A (R-467): steps refused under the block policy are named in the
+      // listing's own words, the rest are listed; when nothing is left the
+      // refusal stands alone. Nothing is written before the yes either way.
+      const gateNotes = lotRef.current?.notes ?? [];
+      if (lotRef.current !== null && gateNotes.length > 0 && lotRef.current.done.length === 0) {
+        refuseLotAlone(gateNotes.join(" "));
+        return;
+      }
       if (precheck !== undefined && lotRef.current !== null) {
         const placing = lotRef.current.done.some(isPlacementStep);
         if (placing) {
@@ -3021,7 +3076,7 @@ export function CommandBar({
           return;
         }
       }
-      showLotStatus();
+      showLotStatus(gateNotes.length > 0 ? gateNotes.join(" ") : undefined);
       return;
     }
     // R-424: same fallback as `runCommand`'s own -- see that function's
@@ -3030,7 +3085,8 @@ export function CommandBar({
     const activeCtx = lastCtxRef.current;
     if (activeCtx === null) return;
     const command = lot.commands[lot.index];
-    const resolution = resolveCommand(command, activeCtx);
+    // S198-A (R-467): the reasons already given for THIS step, and no other's.
+    const resolution = resolveCommand(command, activeCtx, lot.stepOptions?.[lot.index]);
     if (resolution.ok) {
       // S58: `resolveCommand`'s per-shape overloads do not cover the
       // `SingleCommand` union directly (TypeScript overload resolution does
@@ -3077,7 +3133,31 @@ export function CommandBar({
       resolveLotStep();
       return;
     }
-    const base = questionToStatus(resolution.question, command);
+    // S198-A (DEF-0061, R-467): a step short a certificate under the BLOCK
+    // policy has no reason to ask for -- it is refused and named in the
+    // listing's own words, and the rest of the lot is carried on to (the shape a
+    // step busy elsewhere gets, R-465). Under warn the question below asks.
+    const gateQuestion = resolution.question;
+    if (gateQuestion.kind === "not_certified" && gateQuestion.policy === "block") {
+      const who = gateQuestion.attempted ?? `${gateQuestion.person} on ${gateQuestion.cell}`;
+      lotRef.current = {
+        ...lot,
+        notes: [
+          ...(lot.notes ?? []),
+          `Not doing ${renderReadout(who)}: ${describeGateReason(gateQuestion)}`,
+        ],
+        index: lot.index + 1,
+      };
+      resolveLotStep();
+      return;
+    }
+    // S198-A (DEF-0061): a day off the board re-runs the WHOLE sentence once
+    // the board has moved -- never the one step that met the day, which used to
+    // run alone and leave the rest of the sentence never mentioned.
+    const base = questionToStatus(
+      resolution.question,
+      resolution.question.kind === "day_off_board" ? (lot.source ?? command) : command,
+    );
     if (base.kind !== "question") {
       // R-455 / F-219 reviewer fix (24 Sept, session 191): this branch's OWN
       // pre-R-455 comment ("always a 'question' status ... this branch
@@ -3271,34 +3351,149 @@ export function CommandBar({
       }
       if (lotRef.current !== lot) return;
       const kept: ResolvedAny[] = [];
-      const notes: string[] = [];
+      const busyNotes: string[] = [];
       steps.forEach((step, i) => {
         const refusal = refusals[i];
         if (refusal === null) kept.push(step);
-        else notes.push(`Not doing ${renderReadout(step.attempted)}: ${refusal}`);
+        else busyNotes.push(`Not doing ${renderReadout(step.attempted)}: ${refusal}`);
       });
-      if (notes.length === 0) {
-        showLotStatus();
+      // S198-A (R-467): the steps already refused under the block policy are
+      // named first, in the same listing.
+      const gateNotes = lot.notes ?? [];
+      if (busyNotes.length === 0) {
+        showLotStatus(gateNotes.length > 0 ? gateNotes.join(" ") : undefined);
         return;
       }
+      // S198-A (DEF-0062, R-466): a replace is ONE intent -- when its incoming
+      // person cannot go, the bar ASKS what to do next (the probe's own
+      // sentence, then the question) instead of dropping her step and listing
+      // the removal alone. Nothing is written before the answer.
+      if (lot.coupled?.kind === "replace") {
+        const why = [...new Set(refusals.filter((x): x is string => x !== null))].join(" ");
+        askReplaceBlocked(
+          describeReplaceBlocked(why, lot.coupled.outgoing, lot.coupled.place),
+          lot.coupled.outgoing,
+          { kind: "run_removals", resolved: kept },
+        );
+        return;
+      }
+      // S198-A: a SWAP has no half a supervisor would want -- it is refused
+      // whole, before its yes, and says nothing was changed. A COPY is a lot of
+      // independent placements (each copied block stands alone), so it takes
+      // the several's path below: the busy step is named, the rest are listed
+      // for one yes (R-465).
+      if (lot.coupled?.kind === "swap") {
+        refuseLotAlone(`${busyNotes.join(" ")} Nothing changed.`);
+        return;
+      }
+      const notes = [...gateNotes, ...busyNotes];
       if (kept.length === 0) {
-        // Every step refused: the refusal alone, closed the way a lot refused
-        // outright is (DEF-0049's shape -- `asked` is what the bar said).
-        lotRef.current = null;
-        const message = notes.join(" ");
-        if (entry) {
-          entry.asked = message;
-          entry.answered = "auto";
-          entry.outcome = `refused: ${message}`;
-          settleTurn(store, entry);
-        } else {
-          setStatus({ kind: "shape", message });
-        }
+        // Every step refused: the refusal alone (DEF-0049's shape -- `asked` is
+        // what the bar said).
+        refuseLotAlone(notes.join(" "));
         return;
       }
       lotRef.current = { ...lot, done: kept };
       showLotStatus(notes.join(" "));
     });
+  }
+
+  /**
+   * S198-A (R-467, R-449): the lot is refused outright, in one message, with
+   * nothing to say yes to -- the ONE place a lot ends that way (every step
+   * refused, a swap or a copy that cannot go). `asked` is what the bar said,
+   * after whatever it asked and had answered before (a reason, `traceCarry`).
+   */
+  function refuseLotAlone(message: string): void {
+    lotRef.current = null;
+    const entry = traceRef.current;
+    if (entry) {
+      setAsked(entry, message);
+      if (entry.answered === null) entry.answered = "auto";
+      entry.outcome = `refused: ${message}`;
+      settleTurn(store, entry);
+    } else {
+      setStatus({ kind: "shape", message });
+    }
+  }
+
+  /**
+   * S198-A (DEF-0062, R-466): the ONE status a blocked replace asks, whichever
+   * door found the block (the bar's probe, the resolver's own gates): the
+   * sentence (`describeReplaceBlocked`, built once in `resolve.ts`) and two
+   * buttons of one width (R-447, `yesNo` -- a typed yes and no press them). The
+   * first takes the outgoing person off anyway and IS the yes; the second
+   * leaves everything as it is.
+   */
+  function replaceBlockedStatus(
+    message: string,
+    outgoing: string,
+    takeOff: CandidateAction,
+  ): Status {
+    return {
+      kind: "question",
+      message,
+      candidates: [
+        { key: "clear", label: `Take ${outgoing} off anyway`, action: takeOff },
+        { key: "keep", label: "Leave it", action: { kind: "leave_it" } },
+      ],
+      yesNo: true,
+    };
+  }
+
+  /** The probe's door to that question: the lot is dropped (the answer carries
+   *  what it needs as data), the question is shown and traced as asked. */
+  function askReplaceBlocked(message: string, outgoing: string, takeOff: CandidateAction): void {
+    lotRef.current = null;
+    const status = replaceBlockedStatus(renderReadout(message), outgoing, takeOff);
+    setStatus(status);
+    traceQuestionStatus(status);
+  }
+
+  /** The button's press: run the removal now (the press is the yes). */
+  function runRemovalsNow(action: { resolved?: ResolvedAny[]; commands?: SingleCommand[] }): void {
+    if (action.resolved !== undefined) {
+      lotRef.current = {
+        commands: [],
+        index: 0,
+        done: action.resolved,
+        runRemovals: [],
+        runTrims: [],
+      };
+      runLotNow();
+      return;
+    }
+    startLot(action.commands ?? [], { runNow: true });
+  }
+
+  /**
+   * S198-A (DEF-0061, R-467): the typed reason answers the lot's CURRENT step,
+   * and only that step -- it is recorded against the step's index, the step is
+   * re-resolved with it, and the lot carries on (a later step asks its own
+   * question). The trace entry keeps the ask, the reason and what comes next in
+   * order (`traceCarry`, the night shift question's own mechanism, R-434).
+   */
+  function answerLotReason(field: "overrideReason" | "areaReason", value: string): void {
+    const lot = lotRef.current;
+    if (!lot) return;
+    const entry = traceRef.current;
+    if (entry) {
+      store
+        .getState()
+        .set({ traceCarry: { asked: entry.asked ?? "", answered: entry.answered ?? "" } });
+    }
+    const given = lot.stepOptions?.[lot.index] ?? {};
+    lotRef.current = {
+      ...lot,
+      stepOptions: { ...(lot.stepOptions ?? {}), [lot.index]: { ...given, [field]: value } },
+    };
+    resolveLotStep();
+  }
+
+  /** A lot step as the thread says it: its readout, then the reasons it was
+   *  given (R-467) -- the one builder a single sentence's readout shares. */
+  function spokenStep(r: ResolvedAny): string {
+    return renderReadout(r.readout) + reasonsGivenText(reasonsOfStep(r));
   }
 
   function showLotStatus(dropped?: string): void {
@@ -3340,10 +3535,10 @@ export function CommandBar({
     // readouts are joined with a space (each already ends in its own full
     // stop -- "; " printed ".; "), and "And 16 more." is its own sentence, so
     // "Say yes" never runs on from it.
+    // S198-A (R-467): a step's own reasons are named with it, the one builder a
+    // single sentence's readout uses (`reasonsGivenText`).
     const readouts =
-      n === 1
-        ? renderReadout(shown[0].readout)
-        : shown.map((r, i) => `${i + 1}. ${renderReadout(r.readout)}`).join(" ");
+      n === 1 ? spokenStep(shown[0]) : shown.map((r, i) => `${i + 1}. ${spokenStep(r)}`).join(" ");
     const readoutText = n > 6 ? `${readouts} And ${n - 5} more.` : readouts;
     // R-459 (§0's own lot example): "Ready to do N things: ... Say yes to do
     // them, or no." -- never "commands" (a developer's word for a sentence).
@@ -3455,7 +3650,7 @@ export function CommandBar({
     if (done > 0) {
       const doneText = resolved
         .slice(0, done)
-        .map((r) => renderReadout(r.readout))
+        .map((r) => spokenStep(r))
         .join(" ");
       lines.push(`Done: ${doneText}`);
     }
@@ -3500,9 +3695,7 @@ export function CommandBar({
       // everywhere else a written readout is recorded.
       if (traceRef.current) {
         traceRef.current.ran.push(
-          ...resolved
-            .slice(0, result.error === null ? n : result.done)
-            .map((r) => renderReadout(r.readout)),
+          ...resolved.slice(0, result.error === null ? n : result.done).map((r) => spokenStep(r)),
         );
       }
       // F-164: the lot's own last word, recorded BEFORE the entry is
@@ -4172,6 +4365,16 @@ export function CommandBar({
         ...(!question.inLot ? { awaitingAreaReason: true } : {}),
       };
     }
+    // S198-A (DEF-0062, R-466): a replace whose incoming person fails a gate
+    // the resolver itself runs (certificate, area) -- the same question the
+    // probe's door asks (`askReplaceBlocked`), its sentence built from the
+    // gate's own question.
+    if (question.kind === "replace_blocked") {
+      return replaceBlockedStatus(message, question.outgoing, {
+        kind: "run_removals",
+        commands: question.removals,
+      });
+    }
     // DEF-0040 / R-461 (S194-D): the night shift question -- Yes and No, one
     // pair of the same width (R-447, `yesNo`), each carrying the answers
     // already given to this sentence so the second question never loses the
@@ -4782,6 +4985,12 @@ export function CommandBar({
       case "run_lot":
         runLotNow();
         return;
+      case "run_removals":
+        runRemovalsNow(action);
+        return;
+      case "leave_it":
+        cancelStanding("Leave it");
+        return;
       case "pick_span": {
         // R-430 (S194-D third pass): the same sentence with the offered span,
         // printed and re-read like every other pick, so the bubble and the
@@ -5191,6 +5400,15 @@ export function CommandBar({
       // exactly as if no question had stood at all.
       if (!parseCommand(value).ok) {
         if (traceRef.current) setAnswered(traceRef.current, value);
+        // S198-A (DEF-0061, R-467): a lot is standing -- this reason answers
+        // the lot's CURRENT step, never `heldRef` (which holds whatever
+        // single sentence came before, or nothing: `runCommand`'s several
+        // branch returns before it is set). That was the bug in both orders.
+        if (lotRef.current !== null) {
+          setText("");
+          answerLotReason(reasonField, value);
+          return;
+        }
         const command = heldRef.current;
         if (command === null) {
           // Belt and braces: `heldRef` is always set the moment this
@@ -5211,20 +5429,15 @@ export function CommandBar({
         // if it carried one. Both are named, in the order they were asked.
         // R-459: no "·" in a sentence the bar shows -- each reason is its
         // own plain clause, appended after the readout's own period.
-        const suffixParts: string[] = [];
-        if (nextOptions.overrideReason !== undefined) {
-          suffixParts.push(` The reason given: ${nextOptions.overrideReason}.`);
-        }
-        if (nextOptions.areaReason !== undefined) {
-          suffixParts.push(` The area reason given: ${nextOptions.areaReason}.`);
-        }
+        // S198-A (R-449): one builder, `reasonsGivenText`, shared with the lot's
+        // listing.
         // R-437: this Enter answered the standing question with a reason --
         // never a new sentence (`sentence` already names the ORIGINAL one,
         // untouched here), but still an Enter, so the box empties for
         // whatever `runCommand` below turns into (a write, another
         // question, a refusal).
         setText("");
-        runCommand(command, suffixParts.join(""), nextOptions);
+        runCommand(command, reasonsGivenText(nextOptions), nextOptions);
         return;
       }
     }

@@ -61,6 +61,7 @@ import type {
 } from "@/lib/command/parse";
 import type {
   Candidate,
+  Coupled,
   ResolveOptions,
   ResolvedBook,
   ResolvedCommand,
@@ -169,6 +170,19 @@ export type CandidateAction =
   | { kind: "run_sentence"; sentence: string }
   /** S51: the lot's own "Do all N". */
   | { kind: "run_lot" }
+  /**
+   * S198-A (DEF-0062, R-466): a replace's "Take <outgoing> off anyway" -- the
+   * button IS the yes, so pressing it runs the removal now, with no second
+   * "Ready to do 1 thing" question after it. ONE kind for both doors that ask
+   * the question: the bar's probe (busy elsewhere, capacity) hands the steps it
+   * already resolved (`resolved`: the lot minus the placements that cannot go);
+   * the resolver's own gates (certificate, area) hand the removal COMMANDS
+   * (`commands`), which carry their block ids and so resolve without a question.
+   * Exactly one of the two is set.
+   */
+  | { kind: "run_removals"; resolved?: ResolvedAny[]; commands?: SingleCommand[] }
+  /** S198-A: a replace's "Leave it" -- drops the sentence, nothing written. */
+  | { kind: "leave_it" }
   /**
    * DEF-0040 / R-461 (S194-D): the Yes or No of an `other_day_part`
    * question. `options` are the answers ALREADY given to this sentence (the
@@ -337,6 +351,34 @@ export interface Lot {
   /** DEF-0048: the absence sentence's own answer (`Expansion.summary`),
    *  said as the lot's last word -- or undefined for any other lot. */
   summary?: string;
+  /**
+   * S198-A (R-467): the reasons given so far, PER STEP (the index into
+   * `commands`). A lot of independent steps asks a step's certificate or area
+   * question, takes the reason for THAT step only and carries on; the reason
+   * belongs to the step it was given for (a second uncertified step asks its
+   * own), never to the sentence, which is why it is not `heldOptionsRef`'s (a
+   * single sentence's). Absent until a reason is given.
+   */
+  stepOptions?: Record<number, ResolveOptions>;
+  /**
+   * S198-A (R-467): steps of an independent lot that were refused under the
+   * block policy, each already the plant's sentence ("Not doing Lena Novak on
+   * Cell 2 Tue Oct 13, 3 pm to 5 pm: Lena Novak is not certified for Cell 2,
+   * missing Welding."). Named in the listing's own words; the rest are listed.
+   */
+  notes?: string[];
+  /** S198-A: the sentence as said, before it was expanded -- what a day off
+   *  the board re-runs once the board has moved, so the WHOLE sentence comes
+   *  back, never the one step that met the day. */
+  source?: Command;
+  /** S198-A (R-425, R-466): set on a lot the board built from one sentence
+   *  (a replace, a swap, a copy). None of them asks a reason; a busy step
+   *  makes a replace ask, refuses a swap whole, and is named and dropped
+   *  from a copy's listing like any independent step (see `Coupled`). */
+  coupled?: Coupled;
+  /** S198-A: run the lot the moment it has resolved, with no listing -- the
+   *  lot a "take off anyway" press starts, whose press IS the yes. */
+  runNow?: true;
 }
 
 /** S59 (R-419): the command a "Show that day" press is waiting to re-run. */
