@@ -12339,9 +12339,14 @@ requirements:
   verified_by:
   - kind: manual
     steps: "pinned when the bare-pair question lands (queued 17 Sept); then the grammar's own cases"
-  status: uncovered
+  status: contradicted
   note: >-
     STATED 17 Sept (session 178): "7. Yes, definitely ask, always ask when in doubt."
+    RESTATED 30 Sept (session 197t conversation), wider than two readings of one sentence: "Whenever the bar
+    is in any doubt or instructions are unclear, it should always ask the user for what it should do next."
+    Any point where the bar would otherwise drop, shrink or reinterpret part of what was said (a replace whose
+    incoming half cannot be placed, R-466; a lot that stops at a question, DEF-0061) is a question, not a
+    quiet choice.
 - id: R-436
   title: '"Clear" empties the place --- the people and the job go, unless the sentence names a part; and the activity log gives an undo'
   source:
@@ -13288,6 +13293,25 @@ requirements:
     three candidates drawn side by side and the maintainer chose the fullest: the supervisor learns where
     the person is so she knows whom to call, and sees one fact from a line outside her grant, the cell
     and the hours.
+- id: R-466
+  title: A replace whose incoming person cannot be placed asks first --- the bar never takes the outgoing person off on its own; it says why the new one cannot go and lets the supervisor choose
+  source:
+  - 'tester session 197t (30 Sept): as Ana, "replace Sam Patel with Priya Shah on Cell 1" with Priya busy on a line Ana cannot read dropped the incoming half up front and offered only "Sam Patel is off Cell 1"; one press left the cell uncovered'
+  - 'session 197t conversation (the maintainer, 30 Sept): "The bar should ask the user, should it still remove the person and let the user choose it. Whenever the bar is in any doubt or instructions are unclear, it should always ask the user for what it should do next."'
+  stated_by: maintainer
+  claim: >-
+    A replace is one intent. When the incoming person cannot be placed (busy elsewhere, short a certificate,
+    absent, capacity), the bar does not quietly shrink the sentence to its removal half. It says in one plain
+    sentence why the incoming person cannot go and asks what to do next, with the choices as buttons: take
+    the outgoing person off anyway (the place is left uncovered, and the question says so), or leave things
+    as they are. Nothing is written before the answer. It is R-435 applied to a sentence whose parts no
+    longer fit together, and R-431 still holds: no button offers what the server would refuse.
+  verified_by:
+  - kind: manual
+    steps: "as Ana on a fresh demo seed, 'replace Sam Patel with Priya Shah on Cell 1 today' asks the question with both buttons, writes nothing before the answer, and each button does what it says (Sam's block read back)"
+  status: contradicted
+  note: >-
+    STATED 30 Sept (session 197t conversation). DEF-0062 is the defect it answers.
 findings:
 - id: F-243
   title: CI was red on every push since 22 Sept and nobody read it --- two audit-log cases defined "yesterday" by the machine's clock, which agrees with the plant's only in Chicago
@@ -19043,6 +19067,14 @@ sessions:
     left the cell uncovered (disclosed in words, consistent with R-432, but the two halves are one intent).
     My own walk removed Sam's Cell 1 block on the tester's demo data; the next fresh seed restores it.
     Housekeeping: a throwaway worktree I made for the before-196 comparison held node_modules by junction and its removal emptied node_modules/.bin; npm ci restored it (tester worktree only).
+    THE MAINTAINER'S ANSWER to the replace question, the same day: "The bar should ask the user, should it still
+    remove the person and let the user choose it. Whenever the bar is in any doubt or instructions are unclear, it
+    should always ask the user for what it should do next." Recorded as R-466 (a replace whose incoming person
+    cannot be placed asks first) and as a restatement of R-435 in the plan and in CLAUDE.md section 7, wider than two
+    readings of one sentence. The replace is filed as DEF-0062 (major) against R-466 and R-435, both now
+    contradicted. Not yet done: the sweep of the bar for other places it drops or shrinks part of a sentence
+    instead of asking; DEF-0061 and DEF-0062 are the two known, and the developer's fix should grep the lot
+    stepping for the rest.
 - id: '196'
   date: 2026-09-30
   title: "The bar refuses before it speaks: a person busy on a line the supervisor cannot see gets one Not done and no readout or join question in front of it, and a write in flight reads Working until the server answers (DEF-0060 fix-claimed, F-239 fixed)"
