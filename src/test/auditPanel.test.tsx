@@ -42,6 +42,7 @@ import { useAdminViewStore } from "@/features/admin/store/adminView";
    second implementation here could agree with neither. `@/lib/api` is mocked
    below, `@/lib/api/audit` is not. */
 import { entryPlaceIds } from "@/lib/api/audit";
+import { partsInZone, zonedTimeToInstant } from "@/lib/format/timezones";
 
 /** The stylesheet two of the cases below read as text — jsdom applies no CSS. */
 const PANEL_CSS = "src/features/admin/components/AuditPanel.module.css";
@@ -597,13 +598,22 @@ function agoIso(hours: number): string {
   return new Date(Date.now() - hours * 3600_000).toISOString();
 }
 
-/** Midnight this morning, in the reader's own timezone — where "yesterday"
- *  ends. Written out here rather than imported, so the case states the
- *  DEFINITION of the period and not the panel's arithmetic. */
-function localMidnight(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+/** The zone the mocked `useTimezone` answers (the demo plant's, R-450). */
+const PLANT_ZONE = "America/Chicago";
+
+/** Midnight this morning IN THE PLANT'S ZONE — where "yesterday" ends, and
+ *  the zone the When column is in (F-161, R-426). `daysBack` walks whole
+ *  plant days from there (1 is where yesterday starts).
+ *
+ *  Until 30 Sept this was `new Date().setHours(0, 0, 0, 0)` — the machine's
+ *  own midnight. The panel had read the plant's zone since 17 Sept, so the
+ *  two cases below agreed on a machine set to Chicago (the developer's) and
+ *  failed on every CI run since 22 Sept (UTC, five hours out): a
+ *  clock-dependent case pinned to the wrong clock, CLAUDE.md §7's own
+ *  warning, and one now proved in both directions by `TZ=UTC` locally. */
+function plantMidnight(daysBack = 0): Date {
+  const p = partsInZone(new Date(), PLANT_ZONE);
+  return zonedTimeToInstant(PLANT_ZONE, p.year, p.month, p.day - daysBack, 0, 0);
 }
 
 describe("the reader can narrow the log", () => {
@@ -722,11 +732,11 @@ describe("the reader can narrow the log", () => {
 
     fireEvent.change(picker, { target: { value: "yesterday" } });
     await waitFor(() => expect(lastFilter().until).toBeTruthy());
-    const until = localMidnight();
-    const since = new Date(until);
-    since.setDate(since.getDate() - 1);
-    // ⚠️ THE READER'S OWN TIMEZONE, because the When column is in it too: a
-    // "yesterday" that meant UTC would disagree with the dates on screen.
+    const until = plantMidnight();
+    const since = plantMidnight(1);
+    // ⚠️ THE PLANT'S ZONE, because the When column is in it too (F-161): a
+    // "yesterday" that meant UTC, or the reader's laptop, would disagree with
+    // the dates on screen.
     expect(lastFilter().since).toBe(since.toISOString());
     // Exclusive at the top: today's changes belong to today.
     expect(lastFilter().until).toBe(until.toISOString());
@@ -859,7 +869,7 @@ describe("a filter never claims to have searched more of the log than it has", (
   });
 
   it("finishes a bounded period the same way it finishes a now-anchored one", async () => {
-    const until = localMidnight();
+    const until = plantMidnight();
     const inYesterday = new Date(until.getTime() - 3600_000).toISOString();
     // Anchored to today's midnight, NOT to the wall clock: one hour ago is
     // still yesterday for the first hour of every day, and this case went red

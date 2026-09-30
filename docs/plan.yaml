@@ -13283,6 +13283,26 @@ requirements:
     the person is so she knows whom to call, and sees one fact from a line outside her grant, the cell
     and the hours.
 findings:
+- id: F-243
+  title: CI was red on every push since 22 Sept and nobody read it --- two audit-log cases defined "yesterday" by the machine's clock, which agrees with the plant's only in Chicago
+  tag: A clock-dependent case pinned to the wrong clock
+  status: fixed
+  found_by: maintainer
+  stage: S57
+  refs:
+  - R-426
+  - F-161
+  story: >-
+    30 Sept (session 195), the maintainer: "the CI runs on github are failing". Every run of the CI workflow
+    on Development since 22 Sept ended on `npm run test` with the same two cases in auditPanel.test.tsx: the
+    panel had read the plant's zone for its periods since F-161 (17 Sept), and R-450 moved the demo plant to
+    Chicago on 22 Sept, but the two cases still computed "yesterday" from `new Date().setHours(0,0,0,0)`, the
+    machine's own midnight. On the developer's machine, which sits in Chicago, the two agreed and 4902 passed;
+    on GitHub's UTC runners they are five hours apart. Reproduced locally with TZ=UTC (2 failed), fixed by
+    defining the period in the plant's zone through partsInZone and zonedTimeToInstant, and proved green with
+    the clock on UTC, on Tokyo and on the machine. The lesson is CLAUDE.md §7's own sentence about a frozen
+    clock in both directions; the gap was that nobody read the red run for eight days. The developer will read
+    `gh run list` at the start of every session from now on.
 - id: F-242
   title: The clear-everyone guard refuses "clear everything", "clear the entire board" and "clear all of them" on the safe side --- a question for the maintainer, not a defect yet
   tag: Refusing more than it must
@@ -19030,6 +19050,8 @@ sessions:
     rewrites them: after merging, `git rm -rq --cached .` then `git reset --hard` once. The stray untracked
     folder .claude/worktrees/ in the developer's tree makes `eslint .` and `prettier --check .` list a second
     copy of the repo; it is not the project's and was left alone.
+    CI. Asked by the maintainer at the end of the day: every CI run since 22 Sept was red on two audit-log
+    cases that defined "yesterday" by the machine's clock (F-243, fixed, proved with TZ=UTC and Asia/Tokyo).
     NOT A STANDARD, NOTED: the reviewer of DEF-0056 left "clear everything", "clear the entire board" and
     "clear all of them" refused on the safe side (F-242); the developer recommends grounding the first two and
     asks the maintainer.
