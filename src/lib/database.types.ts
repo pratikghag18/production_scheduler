@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -1608,6 +1608,16 @@ export type Database = {
           p_timerange: unknown
         }
         Returns: Json
+      }
+      operator_blocks_elsewhere: {
+        Args: { p_from: string; p_to: string }
+        Returns: {
+          efficiency: number
+          node_name: string
+          operator_id: string
+          parent_name: string
+          timerange: unknown
+        }[]
       }
       operator_peak_load: {
         Args: {

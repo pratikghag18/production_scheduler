@@ -296,8 +296,11 @@ CREATE OR REPLACE FUNCTION operator_peak_load(
   p_efficiency numeric,
   p_exclude_assignment_id uuid DEFAULT NULL
 ) RETURNS numeric
-LANGUAGE sql STABLE
+LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp
+-- R-465 (0085): restored AS IT NOW IS -- SECURITY DEFINER, with the company term on
+-- both reads of assignments -- because 20260930000085 changed the real function and
+-- this second copy has to follow it (see the paragraph below about drift).
 -- R-323: the two `a.status <> 'cancelled'` lines are gone from this copy too.
 -- ⚠️ THIS FILE HOLDS A SECOND COPY OF `operator_peak_load`'s QUERY, which it
 -- restores after mutating the real one -- and it is the reason dropping the
@@ -311,6 +314,7 @@ AS $restore$
     SELECT (SELECT COALESCE(sum(a.efficiency), 0)
             FROM assignments a
             WHERE a.operator_id = p_operator_id
+              AND (auth.uid() IS NULL OR a.org_id = app_current_org())
               AND (p_exclude_assignment_id IS NULL OR a.id <> p_exclude_assignment_id)
               AND a.timerange @> p.pt) + p_efficiency AS load
     FROM (
@@ -318,6 +322,7 @@ AS $restore$
       UNION
       SELECT lower(a.timerange) FROM assignments a
       WHERE a.operator_id = p_operator_id
+              AND (auth.uid() IS NULL OR a.org_id = app_current_org())
         AND (p_exclude_assignment_id IS NULL OR a.id <> p_exclude_assignment_id)
         AND a.timerange && p_timerange
     ) p
@@ -337,6 +342,15 @@ BEGIN
   RAISE NOTICE 'operator_peak_load restored correctly (60/60/50 peak = 1.1 again)';
 END $$;
 RESET ROLE;
+
+-- R-465 (0085): CREATE OR REPLACE keeps privileges, so the mutate-and-restore above must
+-- leave operator_peak_load closed to signed-in people. Read the catalog after it.
+DO $$ BEGIN
+  IF has_function_privilege('authenticated', 'operator_peak_load(uuid,tstzrange,numeric,uuid)', 'EXECUTE')
+     OR has_function_privilege('anon', 'operator_peak_load(uuid,tstzrange,numeric,uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FAIL: operator_peak_load is callable by a signed-in role again after the restore';
+  END IF;
+END $$;
 
 -- ============================================================================
 -- check_eligibility: items 10-11
@@ -624,7 +638,9 @@ BEGIN
   IF (v_res->'assignment') IS NULL OR (v_res->'assignment') = 'null'::jsonb THEN
     RAISE EXCEPTION 'FAIL: new assignment missing from result: %', v_res;
   END IF;
-  v_peak := operator_peak_load(v_op, tstzrange('2099-03-01 08:00+00','2099-03-01 12:00+00'), 0.0, NULL);
+  -- R-465 (0085): operator_peak_load is closed to signed-in people, so the end state is read
+  -- through capacity_probe (a definer over the same helper), which reports the same peak.
+  v_peak := (capacity_probe(v_op, tstzrange('2099-03-01 08:00+00','2099-03-01 12:00+00'), 0.0, NULL)->>'peak')::numeric;
   IF v_peak <> 1.000 THEN RAISE EXCEPTION 'FAIL: end-state peak should be exactly 1.0, got %', v_peak; END IF;
 END $$;
 
@@ -767,14 +783,21 @@ BEGIN
     -- same cell and the same person got `eligible=false` from a company admin
     -- and `eligible=true` from a supervisor whose grant sat below the node
     -- carrying the requirement. A safety check that failed open.
+    -- R-465 (0085): `capacity_probe` and `operator_peak_load` LEFT THIS LIST for the
+    -- same reason and the same cost: as INVOKERS they summed what the CALLER could
+    -- read, so a line supervisor's sum left out every block on another line (DEF-0053).
+    -- The contract changed, not the case: the two are asserted directly instead, in
+    -- 99_capacity_counts_every_block_test.sql (CB1, CB5, CB6: refusal of a person the
+    -- caller cannot read, nothing learned about another company).
+    -- check_operator_capacity (the trigger body) is not on this list and became a definer in
+    -- 0085 for the same reason: it may call operator_peak_load, which nobody signed in may.
     -- The property this exemption costs is asserted directly instead, in
     -- `53_read_scoping_test.sql`: R14 pins that it REFUSES (PT403) a node the
     -- caller cannot read, which is what INVOKER was buying here. The other
     -- eight stay INVOKER and stay asserted; they all WRITE, and RLS must
     -- govern those writes.
-    AND p.proname IN ('board_window','capacity_probe','create_run',
-                       'create_assignment','move_run','apply_split_coverage','delete_run',
-                       'operator_peak_load')
+    AND p.proname IN ('board_window','create_run',
+                       'create_assignment','move_run','apply_split_coverage','delete_run')
     AND p.prosecdef = true;
   IF array_length(v_bad, 1) IS NOT NULL THEN
     RAISE EXCEPTION 'FAIL: SECURITY DEFINER found on non-exempt function(s): %', v_bad;
