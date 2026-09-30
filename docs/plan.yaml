@@ -13214,7 +13214,13 @@ requirements:
   note: >-
     STATED 29 Sept (session 194), answering F-236. It is the same queue F-233's fix needs (a sentence said
     while a create is in flight waits for it), so the two are built as one piece: one queue, entered at
-    the moment a sentence is heard, not two holds at two depths.
+    the moment a sentence is heard, not two holds at two depths. ATTEMPTED the same evening (lane S194-H,
+    brief docs/agent-briefs/s194-h-no-sentence-thrown-away-brief.md): built browser-first, unit suite green
+    (4710), the throttled create thirty of thirty, but the typed walk stalled for minutes twice at different
+    sentences with a blank answer that resolved later, and a third run was stopped for memory. Not proven,
+    NOT MERGED: parked on the branch wip/r464-queue. Next: run the walk from that branch with the bar's
+    state logged, on a quiet machine, in one bounded attempt; if it is not proven within the hour it waits
+    behind the tester's next run.
 findings:
 - id: F-236
   title: A second sentence entered while the bar is still reading the first throws the first away, and its line in the thread stays blank
@@ -18872,6 +18878,11 @@ sessions:
     and the tree put back at 4cde4cc until the cause was seen in a browser's own log. The developer also reported the first attempt to the maintainer as
     passing on three green runs of a timing check, which a reviewer then failed twice on the same code:
     a check that depends on timing is proved by many runs at more than one delay, never by a few.
+    R-464 (no sentence thrown away) was attempted the same evening and is parked unproven on
+    wip/r464-queue; its row says why and what next. The evening's own lesson, recorded so it is not
+    repeated: a sub-task that fails twice is brought to the maintainer, not chased a third and fourth
+    time; the tester's stack is started only when asked, each time; and a status report leads with
+    whether anything new has landed.
     FOUND ON THE WAY, queued as findings: F-225 to F-236. NOT RUN: the scorer against the real Whisper (the
     container is the maintainer's to start); the whole SQL suite; the e2e specs not named above.
 - id: 193t
