@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-09-30'
-  tip: '953c900'
+  tip: 'a07d2b3'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13078,6 +13078,14 @@ requirements:
     the maintainer on 28 Sept (session 194) and written into CLAUDE.md §7. The Vite dev server already
     binds loopback (no server.host anywhere). The hits at the time it was set: record.mjs listens with no
     host, and serve.mjs publishes the model container on every interface; both are lane C's (DEF-0039).
+    THE DATABASE STACK, 30 Sept (session 195, a07d2b3, DEF-0059 left open): supabase start publishes every port
+    on every interface and config.toml has no bind address. The CLI's --network-id on a Docker network with the
+    loopback binding option was built and tried; this machine's Docker Desktop 29.8 ignores the option (a
+    throwaway container published through such a network came up on 0.0.0.0, an explicit 127.0.0.1 publish did
+    not). So the standard holds for the stack through two things: both start scripts read docker ps back and
+    print every port that answers beyond the machine, and scripts/db-firewall.ps1 installs an inbound block on
+    54320-54329 and 54420-54429, which the maintainer runs once as an administrator and proves from a second
+    device. Until that is run and seen, this requirement stays contradicted.
 - id: R-461
   title: A night shift is split at midnight --- each day is its own bucket; clearing a day clears that day's part, and the board asks, yes or no, whether to clear the part on the day before or the day after too
   source:
@@ -13221,7 +13229,150 @@ requirements:
     NOT MERGED: parked on the branch wip/r464-queue. Next: run the walk from that branch with the bar's
     state logged, on a quiet machine, in one bounded attempt; if it is not proven within the hour it waits
     behind the tester's next run.
+- id: R-465
+  title: A person busy on a place the caller cannot see is still busy --- the server counts every block wherever it is, and the supervisor is told the place and the hours, never the product or the job
+  source:
+  - 'tester session 195t (30 Sept): as a line supervisor, a person working on another line was booked a second time and the server wrote it; DEF-0053'
+  - 'session 195 conversation (the maintainer, 30 Sept, shown three candidates for what the supervisor is told --- place and hours, hours only, just busy): "Place and hours"'
+  stated_by: maintainer
+  claim: >-
+    A person's load is the sum of their blocks wherever those blocks are, not the sum of the blocks the
+    caller may read: the capacity check the server runs on every write, and the answer it gives when
+    asked beforehand, are computed by the server as a definer inside the caller's own company. When the
+    block that makes a person busy sits on a place outside the caller's grant, the caller is told the
+    place and the hours and nothing else about it: "Priya Shah is already on Cell 4 in Line 2 today from
+    6 am to 2 pm." The product, the job and the block's id stay hidden. The operator rail says the same
+    of the same person ("booked", with the cell and the hours), for a line supervisor exactly as for the
+    plant admin, and the bar refuses before the yes, never after it (R-431).
+  verified_by:
+  - kind: sql
+    file: supabase/tests/99_capacity_counts_every_block_test.sql
+    cases: "CB1 to CB13: a scoped supervisor refused over a block on a line she cannot read, the admin the same, half and half legal, the outside row's shape, an UPDATE into the hours, another company and a person she cannot read, operator_blocks_elsewhere held to the writer person by person, the owner and seed path, the helper closed to signed-in callers"
+  - kind: sql
+    file: supabase/tests/99_capacity_review_test.sql
+    cases: "RV1 to RV18: every writer that reaches the trigger (reassign, move, move_run, split, direct INSERT and UPDATE), what leaks, the search path, identity edges, the set's edge windows and grants, the planners' offer (RV11, what holds today)"
+  - kind: vitest
+    file: src/test/busyElsewhere.test.ts
+    cases: "BE-1 to BE-16: the sentence for one, two, no parent, across midnight, a zone west and east of UTC with the clock frozen"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "R-465-1 to R-465-12: the create path refuses and opens no split pop-up, a readable overlap still opens it, the probe after a capacity refusal on a move, re-time, efficiency edit and lot step"
+  - kind: vitest
+    file: src/test/railWords.test.ts
+    cases: "RE-1 to RE-14: elsewhere blocks as coverage, the brackets, the title, Chicago and Tokyo"
+  - kind: vitest
+    file: src/test/operatorPanel.test.tsx
+    cases: "PE-1 to PE-9: the word, the brackets, the title, pending and failed, the admin unchanged"
+  - kind: e2e
+    file: e2e/roleWalk.spec.ts
+    cases: "R-465: Ana's rail says booked on Cell 4 as the plant admin's says booked, at 10 am with the clock frozen; at the rail's narrowest the name and the word stay readable"
+  - kind: manual
+    steps: "node src/test/defects/DEF-0053.live.mjs on the tester's stack exits 0 (held: the same answer for both); as Ana in the browser, 'put Priya Shah on Housing A at Cell 1 today from 10 am to noon' then Separate block answers 'Not done: Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.' and her rail reads 'booked (Cell 4, 6 am to 2 pm)'"
+  status: covered
+  note: >-
+    BUILT 30 Sept (session 195, ecfb3e2 and aee2746), DEF-0053 fix-claimed. The probe answers an operator the
+    caller cannot read as the invoker did (no verdict, no rows) rather than refusing: the copy-week planners
+    read a null fits on purpose, and the review found a refusal there broke every template naming a deleted
+    person. F-237 is what is left: the planners still offer "copied" against a block the caller cannot read.
+    STATED 30 Sept (session 195). DEF-0053 is the defect it answers; the rule under it is R-033, which was
+    always about the person and had been computed from the caller's view since the first capacity trigger
+    (migration 0004) because its test ran as one role that reads everything. HOW IT READS was asked with
+    three candidates drawn side by side and the maintainer chose the fullest: the supervisor learns where
+    the person is so she knows whom to call, and sees one fact from a line outside her grant, the cell
+    and the hours.
 findings:
+- id: F-242
+  title: The clear-everyone guard refuses "clear everything", "clear the entire board" and "clear all of them" on the safe side --- a question for the maintainer, not a defect yet
+  tag: Refusing more than it must
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-435
+  - R-431
+  story: >-
+    30 Sept (session 195), the reviewer of DEF-0056's fix. The head-of-clause rule refuses these three
+    because the sweeping shapes name "the board" or "everyone" and nothing else; a refusal only asks the
+    person to say it again, so nothing wrong happens. Whether "everything" and "the entire board" should
+    ground is the maintainer's to say; "all of them" has no referent and the developer recommends leaving
+    it refused.
+- id: F-241
+  title: '"clear Sam Patel and Sam Ortiz tomorrow" becomes a which-person question and the pick drops the other person'
+  tag: A quiet loss
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-435
+  - R-432
+  story: >-
+    30 Sept (session 195), the reviewer of DEF-0055's fix. Two names after "clear" match no cell and no one
+    person exactly, so the nearest-choice question offers Sam Patel and Sam Ortiz as buttons, and pressing one
+    clears only that one; the sentence asked for both. The grammar has "and" for two people in an assign
+    (`several`); the clear-of-a-person reading should read the list the same way.
+- id: F-240
+  title: A typed "yes" at the board's Continue? pop-up does nothing, a reload leaves the waiting line standing, and a two-step re-time keeps the first question's sentence
+  tag: Three small gaps around the pop-up answer
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-434
+  - R-459
+  story: >-
+    30 Sept (session 195), the reviewer of DEF-0054's fix. A typed "no" cancels the pop-up (driven in the
+    browser); a typed "yes" is answered "Nothing to say yes to." and the pop-up stays, because only the cancel
+    word is wired. After a reload with the pop-up standing the thread still reads "The board is asking ...
+    Answer it on the board." with no pop-up behind it (the trace is right: asked, unanswered). A re-time that
+    asks keep-or-scale and then the attachment question keeps the first question's waiting sentence through
+    the second. None writes anything wrong.
+- id: F-239
+  title: The bar's live line prints a readout the moment the writer is called, seconds before the server answers
+  tag: Said as done before it is done
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-431
+  - R-434
+  story: >-
+    30 Sept (session 195), the reviewer of DEF-0054's fix, with the PATCH delayed by five seconds: at 1.5 s
+    the thread read "Sam Patel's block on Cell 1 now ends 1:30 pm; it was 2 pm." while the database still
+    held 2 pm, and the trace had no entry yet, so a page closed in that gap leaves no line. "Written:" and the
+    trace's ran are right (they wait for the answer); it is the live line and the turn's asked that jump
+    ahead. The fix is the live line saying "Working..." until the server answers, which touches the readout
+    that also feeds asked and many sync cases; a piece of its own, and the wording is the maintainer's.
+- id: F-238
+  title: The trigger prices a person the supervisor cannot read if she guesses the id --- an existence oracle, not a listing
+  tag: Low
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-465
+  - R-341
+  story: >-
+    30 Sept (session 195), the reviewer of migration 0085 (case RV7). A supervisor who writes a block for an
+    operator homed at another plant, by uuid, is refused by the capacity trigger with that person's peak
+    rather than by a readable-operator guard first. Before 0085 the write was accepted blind, which was worse.
+    Whether create_assignment should refuse an unreadable operator before pricing them was not checked.
+- id: F-237
+  title: The week-copy and template planners offer "take the copied plan" for a person whose only blocker is on a line the caller cannot read, and the server refuses it after the yes
+  tag: An offer the server refuses
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-431
+  - R-432
+  - R-465
+  story: >-
+    30 Sept (session 195), the reviewer of migration 0085 (case RV11). Since 0085 the plan says clash for
+    such an item (before, it said clean and the double-booking was written), but its list of prior blocks
+    holds only the rows the caller can read and it still offers "prior" and "copied"; applying "copied" raises
+    the capacity refusal and the whole apply rolls back with raw error text. The fix is in the planners' own
+    text (0055, 0066, 0067 and apply_copy_week's choice set): re-emitting three large functions, a piece of
+    its own. The reviewer's file 99_capacity_review_test.sql holds what does hold today.
 - id: F-236
   title: A second sentence entered while the bar is still reading the first throws the first away, and its line in the thread stays blank
   tag: A silent drop
@@ -18805,6 +18956,80 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: '195'
+  date: 2026-09-30
+  title: "The tester's ten: a supervisor can no longer double-book a person who is working on a line she cannot see, the bar's buttons and lot lines speak as a supervisor would, a pop-up's answer finishes its sentence, and every checkout holds LF (DEF-0043, 0044, 0052 to 0058 fix-claimed; DEF-0059 waits on a firewall rule)"
+  shipped: []
+  commits: ['ecfb3e2', 'aee2746', 'a07d2b3']
+  numbers:
+    app_tests: 4902
+    app_test_files: 191
+    tsc: 0
+    eslint: 0
+    db_checks: 937
+    migrations: 85
+    e2e: 56
+  confirmed: true
+  numbers_note: >-
+    npm run test (vitest run) copied from the runner on the final tree with the tester's stack up and its
+    values exported, so the two live pins run: `Test Files  191 passed (191)`, `Tests  4902 passed (4902)`. With
+    no stack the same run reads 2 failed (DEF-0020's and DEF-0022's live pins) and 4900 passed. tsc -b exit 0
+    and CONCLUSIVE: db:types was regenerated from the rebuilt tester stack after migration 0085 (the one new
+    function, operator_blocks_elsewhere). eslint . exit 0 once the stray untracked .claude/worktrees folder is
+    left out; prettier --check . clean after 105 working copies with CRLF were normalised in place (the index
+    was LF; git sees no change). db_checks MEASURED by lane C's reviewer on scratch databases in the tester's
+    container: 65 numbered files, 920 passed, 0 failed, 0 hard errors, plus --demo 17 passed; the sum is 937
+    (the previous 906 plus CB1 to CB13 and RV1 to RV18). e2e: Playwright's own line is `Running 56 tests` (52
+    plus DEF-0054's two cases and R-465's two); `npm run e2e` three times on the final tree: `50 passed, 6
+    skipped` each time (1.5m, 1.6m, 1.5m). The typed walk alone, --workers=1: list 1 twice (58.8 s, 58.3 s),
+    list 2 twice (53.9 s, 54.3 s), `4 passed` each (the walk, F-233, DEF-0054 and its review case).
+  summary: >-
+    THE INBOX. Merged tester (fast-forward, 992ffbc): thirteen of session 194's sixteen verified, three reopened
+    (DEF-0043, 0044, 0052), seven new (DEF-0053 to 0059). Baseline read before any code: 4723 in 189 files,
+    twelve red by design plus two live pins, the developer's stack being down. Every open defect was told to
+    the maintainer first; the developer agreed with every call but the size of DEF-0059 (the tester called the
+    machine from itself, so reach from a second device was unproven).
+    THE DECISION. DEF-0053 needed one: what a supervisor is told when the block that makes a person busy is on
+    a line she cannot read. Asked with three candidates drawn side by side (place and hours; hours only; just
+    busy) and answered "Place and hours" -- R-465, written before the code. The maintainer also approved
+    starting the tester's stack for the run (up before the first proofs, rebuilt with the migration once
+    lane D was done with the browser, down at the end).
+    FIVE LANES AND TWO REVIEWERS, every one on Sonnet with a brief under docs/agent-briefs (s195-a to
+    s195-e, s195-c-review, s195-abd-review). A: the bar's words (DEF-0043's buttons, "1 thing", the joins;
+    DEF-0052's day and hours in Not done and Not tried, and gone versus forbidden by a read-back after a write
+    that changed nothing; DEF-0055's clear of a person; DEF-0044 item 6). B: the clear-everyone guard from the
+    head of its clause (DEF-0056), the two absence screens held to fail closed (DEF-0044), the typed walk in
+    serial order with its own trace entries and polling reads (DEF-0057). C: migration 0085, SQL only, on
+    scratch databases; its reviewer found the probe's new refusal would have broken every week template naming
+    a deleted person and fixed it, attacked every writer that reaches the trigger, and left F-237 and F-238. D:
+    DEF-0054 browser-first (reproduced as Ana before a line was changed), one reporter for all six pop-ups,
+    nothing said as done before it is done, and R-465's client half against a scripted probe; its reviewer
+    found a pop-up opened by hand left the sentence waiting forever and fixed it, widened the guard's openers
+    and retractions, drove a typed "no" in the browser, and left F-239 to F-242. E: the rail, after the stack
+    was rebuilt and the types regenerated: "booked (Cell 4, 6 am to 2 pm)" with the sentence as the title, the
+    read on the window query's key prefix, the role walk with the clock frozen at 10 am. The developer then
+    drove R-465 itself as Ana in the browser (the bar's "Not done: Priya Shah is already on Cell 4 in Line 2
+    today from 6 am to 2 pm." and the rail), ran the tester's live script (exit 0), the unit suite, the walk
+    four times and the browser suite three times, all green, and committed in three pieces.
+    DEF-0058: one .gitattributes line, proved by a Windows-style checkout of the runner and the scorer (113 and
+    746 carriage returns before, none after). DEF-0059, LEFT OPEN: the CLI's --network-id on a loopback-bound
+    Docker network was built and tried and this machine's Docker Desktop 29.8 ignores it (a throwaway
+    container published through the network came up on 0.0.0.0; an explicit 127.0.0.1 publish did not), so
+    the start scripts read docker ps back and say which ports are open, scripts/db-firewall.ps1 installs the
+    inbound block, and the maintainer runs it once as an administrator and proves it from a phone. R-460's
+    note carries this; the requirement stays contradicted until then.
+    THE FULL RUN. weekTemplates' apply case ran out of its 30 s budget once beside five workers (22 s alone once
+    the target week holds an earlier copy) and was given room; CB-abs-1 failed once in a loaded full run and
+    passed alone and in its file, and its two waits carry a real timeout now (a diagnosis by inference, the
+    reviewer says). The e2e count the plan carried (55) was never Playwright's own line; it is 56 now, read
+    from the runner.
+    FOR THE TESTER. Its worktree was checked out before .gitattributes existed and holds CRLF copies until Git
+    rewrites them: after merging, `git rm -rq --cached .` then `git reset --hard` once. The stray untracked
+    folder .claude/worktrees/ in the developer's tree makes `eslint .` and `prettier --check .` list a second
+    copy of the repo; it is not the project's and was left alone.
+    NOT A STANDARD, NOTED: the reviewer of DEF-0056 left "clear everything", "clear the entire board" and
+    "clear all of them" refused on the safe side (F-242); the developer recommends grounding the first two and
+    asks the maintainer.
 - id: 195t
   date: 2026-09-30
   title: "Tester run over session 194: thirteen of the sixteen defects verified by their own reproductions, three reopened, and seven new ones --- the worst, a line supervisor can double-book a person who is working on another line, because the server's own check cannot see that line (DEF-0053 to DEF-0059)"
@@ -27360,13 +27585,25 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S57
-  text: "Push, then the tester verifies DEF-0037 to DEF-0052 by its own reproductions and rewrites two pins"
+  text: "The maintainer runs scripts/db-firewall.ps1 once as an administrator and tries Studio from a phone on the same Wi-Fi; then DEF-0059 can close"
   why: >-
-    Session 194 fix-claimed all sixteen. The maintainer pushes; the tester merges Development, rebuilds its
-    stack (the seed changed: home shifts are a round-robin now) and re-runs each defect's Reproduction. Two pins
-    cannot go green as written and their defect files say why and what to change (DEF-0040, DEF-0043's
-    headcount pin); DEF-0047's pin should be widened to the sentence in its own reproduction. The requirements
-    the tester set contradicted are the tester's to restore.
+    Session 195 found the CLI's network option ignored by this machine's Docker Desktop, so the ports are
+    closed by a firewall rule the repo cannot install itself. The proof is a second device; the same machine
+    reaching its own address does not cross the firewall.
+- kind: task
+  stage: S57
+  text: "Push, then the tester verifies DEF-0043, 0044, 0052 to 0058 by its own reproductions (its worktree needs one re-checkout for the new line-ending rule: git rm -rq --cached . then git reset --hard)"
+  why: >-
+    Session 195 fix-claimed nine of the ten; DEF-0059 stays open on the maintainer's step above. The tester's
+    stack rebuilds with migration 0085, and the two stacks now print their open ports at start. The
+    requirements the tester set contradicted (R-033, R-366, R-407, R-430 to R-435, R-459) are the tester's to
+    restore; R-465 is covered by the developer's own proofs and is the tester's to confirm.
+- kind: task
+  stage: S57
+  text: "F-237 to F-241 from the two reviews: the planners' offer the server refuses, the live line said as done before the server answers, a typed yes at the Continue? pop-up, a guessed id priced by the trigger, two names after clear; and F-242's three sentences are a question for the maintainer"
+  why: >-
+    None writes anything wrong today; F-237 and F-239 are the two R-431 gaps and the developer would take them
+    first. F-239's fix is one wording ("Working..." until the server answers) that touches many sync cases.
 - kind: task
   stage: S57
   text: "The findings session 194 left open: F-225 to F-231 --- the certificate refusal's two wordings and the 24-hour spans on the which-block buttons, the trace file's growth, the seven spoken clears the typed grammar does not read, a person called Lin On, a day said after the shift, a minimum length for a job on the server, the scratch database's cleanup"
