@@ -13085,7 +13085,9 @@ requirements:
     not). So the standard holds for the stack through two things: both start scripts read docker ps back and
     print every port that answers beyond the machine, and scripts/db-firewall.ps1 installs an inbound block on
     54320-54329 and 54420-54429, which the maintainer runs once as an administrator and proves from a second
-    device. Until that is run and seen, this requirement stays contradicted.
+    device. RUN AND SEEN the same day: the maintainer installed the rule and, with Studio listening on
+    0.0.0.0:54323, a phone on the same Wi-Fi could not reach it; DEF-0059 fix-claimed on that. The status is
+    the tester's to restore.
 - id: R-461
   title: A night shift is split at midnight --- each day is its own bucket; clearing a day clears that day's part, and the board asks, yes or no, whether to clear the part on the day before or the day after too
   source:
@@ -18958,7 +18960,7 @@ findings:
 sessions:
 - id: '195'
   date: 2026-09-30
-  title: "The tester's ten: a supervisor can no longer double-book a person who is working on a line she cannot see, the bar's buttons and lot lines speak as a supervisor would, a pop-up's answer finishes its sentence, and every checkout holds LF (DEF-0043, 0044, 0052 to 0058 fix-claimed; DEF-0059 waits on a firewall rule)"
+  title: "The tester's ten: a supervisor can no longer double-book a person who is working on a line she cannot see, the bar's buttons and lot lines speak as a supervisor would, a pop-up's answer finishes its sentence, every checkout holds LF, and the database stack is closed to the network by a firewall rule (DEF-0043, 0044, 0052 to 0059 fix-claimed)"
   shipped: []
   commits: ['ecfb3e2', 'aee2746', 'a07d2b3']
   numbers:
@@ -19016,8 +19018,9 @@ sessions:
     Docker network was built and tried and this machine's Docker Desktop 29.8 ignores it (a throwaway
     container published through the network came up on 0.0.0.0; an explicit 127.0.0.1 publish did not), so
     the start scripts read docker ps back and say which ports are open, scripts/db-firewall.ps1 installs the
-    inbound block, and the maintainer runs it once as an administrator and proves it from a phone. R-460's
-    note carries this; the requirement stays contradicted until then.
+    inbound block, and the maintainer ran it once as an administrator the same afternoon and proved it from a
+    phone ("the site can't be reached" with Studio listening on 0.0.0.0:54323), so DEF-0059 is fix-claimed too.
+    R-460's note carries this.
     THE FULL RUN. weekTemplates' apply case ran out of its 30 s budget once beside five workers (22 s alone once
     the target week holds an earlier copy) and was given room; CB-abs-1 failed once in a loaded full run and
     passed alone and in its file, and its two waits carry a real timeout now (a diagnosis by inference, the
@@ -27585,16 +27588,9 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S57
-  text: "The maintainer runs scripts/db-firewall.ps1 once as an administrator and tries Studio from a phone on the same Wi-Fi; then DEF-0059 can close"
+  text: "Push, then the tester verifies DEF-0043, 0044, 0052 to 0059 by its own reproductions (its worktree needs one re-checkout for the new line-ending rule: git rm -rq --cached . then git reset --hard; DEF-0059's proof is a second device)"
   why: >-
-    Session 195 found the CLI's network option ignored by this machine's Docker Desktop, so the ports are
-    closed by a firewall rule the repo cannot install itself. The proof is a second device; the same machine
-    reaching its own address does not cross the firewall.
-- kind: task
-  stage: S57
-  text: "Push, then the tester verifies DEF-0043, 0044, 0052 to 0058 by its own reproductions (its worktree needs one re-checkout for the new line-ending rule: git rm -rq --cached . then git reset --hard)"
-  why: >-
-    Session 195 fix-claimed nine of the ten; DEF-0059 stays open on the maintainer's step above. The tester's
+    Session 195 fix-claimed all ten, DEF-0059 last on the maintainer's own phone test. The tester's
     stack rebuilds with migration 0085, and the two stacks now print their open ports at start. The
     requirements the tester set contradicted (R-033, R-366, R-407, R-430 to R-435, R-459) are the tester's to
     restore; R-465 is covered by the developer's own proofs and is the tester's to confirm.
