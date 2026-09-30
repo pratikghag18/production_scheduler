@@ -56,7 +56,7 @@ export interface TraceEntry {
    *     did.
    *
    * Written by `CommandBar.tsx` in the four words the writers answer in:
-   * `"written"`, `"refused: <message>"`, `"popup: <what it waits for>"`, and
+   * `"written"`, `"refused: <message>"`, `"popup: <what it waits for>"`, `"writing"` (S196-A: an ordinary write asked of the server and not yet answered -- posted at the ask, corrected at the answer; a page closed mid-write leaves this in the file, which says so), and
    * a lot's own finished sentence (`"Done, N things."` on a clean sweep;
    * DEF-0052 / R-432, 28 Sept: `buildLotOutcome`'s SEPARATE-LINES sentence,
    * "I made k of the N changes.\nDone: ...\nNot done: ...\nNot tried: ...",

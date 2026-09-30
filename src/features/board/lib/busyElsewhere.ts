@@ -179,6 +179,45 @@ export interface ExplainDeps {
 }
 
 /**
+ * S196-A (DEF-0060, F-239, R-465, R-431): the same question asked BEFORE the
+ * bar says anything. The command bar asks `capacity_probe` for the person, the
+ * hours and the share a resolved step would place, and -- when a block the
+ * caller cannot read is what makes the person busy -- answers the one sentence
+ * "<person> is already on <place> <day> from <hours>." and nothing else: no
+ * readout, no join question, no write. Every other answer is `null` and the
+ * bar goes on exactly as before:
+ *   - the probe says the person fits: nothing to say;
+ *   - the person does not fit on READABLE blocks only: the split pop-up is the
+ *     answer, opened after the create as always (`submitCreateDirect`), and
+ *     that path keeps its own probe for exactly this reason -- it needs the
+ *     probe's rows to draw the split, while this asks only whether to refuse;
+ *   - the probe itself fails (a network blip): the probe is a convenience and
+ *     the server's write is the gate (`submitCreateDirect`'s own note).
+ * One sentence builder (`busyElsewhereSentence`) and one gate
+ * (`isBusyElsewhere`) serve this, the create path's probe and the refusal's
+ * explanation, so the three can never say different words.
+ */
+export async function busyElsewhereBeforeWrite(
+  attempt: CapacityAttempt,
+  deps: ExplainDeps,
+): Promise<string | null> {
+  let probe: CapacityProbe;
+  try {
+    probe = await deps.probe(attempt);
+  } catch {
+    return null;
+  }
+  if (!isBusyElsewhere(probe)) return null;
+  return busyElsewhereSentence({
+    person: deps.personName,
+    rows: probe.overlapping,
+    zone: deps.zone,
+    dateFormat: deps.dateFormat,
+    now: (deps.now ?? (() => new Date()))(),
+  });
+}
+
+/**
  * After a `CapacityExceeded` refusal: ask `capacity_probe` the same question
  * and, when a block the caller cannot read is what makes the person busy, hand
  * the refusal back carrying the R-465 sentence (`elsewhere`), which every reader

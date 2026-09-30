@@ -1431,6 +1431,9 @@ export default function BoardPage() {
               // (see `useDragGesture.ts`'s own `runLot` doc for the writer
               // each resolved shape reaches).
               onRunLot={dragApi.runLot}
+              // S196-A (DEF-0060, R-465): the capacity probe, asked before the bar
+              // says anything about a step that places a person over a span.
+              precheck={dragApi.precheckCommandStep}
               // S47 / R-395 item 4: a spoken/typed yes with no question
               // standing reaches the currently-open create pop-up ONLY when
               // a sentence opened it (`autoCreate`) -- `submitIfClean` itself

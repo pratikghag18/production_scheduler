@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CapacityProbe, CapacityProbeOverlap, SchedulerError } from "@/lib/api";
 import {
+  busyElsewhereBeforeWrite,
   busyElsewhereSentence,
   explainCapacityRefusal,
   isBusyElsewhere,
@@ -272,6 +273,65 @@ describe("describeRefusal carries the busy-elsewhere sentence (S195 review)", ()
     );
     expect(describeRefusal(base, "Priya Shah", undefined, "UTC")).toBe(
       "Priya Shah would reach 200% of capacity at this time (limit 100%).",
+    );
+  });
+});
+
+/**
+ * S196-A (DEF-0060, F-239, R-465, R-431): the same question asked BEFORE the bar
+ * speaks. One sentence when a block the caller cannot read makes the person
+ * busy; `null` (go on as before) for everything else, including a probe that
+ * fails -- the probe is a convenience and the server's write is the gate.
+ */
+describe("busyElsewhereBeforeWrite (S196-A): the refusal asked before the bar speaks", () => {
+  type Probe = (input: CapacityAttempt) => Promise<CapacityProbe>;
+  const attempt: CapacityAttempt = {
+    operatorId: "op-priya",
+    start: new Date("2026-09-30T15:00:00Z"),
+    end: new Date("2026-09-30T17:00:00Z"),
+    efficiencyPercent: 100,
+  };
+  const deps = (probe: Probe) => ({
+    probe,
+    personName: "Priya Shah",
+    zone: CHICAGO,
+    dateFormat: "d_mon_yyyy" as const,
+    now: () => new Date("2026-09-30T18:00:00Z"),
+  });
+
+  it("BE-17: an outside row is the one sentence, and the probe is asked about the attempt it was given", async () => {
+    const probe = vi
+      .fn<Probe>()
+      .mockResolvedValue({ fits: false, peak: 2, cap: 1, overlapping: [PRIYA_CELL_4] });
+    expect(await busyElsewhereBeforeWrite(attempt, deps(probe))).toBe(
+      "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.",
+    );
+    expect(probe).toHaveBeenCalledWith(attempt);
+  });
+
+  it("BE-18: a person who fits, and one who does not fit on blocks the caller CAN read, are not refused here (the split pop-up is that answer)", async () => {
+    const fits = vi.fn<Probe>().mockResolvedValue({ fits: true, peak: 1, cap: 1, overlapping: [] });
+    expect(await busyElsewhereBeforeWrite(attempt, deps(fits))).toBeNull();
+    const readable = vi
+      .fn<Probe>()
+      .mockResolvedValue({ fits: false, peak: 2, cap: 1, overlapping: [READABLE] });
+    expect(await busyElsewhereBeforeWrite(attempt, deps(readable))).toBeNull();
+  });
+
+  it("BE-19: a probe that fails is null -- nothing new is said, the server's write is the gate", async () => {
+    const probe = vi.fn<Probe>().mockRejectedValue(new Error("network"));
+    expect(await busyElsewhereBeforeWrite(attempt, deps(probe))).toBeNull();
+  });
+
+  it("BE-20: an outside row among readable ones still refuses, and names only the outside one", async () => {
+    const probe = vi.fn<Probe>().mockResolvedValue({
+      fits: false,
+      peak: 3,
+      cap: 1,
+      overlapping: [READABLE, PRIYA_CELL_4],
+    });
+    expect(await busyElsewhereBeforeWrite(attempt, deps(probe))).toBe(
+      "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.",
     );
   });
 });

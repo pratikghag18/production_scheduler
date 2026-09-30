@@ -580,6 +580,17 @@ async function runEntry(page: Page, entry: Sentence): Promise<EntryResult> {
   }
   const liveBarSaid = await currentStatusText(page);
   const written = await answerIfAny(page, entry, liveBarSaid);
+  if (entry.writtenSays !== undefined) {
+    // S196-A (R-425, R-459): the reason typed as the answer is read back on
+    // the readout of the write once it is written.
+    try {
+      await expect(async () => {
+        expect(await threadTextOf(page)).toMatch(entry.writtenSays as RegExp);
+      }).toPass({ timeout: 30_000, intervals: [250] });
+    } catch {
+      return recordMismatch(page, entry, "the written readout did not carry the reason given");
+    }
+  }
   // S194-C follow-up (28 Sept): CP-5/S63-a's own doc on `expectAnswered`
   // above says the live status line "goes back to empty the SAME tick the
   // write settles" for a plain readout with no further `answer` -- exactly
@@ -2093,4 +2104,160 @@ test("DEF-0054 review: a typed 'no', and a pop-up opened by hand, each end the C
     expect(entry.ran).toEqual([]);
   }).toPass({ timeout: 10_000, intervals: [250] });
   await page.keyboard.press("Escape");
+});
+
+/**
+ * S196-A (DEF-0060, R-465, R-431): the bar refuses BEFORE it speaks. As Ana on
+ * the real board, Priya Shah is on Cell 4 of Line 2 every day 6 am to 2 pm (the
+ * demo seed), a line Ana cannot read. Both sentences of DEF-0060's reproduction
+ * end in ONE thread line, "Not done: Priya Shah is already on Cell 4 in Line 2
+ * today from 6 am to 2 pm." -- never the readout "Priya Shah is on Cell 2 ..."
+ * before it, and never the join-or-separate question (whose both answers led to
+ * the same refusal). The trace holds the turn refused with nothing asked, and
+ * the database is the proof that nothing was written (Priya's rows, counted
+ * before and after). Writes nothing, so there is nothing to put back.
+ */
+test("DEF-0060: a person busy on a line Ana cannot read is refused in one sentence -- no readout, no join question -- in the thread, the trace and the database", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(120_000);
+
+  const dana = await signedInClient(ADMIN);
+  const priya = await operatorId(dana, "Priya Shah");
+  const countPriya = async (): Promise<number> => {
+    const { data, error } = await dana.from("assignments").select("id").eq("operator_id", priya);
+    if (error) throw new Error(`reading Priya's blocks: ${error.message}`);
+    return (data ?? []).length;
+  };
+  const before = await countPriya();
+  const SAID = "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+
+  await signIn(page, "ana@example.test", "/");
+  await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+  await ensureBarOpen(page);
+
+  const sentences = [
+    "put Priya Shah on Housing A at Cell 2 today from 10 am to noon",
+    "put Priya Shah on Housing A at Cell 1 today from 10 am to noon",
+  ];
+  for (const [turn, sentence] of sentences.entries()) {
+    const from = Date.now();
+    await submit(page, sentence);
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain(`Not done: ${SAID}`);
+      const [entry] = await traceEntriesFor(sentence, from);
+      expect(entry).toBeTruthy();
+      expect(entry.outcome).toBe(`refused: ${SAID}`);
+    }).toPass({ timeout: 60_000, intervals: [250] });
+
+    // The thread says it once and says nothing else about this sentence: no
+    // readout ("... is on Cell 2 ..."), no join question, no answer buttons.
+    const thread = await threadTextOf(page);
+    expect(thread.split(SAID), "the refusal stands once per turn").toHaveLength(turn + 2);
+    await expect(candidateButtons(page)).toHaveCount(0);
+    const [entry] = await traceEntriesFor(sentence, from);
+    expect(entry.asked).toBeNull();
+    expect(entry.ran).toEqual([]);
+  }
+  // Both turns, in one thread: the readouts of neither are anywhere in it.
+  const thread = await threadTextOf(page);
+  expect(thread).not.toMatch(/Priya Shah is on Cell|making Housing A|Join it|Separate block/);
+  expect(await countPriya(), "nothing was written for Priya").toBe(before);
+});
+
+/**
+ * S196-A (F-239, R-431): nothing is printed as done before it is done. As Ana,
+ * with the PATCH of an assignment held back five seconds, "shorten Sam Patel by
+ * 30 minutes": at 1.5 s the live line reads Working..., the thread has no "now
+ * ends ..." readout, the trace already holds the entry (waiting, nothing asked
+ * yet) and the database still has the old hours. Once the write lands the thread
+ * says Written and the trace says written, with the readout as what it asked;
+ * the block is 30 minutes shorter. The row is put back as the seed had it.
+ */
+test("F-239: a slow write reads Working... and says nothing as done until it is -- then Written, in the thread, the trace and the database", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(120_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readBlocks = async () => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, run_id, product_id, timerange")
+      .eq("operator_id", sam)
+      .eq("node_id", cell1);
+    if (error) throw new Error(`reading Sam's blocks: ${error.message}`);
+    return ((data ?? []) as unknown as AssignmentRow[]).filter(
+      (r) =>
+        new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(
+          new Date(parseTimerange(r.timerange).startMs),
+        ) === todayIso,
+    );
+  };
+  const before = (await readBlocks()).find((r) => r.run_id !== null);
+  if (!before) {
+    throw new Error(`the seed has no block of Sam Patel's on Cell 1 today (${todayIso}) on a job`);
+  }
+  const original = parseTimerange(before.timerange);
+  const SENTENCE = "shorten Sam Patel by 30 minutes";
+  let restoreError: string | null = null;
+
+  try {
+    await page.route("**/rest/v1/assignments?*", async (route) => {
+      if (route.request().method() === "PATCH") await new Promise((r) => setTimeout(r, 5000));
+      await route.continue();
+    });
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    const from = Date.now();
+    await submit(page, SENTENCE);
+    // While the write is held: the line says working, nothing is said as done,
+    // the file already has the entry and the database has the old hours.
+    await expect(statusLine(page)).toHaveText("Working…", { timeout: 60_000 });
+    await page.waitForTimeout(1500);
+    expect(await currentStatusText(page)).toBe("Working…");
+    expect(await threadTextOf(page)).not.toMatch(/now ends|it was/);
+    const [waiting] = await traceEntriesFor(SENTENCE, from);
+    expect(waiting).toBeTruthy();
+    expect(waiting.outcome).toBe("writing");
+    expect(waiting.asked).toBeNull();
+    expect(waiting.ran).toEqual([]);
+    const held = (await readBlocks()).find((r) => r.id === before.id);
+    expect(parseTimerange(held!.timerange)).toEqual(original);
+
+    // Then the write lands: Written, the readout is what the entry asked.
+    await expect(async () => {
+      expect(await threadTextOf(page)).toMatch(/Written: Sam Patel's block on Cell 1 now ends /);
+      const [entry] = await traceEntriesFor(SENTENCE, from);
+      expect(entry.outcome).toBe("written");
+      expect(entry.asked).toMatch(/^Sam Patel's block on Cell 1 now ends /);
+      expect(entry.ran).toHaveLength(1);
+    }).toPass({ timeout: 30_000, intervals: [250] });
+    await expect(async () => {
+      const row = (await readBlocks()).find((r) => r.id === before.id);
+      expect(parseTimerange(row!.timerange)).toEqual({
+        startMs: original.startMs,
+        endMs: original.endMs - 30 * 60_000,
+      });
+    }).toPass({ timeout: 15_000, intervals: [300] });
+  } finally {
+    const { error } = await dana
+      .from("assignments")
+      .update({ timerange: before.timerange, run_id: before.run_id, product_id: before.product_id })
+      .eq("id", before.id);
+    restoreError = error?.message ?? null;
+    if (restoreError !== null) console.error(`PUTTING SAM'S BLOCK BACK FAILED: ${restoreError}`);
+  }
+  expect(restoreError, "Sam's block is back as the seed had it").toBeNull();
 });

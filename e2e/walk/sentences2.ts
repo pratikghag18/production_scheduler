@@ -92,6 +92,8 @@ export function buildSentences2(dates: WalkDates): Sentence[] {
     {
       say: `Assign Lena Novak to Bracket A on Cell 2 in Line 1 from 8am to 12pm ${dates.day}`,
       answer: "Lena is covering for the Line 1 shortfall today",
+      writtenSays:
+        /Lena Novak is on Cell 2 .*making Bracket A\. The reason given: Lena is covering for the Line 1 shortfall today\./,
       note: "not_certified under warn (Lena lacks Welding, Cell 2 is Line 1): the typed reason re-resolves with eligibility_override -- the DB read after asserts eligibility_override = true.",
       expect:
         /^Not done: Lena Novak is not certified for Cell 2, missing Welding\. Say the reason to schedule anyway, or no\.$/,

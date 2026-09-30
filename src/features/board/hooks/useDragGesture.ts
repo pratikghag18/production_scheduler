@@ -42,7 +42,12 @@ import {
   toTstzRange,
 } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
-import type { ResolvedLotStep, ResolvedRunTrim } from "@/lib/command/resolve";
+import type {
+  ResolvedCommand,
+  ResolvedLotStep,
+  ResolvedMove,
+  ResolvedRunTrim,
+} from "@/lib/command/resolve";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "../lib/boardIndex";
 import { certificateGaps, policyForNode } from "../lib/boardIndex";
 import { ZOOMS, pxToMinutes, shiftSnapPoints, type ZoomIndex } from "../lib/geometry";
@@ -72,6 +77,7 @@ import {
 } from "../lib/interaction";
 import { scaledTarget } from "../lib/standardTarget";
 import {
+  busyElsewhereBeforeWrite,
   busyElsewhereSentence,
   explainCapacityRefusal,
   isBusyElsewhere,
@@ -965,6 +971,60 @@ export function useDragGesture(args: UseDragGestureArgs) {
       };
     },
     [index],
+  );
+
+  /**
+   * S196-A (DEF-0060, F-239, R-465, R-431): the command bar's pre-check. Asked
+   * of every resolved step that places a person over a span (a create, a move
+   * to other hours or another cell, a re-time) BEFORE the bar prints the
+   * readout or asks a question whose every answer leads to that write. Answers
+   * the R-465 sentence when a block the caller cannot read makes the person
+   * busy, `null` for everything else (they fit, the overlap is on readable
+   * blocks only and the split pop-up is the answer, the probe failed, the step
+   * has nobody on it). The attempt is the one the write itself would make: a
+   * create's from `buildCreateAssignmentInput` (the writer's own builder), an
+   * existing block's from `attemptOfBlock` (itself left out), so the probe and
+   * the server are asked the same thing. Never a gate: the write still is.
+   */
+  const precheckCommandStep = useCallback(
+    (step: ResolvedCommand | ResolvedMove): Promise<string | null> => {
+      let attempt: CapacityAttempt | null = null;
+      const startEnd = {
+        start: minuteDate(index.windowStart, step.range.startMin),
+        end: minuteDate(index.windowStart, step.range.endMin),
+      };
+      if (step.intent === "assign" && step.target.kind !== "retime") {
+        const input = buildCreateAssignmentInput(index.windowStart, {
+          nodeId: step.nodeId,
+          range: step.range,
+          operatorId: step.operatorId,
+          target: step.target,
+        });
+        attempt = {
+          operatorId: step.operatorId,
+          start: input.start,
+          end: input.end,
+          efficiencyPercent: input.efficiencyPercent ?? 100,
+        };
+      } else {
+        const assignmentId =
+          step.intent === "move"
+            ? step.assignmentId
+            : step.target.kind === "retime"
+              ? step.target.assignmentId
+              : null;
+        const a = assignmentId !== null ? index.assignmentById.get(assignmentId) : undefined;
+        if (a !== undefined) attempt = attemptOfBlock(a, startEnd);
+      }
+      if (attempt === null) return Promise.resolve(null);
+      return busyElsewhereBeforeWrite(attempt, {
+        probe: probeCapacity,
+        personName: index.operatorById.get(attempt.operatorId)?.displayName ?? "That person",
+        zone: index.zone,
+        dateFormat,
+      });
+    },
+    [index, dateFormat, attemptOfBlock],
   );
 
   // --------------------------------------------------------------------
@@ -3426,6 +3486,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     handleTrackKeyDown,
     submitCreateRun,
     submitCreateDirect,
+    precheckCommandStep,
     openCreateFromCommand,
     createFromCommand,
     retimeAssignmentFromCommand,

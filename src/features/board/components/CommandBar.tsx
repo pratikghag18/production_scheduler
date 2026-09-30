@@ -545,6 +545,18 @@ export interface CommandBarProps {
    * (non-several) sentence -- see CB-lot-9's regression pin.
    */
   onRunLot: (resolved: ResolvedAny[]) => Promise<LotResult>;
+  /**
+   * S196-A (DEF-0060, F-239, R-465, R-431): the capacity probe, asked BEFORE the
+   * bar says anything about a step that places a person over a span (a create,
+   * a move, a re-time -- alone, inside a lot, or as every answer of a question
+   * such as "Join it, or make a separate block?"). Answers the plant's own
+   * sentence ("Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2
+   * pm.") when a block the caller cannot read makes the person busy, `null`
+   * for anything else, and never rejects (a probe that fails is `null`: the
+   * server's write is the gate). Omitted, the bar says and writes exactly as it
+   * did before this existed -- every caller that has no probe to give.
+   */
+  precheck?: (step: ResolvedCommand | ResolvedMove) => Promise<string | null>;
   /** S44-b: when set, Enter reads the sentence through the model service
    *  first and falls back to the rules on anything but a clean answer.
    *  `null` (the default) is the pre-S44-b behaviour, unchanged. */
@@ -857,6 +869,9 @@ function turnResultLine(turn: HistoryTurn): string {
   }
   if (turn.ran.length > 0) return `Written: ${turn.ran.join(" ")}`;
   if (outcome === null) return "";
+  // S196-A: a turn filed while its write is still in flight (another sentence
+  // or Escape came first) says so; the answer corrects it.
+  if (outcome === WRITE_IN_FLIGHT) return "Working…";
   if (outcome.startsWith("popup: ")) {
     // S195-D: while a pop-up stands the turn's own board line IS the sentence
     // saying what it asks (`popupWords.ts`), so it is not said twice. Any
@@ -930,6 +945,28 @@ const PENDING_RERUN_TIMEOUT_MS = 15000;
  * against a board that may still be missing what it is about.
  */
 const HOLD_BOUND_MS = 5000;
+
+/**
+ * S196-A (F-239, R-431): the live line while a write is asked of the server, or
+ * the capacity probe is. Nothing is printed as done until it is.
+ */
+function workingStatus(): Status {
+  return { kind: "reading", message: "Working…" };
+}
+
+/** The trace entry's outcome while an ordinary write is in flight: posted at
+ *  the ask (DEF-0049), corrected to written, refused or cancelled at the answer.
+ *  Not a `popup:` -- nothing was handed to a pop-up. */
+const WRITE_IN_FLIGHT = "writing";
+
+/**
+ * S196-A (DEF-0060, R-465): the resolved steps that place a person over a span
+ * -- a create, a move to other hours or another cell, a re-time -- and so the
+ * ones the capacity probe can refuse before the bar speaks.
+ */
+function isPlacementStep(r: { intent: string }): r is ResolvedCommand | ResolvedMove {
+  return r.intent === "assign" || r.intent === "move";
+}
 
 /**
  * F-233, second pass: the exact words past the bound (the main session's
@@ -1166,6 +1203,7 @@ export function CommandBar({
   onMove,
   onSetHeadcount,
   onRunLot,
+  precheck,
   reader = null,
   recognizer = null,
   recognizerName,
@@ -2490,11 +2528,18 @@ export function CommandBar({
             : null;
       }
       if (entry) {
-        // F-157 item 5, unchanged: a single that ran straight off its own
-        // readout was never asked anything and never answered by a word or
-        // a button.
-        if (entry.asked === null) entry.asked = readoutStatus.message;
-        if (entry.answered === null) entry.answered = "auto";
+        // F-157 item 5: a single that ran straight off its own readout was
+        // never asked anything and never answered by a word or a button.
+        // S196-A (F-239, R-431): CONTRACT CHANGED -- that readout is what the
+        // entry `asked` only once it is TRUE. It used to be filed here for a
+        // refusal too, so a write the server refused read in the trace and the
+        // thread as a statement that it had happened, then "Not done". A
+        // refusal asked nothing and was answered by nothing; its `outcome` is
+        // the whole story.
+        if (outcome !== undefined && outcome.kind === "written") {
+          if (entry.asked === null) entry.asked = readoutStatus.message;
+          if (entry.answered === null) entry.answered = "auto";
+        }
         if (outcome === undefined) {
           // F-168: NOT a success -- see this function's own doc above. Every
           // writer this file calls answers for real now; a caller reaching
@@ -2565,6 +2610,7 @@ export function CommandBar({
         holdSentence(command, suffix, options);
         return;
       }
+      const givenSuffix = suffix ?? "";
       // DEF-0048 / R-409 (S194-D): THE one place both paths meet -- the rules
       // (`fallbackToRules`/`submitText`) and the model (`applyReading`) both
       // land here. The grammar already marks a typed absence ("Sam Patel is
@@ -2657,7 +2703,13 @@ export function CommandBar({
         // SPOKEN (every ISO day rendered) -- the lot path already did
         // (DEF-0043 item 1); the single path handed the raw one on, so a
         // single write's "Written:" line showed "2026-09-03".
-        const spoken = renderReadout(resolved.readout);
+        // S196-A (R-425, R-459): the reasons the person typed ("The reason
+        // given: ...") are read back on the readout of the write once it is
+        // WRITTEN -- the Written line, the thread bubble and the trace's ran --
+        // never on a live line while it is still in flight. Only the reasons
+        // the caller passed in: the absence summary appended below says why a
+        // sentence was read, not what ran.
+        const spoken = renderReadout(resolved.readout) + givenSuffix;
         const report = popupReporterFor(traceRef.current, spoken, readoutStatus.message);
         // F-233, second pass (finding 1): up the instant a writer is
         // called, synchronously, before any of them has a chance to
@@ -2665,62 +2717,94 @@ export function CommandBar({
         // or `popupReporterFor`'s own returned function (a hand-off's own
         // eventual written/refused/cancelled) is what brings it back down.
         barWritesInFlightRef.current += 1;
+        // S196-A: the writer is called through this, so the pre-check below can
+        // put the server's own answer about the person BEFORE it -- the one
+        // place every single write is handed on.
+        const callWriter = (): WriteAnswer => {
+          let answer: WriteAnswer;
+          if (resolved.intent === "book") {
+            if (resolved.target.kind === "retime_run") {
+              pendingCreateCollectionRef.current = null;
+              answer = onRetimeRun(resolved, anchorOfInput(), report);
+            } else {
+              // A job/run create -- see `awaitingRowIdRef`'s own doc. Armed
+              // only when the row's own day is inside this `ctx`'s window;
+              // outside it (item 4: a copy to another week, a repeat) the id
+              // could never appear here, and waiting for it would be exactly
+              // today's fault (a five-second refusal for ever) for a write
+              // that actually succeeded.
+              pendingCreateCollectionRef.current = dayIsInCtxWindow(resolved.range, activeCtx)
+                ? "runs"
+                : null;
+              answer = onBook(resolved, anchorOfInput(), report);
+            }
+          } else if (resolved.intent === "unassign") {
+            pendingCreateCollectionRef.current = null;
+            answer = onUnassign(resolved, anchorOfInput(), report);
+          } else if (resolved.intent === "move") {
+            // S41-c: BOTH targets go through onMove -- the caller narrows on
+            // `resolved.target.kind` (keep the types honest: never build a
+            // ResolvedCommand-shaped call to reach onRetime from here).
+            pendingCreateCollectionRef.current = null;
+            answer = onMove(resolved, anchorOfInput(), report);
+          } else if (resolved.intent === "headcount") {
+            // S58 (R-415, D132 item 4): one existing write, never a create or a
+            // re-time -- see `onSetHeadcount`'s own doc above.
+            pendingCreateCollectionRef.current = null;
+            answer = onSetHeadcount(resolved, anchorOfInput(), report);
+          } else {
+            if (resolved.target.kind === "retime") {
+              pendingCreateCollectionRef.current = null;
+              answer = onRetime(resolved, anchorOfInput(), report);
+            } else {
+              // An assignment create -- see `awaitingRowIdRef`'s own doc, and
+              // `onBook`'s own identical comment just above for the window
+              // check.
+              pendingCreateCollectionRef.current = dayIsInCtxWindow(resolved.range, activeCtx)
+                ? "assignments"
+                : null;
+              answer = onOpen(resolved, anchorOfInput(), report);
+            }
+          }
+          // DEF-0046: the writer was called and did not itself throw -- from
+          // here on a crash names this readout as done, never "nothing
+          // changed" (see this function's own opening doc).
+          wrote = { readout: resolved.readout };
+          return answer;
+        };
         let answer: WriteAnswer;
-        if (resolved.intent === "book") {
-          if (resolved.target.kind === "retime_run") {
-            pendingCreateCollectionRef.current = null;
-            answer = onRetimeRun(resolved, anchorOfInput(), report);
-          } else {
-            // A job/run create -- see `awaitingRowIdRef`'s own doc. Armed
-            // only when the row's own day is inside this `ctx`'s window;
-            // outside it (item 4: a copy to another week, a repeat) the id
-            // could never appear here, and waiting for it would be exactly
-            // today's fault (a five-second refusal for ever) for a write
-            // that actually succeeded.
-            pendingCreateCollectionRef.current = dayIsInCtxWindow(resolved.range, activeCtx)
-              ? "runs"
-              : null;
-            answer = onBook(resolved, anchorOfInput(), report);
-          }
-        } else if (resolved.intent === "unassign") {
-          pendingCreateCollectionRef.current = null;
-          answer = onUnassign(resolved, anchorOfInput(), report);
-        } else if (resolved.intent === "move") {
-          // S41-c: BOTH targets go through onMove -- the caller narrows on
-          // `resolved.target.kind` (keep the types honest: never build a
-          // ResolvedCommand-shaped call to reach onRetime from here).
-          pendingCreateCollectionRef.current = null;
-          answer = onMove(resolved, anchorOfInput(), report);
-        } else if (resolved.intent === "headcount") {
-          // S58 (R-415, D132 item 4): one existing write, never a create or a
-          // re-time -- see `onSetHeadcount`'s own doc above.
-          pendingCreateCollectionRef.current = null;
-          answer = onSetHeadcount(resolved, anchorOfInput(), report);
+        if (precheck !== undefined && isPlacementStep(resolved)) {
+          // S196-A (DEF-0060, R-465, R-431): ask the server's capacity probe
+          // before saying or writing anything. A person busy on a place the
+          // caller cannot read is refused in one sentence -- no readout, no
+          // write. Until it answers the live line says the bar is working,
+          // and the trace already holds the entry (DEF-0049's shape).
+          answer = precheck(resolved).then((refusal): WriteAnswer =>
+            refusal !== null ? { kind: "refused", message: refusal } : callWriter(),
+          );
         } else {
-          if (resolved.target.kind === "retime") {
-            pendingCreateCollectionRef.current = null;
-            answer = onRetime(resolved, anchorOfInput(), report);
-          } else {
-            // An assignment create -- see `awaitingRowIdRef`'s own doc, and
-            // `onBook`'s own identical comment just above for the window
-            // check.
-            pendingCreateCollectionRef.current = dayIsInCtxWindow(resolved.range, activeCtx)
-              ? "assignments"
-              : null;
-            answer = onOpen(resolved, anchorOfInput(), report);
-          }
+          answer = callWriter();
         }
-        // DEF-0046: the writer was called and did not itself throw -- from
-        // here on a crash names this readout as done, never "nothing
-        // changed" (see this function's own opening doc).
-        wrote = { readout: resolved.readout };
         // S195-D (DEF-0054, R-431): a writer that answered NOW that it handed
         // the write to a pop-up has done nothing yet, so the done-form readout
         // is never shown for it (`settleWrite` says what is being asked).
-        // Every other answer keeps the readout as before.
         const handedToPopup =
           !isThenable(answer) && answer !== undefined && (answer as WriteOutcome).kind === "popup";
-        if (!handedToPopup) setStatus(readoutStatus);
+        if (isThenable(answer)) {
+          // S196-A (F-239, R-431): CONTRACT CHANGED. The done-form readout was
+          // printed the moment the writer was CALLED, so a slow write read as
+          // done while the database still held the old hours, and the trace had
+          // no entry. Nothing is said as done until it is: the live line is
+          // the bar's own "Working…" and the entry is posted at the ask;
+          // `settleWrite` files the readout only once the writer says written.
+          setStatus(workingStatus());
+          if (traceRef.current) {
+            traceRef.current.outcome = WRITE_IN_FLIGHT;
+            postTrace(traceRef.current);
+          }
+        } else if (!handedToPopup) {
+          setStatus(readoutStatus);
+        }
         // F-164: the entry is finished by `settleWrite` now, once (and only
         // once) the writer has answered -- `resolved.readout` is the ONE
         // command this run asked for (never the `+ suffix` UI annotation,
@@ -2735,9 +2819,105 @@ export function CommandBar({
       // substitute a field into -- for an ordinary sentence the two are the
       // same object, so this is unchanged from before S55 there.
       const next = questionToStatus(resolution.question, resolvedCommand);
+      // S196-A (DEF-0060, R-465, R-431): a question whose EVERY answer leads to
+      // a write the server would refuse for a block the caller cannot read
+      // ("Join it, or make a separate block?") is not asked -- the refusal is
+      // said instead, and nothing else.
+      const asking = refusalBeforeAsking(next, resolvedCommand, options, activeCtx);
+      if (asking !== null) {
+        const entry = traceRef.current;
+        setStatus(workingStatus());
+        void asking.then((refusal) => {
+          // Another sentence, Escape or an edit has happened since -- that one
+          // already closed or replaced this turn; say nothing for it.
+          if (traceRef.current !== entry || store.getState().status?.kind !== "reading") return;
+          if (refusal === null) {
+            setStatus(next);
+            traceQuestionStatus(next);
+            return;
+          }
+          refuseBeforeSpeaking(refusal);
+        });
+        return;
+      }
       setStatus(next);
       traceQuestionStatus(next);
     }
+  }
+
+  /**
+   * S196-A (DEF-0060, R-465, R-431): the turn ends here, in the one sentence,
+   * with nothing said before it. `asked` stays empty (the bar asked nothing and
+   * printed nothing as done); `outcome` is the whole story, and the thread
+   * reads it "Not done: ...". Closed through `settleTurn`, so a turn that was
+   * filed early is corrected rather than doubled.
+   */
+  function refuseBeforeSpeaking(sentence: string): void {
+    const entry = traceRef.current;
+    if (entry) {
+      entry.outcome = `refused: ${sentence}`;
+      settleTurn(store, entry);
+      return;
+    }
+    setStatus({ kind: "shape", message: sentence });
+  }
+
+  /**
+   * S196-A (DEF-0060, R-465, R-431): for a question about to be asked, what
+   * the server's probe says about what EVERY answer would write. `null` when
+   * there is nothing to settle first (no probe wired, a lot's own step, a
+   * question with no buttons or whose answers are not all placements of a
+   * person -- the ordinary path, untouched and synchronous). Otherwise a
+   * promise of the refusal sentence, or `null` when at least one answer would
+   * be allowed (the question is then asked as always). The answers are read
+   * through the SAME substitution pressing the button makes
+   * (`candidateCommand`, `pickAttach`, `pickExisting`) and resolved with the
+   * SAME `resolveCommand`, so no answer is read two ways.
+   */
+  function refusalBeforeAsking(
+    asked: Status,
+    command: Command,
+    options: ResolveOptions | undefined,
+    activeCtx: ResolveContext,
+  ): Promise<string | null> | null {
+    if (precheck === undefined || lotRef.current !== null || asked.kind !== "question") return null;
+    const steps: Array<ResolvedCommand | ResolvedMove> = [];
+    if (asked.awaitingOverrideReason || asked.awaitingAreaReason) {
+      // A free-text reason is the answer; every reason leads to the same write.
+      if (command.intent === "several") return null;
+      const r = resolveCommand(command, activeCtx, {
+        ...options,
+        overrideReason: options?.overrideReason ?? "-",
+        areaReason: options?.areaReason ?? "-",
+      });
+      if (!r.ok || !isPlacementStep(r.resolved)) return null;
+      steps.push(r.resolved);
+    } else {
+      if (asked.candidates.length === 0 || asked.candidates.length > 8) return null;
+      for (const c of asked.candidates) {
+        const a = c.action;
+        let answer: Command | null = null;
+        if (a.kind === "pick_candidate") {
+          const parsed = parseCommand(
+            formatCommand(candidateCommand(a.command, a.field, a.candidate, a.text)),
+          );
+          answer = parsed.ok ? parsed.command : null;
+        } else if (a.kind === "pick_attach") {
+          answer = { ...a.command, attach: a.attach };
+        } else if (a.kind === "pick_existing") {
+          answer = { ...a.command, existing: a.existing } as Command;
+        }
+        if (answer === null || answer.intent === "several") return null;
+        const r = resolveCommand(answer, activeCtx, options);
+        if (!r.ok || !isPlacementStep(r.resolved)) return null;
+        steps.push(r.resolved);
+      }
+    }
+    if (steps.length === 0) return null;
+    return Promise.all(steps.map((step) => precheck(step))).then((refusals) => {
+      const said = refusals.filter((x): x is string => x !== null);
+      return said.length === refusals.length ? [...new Set(said)].join(" ") : null;
+    });
   }
 
   /** S51: starts a fresh lot from a several's inner commands and resolves
@@ -2833,6 +3013,13 @@ export function CommandBar({
           runTrims: [],
           absenceRecord: undefined,
         };
+      }
+      if (precheck !== undefined && lotRef.current !== null) {
+        const placing = lotRef.current.done.some(isPlacementStep);
+        if (placing) {
+          refuseBusyLotSteps(lotRef.current);
+          return;
+        }
       }
       showLotStatus();
       return;
@@ -3060,7 +3247,61 @@ export function CommandBar({
    * so this drops the lot outright and says which two commands collided,
    * in plain sentence positions.
    */
-  function showLotStatus(): void {
+  /**
+   * S196-A (DEF-0060, R-465, R-431): before the lot is listed, every step that
+   * places a person is put to the server's probe, all together. A step whose
+   * person is busy on a place the caller cannot read is dropped from the lot and
+   * named in the listing's own words, one sentence each; the rest are listed as
+   * always. When nothing is left the refusal stands alone. Nothing is listed as
+   * a thing to do that the server would refuse.
+   */
+  function refuseBusyLotSteps(lot: NonNullable<typeof lotRef.current>): void {
+    if (precheck === undefined) return;
+    const entry = traceRef.current;
+    setStatus(workingStatus());
+    const steps = lot.done;
+    void Promise.all(
+      steps.map((step) => (isPlacementStep(step) ? precheck(step) : Promise.resolve(null))),
+    ).then((refusals) => {
+      // Escape, an edit or another sentence has happened since: that one
+      // already closed or replaced this turn, and the lot it held goes with it.
+      if (traceRef.current !== entry || store.getState().status?.kind !== "reading") {
+        if (lotRef.current === lot) lotRef.current = null;
+        return;
+      }
+      if (lotRef.current !== lot) return;
+      const kept: ResolvedAny[] = [];
+      const notes: string[] = [];
+      steps.forEach((step, i) => {
+        const refusal = refusals[i];
+        if (refusal === null) kept.push(step);
+        else notes.push(`Not doing ${renderReadout(step.attempted)}: ${refusal}`);
+      });
+      if (notes.length === 0) {
+        showLotStatus();
+        return;
+      }
+      if (kept.length === 0) {
+        // Every step refused: the refusal alone, closed the way a lot refused
+        // outright is (DEF-0049's shape -- `asked` is what the bar said).
+        lotRef.current = null;
+        const message = notes.join(" ");
+        if (entry) {
+          entry.asked = message;
+          entry.answered = "auto";
+          entry.outcome = `refused: ${message}`;
+          settleTurn(store, entry);
+        } else {
+          setStatus({ kind: "shape", message });
+        }
+        return;
+      }
+      lotRef.current = { ...lot, done: kept };
+      showLotStatus(notes.join(" "));
+    });
+  }
+
+  function showLotStatus(dropped?: string): void {
     const lot = lotRef.current;
     if (!lot) return;
     const dup = findDuplicateBlockPair(lot.done);
@@ -3110,7 +3351,7 @@ export function CommandBar({
     // readout sentence does) -- a second, hardcoded one here would print
     // "making Housing A.. Say yes ..." Say yes joins with a leading space,
     // never its own leading period.
-    const message = `Ready to do ${thingsCount(n)}: ${readoutText} Say yes to do ${oneOrThem(n)}, or no.`;
+    const message = `${dropped !== undefined ? `${dropped} ` : ""}Ready to do ${thingsCount(n)}: ${readoutText} Say yes to do ${oneOrThem(n)}, or no.`;
     setStatus({
       kind: "question",
       message,
@@ -3617,15 +3858,18 @@ export function CommandBar({
     });
   }
 
-  function pickCandidate(
+  /**
+   * The command a candidate button's answer makes of `command` -- the one
+   * place a picked candidate is substituted in, so pressing it
+   * (`pickCandidate`) and asking beforehand what every answer would write
+   * (`answersRefusedBeforeAsking`, S196-A) can never read the answer two ways.
+   */
+  function candidateCommand(
     command: Command,
     field: "operator" | "product" | "place" | "shift",
     candidate: Candidate,
-    // S55 (D130 item 1): the exact word `question.text` was asked about --
-    // needed ONLY to tell a `replace`/`swap`'s TWO person fields apart (see
-    // below); every other caller of this function leaves it unset.
     text?: string,
-  ): void {
+  ): Command {
     let next: Command;
     if (
       field === "operator" &&
@@ -3683,6 +3927,19 @@ export function CommandBar({
                   place: [candidate.word],
                 };
     }
+    return next;
+  }
+
+  function pickCandidate(
+    command: Command,
+    field: "operator" | "product" | "place" | "shift",
+    candidate: Candidate,
+    // S55 (D130 item 1): the exact word `question.text` was asked about --
+    // needed ONLY to tell a `replace`/`swap`'s TWO person fields apart (see
+    // below); every other caller of this function leaves it unset.
+    text?: string,
+  ): void {
+    const next = candidateCommand(command, field, candidate, text);
     // S51 (brief §2 item 1): while a lot stands, a candidate substitutes
     // into THAT command (`lotRef.current.commands[index]`), never into the
     // input text or the lone `heldRef` -- the input keeps showing the whole

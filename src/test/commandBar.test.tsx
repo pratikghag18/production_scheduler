@@ -381,6 +381,13 @@ function renderBar(
   // positional arguments) renders exactly as before; the F-233 describe
   // block below is the only caller that passes `true`.
   s233: { hasPendingCreate?: boolean } = {},
+  // S196-A (DEF-0060, R-465): the capacity pre-check. Undefined -- every
+  // earlier call site (up to eight positional arguments) -- is the bar with no
+  // probe wired, byte for byte what it was; the CB-pre describe block below is
+  // the only caller that passes one.
+  s196: {
+    precheck?: (step: ResolvedCommand | ResolvedMove) => Promise<string | null>;
+  } = {},
 ) {
   const onOpen = vi.fn().mockReturnValue(WRITTEN);
   const onRetime = vi.fn().mockReturnValue(WRITTEN);
@@ -420,6 +427,7 @@ function renderBar(
       onMove={onMove}
       onSetHeadcount={onSetHeadcount}
       onRunLot={onRunLot}
+      precheck={s196.precheck}
       onHighlight={onHighlight}
       onShowDay={onShowDay}
       onConfirmWord={s47.onConfirmWord}
@@ -630,6 +638,27 @@ function renderedReadout(rawReadout: string): string {
   return renderIsoDays(rawReadout, "UTC", "d_mon_yyyy");
 }
 
+/**
+ * S196-A (F-239, R-431): a write the test settles itself. While it is pending
+ * the live line says "Working…" -- never the done-form readout -- and only the
+ * answer (`written`) puts the readout in the thread.
+ */
+function pendingWrite(): {
+  promise: Promise<WriteOutcome>;
+  settle: (outcome?: WriteOutcome) => Promise<void>;
+} {
+  let resolve: (o: WriteOutcome) => void = () => {};
+  const promise = new Promise<WriteOutcome>((r) => (resolve = r));
+  return {
+    promise,
+    settle: async (outcome: WriteOutcome = WRITTEN) => {
+      await act(async () => {
+        resolve(outcome);
+      });
+    },
+  };
+}
+
 describe("CommandBar (P1-7a, brief §9)", () => {
   it("C1: the input has the accessible name 'Tell the board' and the example placeholder", () => {
     const { input } = renderBar();
@@ -648,9 +677,15 @@ describe("CommandBar (P1-7a, brief §9)", () => {
   // here instead of left to settle synchronously, the same shape CB-day-1
   // below now uses, to give the live line a moment to be read before it
   // would be filed.
-  it("C2: a resolvable sentence opens the popover and shows the readout with the day rendered", () => {
+  // S196-A (F-239, R-431): CONTRACT CHANGED. While the writer is pending the
+  // live line used to carry the done-form readout (this case pinned it); it
+  // says "Working…" now, and the readout -- with its day rendered -- is what
+  // the thread holds once the writer answers `written`. The day rendering is
+  // still what this case proves; it is read from the place the readout lives.
+  it("C2: a resolvable sentence opens the popover and shows the readout with the day rendered", async () => {
     const { onOpen, input } = renderBar({ runs: [] });
-    onOpen.mockReturnValue(new Promise(() => {}));
+    const write = pendingWrite();
+    onOpen.mockReturnValue(write.promise);
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -663,10 +698,12 @@ describe("CommandBar (P1-7a, brief §9)", () => {
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 });
 
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
-    const status = statusText();
-    expect(status).not.toMatch(/\d{4}-\d{2}-\d{2}/);
-    expect(status).toContain(dayLabel);
-    expect(status).toBe(
+    expect(statusText()).toBe("Working…");
+    await write.settle();
+    const thread = threadText();
+    expect(thread).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(thread).toContain(dayLabel);
+    expect(thread).toContain(
       `Operator 1 is on Cell 1 in Line 1 ${dayLabel} from 10 am to 2 pm, making Housing A.`,
     );
   });
@@ -3574,7 +3611,11 @@ describe("CB-y: group 2 of the catalogue -- adjust, split, the job's hours, a he
     // (async, void) write could possibly have settled either way -- the bar
     // has no promise to await here, unlike `onRunLot`'s lot path.
     expect(onSetHeadcount).toHaveBeenCalledTimes(1);
-    expect(statusText()).toContain("4 people");
+    // S196-A (F-239, R-431): CONTRACT CHANGED -- a write not yet answered is
+    // "Working…", never the readout (which used to be pinned here as shown
+    // "SYNCHRONOUSLY ... before the write could have settled"). The readout
+    // appears with the answer; a pending write has none to show.
+    expect(statusText()).toBe("Working…");
     // R-437 (CONTRACT CHANGED, CLAUDE.md §4): this used to pin that the
     // input was "never cleared for a single (non-lot) write -- success or
     // failure look identical from here". R-437 (CB-ent-1) empties the box on
@@ -3828,7 +3869,8 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
     // pending so the live status line is still there to read once the model
     // has answered, the same shape C2/CB-day-1 use.
     const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
-    onOpen.mockReturnValue(new Promise(() => {}));
+    const write = pendingWrite();
+    onOpen.mockReturnValue(write.promise);
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -3842,7 +3884,10 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
     expect(resolved.target).toEqual({ kind: "direct", productId: "ha" });
     expect(resolved.range).toEqual({ startMin: 3 * 1440 + 600, endMin: 3 * 1440 + 840 });
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
-    expect(statusText()).toBe(
+    // S196-A (F-239): "Working…" until the writer answers, then the readout.
+    expect(statusText()).toBe("Working…");
+    await write.settle();
+    expect(threadText()).toContain(
       `Operator 1 is on Cell 1 in Line 1 ${dayLabel} from 10 am to 2 pm, making Housing A.`,
     );
   });
@@ -3856,14 +3901,18 @@ describe("CB-model: the bar reads through a model reader (S44-b)", () => {
     // entirely -- a rules fallback and a clean model reading print the
     // identical sentence now.
     const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
-    onOpen.mockReturnValue(new Promise(() => {}));
+    const write = pendingWrite();
+    onOpen.mockReturnValue(write.promise);
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
 
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
-    expect(statusText()).toBe(
+    // S196-A (F-239): "Working…" until the writer answers, then the readout.
+    expect(statusText()).toBe("Working…");
+    await write.settle();
+    expect(threadText()).toContain(
       `Operator 1 is on Cell 1 in Line 1 ${dayLabel} from 10 am to 2 pm, making Housing A.`,
     );
   });
@@ -4103,15 +4152,20 @@ describe("CB-ground: the model's reading must be grounded in what was heard (S71
       by: "model",
     }));
     const { onOpen, input } = renderBar({ runs: [] }, fakeReader);
-    onOpen.mockReturnValue(new Promise(() => {}));
+    const write = pendingWrite();
+    onOpen.mockReturnValue(write.promise);
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
-    // R-459: no suffix at all -- the readout is the plain sentence.
+    // R-459: no suffix at all -- the readout is the plain sentence. S196-A
+    // (F-239): it is in the thread once the writer has answered; until then
+    // the live line is "Working…".
     const dayLabel = formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC");
-    expect(statusText()).toBe(
+    expect(statusText()).toBe("Working…");
+    await write.settle();
+    expect(threadText()).toContain(
       `Operator 1 is on Cell 1 in Line 1 ${dayLabel} from 10 am to 2 pm, making Housing A.`,
     );
     expect(candidateButtons()).toHaveLength(0);
@@ -4979,7 +5033,11 @@ describe("CB-mic: the microphone button (S46-a)", () => {
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     const readout = statusText();
-    expect(readout).toContain("Operator 1");
+    // S196-A (F-239, R-431): CONTRACT CHANGED -- the line that stands while the
+    // first write is pending is "Working…", no longer the done-form readout.
+    // What this case proves (a standing line is untouched by the mic press,
+    // and "Listening…" sits beside it) holds for whatever the line says.
+    expect(readout).toBe("Working…");
     expect(screen.queryByText("Listening…")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Speak a sentence" }));
@@ -7873,8 +7931,9 @@ describe("CB-day: the readout's ISO day renders in the plant's own zone (F-153)"
   // zone-aware day label this test is actually about (F-153/R-426) only
   // ever lives on that live, optimistic line -- the thread keeps the raw
   // ISO date verbatim, never reformatted.
-  it("CB-day-1: a readout carrying 2026-09-16 under America/Chicago renders 'Wed Sep 16', never Tue", () => {
-    const onBook = vi.fn(() => new Promise<never>(() => {}));
+  it("CB-day-1: a readout carrying 2026-09-16 under America/Chicago renders 'Wed Sep 16', never Tue", async () => {
+    const write = pendingWrite();
+    const onBook = vi.fn(() => write.promise);
     render(
       <CommandBar
         ctx={buildCtx({
@@ -7900,8 +7959,12 @@ describe("CB-day: the readout's ISO day renders in the plant's own zone (F-153)"
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onBook).toHaveBeenCalledTimes(1);
-    expect(statusText()).toContain("Wed Sep 16");
-    expect(statusText()).not.toContain("Tue Sep 15");
+    // S196-A (F-239): CONTRACT CHANGED -- the readout lives in the thread once
+    // the writer answers; the live line is "Working…" until then.
+    expect(statusText()).toBe("Working…");
+    await write.settle();
+    expect(threadText()).toContain("Wed Sep 16");
+    expect(threadText()).not.toContain("Tue Sep 15");
   });
 });
 
@@ -8514,12 +8577,25 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
     onOpenResult.onOpen.mockResolvedValue({ kind: "written" });
     fireEvent.change(onOpenResult.input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(onOpenResult.input, { key: "Enter" });
-    // Nothing is posted until the writer has answered.
-    expect(fetchMock).not.toHaveBeenCalled();
+    // S196-A (F-239, R-434): CONTRACT CHANGED -- this used to pin "nothing is
+    // posted until the writer has answered". The entry is posted at the ask
+    // now (DEF-0049's shape) so a slow write leaves a line at once; what it
+    // holds is the truth so far: nothing asked, nothing ran, waiting on the
+    // board. The readout is `asked` only once the write is written.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const atAsk = postedEntry(fetchMock, 0);
+    expect(atAsk.asked).toBeNull();
+    expect(atAsk.ran).toEqual([]);
+    expect(atAsk.outcome).toBe("writing");
     await act(async () => {});
     let entry = postedEntry(fetchMock);
     expect(entry.outcome).toBe("written");
     expect(entry.ran).toHaveLength(1);
+    expect(entry.asked).toBe(
+      "Operator 1 is on Cell 1 in Line 1 " +
+        formatDayLabel(new Date("2026-09-03T00:00:00Z"), "d_mon_yyyy", "UTC") +
+        " from 10 am to 2 pm, making Housing A.",
+    );
 
     cleanup();
     vi.unstubAllGlobals();
@@ -8537,6 +8613,13 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
       "refused: That person does not belong to this part of the structure.",
     );
     expect(entry.ran).toEqual([]);
+    // S196-A (F-239, R-431): a refused write never claims the readout -- the
+    // bar asked nothing and printed nothing as done.
+    expect(entry.asked).toBeNull();
+    expect(threadText()).not.toContain("making Housing A");
+    expect(threadText()).toContain(
+      "Not done: That person does not belong to this part of the structure.",
+    );
   });
 
   // -------------------------------------------------------------------
@@ -8607,21 +8690,25 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(fetchMock).not.toHaveBeenCalled();
+    // S196-A (F-239): CONTRACT CHANGED -- the entry is posted at the ask (call
+    // index 0), waiting on the board, where it used to be posted only when
+    // the next sentence flushed it.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // A second sentence, before the first writer answered: the first entry is
-    // flushed as it stands -- ran empty, outcome null. DEF-0049 (CONTRACT
-    // CHANGED, 28 Sept): "gibberish" ALSO asks its own shape-hint question
-    // now, posted at the ask (`traceQuestionStatus`'s new call) -- a SECOND,
-    // separate entry, call index 1, right after P1's own flush at index 0.
+    // flushed as it stands -- ran empty, still waiting (call index 1, a
+    // correction of index 0). DEF-0049 (CONTRACT CHANGED, 28 Sept):
+    // "gibberish" ALSO asks its own shape-hint question now, posted at the ask
+    // (`traceQuestionStatus`'s new call) -- a SECOND, separate entry, call
+    // index 2.
     fireEvent.change(input, { target: { value: "gibberish" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const firstLine = postedEntry(fetchMock, 0);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const firstLine = postedEntry(fetchMock, 1);
     expect(firstLine.heard).toBe(P1_SENTENCE);
     expect(firstLine.ran).toEqual([]);
-    expect(firstLine.outcome).toBeNull();
-    const gibberishAsked = postedEntry(fetchMock, 1);
+    expect(firstLine.outcome).toBe("writing");
+    const gibberishAsked = postedEntry(fetchMock, 2);
     expect(gibberishAsked.heard).toBe("gibberish");
     expect(gibberishAsked.asked).toBe(SHAPE);
 
@@ -8632,9 +8719,9 @@ describe("CB-t-outcome: the writer's answer is the entry's last word (F-164)", (
 
     // The file gets a CORRECTED line for P1's OWN entry -- same `at`,
     // `revises: true` -- since it is append-only and the first line is
-    // already in it; call index 2, after gibberish's own ask-time post.
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const corrected = postedEntry(fetchMock, 2);
+    // already in it; call index 3, after gibberish's own ask-time post.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const corrected = postedEntry(fetchMock, 3);
     expect(corrected.at).toBe(firstLine.at);
     expect(corrected.revises).toBe(true);
     expect(corrected.outcome).toBe("written");
@@ -9606,9 +9693,10 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
   // "· override: …" suffix (`runCommand`'s own `suffix` argument) lives only
   // on the live, optimistic status line, never in `entry.ran`/the thread; a
   // synchronous write would file (and clear) it in the same tick.
-  it("CB-nc-2: a reason runs with the override on the resolved command -- onOpen receives it, the readout is suffixed", () => {
+  it("CB-nc-2: a reason runs with the override on the resolved command -- onOpen receives it, the readout is suffixed", async () => {
     const { onOpen, input } = renderBar(notCertifiedCtx("warn"));
-    onOpen.mockReturnValue(new Promise(() => {}));
+    const write = pendingWrite();
+    onOpen.mockReturnValue(write.promise);
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onOpen).not.toHaveBeenCalled();
@@ -9619,7 +9707,15 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     const [resolved] = onOpen.mock.calls[0] as [ResolvedCommand, { x: number; y: number }];
     expect(resolved.override).toEqual({ reason: "Covering an absence" });
-    expect(statusText()).toContain("The reason given: Covering an absence.");
+    // S196-A (F-239, R-425, R-459): "Working…" until the writer answers (no
+    // readout is printed as done before it is); then the reason the person
+    // typed is read back on the WRITTEN readout -- the thread's Written line --
+    // in the same words as before, and the trace's `ran` carries it too.
+    expect(statusText()).toBe("Working…");
+    await write.settle();
+    expect(threadText()).toContain(
+      "Written: Operator 1 is on Cell 1 in Line 1 Thu Sep 3 from 10 am to 2 pm, making Housing A. The reason given: Covering an absence.",
+    );
   });
 
   it("CB-nc-3: a bare confirm word re-asks -- 'Say the reason, not yes.', nothing runs", () => {
@@ -9726,7 +9822,7 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
 
   // S63-a review fix (CP-5, CLAUDE.md §4): `onOpen` is held pending -- see
   // CB-nc-2's own identical note.
-  it("CB-nc-7: a person failing BOTH gates is asked twice, and the readout names BOTH overrides", () => {
+  it("CB-nc-7: a person failing BOTH gates is asked twice, and the readout names BOTH overrides", async () => {
     // Uncertified for the cell AND not from its area -- the two gates run
     // one after the other (certificate first), so the sentence is answered
     // twice before anything is written.
@@ -9736,7 +9832,8 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
       eligibilityPolicy: () => "warn" as const,
       outsideArea: () => true,
     });
-    onOpen.mockReturnValue(new Promise(() => {}));
+    const write = pendingWrite();
+    onOpen.mockReturnValue(write.promise);
 
     fireEvent.change(input, { target: { value: P1_SENTENCE } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -9762,8 +9859,13 @@ describe("CB-nc: a not_certified question (S61-a, R-425, F-155)", () => {
     expect(resolved.areaOverride).toEqual({ reason: "short-handed on Line 1" });
     // S62-b reviewer fix (E): the readout named only the LAST reason given,
     // so a block written with two overrides read as if it carried one.
-    expect(statusText()).toContain("The reason given: covering for Sam.");
-    expect(statusText()).toContain("The area reason given: short-handed on Line 1.");
+    // S196-A (F-239): "Working…" until the writer answers; both reasons are
+    // then read back on the written readout, in the order they were asked.
+    expect(statusText()).toBe("Working…");
+    await write.settle();
+    expect(threadText()).toContain(
+      "Written: Operator 1 is on Cell 1 in Line 1 Thu Sep 3 from 10 am to 2 pm, making Housing A. The reason given: covering for Sam. The area reason given: short-handed on Line 1.",
+    );
   });
 
   // CB-nc-8 (F-197, R-425/R-434, the spoken walk 22 Sept): typed, a reason
@@ -10965,5 +11067,263 @@ describe("CB-pop: a sentence that ends in the board's own pop-up is finished by 
     expect(statusText()).toMatch(/^Ready to do 2 things: /);
     expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Do it" })).toBeNull();
+  });
+});
+
+/**
+ * S196-A (DEF-0060, F-239, R-465, R-431): the bar asks the server's capacity
+ * probe BEFORE it prints a readout or asks a question whose every answer leads
+ * to a placement. A person busy on a place the caller cannot read is refused in
+ * ONE sentence and nothing else: no readout, no join question, no write. The
+ * probe is scripted (`precheck`, what `useDragGesture.precheckCommandStep` is
+ * in the real app); the real probe's own decision is in busyElsewhere.test.ts.
+ */
+describe("CB-pre: the bar refuses before it speaks (S196-A, DEF-0060, F-239)", () => {
+  const BUSY = "Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+  const busy = vi.fn(async (): Promise<string | null> => BUSY);
+  const free = vi.fn(async (): Promise<string | null> => null);
+  const nothingBut = (): void => {
+    expect(threadText()).toContain(`Not done: ${BUSY}`);
+    expect(threadText()).not.toMatch(/making Housing A|Join it|Separate block|Ready to do/);
+    expect(statusText()).toBe("");
+    expect(candidateButtons()).toHaveLength(0);
+  };
+  const bar = (
+    over: Partial<ResolveContext>,
+    precheck: (step: ResolvedCommand | ResolvedMove) => Promise<string | null>,
+  ) => renderBar(over, null, null, {}, {}, {}, {}, {}, { precheck });
+
+  afterEach(() => {
+    busy.mockClear();
+    free.mockClear();
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-pre-1: a create -- 'Working…' while the probe is out, then the one refusal; no readout, nothing written, the trace says refused with nothing asked", async () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = bar({ runs: [] }, busy);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // Not a readout: the probe has not answered, nothing is said as done.
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+
+    expect(busy).toHaveBeenCalledTimes(1);
+    const [step] = busy.mock.calls[0] as unknown as [ResolvedCommand];
+    expect(step.intent).toBe("assign");
+    expect(step.operatorId).toBe("op1");
+    nothingBut();
+    expect(onOpen).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    // R-434: the turn traces. `asked` is empty on purpose: the bar asked
+    // nothing and printed nothing as done -- the outcome is the whole story.
+    expect(entry.asked).toBeNull();
+    expect(entry.ran).toEqual([]);
+    expect(entry.outcome).toBe(`refused: ${BUSY}`);
+  });
+
+  it("CB-pre-2: a move to another cell is refused the same way, before any readout", async () => {
+    const { onMove, input } = bar({ assignments: [BLK1] }, busy);
+    fireEvent.change(input, { target: { value: MOVE_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+    expect(busy).toHaveBeenCalledTimes(1);
+    const [step] = busy.mock.calls[0] as unknown as [ResolvedMove];
+    expect(step.intent).toBe("move");
+    expect(step.target).toEqual({ kind: "move_cell" });
+    expect(threadText()).toContain(`Not done: ${BUSY}`);
+    expect(threadText()).not.toMatch(/is moving from/);
+    expect(onMove).not.toHaveBeenCalled();
+  });
+
+  it("CB-pre-3: a re-time (a move in time) is refused the same way, before any readout", async () => {
+    const { onMove, input } = bar({ assignments: [BLK1] }, busy);
+    fireEvent.change(input, { target: { value: MOVE_RETIME_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+    expect(busy).toHaveBeenCalledTimes(1);
+    expect(threadText()).toContain(`Not done: ${BUSY}`);
+    expect(threadText()).not.toMatch(/now runs|now ends/);
+    expect(onMove).not.toHaveBeenCalled();
+  });
+
+  it("CB-pre-4: the join-or-separate question is not asked when BOTH answers lead to the refused write -- the one refusal, no buttons", async () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = bar({ runs: [RUN1] }, busy);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+
+    // Every answer was put to the probe: join, and separate.
+    expect(busy).toHaveBeenCalledTimes(2);
+    nothingBut();
+    expect(onOpen).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe(`refused: ${BUSY}`);
+    expect(entry.asked).toBeNull();
+  });
+
+  it("CB-pre-5: the join-or-separate question IS asked when the probe allows the write (the question the bar always asked)", async () => {
+    const { onOpen, input } = bar({ runs: [RUN1] }, free);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+    expect(statusText()).toBe(
+      "A Housing A job is already booked on Cell 1, 8 am to 4 pm. Join it, or make a separate block?",
+    );
+    expect(screen.getByRole("button", { name: "Separate block" })).toBeTruthy();
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("CB-pre-6: the which-shift question is not asked when EVERY shift leads to the refused write; asked when only one does", async () => {
+    const shifts = (nodeId: string) =>
+      nodeId === "c1a"
+        ? [
+            { name: "Day A", startMin: 360, endMin: 840 },
+            { name: "Day B", startMin: 840, endMin: 1320 },
+          ]
+        : [];
+    const sentence = "assign Operator 1 to Housing A on Cell 1 in Line 1 for the day shift";
+    const all = bar({ runs: [], shiftsAt: shifts }, busy);
+    fireEvent.change(all.input, { target: { value: sentence } });
+    fireEvent.keyDown(all.input, { key: "Enter" });
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+    expect(busy).toHaveBeenCalledTimes(2);
+    nothingBut();
+    cleanup();
+
+    // Only the first shift is refused: the second is fine, so the question
+    // is still the person's to answer.
+    const first = vi.fn(async (step: ResolvedCommand | ResolvedMove) =>
+      step.range.startMin === 3 * 1440 + 360 ? BUSY : null,
+    );
+    const some = bar({ runs: [], shiftsAt: shifts }, first);
+    fireEvent.change(some.input, { target: { value: sentence } });
+    fireEvent.keyDown(some.input, { key: "Enter" });
+    await act(async () => {});
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(candidateButtons().length).toBe(2);
+    expect(screen.getByRole("button", { name: /Day B/ })).toBeTruthy();
+  });
+
+  it("CB-pre-7: a readable-only overlap (the probe says nothing is refused) still reaches the writer and its readout, as before", async () => {
+    const { onOpen, input } = bar({ runs: [] }, free);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+    expect(free).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(threadText()).toContain("Written: Operator 1 is on Cell 1 in Line 1");
+  });
+
+  it("CB-pre-8: no probe wired -- the sentence is synchronous and exactly as it was (the writer is called inside the Enter)", () => {
+    const { onOpen, input } = renderBar({ runs: [] });
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("CB-pre-9: a slow write that succeeds -- 'Working…' on the line, nothing as done in the thread or the file, then Written", async () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    const write = pendingWrite();
+    onOpen.mockReturnValue(write.promise);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // In flight: the line says the bar is working, the thread holds nothing
+    // said as done, and the entry is already in the file, waiting.
+    expect(statusText()).toBe("Working…");
+    expect(threadText()).not.toContain("making Housing A");
+    const atAsk = postedEntry(fetchMock, 0);
+    expect(atAsk.outcome).toBe("writing");
+    expect(atAsk.asked).toBeNull();
+    expect(atAsk.ran).toEqual([]);
+
+    await write.settle();
+    expect(threadText()).toContain("Written: Operator 1 is on Cell 1 in Line 1");
+    const done = postedEntry(fetchMock);
+    expect(done.outcome).toBe("written");
+    // `asked` holds the readout only now that it is true.
+    expect(done.asked).toContain("making Housing A");
+  });
+
+  it("CB-pre-10: a slow write that is refused -- no readout before it, 'Not done' after, the file says refused with nothing asked", async () => {
+    const fetchMock = stubFetch();
+    const { onOpen, input } = renderBar({ runs: [] });
+    const write = pendingWrite();
+    onOpen.mockReturnValue(write.promise);
+    fireEvent.change(input, { target: { value: P1_SENTENCE } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Working…");
+    expect(threadText()).not.toContain("making Housing A");
+
+    await write.settle({ kind: "refused", message: BUSY });
+    expect(threadText()).toContain(`Not done: ${BUSY}`);
+    expect(threadText()).not.toContain("making Housing A");
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe(`refused: ${BUSY}`);
+    expect(entry.asked).toBeNull();
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-pre-11: a lot with one step busy elsewhere drops it, names it in one sentence, and lists the rest", async () => {
+    const onlyOp1 = vi.fn(async (step: ResolvedCommand | ResolvedMove) =>
+      step.intent === "assign" && step.operatorId === "op1" ? BUSY : null,
+    );
+    const { input, onRunLot } = bar({ runs: [] }, onlyOp1);
+    fireEvent.change(input, {
+      target: {
+        value: "Assign Operator 1 and Sam Patel to Housing A on Cell 1 in Line 1 from 10 to 2",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+
+    // Both steps were probed together, before any listing.
+    expect(onlyOp1).toHaveBeenCalledTimes(2);
+    expect(statusText()).toMatch(
+      /^Not doing Operator 1 on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm: Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm\. Ready to do 1 thing: /,
+    );
+    expect(statusText()).toContain("Sam Patel is on Cell 1");
+    expect(statusText()).not.toMatch(/Operator 1 is on Cell 1/);
+    expect(screen.getByRole("button", { name: "Do it" })).toBeTruthy();
+
+    // And what the lot then writes is the kept step alone.
+    fireEvent.click(screen.getByRole("button", { name: "Do it" }));
+    expect(onRunLot).toHaveBeenCalledTimes(1);
+    const [resolved] = onRunLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolved).toHaveLength(1);
+    expect((resolved[0] as ResolvedCommand).operatorId).toBe("sp");
+  });
+
+  it("CB-pre-12: a lot whose every step is busy elsewhere is the refusal alone -- no listing, nothing to say yes to", async () => {
+    const fetchMock = stubFetch();
+    const { input, onRunLot } = bar({ runs: [] }, busy);
+    fireEvent.change(input, {
+      target: {
+        value: "Assign Operator 1 and Sam Patel to Housing A on Cell 1 in Line 1 from 10 to 2",
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+    expect(busy).toHaveBeenCalledTimes(2);
+    expect(threadText()).toContain(
+      "Not doing Operator 1 on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm: ",
+    );
+    expect(threadText()).toContain(
+      "Not doing Sam Patel on Cell 1 in Line 1 Thu Sep 3, 10 am to 2 pm: ",
+    );
+    expect(threadText()).not.toMatch(/Ready to do/);
+    expect(candidateButtons()).toHaveLength(0);
+    expect(onRunLot).not.toHaveBeenCalled();
+    expect(postedEntry(fetchMock).outcome).toMatch(/^refused: Not doing /);
   });
 });

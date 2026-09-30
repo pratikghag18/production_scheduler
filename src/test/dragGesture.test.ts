@@ -3853,4 +3853,107 @@ describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
     expect(toasts()).toEqual([SAID]);
     expect(api.createAssignment).toHaveBeenCalledTimes(1);
   });
+
+  // S196-A (DEF-0060, F-239, R-465, R-431): the command bar asks the same probe
+  // BEFORE it says anything, through this one function. It is given the step the
+  // bar resolved and answers the R-465 sentence or null; what it asks the probe
+  // is what the write itself would ask -- the same person, hours and share, and
+  // for an existing block, that block left out.
+  describe("S196-A: precheckCommandStep -- the pre-check the bar runs before it speaks", () => {
+    const step = (over: Record<string, unknown>) =>
+      ({
+        intent: "assign",
+        nodeId: "cell-1",
+        operatorId: "op-1",
+        productId: "prod-1",
+        target: { kind: "direct", productId: "prod-1" },
+        range: { startMin: 480, endMin: 720 },
+        readout: "",
+        attempted: "",
+        notTried: "",
+        ...over,
+      }) as never;
+
+    it("PC-1: a create asks the probe for the person, the hours and the 100% share the write would send, and says the place when a block she cannot read is what makes them busy", async () => {
+      const api = await probeSays([OUTSIDE_ROW]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+      let said: string | null = null;
+      await act(async () => {
+        said = await result.current.precheckCommandStep(step({}));
+      });
+      expect(said).toBe(SAID);
+      expect(api.probeCapacity).toHaveBeenCalledTimes(1);
+      expect(api.probeCapacity).toHaveBeenCalledWith({
+        operatorId: "op-1",
+        start: new Date("2026-08-24T08:00:00.000Z"),
+        end: new Date("2026-08-24T12:00:00.000Z"),
+        efficiencyPercent: 100,
+      });
+      // Nothing was written or opened: this is a question, never a write.
+      expect(api.createAssignment).not.toHaveBeenCalled();
+      expect(result.current.popover).toBeNull();
+    });
+
+    it("PC-2: a re-time, and a move to another cell, ask about the EXISTING block: its person, the new hours, its own share, itself left out", async () => {
+      const api = await probeSays([OUTSIDE_ROW]);
+      const a = {
+        ...crewFixture(),
+        id: "asg-mine",
+        runId: null,
+        productId: "prod-1",
+        efficiencyPercent: 50,
+        efficiency: 0.5,
+      };
+      const { result } = renderHook(() => useDragGesture(baseArgs(named([a]))), { wrapper });
+      for (const s of [
+        step({ intent: "assign", target: { kind: "retime", assignmentId: "asg-mine" } }),
+        step({ intent: "move", assignmentId: "asg-mine", target: { kind: "retime" } }),
+        step({
+          intent: "move",
+          assignmentId: "asg-mine",
+          nodeId: "cell-2",
+          target: { kind: "move_cell" },
+        }),
+      ]) {
+        vi.mocked(api.probeCapacity).mockClear();
+        let said: string | null = null;
+        await act(async () => {
+          said = await result.current.precheckCommandStep(s);
+        });
+        expect(said).toBe(SAID);
+        expect(api.probeCapacity).toHaveBeenCalledWith({
+          operatorId: "op-1",
+          start: new Date("2026-08-24T08:00:00.000Z"),
+          end: new Date("2026-08-24T12:00:00.000Z"),
+          efficiencyPercent: 50,
+          excludeAssignmentId: "asg-mine",
+        });
+      }
+    });
+
+    it("PC-3: a person who fits, an overlap on blocks she CAN read only (the split pop-up is that answer), a probe that fails, and a block that is no longer on the board are all null -- the bar goes on as before", async () => {
+      const api = await probeSays([], true);
+      const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+      await act(async () => {
+        expect(await result.current.precheckCommandStep(step({}))).toBeNull();
+      });
+      await probeSays([READABLE_ROW]);
+      await act(async () => {
+        expect(await result.current.precheckCommandStep(step({}))).toBeNull();
+      });
+      vi.mocked(api.probeCapacity).mockRejectedValue(new Error("network"));
+      await act(async () => {
+        expect(await result.current.precheckCommandStep(step({}))).toBeNull();
+      });
+      vi.mocked(api.probeCapacity).mockClear();
+      await act(async () => {
+        expect(
+          await result.current.precheckCommandStep(
+            step({ intent: "move", assignmentId: "gone", target: { kind: "retime" } }),
+          ),
+        ).toBeNull();
+      });
+      expect(api.probeCapacity).not.toHaveBeenCalled();
+    });
+  });
 });

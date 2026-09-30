@@ -50,6 +50,10 @@ export interface Sentence {
    *  wording), and either way the certificate refusal is what the entry
    *  proves; the table records which path the bar took. */
   expect: RegExp | { button: string; then: RegExp; question?: RegExp; orDirect?: RegExp };
+  /** S196-A (R-425, R-459): for an entry with an `answer` that is a reason --
+   *  what the thread must say once the write has landed, the reason read back
+   *  on the written readout ("... making Housing A. The reason given: ...."). */
+  writtenSays?: RegExp;
   note?: string;
   voice?: true;
 }
@@ -427,6 +431,8 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     {
       say: `Assign Tom Baker to Housing A on Cell 1 in Line 1 from 3pm to 5pm ${dates.day}`,
       answer: "the line supervisor approved the cover",
+      writtenSays:
+        /Tom Baker is on Cell 1 .*making Housing A\. The reason given: the line supervisor approved the cover\./,
       note: "not_certified under warn: the typed reason re-resolves with eligibility_override -- the DB read after asserts eligibility_override = true.",
       expect:
         /^Not done: Tom Baker is not certified for Cell 1, missing Welding\. Say the reason to schedule anyway, or no\.$/,
@@ -500,6 +506,8 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     {
       say: `Assign Lena Novak to Housing A on Cell 1 in Line 1 from 2pm to 2:05pm ${dates.day}`,
       answer: "the line supervisor approved the cover",
+      writtenSays:
+        /Lena Novak is on Cell 1 .*making Housing A\. The reason given: the line supervisor approved the cover\./,
       note: "R-463: proves the new one-minute floor itself -- a 5-minute block now WRITES. Lands on Cell 1's one free slot that afternoon (2pm-2:05pm, between Sam Patel's 1pm-2pm and Tom Baker's 3pm start), and, found live, Lena Novak needs the same not_certified override Tom Baker needed at entry 18 -- so this proves the floor AND an overridden write together, the DB read after asserting eligibility_override = true.",
       expect:
         /^Not done: Lena Novak is not certified for Cell 1, missing Welding\. Say the reason to schedule anyway, or no\.$/,
