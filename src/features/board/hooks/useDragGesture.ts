@@ -77,11 +77,12 @@ import {
 } from "../lib/interaction";
 import { scaledTarget } from "../lib/standardTarget";
 import {
-  busyElsewhereBeforeWrite,
+  precheckBeforeWrite,
   busyElsewhereSentence,
   explainCapacityRefusal,
   isBusyElsewhere,
   type CapacityAttempt,
+  type PrecheckResult,
 } from "../lib/busyElsewhere";
 import {
   attachmentWaiting,
@@ -978,16 +979,18 @@ export function useDragGesture(args: UseDragGestureArgs) {
    * of every resolved step that places a person over a span (a create, a move
    * to other hours or another cell, a re-time) BEFORE the bar prints the
    * readout or asks a question whose every answer leads to that write. Answers
-   * the R-465 sentence when a block the caller cannot read makes the person
-   * busy, `null` for everything else (they fit, the overlap is on readable
-   * blocks only and the split pop-up is the answer, the probe failed, the step
+   * `busy_elsewhere` with the R-465 sentence when a block the caller cannot
+   * read makes the person busy; `overlap` (S200-A, R-468) when they are busy
+   * on blocks the caller CAN read -- a single sentence ignores that answer
+   * (the split pop-up is its answer, opened after the create), a lot asks in
+   * the bar; `ok` for everything else (they fit, the probe failed, the step
    * has nobody on it). The attempt is the one the write itself would make: a
    * create's from `buildCreateAssignmentInput` (the writer's own builder), an
    * existing block's from `attemptOfBlock` (itself left out), so the probe and
    * the server are asked the same thing. Never a gate: the write still is.
    */
   const precheckCommandStep = useCallback(
-    (step: ResolvedCommand | ResolvedMove): Promise<string | null> => {
+    (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> => {
       let attempt: CapacityAttempt | null = null;
       const startEnd = {
         start: minuteDate(index.windowStart, step.range.startMin),
@@ -1016,8 +1019,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
         const a = assignmentId !== null ? index.assignmentById.get(assignmentId) : undefined;
         if (a !== undefined) attempt = attemptOfBlock(a, startEnd);
       }
-      if (attempt === null) return Promise.resolve(null);
-      return busyElsewhereBeforeWrite(attempt, {
+      if (attempt === null) return Promise.resolve<PrecheckResult>({ kind: "ok" });
+      return precheckBeforeWrite(attempt, {
         probe: probeCapacity,
         personName: index.operatorById.get(attempt.operatorId)?.displayName ?? "That person",
         zone: index.zone,
@@ -3387,6 +3390,36 @@ export function useDragGesture(args: UseDragGestureArgs) {
                 readout: r.readout,
               });
             } else {
+              // S200-A (R-468): a step the person chose to "Split evenly" is
+              // written through the SAME call the board's split pop-up's Confirm
+              // makes (`apply_split_coverage`: the existing blocks' new shares
+              // and this assignment, in one transaction), with the shares the bar
+              // worked out through `splitEvenly`.
+              if (r.split) {
+                const input = buildCreateAssignmentInput(
+                  index.windowStart,
+                  {
+                    nodeId: r.nodeId,
+                    range: r.range,
+                    operatorId: r.operatorId,
+                    target: r.target,
+                  },
+                  {
+                    ...(r.override
+                      ? { eligibilityOverride: true, overrideReason: r.override.reason }
+                      : {}),
+                    ...(r.areaOverride
+                      ? { areaOverride: true, areaOverrideReason: r.areaOverride.reason }
+                      : {}),
+                  },
+                );
+                await applySplitCoverage.mutateAsync({
+                  adjustments: r.split.adjustments,
+                  newAssignment: { ...input, efficiencyPercent: r.split.efficiencyPercent },
+                });
+                done++;
+                continue;
+              }
               // S198-A (DEF-0061, R-467): the step's own reasons, when it was
               // asked for them (see the move branch above).
               await createFromCommand({
@@ -3475,6 +3508,8 @@ export function useDragGesture(args: UseDragGestureArgs) {
       createFromCommand,
       createRunFromCommand,
       submitMove,
+      applySplitCoverage,
+      index,
     ],
   );
 

@@ -252,7 +252,8 @@ export function buildSentences2(dates: WalkDates): Sentence[] {
     // 18. A repeat day, answered no -- "next week" is off the board (F-158:
     // the move names the WEEK, widens to seven days, Monday to Friday is a
     // lot of five, CB-y-2). Lena Novak's own Cell 2 block (entry 4) is on
-    // THIS week, so next week's Cell 4 is untouched either way. (Not Tom
+    // the walk day, which is next Monday -- inside the week this sentence names,
+    // so the entry takes hours she is free (see its note). (Not Tom
     // Baker: this entry doesn't need his own block, and the model-gap
     // mishearing this file's entry 12 already carries is better kept to one
     // place than risked here too.)
@@ -265,9 +266,9 @@ export function buildSentences2(dates: WalkDates): Sentence[] {
     // (`expectAnswered` in `typedWalk.spec.ts` polls the live status line
     // and the filed thread turn the move updates in place).
     {
-      say: "Assign Lena Novak to Common Fastener on Cell 4 in Line 2 every weekday next week from 9am to 1pm",
+      say: "Assign Lena Novak to Common Fastener on Cell 4 in Line 2 every weekday next week from 1pm to 3pm",
       answer: "no",
-      note: "a repeat day must be on the board (R-416); F-158 widens to the week, five commands (Monday-Friday, CB-y-2), and no leaves every one of them unwritten. R-455's own move runs with no press.",
+      note: "a repeat day must be on the board (R-416); F-158 widens to the week, five commands (Monday-Friday, CB-y-2), and no leaves every one of them unwritten. R-455's own move runs with no press. S200-A (R-468): the hours moved from 9 am to 1 pm to 1 pm to 3 pm -- Lena Novak is on Cell 2 on the walk day 8 am to 11:30 am, so with the old hours Monday's step double-booked her on a block the supervisor can read, which the server refuses after the yes (DEF-0064) while the listing said 'Ready to do 5 things'. The bar now asks that step first (CB-ovl); this entry is about the five-day listing, so it takes hours she is free.",
       expect: LOT_RE,
     },
 

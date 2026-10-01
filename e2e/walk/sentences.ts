@@ -419,9 +419,9 @@ export function buildSentences(dates: WalkDates): Sentence[] {
     // the walk day -- entries 18, 21 and 22 below name it and are
     // unaffected.
     {
-      say: "Assign Lena Novak to Bracket A on Cell 4 in Line 2 every weekday next week from 8am to 12pm",
+      say: "Assign Lena Novak to Bracket A on Cell 4 in Line 2 every weekday next week from 2pm to 4pm",
       answer: "no",
-      note: "a repeat day must be on the board (R-416); F-158 makes the move name the week, so R-455's own move widens the board to seven days on its own, no press. Five commands, Monday to Friday (CB-y-2), and no leaves every one of them unwritten.",
+      note: "a repeat day must be on the board (R-416); F-158 makes the move name the week, so R-455's own move widens the board to seven days on its own, no press. Five commands, Monday to Friday (CB-y-2), and no leaves every one of them unwritten. S200-A (R-468): the hours moved from 8 am to 12 pm to 2 pm to 4 pm. Lena Novak is on Cell 3 on the walk day 8 am to 1 pm (entries 14 and 15 put her there), so with the old hours Monday's step double-booked her on a block the supervisor can read -- the server refuses that after the yes (200% of 100%, DEF-0064), and the listing used to say 'Ready to do 5 things' anyway. The bar now asks that step first (CB-ovl, the DEF-0064 case); this entry is about the five-day listing, so it takes hours she is free.",
       expect: /^Ready to do 5 things: .+ Say yes to do them, or no\.$/,
     },
 

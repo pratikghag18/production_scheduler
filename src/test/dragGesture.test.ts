@@ -3827,6 +3827,87 @@ describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
     expect(retime).toEqual({ done: 0, error: SAID });
   });
 
+  it("S200-A-1 (R-468): a lot step the person chose to split is written through the split call -- the existing block's new share and the new assignment at its own share, in ONE call -- and a plain step beside it still goes through the plain create", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.applySplitCoverage).mockResolvedValue({} as never);
+    vi.mocked(api.createAssignment).mockResolvedValue({ assignment: { id: "new-2" } } as never);
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+    const step = (operatorId: string, extra: Record<string, unknown>) =>
+      ({
+        intent: "assign",
+        nodeId: "cell-1",
+        operatorId,
+        productId: "prod-1",
+        target: { kind: "direct", productId: "prod-1" },
+        range: { startMin: 480, endMin: 720 },
+        readout: "x",
+        attempted: "x",
+        notTried: "x",
+        ...extra,
+      }) as unknown as ResolvedAny;
+
+    let outcome: LotResult | undefined;
+    await act(async () => {
+      outcome = await result.current.runLot([
+        step("op-1", {
+          split: {
+            adjustments: [{ assignmentId: "asg-other", efficiencyPercent: 50 }],
+            efficiencyPercent: 50,
+            person: "Sam Patel",
+            with: "Cell 2",
+          },
+        }),
+        step("op-2", {}),
+      ]);
+    });
+
+    expect(outcome).toEqual({ done: 2, error: null });
+    expect(api.applySplitCoverage).toHaveBeenCalledTimes(1);
+    const [input] = vi.mocked(api.applySplitCoverage).mock.calls[0];
+    expect(input.adjustments).toEqual([{ assignmentId: "asg-other", efficiencyPercent: 50 }]);
+    expect(input.newAssignment).toMatchObject({
+      nodeId: "cell-1",
+      operatorId: "op-1",
+      efficiencyPercent: 50,
+      start: new Date("2026-08-24T08:00:00.000Z"),
+      end: new Date("2026-08-24T12:00:00.000Z"),
+    });
+    // The plain step is the plain create, and the split step is NOT also created plain.
+    expect(api.createAssignment).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.createAssignment).mock.calls[0][0]).toMatchObject({ operatorId: "op-2" });
+  });
+
+  it("S200-A-2: a refusal of the split call stops the lot there and reports it in the plant's words with the count done", async () => {
+    const api = await import("@/lib/api");
+    vi.mocked(api.applySplitCoverage).mockRejectedValue(CAPACITY_REFUSAL);
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+    let outcome: LotResult | undefined;
+    await act(async () => {
+      outcome = await result.current.runLot([
+        {
+          intent: "assign",
+          nodeId: "cell-1",
+          operatorId: "op-1",
+          productId: "prod-1",
+          target: { kind: "direct", productId: "prod-1" },
+          range: { startMin: 480, endMin: 720 },
+          readout: "x",
+          attempted: "x",
+          notTried: "x",
+          split: {
+            adjustments: [{ assignmentId: "asg-other", efficiencyPercent: 50 }],
+            efficiencyPercent: 50,
+            person: "Sam Patel",
+            with: "Cell 2",
+          },
+        } as unknown as ResolvedAny,
+      ]);
+    });
+    expect(outcome?.done).toBe(0);
+    expect(outcome?.error).toBeTruthy();
+    expect(api.createAssignment).not.toHaveBeenCalled();
+  });
+
   it("R-465-10: a staffed run dragged over the cap names the crew member's other block by its place, in the toast", async () => {
     const api = await probeSays([OUTSIDE_ROW]);
     vi.mocked(api.moveRun).mockRejectedValue(CAPACITY_REFUSAL);
@@ -3919,11 +4000,11 @@ describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
     it("PC-1: a create asks the probe for the person, the hours and the 100% share the write would send, and says the place when a block she cannot read is what makes them busy", async () => {
       const api = await probeSays([OUTSIDE_ROW]);
       const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
-      let said: string | null = null;
+      let said: unknown = null;
       await act(async () => {
         said = await result.current.precheckCommandStep(step({}));
       });
-      expect(said).toBe(SAID);
+      expect(said).toEqual({ kind: "busy_elsewhere", sentence: SAID });
       expect(api.probeCapacity).toHaveBeenCalledTimes(1);
       expect(api.probeCapacity).toHaveBeenCalledWith({
         operatorId: "op-1",
@@ -3958,11 +4039,11 @@ describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
         }),
       ]) {
         vi.mocked(api.probeCapacity).mockClear();
-        let said: string | null = null;
+        let said: unknown = null;
         await act(async () => {
           said = await result.current.precheckCommandStep(s);
         });
-        expect(said).toBe(SAID);
+        expect(said).toEqual({ kind: "busy_elsewhere", sentence: SAID });
         expect(api.probeCapacity).toHaveBeenCalledWith({
           operatorId: "op-1",
           start: new Date("2026-08-24T08:00:00.000Z"),
@@ -3973,19 +4054,15 @@ describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
       }
     });
 
-    it("PC-3: a person who fits, an overlap on blocks she CAN read only (the split pop-up is that answer), a probe that fails, and a block that is no longer on the board are all null -- the bar goes on as before", async () => {
+    it("PC-3: a person who fits, a probe that fails, and a block that is no longer on the board are all `ok` -- the bar goes on as before", async () => {
       const api = await probeSays([], true);
       const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
       await act(async () => {
-        expect(await result.current.precheckCommandStep(step({}))).toBeNull();
-      });
-      await probeSays([READABLE_ROW]);
-      await act(async () => {
-        expect(await result.current.precheckCommandStep(step({}))).toBeNull();
+        expect(await result.current.precheckCommandStep(step({}))).toEqual({ kind: "ok" });
       });
       vi.mocked(api.probeCapacity).mockRejectedValue(new Error("network"));
       await act(async () => {
-        expect(await result.current.precheckCommandStep(step({}))).toBeNull();
+        expect(await result.current.precheckCommandStep(step({}))).toEqual({ kind: "ok" });
       });
       vi.mocked(api.probeCapacity).mockClear();
       await act(async () => {
@@ -3993,9 +4070,25 @@ describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
           await result.current.precheckCommandStep(
             step({ intent: "move", assignmentId: "gone", target: { kind: "retime" } }),
           ),
-        ).toBeNull();
+        ).toEqual({ kind: "ok" });
       });
       expect(api.probeCapacity).not.toHaveBeenCalled();
+    });
+
+    it("PC-4 (S200-A, R-468, CONTRACT CHANGED: it used to be null): an overlap on blocks she CAN read only answers `overlap` -- the sentence, the blocks with their ids and the cap -- from the SAME one probe; a single sentence still goes on to the writer and the split pop-up", async () => {
+      const api = await probeSays([READABLE_ROW]);
+      const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+      await act(async () => {
+        expect(await result.current.precheckCommandStep(step({}))).toEqual({
+          kind: "overlap",
+          sentence: "Sam Patel is already on Cell 2 today from 6 am to 10 am.",
+          blocks: [
+            { assignmentId: "asg-other", nodeId: "cell-2", nodeName: "Cell 2", efficiency: 1 },
+          ],
+          capPercent: 100,
+        });
+      });
+      expect(api.probeCapacity).toHaveBeenCalledTimes(1);
     });
   });
 });

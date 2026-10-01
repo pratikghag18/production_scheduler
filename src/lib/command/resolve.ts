@@ -322,6 +322,19 @@ export interface ResolvedCommand {
    *  "not from this area" checkbox already sends (migration 0072's second
    *  door) -- never the eligibility pair, which is a different rule. */
   areaOverride?: { reason: string };
+  /** S200-A (R-468): set ONLY by the bar, on a lot step whose person is
+   *  already booked on blocks the caller can read and who chose "Split
+   *  evenly" -- never by the resolver. The writer sends the existing blocks'
+   *  new shares and this step's own share through the board's own split call
+   *  (`apply_split_coverage`) instead of a plain create. `with` is the places
+   *  the time is split with, as the readout says them ("Cell 1"). */
+  split?: {
+    adjustments: Array<{ assignmentId: string; efficiencyPercent: number }>;
+    efficiencyPercent: number;
+    /** The person whose time is split, and the places it is split with. */
+    person: string;
+    with: string;
+  };
 }
 
 /** S41-a: a "book a job" sentence resolves to either a brand-new job (never
@@ -3692,8 +3705,24 @@ export function resolveCommand(
  * correction in session 198).
  */
 export type Coupled =
-  | { kind: "replace"; outgoing: string; incoming: string; place: string }
+  | {
+      kind: "replace";
+      outgoing: string;
+      incoming: string;
+      place: string;
+      /** S200-A (R-469): the outgoing person's blocks, in the order the lot
+       *  removes them (and places the incoming person on them) -- each one's
+       *  cell and hours as the board says them, so the question the bar asks
+       *  is built from the steps its press will run. */
+      blocks?: ReplaceBlockFact[];
+    }
   | { kind: "swap" | "copy" };
+
+/** S200-A (R-469): one block a replace takes the outgoing person off. */
+export interface ReplaceBlockFact {
+  cell: string;
+  hours: string;
+}
 
 export type Expansion =
   | {
@@ -5349,6 +5378,7 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
   const assigns: SingleCommand[] = [];
   let blocked: Question | null = null;
   const placeNames: string[] = [];
+  const blockFacts: ReplaceBlockFact[] = [];
   for (const x of blocks) {
     const xCell = ctx.nodeById.get(x.nodeId) as Node;
     // F-152-b, rule 2: this block's own edges are about to be read through
@@ -5414,6 +5444,8 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
     }
     const cellLabel = cellDisplayName(xCell, ctx, byPath);
     if (!placeNames.includes(cellLabel)) placeNames.push(cellLabel);
+    const blockHours = hoursOfBlock(x.startMin, x.endMin, ctx);
+    blockFacts.push({ cell: cellLabel, hours: formatSpan(blockHours.start, blockHours.end) });
 
     removals.push({
       intent: "unassign",
@@ -5463,6 +5495,7 @@ function expandReplace(command: ReplaceCommand, ctx: ResolveContext): Expansion 
     outgoing: a.displayName,
     incoming: b.displayName,
     place: placeNames.join(" and "),
+    blocks: blockFacts,
   });
 }
 
@@ -6849,8 +6882,79 @@ export function describeGateReason(q: Question): string {
  * cannot go -- the ONE sentence both doors build (the resolver's own gates and
  * the bar's probe). `reason` is why she cannot go, already a sentence.
  */
-export function describeReplaceBlocked(reason: string, outgoing: string, place: string): string {
-  return `${reason} Take ${outgoing} off ${place} anyway? Nobody would be covering ${outgoing}'s hours on ${place}.`;
+export function describeReplaceBlocked(
+  reason: string,
+  outgoing: string,
+  place: string,
+  detail?: ReplaceBlockedDetail,
+): string {
+  const blocks = detail?.blocks ?? [];
+  const refused = blocks.filter((b) => b.refused);
+  const allowed = blocks.filter((b) => !b.refused);
+  // One block, or no detail: the sentence as it always read.
+  if (detail === undefined || blocks.length < 2 || refused.length === 0) {
+    return `${reason} Take ${outgoing} off ${place} anyway? Nobody would be covering ${outgoing}'s hours on ${place}.`;
+  }
+  const all = `${blocks.length === 2 ? "both" : `all ${spelledCount(blocks.length)}`} blocks`;
+  // R-469: several blocks and the incoming person can take NONE -- the same
+  // question, with the blocks named.
+  if (allowed.length === 0) {
+    return `${reason} Take ${outgoing} off ${place} for ${all} anyway? Nobody would be covering ${outgoing}'s hours on ${place}.`;
+  }
+  // R-469: she can take some -- the question names every step its press runs.
+  const cells = new Set(blocks.map((b) => b.cell));
+  const multiCell = cells.size > 1;
+  const refusedBlocks = refused.map((b) => `${b.hours} on ${b.cell}`);
+  const cannotTake =
+    refused.length === 1
+      ? `${outgoing}'s ${refused[0].hours} block on ${refused[0].cell} cannot go to ${detail.incoming}.`
+      : `${outgoing}'s blocks ${listWithAnd(refusedBlocks)} cannot go to ${detail.incoming}.`;
+  // One reason sentence leads into it with "so"; several stand as they are.
+  const trimmed = reason.replace(/\.$/, "");
+  const lead = trimmed.includes(". ") ? `${reason} ${cannotTake}` : `${trimmed}, so ${cannotTake}`;
+  const placed = listWithAnd(
+    allowed.map((b) => `the ${b.hours} one${multiCell ? ` on ${b.cell}` : ""}`),
+  );
+  const uncovered = listWithAnd(
+    refused.map((b) => (multiCell ? `${b.hours} on ${b.cell}` : b.hours)),
+  );
+  return `${lead} Take ${outgoing} off ${place} for ${all} and put ${detail.incoming} on ${placed}? Nobody would be covering ${uncovered}.`;
+}
+
+/** S200-A (R-469): what a replace's question is built from -- the outgoing
+ *  person's blocks in the lot's order, and which of them the incoming person
+ *  cannot take. */
+export interface ReplaceBlockedDetail {
+  incoming: string;
+  blocks: Array<ReplaceBlockFact & { refused: boolean }>;
+}
+
+/** The first button of a blocked replace's question: when she can take some of
+ *  the blocks the press places her on them, and the label says so (R-469). */
+export function replaceBlockedLabel(
+  outgoing: string,
+  incoming: string,
+  detail?: ReplaceBlockedDetail,
+): string {
+  const some =
+    detail !== undefined &&
+    detail.blocks.length >= 2 &&
+    detail.blocks.some((b) => b.refused) &&
+    detail.blocks.some((b) => !b.refused);
+  return some
+    ? `Take ${outgoing} off, place ${incoming} where possible`
+    : `Take ${outgoing} off anyway`;
+}
+
+const SPELLED_COUNTS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight"];
+function spelledCount(n: number): string {
+  return SPELLED_COUNTS[n] ?? String(n);
+}
+
+/** "a", "a and b", "a, b and c". */
+function listWithAnd(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 function describeQuestionRaw(q: Question): string {

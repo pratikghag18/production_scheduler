@@ -2533,3 +2533,341 @@ test("DEF-0062: a replace whose incoming person is busy elsewhere asks -- Leave 
   expect(restoreError, "Sam's blocks are back as the seed had them").toBeNull();
   expect((await readSam()).length).toBe(samBefore.length);
 });
+
+/**
+ * S200-A (DEF-0064, R-468): "put Sam Patel and Maria Lopez on Housing A at Cell 2
+ * today from 8 am to 10 am" as Ana, with Sam already on Cell 1 today 6 am to 2 pm
+ * (a block Ana CAN read) and Maria free then. The lot asks Sam's question IN THE
+ * BAR before any listing -- numbered as the lot's step, "Split evenly" and "Skip
+ * Sam Patel" of one width -- and writes nothing before the yes. Split evenly: the
+ * listing says so and the one yes writes Sam's Cell 1 block at half and a new
+ * Cell 2 block at half, and Maria's row beside it. Skip: Sam is named as not done,
+ * the yes writes Maria only. A typed "no" drops the lot. The thread, the trace
+ * and the database are read; every row it writes is removed and Sam's Cell 1
+ * share is put back to what the seed had.
+ */
+test("DEF-0064: a lot step whose person is already booked on a block Ana can read asks in the bar -- Split evenly writes the split, Skip names him and writes the rest, 'no' writes nothing", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  const cell2 = nodes.cellIdByName.get("Cell 2");
+  if (!cell1 || !cell2) throw new Error("no such cell in Plant A: Cell 1 / Cell 2");
+  const sam = await operatorId(dana, "Sam Patel");
+  const maria = await operatorId(dana, "Maria Lopez");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readRows = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, operator_id, node_id, timerange, efficiency")
+      .in("operator_id", [sam, maria]);
+    if (error) throw new Error(`reading Sam's and Maria's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const before = await readRows();
+  const beforeIds = new Set(before.map((r) => String(r.id)));
+  const samCell1Today = before.find(
+    (r) =>
+      r.operator_id === sam &&
+      r.node_id === cell1 &&
+      parseTimerange(String(r.timerange)).startMs === clockMsInZone(todayIso, zone, 6, 0),
+  );
+  if (!samCell1Today) throw new Error(`the seed has no block of Sam Patel's on Cell 1 today 6 am`);
+  const at8to10 = (r: Record<string, unknown>): boolean => {
+    const t = parseTimerange(String(r.timerange));
+    return (
+      t.startMs === clockMsInZone(todayIso, zone, 8, 0) &&
+      t.endMs === clockMsInZone(todayIso, zone, 10, 0)
+    );
+  };
+  const added = async (): Promise<Array<Record<string, unknown>>> =>
+    (await readRows()).filter((r) => !beforeIds.has(String(r.id)));
+  const ASK =
+    "1 of 2: Sam Patel is already on Cell 1 today from 6 am to 2 pm. Split Sam Patel's time evenly between Cell 1 and Cell 2, or skip Sam Patel?";
+  const SENTENCE = "put Sam Patel and Maria Lopez on Housing A at Cell 2 today from 8 am to 10 am";
+  let restoreError: string | null = null;
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Split evenly -----------------------------------------------------------
+    const fromSplit = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Split evenly", "Skip Sam Patel"], {
+      timeout: 60_000,
+    });
+    expect(await currentStatusText(page)).toBe(ASK);
+    const widths = await candidateButtons(page).evaluateAll((els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().width)),
+    );
+    expect(widths[0], "the two answers are one width").toBe(widths[1]);
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromSplit);
+      expect(entry.asked).toBe(ASK);
+      expect(entry.answered).toBeNull();
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await added()).length, "nothing is written before the answer").toBe(0);
+
+    await page.getByRole("button", { name: "Split evenly", exact: true }).click();
+    await expect(statusLine(page)).toHaveText(
+      /^Ready to do 2 things: 1\. Sam Patel is on Cell 2 .* from 8 am to 10 am, making Housing A, Sam Patel's time split evenly with Cell 1\. 2\. Maria Lopez is on Cell 2 .* from 8 am to 10 am, making Housing A\. Say yes to do them, or no\.$/,
+      { timeout: 30_000 },
+    );
+    expect((await added()).length, "the listing wrote nothing").toBe(0);
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 2 things.");
+    }).toPass({ timeout: 30_000, intervals: [250] });
+    // The database: Sam's Cell 1 block is at half, his new Cell 2 block is at half,
+    // and Maria's is whole.
+    await expect(async () => {
+      const rows = await readRows();
+      const cell1Now = rows.find((r) => r.id === samCell1Today.id);
+      expect(Number(cell1Now?.efficiency)).toBeCloseTo(0.5, 3);
+      const mine = rows.filter((r) => !beforeIds.has(String(r.id)));
+      expect(mine).toHaveLength(2);
+      const samNew = mine.find((r) => r.operator_id === sam);
+      const mariaNew = mine.find((r) => r.operator_id === maria);
+      expect(samNew && at8to10(samNew) && samNew.node_id === cell2).toBe(true);
+      expect(Number(samNew?.efficiency)).toBeCloseTo(0.5, 3);
+      expect(mariaNew && at8to10(mariaNew)).toBe(true);
+      expect(Number(mariaNew?.efficiency)).toBeCloseTo(1, 3);
+    }).toPass({ timeout: 20_000, intervals: [300] });
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromSplit);
+      expect(entry.asked).toContain(`${ASK}\nReady to do 2 things: 1. Sam Patel is on Cell 2`);
+      expect(entry.answered).toBe("Split evenly\nyes");
+      expect(entry.ran).toHaveLength(2);
+      expect(entry.ran[0]).toContain("time split evenly with Cell 1");
+      expect(entry.outcome).toBe("Done, 2 things.");
+    }).toPass({ timeout: 15_000, intervals: [250] });
+
+    // Put the split back before the next round.
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    await dana
+      .from("assignments")
+      .update({ efficiency: samCell1Today.efficiency })
+      .eq("id", String(samCell1Today.id));
+    // The board the bar reads is a fresh one: it must not still hold the blocks
+    // just removed (a stale Housing A block on Cell 2 reads as a job to join).
+    await page.reload();
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Skip Sam Patel -----------------------------------------------------------
+    const fromSkip = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Split evenly", "Skip Sam Patel"], {
+      timeout: 60_000,
+    });
+    await page.getByRole("button", { name: "Skip Sam Patel", exact: true }).click();
+    await expect(statusLine(page)).toHaveText(
+      /^Not doing Sam Patel on Cell 2 [^:]*: Sam Patel is already on Cell 1 today from 6 am to 2 pm\. Ready to do 1 thing: Maria Lopez is on Cell 2 .* from 8 am to 10 am, making Housing A\. Say yes to do it, or no\.$/,
+      { timeout: 30_000 },
+    );
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 1 thing.");
+      const mine = await added();
+      expect(mine).toHaveLength(1);
+      expect(mine[0].operator_id).toBe(maria);
+    }).toPass({ timeout: 30_000, intervals: [300] });
+    expect(
+      Number((await readRows()).find((r) => r.id === samCell1Today.id)?.efficiency),
+      "Sam's Cell 1 block was not touched",
+    ).toBeCloseTo(Number(samCell1Today.efficiency), 3);
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromSkip);
+      expect(entry.answered).toBe("Skip Sam Patel\nyes");
+      expect(entry.ran).toHaveLength(1);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    await page.reload();
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- "no" at the question -------------------------------------------------------
+    const fromNo = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Split evenly", "Skip Sam Patel"], {
+      timeout: 60_000,
+    });
+    await submit(page, "no");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Left it.");
+      const [entry] = await traceEntriesFor(SENTENCE, fromNo);
+      expect(entry.outcome).toBe("cancelled");
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+    expect((await added()).length, "'no' wrote nothing").toBe(0);
+  } finally {
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    const { error } = await dana
+      .from("assignments")
+      .update({ efficiency: samCell1Today.efficiency })
+      .eq("id", String(samCell1Today.id));
+    restoreError = error?.message ?? null;
+    if (restoreError !== null) console.error(`PUTTING SAM'S SHARE BACK FAILED: ${restoreError}`);
+  }
+  expect(restoreError, "Sam's Cell 1 share is back as the seed had it").toBeNull();
+  expect(await added(), "the rows it wrote are gone").toEqual([]);
+});
+
+/**
+ * S200-A (DEF-0063, R-469): "replace Sam Patel with Priya Shah on Cell 1" as Ana
+ * with Sam on TWO Cell 1 blocks today (6 am to 2 pm, and a second 6 pm to 8 pm
+ * this test inserts) and Priya busy on Cell 4 of Line 2 (a line Ana cannot read)
+ * only 6 am to 2 pm. The question names what its press will run -- both removals
+ * and Priya's placement on the 6 pm block -- and says what stays uncovered; its
+ * first button says so; the press runs exactly that. "Leave it" writes nothing.
+ * Sam's blocks and Priya's rows are read back and put back as the seed had them,
+ * and the inserted block is removed.
+ */
+test("DEF-0063: a replace with two blocks, one of them busy elsewhere, names both removals and the one placement -- and the press writes exactly that", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+  const priya = await operatorId(dana, "Priya Shah");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readSam = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("*")
+      .eq("operator_id", sam)
+      .eq("node_id", cell1);
+    if (error) throw new Error(`reading Sam's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const readPriya = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, node_id, timerange")
+      .eq("operator_id", priya);
+    if (error) throw new Error(`reading Priya's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const first = (await readSam()).find(
+    (r) => parseTimerange(String(r.timerange)).startMs === clockMsInZone(todayIso, zone, 6, 0),
+  );
+  if (!first) throw new Error("the seed has no block of Sam Patel's on Cell 1 today 6 am");
+  const eveningStart = clockMsInZone(todayIso, zone, 18, 0);
+  const eveningEnd = clockMsInZone(todayIso, zone, 20, 0);
+  const { id: _firstId, ...firstCopy } = first;
+  void _firstId;
+  const inserted = await dana
+    .from("assignments")
+    .insert({
+      ...firstCopy,
+      timerange: `[${new Date(eveningStart).toISOString()},${new Date(eveningEnd).toISOString()})`,
+    })
+    .select("id")
+    .single();
+  if (inserted.error) throw new Error(`inserting Sam's second block: ${inserted.error.message}`);
+  const extraId = String(inserted.data.id);
+  const samBefore = await readSam();
+  const priyaBefore = await readPriya();
+  const priyaIds = new Set(priyaBefore.map((r) => String(r.id)));
+  const SENTENCE = "replace Sam Patel with Priya Shah on Cell 1";
+  const ASK =
+    "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm, so Sam Patel's 6 am to 2 pm block on Cell 1 cannot go to Priya Shah. Take Sam Patel off Cell 1 for both blocks and put Priya Shah on the 6 pm to 8 pm one? Nobody would be covering 6 am to 2 pm.";
+  const TAKE = "Take Sam Patel off, place Priya Shah where possible";
+  let restoreError: string | null = null;
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Leave it ---------------------------------------------------------------
+    const fromLeave = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText([TAKE, "Leave it"], { timeout: 60_000 });
+    expect(await currentStatusText(page)).toBe(ASK);
+    const widths = await candidateButtons(page).evaluateAll((els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().width)),
+    );
+    expect(widths[0], "the two answers are one width").toBe(widths[1]);
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromLeave);
+      expect(entry.asked).toBe(ASK);
+      expect(entry.answered).toBeNull();
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await readSam()).length, "nothing written before the answer").toBe(samBefore.length);
+    await page.getByRole("button", { name: "Leave it", exact: true }).click();
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Left it.");
+      const [entry] = await traceEntriesFor(SENTENCE, fromLeave);
+      expect(entry.outcome).toBe("cancelled");
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await readSam()).length, "Leave it wrote nothing").toBe(samBefore.length);
+    expect((await readPriya()).length).toBe(priyaBefore.length);
+
+    // --- The press ----------------------------------------------------------------
+    const fromTake = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText([TAKE, "Leave it"], { timeout: 60_000 });
+    await page.getByRole("button", { name: TAKE, exact: true }).click();
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain("Done, 3 things.");
+      const [entry] = await traceEntriesFor(SENTENCE, fromTake);
+      expect(entry.answered).toBe(TAKE);
+      expect(entry.ran).toHaveLength(3);
+      expect(entry.ran[0]).toMatch(/^Sam Patel is off Cell 1/);
+      expect(entry.ran[1]).toMatch(/^Sam Patel is off Cell 1/);
+      expect(entry.ran[2]).toMatch(/^Priya Shah is on Cell 1 .* from 6 pm to 8 pm/);
+      expect(entry.outcome).toBe("Done, 3 things.");
+    }).toPass({ timeout: 20_000, intervals: [250] });
+    // The database says what the question said: both of Sam's blocks are gone, and
+    // Priya has exactly one new row, on Cell 1 from 6 pm to 8 pm.
+    await expect(async () => {
+      expect((await readSam()).length).toBe(samBefore.length - 2);
+      const newRows = (await readPriya()).filter((r) => !priyaIds.has(String(r.id)));
+      expect(newRows).toHaveLength(1);
+      expect(newRows[0].node_id).toBe(cell1);
+      const t = parseTimerange(String(newRows[0].timerange));
+      expect(t).toEqual({ startMs: eveningStart, endMs: eveningEnd });
+    }).toPass({ timeout: 15_000, intervals: [300] });
+  } finally {
+    const have = new Set((await readSam()).map((r) => String(r.id)));
+    const missing = samBefore.filter((r) => !have.has(String(r.id)));
+    if (missing.length > 0) {
+      const { error } = await dana.from("assignments").insert(missing);
+      restoreError = error?.message ?? null;
+      if (restoreError !== null) console.error(`PUTTING SAM'S BLOCKS BACK FAILED: ${restoreError}`);
+    }
+    await dana.from("assignments").delete().eq("id", extraId);
+    const stray = (await readPriya()).filter((r) => !priyaIds.has(String(r.id)));
+    if (stray.length > 0) {
+      await dana
+        .from("assignments")
+        .delete()
+        .in(
+          "id",
+          stray.map((r) => String(r.id)),
+        );
+    }
+  }
+  expect(restoreError, "Sam's blocks are back").toBeNull();
+  expect((await readSam()).length, "the inserted block is gone").toBe(samBefore.length - 1);
+  expect((await readPriya()).length, "Priya's rows are as the seed had them").toBe(
+    priyaBefore.length,
+  );
+});

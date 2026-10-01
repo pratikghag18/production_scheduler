@@ -184,6 +184,12 @@ export type CandidateAction =
   /** S198-A: a replace's "Leave it" -- drops the sentence, nothing written. */
   | { kind: "leave_it" }
   /**
+   * S200-A (R-468): the answer to a lot step's "split his time evenly, or skip
+   * him?" -- `step` is the step's index in the lot's `done`, `answer` which
+   * button. Data: the shares and the blocks live on the lot (`Lot.overlaps`).
+   */
+  | { kind: "answer_lot_overlap"; step: number; answer: "split" | "skip" }
+  /**
    * DEF-0040 / R-461 (S194-D): the Yes or No of an `other_day_part`
    * question. `options` are the answers ALREADY given to this sentence (the
    * first question's, when this answers the second), so pressing this reruns
@@ -252,6 +258,12 @@ export type Status =
        * everywhere else).
        */
       yesNo?: true;
+      /**
+       * S200-A (R-468, R-447): the two buttons are one pair of one width, but
+       * neither is a yes or a no -- "Split evenly" and "Skip <name>" -- so a
+       * typed yes or no does not press them (a "no" cancels, as everywhere).
+       */
+      pair?: true;
     }
   | {
       kind: "readout";
@@ -379,6 +391,34 @@ export interface Lot {
   /** S198-A: run the lot the moment it has resolved, with no listing -- the
    *  lot a "take off anyway" press starts, whose press IS the yes. */
   runNow?: true;
+  /**
+   * S200-A (R-468): the steps of this lot whose person is already booked on
+   * blocks the caller can read, asked about in the bar one after another
+   * (numbered as the lot's step, before the listing). Each is answered "split"
+   * (the step is kept and written through the split call) or "skip" (named in
+   * the listing as not done). Absent when no step overlaps.
+   */
+  overlaps?: LotOverlap[];
+  /** S200-A: on a replace that has to ask the overlap question first, the
+   *  steps the probe already refused (busy on a place the caller cannot read),
+   *  aligned with `done`, so the replace question is built from them after. */
+  refusals?: Array<string | null>;
+}
+
+/** S200-A (R-468): one lot step that overlaps a block the caller can read. */
+export interface LotOverlap {
+  /** The step's index in the lot's `done` (the numbering the listing uses). */
+  step: number;
+  person: string;
+  /** "Sam Patel is already on Cell 1 today from 6 am to 2 pm." */
+  sentence: string;
+  /** The person's blocks that make them busy, in the probe's order. */
+  blocks: Array<{ assignmentId: string; nodeName: string }>;
+  /** The cap the shares fit under, in percent. */
+  capPercent: number;
+  /** The cell this step would place them on, as the step says it. */
+  place: string;
+  answer?: "split" | "skip";
 }
 
 /** S59 (R-419): the command a "Show that day" press is waiting to re-run. */

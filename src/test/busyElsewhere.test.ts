@@ -3,6 +3,7 @@ import type { CapacityProbe, CapacityProbeOverlap, SchedulerError } from "@/lib/
 import {
   busyElsewhereBeforeWrite,
   busyElsewhereSentence,
+  precheckBeforeWrite,
   explainCapacityRefusal,
   isBusyElsewhere,
   outsideRows,
@@ -333,5 +334,82 @@ describe("busyElsewhereBeforeWrite (S196-A): the refusal asked before the bar sp
     expect(await busyElsewhereBeforeWrite(attempt, deps(probe))).toBe(
       "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.",
     );
+  });
+});
+
+/**
+ * S200-A (DEF-0064, R-468): the same ONE probe, answered more fully. `overlap`
+ * when the person does not fit and every block making them busy is one the
+ * caller can read; the sentence is the SAME builder's ("and"-joined, in the order
+ * the blocks start) with the cell named alone.
+ */
+describe("precheckBeforeWrite (S200-A): the pre-check's fuller answer from the one probe", () => {
+  type Probe = (input: CapacityAttempt) => Promise<CapacityProbe>;
+  const attempt: CapacityAttempt = {
+    operatorId: "op-sam",
+    start: new Date("2026-09-30T13:00:00Z"),
+    end: new Date("2026-09-30T15:00:00Z"),
+    efficiencyPercent: 100,
+  };
+  const deps = (probe: Probe) => ({
+    probe,
+    personName: "Sam Patel",
+    zone: CHICAGO,
+    dateFormat: "d_mon_yyyy" as const,
+    now: () => new Date("2026-09-30T18:00:00Z"),
+  });
+  // 6 am to 2 pm on Cell 1 (Wed 30 Sept, Chicago), and 5 pm to 7 pm on Cell 3.
+  const CELL_1: CapacityProbeOverlap = {
+    ...READABLE,
+    assignmentId: "asg-c1",
+    nodeId: "n-c1",
+    nodeName: "Cell 1",
+    timerange: '["2026-09-30 11:00:00+00","2026-09-30 19:00:00+00")',
+  };
+  const CELL_3: CapacityProbeOverlap = {
+    ...READABLE,
+    assignmentId: "asg-c3",
+    nodeId: "n-c3",
+    nodeName: "Cell 3",
+    timerange: '["2026-09-30 22:00:00+00","2026-10-01 00:00:00+00")',
+    efficiency: 0.5,
+  };
+
+  it("PB-1: readable blocks only -- `overlap`, the sentence from the same builder (cell named alone, never the product), the blocks with their ids and shares, the cap in percent", async () => {
+    const probe = vi
+      .fn<Probe>()
+      .mockResolvedValue({ fits: false, peak: 2, cap: 1, overlapping: [CELL_3, CELL_1] });
+    const answer = await precheckBeforeWrite(attempt, deps(probe));
+    expect(answer).toEqual({
+      kind: "overlap",
+      // In the order the blocks START, "and"-joined, like the outside sentence.
+      sentence:
+        "Sam Patel is already on Cell 1 today from 6 am to 2 pm and Cell 3 today from 5 pm to 7 pm.",
+      blocks: [
+        { assignmentId: "asg-c3", nodeId: "n-c3", nodeName: "Cell 3", efficiency: 0.5 },
+        { assignmentId: "asg-c1", nodeId: "n-c1", nodeName: "Cell 1", efficiency: 1 },
+      ],
+      capPercent: 100,
+    });
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  it("PB-2: the outside case is still `busy_elsewhere` with exactly busyElsewhereBeforeWrite's sentence (the one gate), even among readable rows; fits and a failed probe are `ok`", async () => {
+    const mixed = vi
+      .fn<Probe>()
+      .mockResolvedValue({ fits: false, peak: 3, cap: 1, overlapping: [CELL_1, PRIYA_CELL_4] });
+    expect(await precheckBeforeWrite(attempt, deps(mixed))).toEqual({
+      kind: "busy_elsewhere",
+      sentence: await busyElsewhereBeforeWrite(attempt, deps(mixed)),
+    });
+    const fits = vi.fn<Probe>().mockResolvedValue({ fits: true, peak: 1, cap: 1, overlapping: [] });
+    expect(await precheckBeforeWrite(attempt, deps(fits))).toEqual({ kind: "ok" });
+    const down = vi.fn<Probe>().mockRejectedValue(new Error("network"));
+    expect(await precheckBeforeWrite(attempt, deps(down))).toEqual({ kind: "ok" });
+    // Not fitting with nothing to name is `ok` too: the write is the gate.
+    const nothing = vi
+      .fn<Probe>()
+      .mockResolvedValue({ fits: false, peak: 2, cap: 1, overlapping: [] });
+    expect(await precheckBeforeWrite(attempt, deps(nothing))).toEqual({ kind: "ok" });
   });
 });

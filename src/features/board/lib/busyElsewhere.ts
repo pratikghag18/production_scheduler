@@ -116,12 +116,15 @@ export function elsewhereTitle(
   return `${person} is on ${joinWithAnd(blocks)}.`;
 }
 
-/** One outside block as "Cell 4 in Line 2 today from 6 am to 2 pm". */
+/** One outside block as "Cell 4 in Line 2 today from 6 am to 2 pm". `withParent`
+ *  false names the cell alone ("Cell 1 today from 6 am to 2 pm") -- a block the
+ *  caller CAN read, whose line she already sees (S200-A, R-468). */
 function describeBlock(
   row: ElsewhereBlockFacts,
   zone: string,
   dateFormat: DateFormat,
   todayIso: string,
+  withParent: boolean = true,
 ): string {
   const { start, end } = parseTstzRange(row.timerange);
   const startParts = partsInZone(start, zone);
@@ -130,7 +133,8 @@ function describeBlock(
   const lastMoment = partsInZone(new Date(end.getTime() - 1), zone);
   const endsNextDay = isoOfParts(lastMoment) !== startDay;
 
-  const place = row.parentName !== null ? `${row.nodeName} in ${row.parentName}` : row.nodeName;
+  const place =
+    withParent && row.parentName !== null ? `${row.nodeName} in ${row.parentName}` : row.nodeName;
   const day =
     startDay === todayIso
       ? "today"
@@ -159,6 +163,56 @@ export function busyElsewhereSentence(facts: BusyElsewhereFacts): string | null 
   const blocks = ordered.map((r) => describeBlock(r, facts.zone, facts.dateFormat, todayIso));
   return `${facts.person} is already on ${joinWithAnd(blocks)}.`;
 }
+
+/**
+ * S200-A (R-468): "<person> is already on <block> and <block>." for the blocks
+ * the caller CAN read that make a person busy -- the SAME builder, the same
+ * order and the same "and" as `busyElsewhereSentence`, with the cell named
+ * alone (the line is on her own board). Null when the probe has no readable
+ * overlap rows.
+ */
+export function overlapSentence(facts: BusyElsewhereFacts): string | null {
+  const rows = facts.rows.filter((r) => !r.outside);
+  if (rows.length === 0) return null;
+  const todayIso = isoOfParts(partsInZone(facts.now, facts.zone));
+  const ordered = [...rows].sort(
+    (a, b) =>
+      parseTstzRange(a.timerange).start.getTime() - parseTstzRange(b.timerange).start.getTime(),
+  );
+  const blocks = ordered.map((r) =>
+    describeBlock(r, facts.zone, facts.dateFormat, todayIso, false),
+  );
+  return `${facts.person} is already on ${joinWithAnd(blocks)}.`;
+}
+
+/** A block of the person's the caller can read, which the bar can split with. */
+export interface OverlapBlock {
+  assignmentId: string;
+  nodeId: string;
+  nodeName: string;
+  /** The share the block carries now, as the server stores it (1 = 100%). */
+  efficiency: number;
+}
+
+/**
+ * S200-A (R-468): what the bar's pre-check learns from ONE `capacity_probe`
+ * answer. `busy_elsewhere` is R-465's refusal (a block on a place the caller
+ * cannot read); `overlap` is a person who does not fit on blocks the caller
+ * CAN read -- the single sentence opens the board's split pop-up for it, a lot
+ * asks in the bar; `ok` is everything else (they fit, the probe failed, nothing
+ * to ask about).
+ */
+export type PrecheckResult =
+  | { kind: "ok" }
+  | { kind: "busy_elsewhere"; sentence: string }
+  | {
+      kind: "overlap";
+      sentence: string;
+      /** The blocks that make the person busy, in the probe's order. */
+      blocks: OverlapBlock[];
+      /** The cap the shares must fit under, in percent (the pop-up's `capPercent`). */
+      capPercent: number;
+    };
 
 /** What a write was asking for -- the same person, hours and share the probe is asked about. */
 export interface CapacityAttempt {
@@ -201,20 +255,54 @@ export async function busyElsewhereBeforeWrite(
   attempt: CapacityAttempt,
   deps: ExplainDeps,
 ): Promise<string | null> {
+  const answer = await precheckBeforeWrite(attempt, deps);
+  return answer.kind === "busy_elsewhere" ? answer.sentence : null;
+}
+
+/**
+ * S200-A (R-468): the same ONE probe, answered more fully -- the bar's
+ * pre-check. `busy_elsewhere` exactly when `busyElsewhereBeforeWrite` would
+ * have answered a sentence (`isBusyElsewhere`, the one gate); `overlap` when
+ * the person does not fit and EVERY block making them busy is one the caller
+ * can read (the board's own split question); `ok` for everything else,
+ * including a probe that fails (the write is the gate).
+ */
+export async function precheckBeforeWrite(
+  attempt: CapacityAttempt,
+  deps: ExplainDeps,
+): Promise<PrecheckResult> {
   let probe: CapacityProbe;
   try {
     probe = await deps.probe(attempt);
   } catch {
-    return null;
+    return { kind: "ok" };
   }
-  if (!isBusyElsewhere(probe)) return null;
-  return busyElsewhereSentence({
+  if (probe.fits) return { kind: "ok" };
+  const facts: BusyElsewhereFacts = {
     person: deps.personName,
     rows: probe.overlapping,
     zone: deps.zone,
     dateFormat: deps.dateFormat,
     now: (deps.now ?? (() => new Date()))(),
-  });
+  };
+  if (isBusyElsewhere(probe)) {
+    const sentence = busyElsewhereSentence(facts);
+    return sentence === null ? { kind: "ok" } : { kind: "busy_elsewhere", sentence };
+  }
+  const sentence = overlapSentence(facts);
+  const blocks: OverlapBlock[] = [];
+  for (const o of probe.overlapping) {
+    // A readable row always carries both ids (`parseCapacityProbeOverlap`).
+    if (o.assignmentId === null || o.nodeId === null) continue;
+    blocks.push({
+      assignmentId: o.assignmentId,
+      nodeId: o.nodeId,
+      nodeName: o.nodeName,
+      efficiency: o.efficiency,
+    });
+  }
+  if (sentence === null || blocks.length === 0) return { kind: "ok" };
+  return { kind: "overlap", sentence, blocks, capPercent: Math.round(probe.cap * 100) };
 }
 
 /**

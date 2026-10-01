@@ -11,6 +11,8 @@ import {
   resolveCommand,
   describeQuestion,
   describeGateReason,
+  describeReplaceBlocked,
+  replaceBlockedLabel,
   expandCommand,
   readClearAsPerson,
   thingsCount,
@@ -3823,11 +3825,15 @@ describe("commandResolve: S55 expandCommand (R-404 to R-410, D130)", () => {
       expect(ok.ok).toBe(true);
       if (!ok.ok) return;
       expect(ok.command.intent).toBe("several");
+      // S200-A (R-469): CONTRACT CHANGED -- the replace's coupling now also carries
+      // the outgoing person's blocks (cell and hours, in the lot's order), the
+      // facts the bar's question is built from. The rest is as it was.
       expect(ok.coupled).toEqual({
         kind: "replace",
         outgoing: "Sam",
         incoming: "Ana",
         place: "Cell 1",
+        blocks: [{ cell: "Cell 1", hours: "10 am to 2 pm" }],
       });
     });
   });
@@ -9251,5 +9257,100 @@ describe("commandResolve: S195-A the bar's words", () => {
       ).toBe("none");
       expect(readClearAsPerson(cmd(), baseCtx()).kind).toBe("none");
     });
+  });
+});
+
+/**
+ * S200-A (DEF-0063, R-469): the replace's question is built from the steps its
+ * press will run -- one pure function, the four shapes the maintainer named.
+ */
+describe("describeReplaceBlocked (S200-A, R-469): the question names every step the press runs", () => {
+  const BUSY = "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+  const morning = { cell: "Cell 1", hours: "6 am to 2 pm" };
+  const evening = { cell: "Cell 1", hours: "6 pm to 8 pm" };
+  const detail = (...blocks: Array<{ cell: string; hours: string; refused: boolean }>) => ({
+    incoming: "Priya Shah",
+    blocks,
+  });
+
+  it("RB-1: one block, or no detail -- the sentence as it always read", () => {
+    const one =
+      "Take Sam Patel off Cell 1 anyway? Nobody would be covering Sam Patel's hours on Cell 1.";
+    expect(describeReplaceBlocked(BUSY, "Sam Patel", "Cell 1")).toBe(`${BUSY} ${one}`);
+    expect(
+      describeReplaceBlocked(BUSY, "Sam Patel", "Cell 1", detail({ ...morning, refused: true })),
+    ).toBe(`${BUSY} ${one}`);
+  });
+
+  it("RB-2: two blocks, she can take one -- both removals, the one placement, what stays uncovered", () => {
+    expect(
+      describeReplaceBlocked(
+        BUSY,
+        "Sam Patel",
+        "Cell 1",
+        detail({ ...morning, refused: true }, { ...evening, refused: false }),
+      ),
+    ).toBe(
+      "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm, so Sam Patel's 6 am to 2 pm block on Cell 1 cannot go to Priya Shah. Take Sam Patel off Cell 1 for both blocks and put Priya Shah on the 6 pm to 8 pm one? Nobody would be covering 6 am to 2 pm.",
+    );
+    // Three blocks: "all three".
+    expect(
+      describeReplaceBlocked(
+        BUSY,
+        "Sam Patel",
+        "Cell 1",
+        detail(
+          { ...morning, refused: true },
+          { ...evening, refused: false },
+          { cell: "Cell 1", hours: "9 pm to 11 pm", refused: false },
+        ),
+      ),
+    ).toContain(
+      "for all three blocks and put Priya Shah on the 6 pm to 8 pm one and the 9 pm to 11 pm one?",
+    );
+  });
+
+  it("RB-3: two blocks, she can take none -- the one-block form with the blocks named", () => {
+    expect(
+      describeReplaceBlocked(
+        BUSY,
+        "Sam Patel",
+        "Cell 1",
+        detail({ ...morning, refused: true }, { ...evening, refused: true }),
+      ),
+    ).toBe(
+      `${BUSY} Take Sam Patel off Cell 1 for both blocks anyway? Nobody would be covering Sam Patel's hours on Cell 1.`,
+    );
+  });
+
+  it("RB-4: two cells -- each block's cell is named, in the placement and in what stays uncovered", () => {
+    expect(
+      describeReplaceBlocked(
+        BUSY,
+        "Sam Patel",
+        "Cell 1 and Cell 2",
+        detail(
+          { ...morning, refused: true },
+          { cell: "Cell 2", hours: "6 pm to 8 pm", refused: false },
+        ),
+      ),
+    ).toBe(
+      "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm, so Sam Patel's 6 am to 2 pm block on Cell 1 cannot go to Priya Shah. Take Sam Patel off Cell 1 and Cell 2 for both blocks and put Priya Shah on the 6 pm to 8 pm one on Cell 2? Nobody would be covering 6 am to 2 pm on Cell 1.",
+    );
+  });
+
+  it("RB-5: the first button says what one press does -- 'anyway' unless she is placed on some blocks", () => {
+    const some = detail({ ...morning, refused: true }, { ...evening, refused: false });
+    expect(replaceBlockedLabel("Sam Patel", "Priya Shah", some)).toBe(
+      "Take Sam Patel off, place Priya Shah where possible",
+    );
+    expect(replaceBlockedLabel("Sam Patel", "Priya Shah")).toBe("Take Sam Patel off anyway");
+    expect(
+      replaceBlockedLabel(
+        "Sam Patel",
+        "Priya Shah",
+        detail({ ...morning, refused: true }, { ...evening, refused: true }),
+      ),
+    ).toBe("Take Sam Patel off anyway");
   });
 });

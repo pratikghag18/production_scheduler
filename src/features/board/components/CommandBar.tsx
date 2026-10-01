@@ -52,6 +52,7 @@ import {
   describeQuestion,
   describeGateReason,
   describeReplaceBlocked,
+  replaceBlockedLabel,
   expandCommand,
   thingsCount,
   oneOrThem,
@@ -59,6 +60,7 @@ import {
 } from "@/lib/command/resolve";
 import type {
   Coupled,
+  ReplaceBlockedDetail,
   ResolveContext,
   ResolveOptions,
   ResolvedCommand,
@@ -73,6 +75,8 @@ import type {
   Candidate,
 } from "@/lib/command/resolve";
 import type { Highlight } from "../lib/highlight";
+import type { PrecheckResult } from "../lib/busyElsewhere";
+import { splitEvenly } from "../lib/interaction";
 import { Microphone } from "@/components/icons";
 import {
   createConversationStore,
@@ -85,6 +89,7 @@ import {
   type CandidateAction,
   type ConversationStore,
   type HistoryTurn,
+  type LotOverlap,
   type PopupReporter,
   type PopupResult,
   type ResolvedAny,
@@ -554,12 +559,15 @@ export interface CommandBarProps {
    * a move, a re-time -- alone, inside a lot, or as every answer of a question
    * such as "Join it, or make a separate block?"). Answers the plant's own
    * sentence ("Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2
-   * pm.") when a block the caller cannot read makes the person busy, `null`
-   * for anything else, and never rejects (a probe that fails is `null`: the
-   * server's write is the gate). Omitted, the bar says and writes exactly as it
-   * did before this existed -- every caller that has no probe to give.
+   * pm.") when a block the caller cannot read makes the person busy
+   * (`busy_elsewhere`); S200-A (R-468): `overlap` when they are busy on blocks
+   * the caller CAN read -- a lot's step asks about it in the bar, a single
+   * sentence ignores it (the board's split pop-up answers it); `ok` for
+   * anything else. Never rejects (a probe that fails is `ok`: the server's
+   * write is the gate). Omitted, the bar says and writes exactly as it did
+   * before this existed -- every caller that has no probe to give.
    */
-  precheck?: (step: ResolvedCommand | ResolvedMove) => Promise<string | null>;
+  precheck?: (step: ResolvedCommand | ResolvedMove) => Promise<PrecheckResult>;
   /** S44-b: when set, Enter reads the sentence through the model service
    *  first and falls back to the rules on anything but a clean answer.
    *  `null` (the default) is the pre-S44-b behaviour, unchanged. */
@@ -969,6 +977,28 @@ const WRITE_IN_FLIGHT = "writing";
  */
 function isPlacementStep(r: { intent: string }): r is ResolvedCommand | ResolvedMove {
   return r.intent === "assign" || r.intent === "move";
+}
+
+/** "a", "a and b", "a, b and c". */
+function andList(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * S200-A (R-468): a lot step the person chose to split reads, in its own
+ * sentence, whose time is split with which places -- "... making Housing A,
+ * Sam Patel's time split evenly with Cell 1." -- inserted before the readout's
+ * first full stop (a joined job's sentence, if any, follows it). A step with no
+ * split is unchanged.
+ */
+function splitClause(text: string, r: ResolvedAny): string {
+  if (r.intent !== "assign" || r.split === undefined) return text;
+  const at = text.indexOf(" Joining the ");
+  const head = at === -1 ? text : text.slice(0, at);
+  const tail = at === -1 ? "" : text.slice(at);
+  const bare = head.endsWith(".") ? head.slice(0, -1) : head;
+  return `${bare}, ${r.split.person}'s time split evenly with ${r.split.with}.${tail}`;
 }
 
 /**
@@ -1965,6 +1995,16 @@ export function CommandBar({
         window.clearTimeout(pendingRerunTimeoutRef.current);
         pendingRerunTimeoutRef.current = null;
       }
+      // F-251 (1 Oct, session 200): the hold's five-second bound
+      // (`armHoldBound`) is the same shape of leftover again. Left armed
+      // past unmount it fired into whatever bar stood NEXT -- in the unit
+      // suite, a later test's fetch stub received a stale entry's "did not
+      // catch up" refusal as its last post, and three unrelated cases went
+      // red by turns under six workers (CB-rep-1, CB-pre-10, CB-night-1).
+      if (holdBoundTimeoutRef.current !== null) {
+        window.clearTimeout(holdBoundTimeoutRef.current);
+        holdBoundTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -2812,8 +2852,10 @@ export function CommandBar({
           // caller cannot read is refused in one sentence -- no readout, no
           // write. Until it answers the live line says the bar is working,
           // and the trace already holds the entry (DEF-0049's shape).
-          answer = precheck(resolved).then((refusal): WriteAnswer =>
-            refusal !== null ? { kind: "refused", message: refusal } : callWriter(),
+          answer = precheck(resolved).then((checked): WriteAnswer =>
+            checked.kind === "busy_elsewhere"
+              ? { kind: "refused", message: checked.sentence }
+              : callWriter(),
           );
         } else {
           answer = callWriter();
@@ -2947,9 +2989,9 @@ export function CommandBar({
       }
     }
     if (steps.length === 0) return null;
-    return Promise.all(steps.map((step) => precheck(step))).then((refusals) => {
-      const said = refusals.filter((x): x is string => x !== null);
-      return said.length === refusals.length ? [...new Set(said)].join(" ") : null;
+    return Promise.all(steps.map((step) => precheck(step))).then((answers) => {
+      const said = answers.flatMap((x) => (x.kind === "busy_elsewhere" ? [x.sentence] : []));
+      return said.length === answers.length ? [...new Set(said)].join(" ") : null;
     });
   }
 
@@ -3341,8 +3383,12 @@ export function CommandBar({
     setStatus(workingStatus());
     const steps = lot.done;
     void Promise.all(
-      steps.map((step) => (isPlacementStep(step) ? precheck(step) : Promise.resolve(null))),
-    ).then((refusals) => {
+      steps.map((step) =>
+        isPlacementStep(step) ? precheck(step) : Promise.resolve<PrecheckResult>({ kind: "ok" }),
+      ),
+    ).then((answers) => {
+      // R-465: the steps whose person is busy on a place the caller cannot read.
+      const refusals = answers.map((a) => (a.kind === "busy_elsewhere" ? a.sentence : null));
       // Escape, an edit or another sentence has happened since: that one
       // already closed or replaced this turn, and the lot it held goes with it.
       if (traceRef.current !== entry || store.getState().status?.kind !== "reading") {
@@ -3360,7 +3406,47 @@ export function CommandBar({
       // S198-A (R-467): the steps already refused under the block policy are
       // named first, in the same listing.
       const gateNotes = lot.notes ?? [];
-      if (busyNotes.length === 0) {
+      // S200-A (R-468): a step whose person is already booked on blocks the
+      // caller CAN read asks, in the bar, before the listing -- split the time
+      // evenly, or skip the person. A several, a copy and a replace's placement
+      // ask it; a SWAP does not (its placement overlaps the very block its first
+      // step removes, so there the writer stays the gate). A block another step
+      // of this lot removes or moves EARLIER in the lot is not what makes the
+      // person busy once the lot has run (the lot writes in order): that one is
+      // left to the writer.
+      const overlaps: LotOverlap[] = [];
+      const ctxNow = lastCtxRef.current;
+      const replacing = lot.coupled?.kind === "replace";
+      if (lot.coupled?.kind !== "swap" && ctxNow !== null) {
+        const namedAt = new Map<string, number>();
+        steps.forEach((s, i) => {
+          const id = namedAssignmentId(s);
+          if (id !== null && !namedAt.has(id)) namedAt.set(id, i);
+        });
+        let keptIndex = 0;
+        steps.forEach((step, i) => {
+          if (refusals[i] !== null) return;
+          const at = replacing ? i : keptIndex;
+          keptIndex += 1;
+          const answer = answers[i];
+          if (answer.kind !== "overlap") return;
+          if (step.intent !== "assign" || step.target.kind === "retime") return;
+          if (answer.blocks.some((b) => (namedAt.get(b.assignmentId) ?? Infinity) < i)) return;
+          overlaps.push({
+            step: at,
+            person:
+              ctxNow.operators.find((o) => o.id === step.operatorId)?.displayName ?? "That person",
+            sentence: answer.sentence,
+            blocks: answer.blocks.map((b) => ({
+              assignmentId: b.assignmentId,
+              nodeName: b.nodeName,
+            })),
+            capPercent: answer.capPercent,
+            place: ctxNow.nodeById.get(step.nodeId)?.name ?? "this place",
+          });
+        });
+      }
+      if (busyNotes.length === 0 && overlaps.length === 0) {
         showLotStatus(gateNotes.length > 0 ? gateNotes.join(" ") : undefined);
         return;
       }
@@ -3368,13 +3454,18 @@ export function CommandBar({
       // person cannot go, the bar ASKS what to do next (the probe's own
       // sentence, then the question) instead of dropping her step and listing
       // the removal alone. Nothing is written before the answer.
-      if (lot.coupled?.kind === "replace") {
-        const why = [...new Set(refusals.filter((x): x is string => x !== null))].join(" ");
-        askReplaceBlocked(
-          describeReplaceBlocked(why, lot.coupled.outgoing, lot.coupled.place),
-          lot.coupled.outgoing,
-          { kind: "run_removals", resolved: kept },
-        );
+      // S200-A (R-469): the question is built from the steps its press will run.
+      // S200-A (R-468): when her placement overlaps a readable block too, that
+      // question comes FIRST (split or skip, on every step of the lot, none yet
+      // dropped); the replace question is then built from what is left -- a
+      // skipped placement counts as one she cannot take (`finishLotOverlaps`).
+      if (replacing) {
+        if (overlaps.length > 0) {
+          lotRef.current = { ...lot, overlaps, refusals };
+          askLotOverlap();
+          return;
+        }
+        askReplaceFrom(lot, steps, refusals);
         return;
       }
       // S198-A: a SWAP has no half a supervisor would want -- it is refused
@@ -3393,9 +3484,53 @@ export function CommandBar({
         refuseLotAlone(notes.join(" "));
         return;
       }
+      if (overlaps.length > 0) {
+        lotRef.current = {
+          ...lot,
+          done: kept,
+          ...(notes.length > 0 ? { notes } : {}),
+          overlaps,
+        };
+        askLotOverlap();
+        return;
+      }
       lotRef.current = { ...lot, done: kept };
       showLotStatus(notes.join(" "));
     });
+  }
+
+  /**
+   * S198-A / S200-A (R-466, R-469): the replace question, from the lot's steps
+   * (removals first, then one placement per block) and which placements cannot
+   * go (`refusals`, aligned with `steps`, null where one can). The press runs
+   * the steps that can go.
+   */
+  function askReplaceFrom(
+    lot: NonNullable<typeof lotRef.current>,
+    steps: ResolvedAny[],
+    refusals: Array<string | null>,
+  ): void {
+    if (lot.coupled?.kind !== "replace") return;
+    const c = lot.coupled;
+    const kept = steps.filter((_, i) => refusals[i] === null);
+    const why = [...new Set(refusals.filter((x): x is string => x !== null))].join(" ");
+    const k = steps.length / 2;
+    const shaped =
+      Number.isInteger(k) &&
+      steps.slice(0, k).every((s) => s.intent === "unassign") &&
+      steps.slice(k).every((s) => s.intent === "assign");
+    const detail: ReplaceBlockedDetail | undefined =
+      shaped && c.blocks !== undefined && c.blocks.length === k
+        ? {
+            incoming: c.incoming,
+            blocks: c.blocks.map((b, i) => ({ ...b, refused: refusals[k + i] !== null })),
+          }
+        : undefined;
+    askReplaceBlocked(
+      describeReplaceBlocked(why, c.outgoing, c.place, detail),
+      replaceBlockedLabel(c.outgoing, c.incoming, detail),
+      { kind: "run_removals", resolved: kept },
+    );
   }
 
   /**
@@ -3425,16 +3560,12 @@ export function CommandBar({
    * first takes the outgoing person off anyway and IS the yes; the second
    * leaves everything as it is.
    */
-  function replaceBlockedStatus(
-    message: string,
-    outgoing: string,
-    takeOff: CandidateAction,
-  ): Status {
+  function replaceBlockedStatus(message: string, label: string, takeOff: CandidateAction): Status {
     return {
       kind: "question",
       message,
       candidates: [
-        { key: "clear", label: `Take ${outgoing} off anyway`, action: takeOff },
+        { key: "clear", label, action: takeOff },
         { key: "keep", label: "Leave it", action: { kind: "leave_it" } },
       ],
       yesNo: true,
@@ -3443,9 +3574,9 @@ export function CommandBar({
 
   /** The probe's door to that question: the lot is dropped (the answer carries
    *  what it needs as data), the question is shown and traced as asked. */
-  function askReplaceBlocked(message: string, outgoing: string, takeOff: CandidateAction): void {
+  function askReplaceBlocked(message: string, label: string, takeOff: CandidateAction): void {
     lotRef.current = null;
-    const status = replaceBlockedStatus(renderReadout(message), outgoing, takeOff);
+    const status = replaceBlockedStatus(renderReadout(message), label, takeOff);
     setStatus(status);
     traceQuestionStatus(status);
   }
@@ -3490,10 +3621,140 @@ export function CommandBar({
     resolveLotStep();
   }
 
-  /** A lot step as the thread says it: its readout, then the reasons it was
-   *  given (R-467) -- the one builder a single sentence's readout shares. */
+  /**
+   * S200-A (R-468): the next lot step whose person is already booked on a block
+   * the caller can read, asked in the bar and numbered as the lot's step -- the
+   * probe's own sentence, then "split evenly, or skip?" with two buttons of one
+   * width. Nothing is written. When every one has been answered the lot goes on
+   * to its listing (`finishLotOverlaps`).
+   */
+  function askLotOverlap(): void {
+    const lot = lotRef.current;
+    if (!lot) return;
+    const overlaps = lot.overlaps ?? [];
+    const next = overlaps.find((o) => o.answer === undefined);
+    if (next === undefined) {
+      finishLotOverlaps(lot);
+      return;
+    }
+    const cells = andList([...next.blocks.map((b) => b.nodeName), next.place]);
+    const message = `${next.step + 1} of ${lot.done.length}: ${renderReadout(next.sentence)} Split ${next.person}'s time evenly between ${cells}, or skip ${next.person}?`;
+    const status: Status = {
+      kind: "question",
+      message,
+      candidates: [
+        {
+          key: "split",
+          label: "Split evenly",
+          action: { kind: "answer_lot_overlap", step: next.step, answer: "split" },
+        },
+        {
+          key: "skip",
+          label: `Skip ${next.person}`,
+          action: { kind: "answer_lot_overlap", step: next.step, answer: "skip" },
+        },
+      ],
+      pair: true,
+    };
+    setStatus(status);
+    if (traceRef.current) {
+      setAsked(traceRef.current, message);
+      postTrace(traceRef.current);
+    }
+  }
+
+  /** The step with the even split its person chose: the existing blocks first,
+   *  the new one last (the pop-up's own order), the shares from `splitEvenly`. */
+  function withSplit(step: ResolvedCommand, o: LotOverlap): ResolvedCommand {
+    const shares = splitEvenly(o.blocks.length + 1, o.capPercent);
+    return {
+      ...step,
+      split: {
+        adjustments: o.blocks.map((b, j) => ({
+          assignmentId: b.assignmentId,
+          efficiencyPercent: shares[j],
+        })),
+        efficiencyPercent: shares[o.blocks.length],
+        person: o.person,
+        with: andList(o.blocks.map((b) => b.nodeName)),
+      },
+    };
+  }
+
+  /** The button's press: record the answer against its step and ask the next. */
+  function answerLotOverlap(step: number, answer: "split" | "skip"): void {
+    const lot = lotRef.current;
+    if (!lot) return;
+    const entry = traceRef.current;
+    // The ask and its answer stay in the entry; the next ask (or the listing)
+    // lands after them, in order (R-434, the night shift question's own carry).
+    if (entry) {
+      store
+        .getState()
+        .set({ traceCarry: { asked: entry.asked ?? "", answered: entry.answered ?? "" } });
+    }
+    lotRef.current = {
+      ...lot,
+      overlaps: (lot.overlaps ?? []).map((o) => (o.step === step ? { ...o, answer } : o)),
+    };
+    askLotOverlap();
+  }
+
+  /** Every overlap answered: a skipped step is named in the listing's own words
+   *  (`Not doing ...`, the shape a step busy elsewhere gets), a split step is
+   *  kept with the even shares `splitEvenly` gives -- the existing blocks first,
+   *  the new one last, the pop-up's own order -- and the lot is listed. */
+  function finishLotOverlaps(lot: NonNullable<typeof lotRef.current>): void {
+    const overlaps = lot.overlaps ?? [];
+    if (lot.coupled?.kind === "replace") {
+      // The replace question, built from what is left: a skipped placement is one
+      // she cannot take (its sentence is the reason), a split one is kept.
+      const refusals = [...(lot.refusals ?? lot.done.map(() => null))];
+      const steps = lot.done.map((step, i) => {
+        const o = overlaps.find((x) => x.step === i);
+        if (o === undefined || step.intent !== "assign") return step;
+        if (o.answer === "skip") {
+          refusals[i] = o.sentence;
+          return step;
+        }
+        return withSplit(step, o);
+      });
+      if (refusals.every((r) => r === null)) {
+        lotRef.current = { ...lot, done: steps, overlaps: undefined, refusals: undefined };
+        showLotStatus();
+        return;
+      }
+      askReplaceFrom(lot, steps, refusals);
+      return;
+    }
+    const kept: ResolvedAny[] = [];
+    const notes = [...(lot.notes ?? [])];
+    lot.done.forEach((step, i) => {
+      const o = overlaps.find((x) => x.step === i);
+      if (o === undefined || step.intent !== "assign") {
+        kept.push(step);
+        return;
+      }
+      if (o.answer === "skip") {
+        notes.push(`Not doing ${renderReadout(step.attempted)}: ${renderReadout(o.sentence)}`);
+        return;
+      }
+      kept.push(withSplit(step, o));
+    });
+    if (kept.length === 0) {
+      refuseLotAlone(notes.join(" "));
+      return;
+    }
+    lotRef.current = { ...lot, done: kept, overlaps: undefined, notes: undefined };
+    showLotStatus(notes.length > 0 ? notes.join(" ") : undefined);
+  }
+
+  /** A lot step as the thread says it: its readout (S200-A: and, for a step the
+   *  person chose to split, whose time is split with which places), then the
+   *  reasons it was given (R-467) -- the one builder a single sentence's readout
+   *  shares. */
   function spokenStep(r: ResolvedAny): string {
-    return renderReadout(r.readout) + reasonsGivenText(reasonsOfStep(r));
+    return splitClause(renderReadout(r.readout), r) + reasonsGivenText(reasonsOfStep(r));
   }
 
   function showLotStatus(dropped?: string): void {
@@ -4370,10 +4631,14 @@ export function CommandBar({
     // probe's door asks (`askReplaceBlocked`), its sentence built from the
     // gate's own question.
     if (question.kind === "replace_blocked") {
-      return replaceBlockedStatus(message, question.outgoing, {
-        kind: "run_removals",
-        commands: question.removals,
-      });
+      return replaceBlockedStatus(
+        message,
+        replaceBlockedLabel(question.outgoing, question.incoming),
+        {
+          kind: "run_removals",
+          commands: question.removals,
+        },
+      );
     }
     // DEF-0040 / R-461 (S194-D): the night shift question -- Yes and No, one
     // pair of the same width (R-447, `yesNo`), each carrying the answers
@@ -4990,6 +5255,9 @@ export function CommandBar({
         return;
       case "leave_it":
         cancelStanding("Leave it");
+        return;
+      case "answer_lot_overlap":
+        answerLotOverlap(action.step, action.answer);
         return;
       case "pick_span": {
         // R-430 (S194-D third pass): the same sentence with the offered span,
@@ -6219,7 +6487,7 @@ export function CommandBar({
                   {status.kind === "question" && status.candidates.length > 0 && (
                     <div
                       className={
-                        status.yesNo
+                        status.yesNo || status.pair
                           ? `${styles.candidates} ${styles.answerPair}`
                           : styles.candidates
                       }

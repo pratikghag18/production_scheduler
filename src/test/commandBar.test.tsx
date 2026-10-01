@@ -78,6 +78,17 @@ import type { Reader, Reading } from "@/lib/voice/readSentence";
 import type { ClipInfo, Recognizer, RecognizerEvents } from "@/lib/voice/recognizer";
 import type { TraceEntry } from "@/lib/voice/trace";
 import { CREATE_WAITING, attachmentWaiting, splitWaiting } from "@/features/board/lib/popupWords";
+import type { PrecheckResult } from "@/features/board/lib/busyElsewhere";
+
+/**
+ * S200-A (R-468): `precheck` answers a `PrecheckResult` now, not a sentence or
+ * null. The scripted probes in the CB-pre and CB-rep blocks keep their old
+ * shape -- a refusal sentence, or null for "nothing to say" -- and are turned
+ * into the new answer here, so every assertion those cases make is unchanged.
+ */
+function said(sentence: string | null): PrecheckResult {
+  return sentence === null ? { kind: "ok" } : { kind: "busy_elsewhere", sentence };
+}
 
 /**
  * F-168 (R-421/R-427/R-434): `settleWrite` no longer reads an `undefined`
@@ -386,7 +397,7 @@ function renderBar(
   // probe wired, byte for byte what it was; the CB-pre describe block below is
   // the only caller that passes one.
   s196: {
-    precheck?: (step: ResolvedCommand | ResolvedMove) => Promise<string | null>;
+    precheck?: (step: ResolvedCommand | ResolvedMove) => Promise<PrecheckResult>;
   } = {},
 ) {
   const onOpen = vi.fn().mockReturnValue(WRITTEN);
@@ -11080,8 +11091,8 @@ describe("CB-pop: a sentence that ends in the board's own pop-up is finished by 
  */
 describe("CB-pre: the bar refuses before it speaks (S196-A, DEF-0060, F-239)", () => {
   const BUSY = "Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
-  const busy = vi.fn(async (): Promise<string | null> => BUSY);
-  const free = vi.fn(async (): Promise<string | null> => null);
+  const busy = vi.fn(async (): Promise<PrecheckResult> => said(BUSY));
+  const free = vi.fn(async (): Promise<PrecheckResult> => said(null));
   const nothingBut = (): void => {
     expect(threadText()).toContain(`Not done: ${BUSY}`);
     expect(threadText()).not.toMatch(/making Housing A|Join it|Separate block|Ready to do/);
@@ -11090,7 +11101,7 @@ describe("CB-pre: the bar refuses before it speaks (S196-A, DEF-0060, F-239)", (
   };
   const bar = (
     over: Partial<ResolveContext>,
-    precheck: (step: ResolvedCommand | ResolvedMove) => Promise<string | null>,
+    precheck: (step: ResolvedCommand | ResolvedMove) => Promise<PrecheckResult>,
   ) => renderBar(over, null, null, {}, {}, {}, {}, {}, { precheck });
 
   afterEach(() => {
@@ -11200,7 +11211,7 @@ describe("CB-pre: the bar refuses before it speaks (S196-A, DEF-0060, F-239)", (
     // Only the first shift is refused: the second is fine, so the question
     // is still the person's to answer.
     const first = vi.fn(async (step: ResolvedCommand | ResolvedMove) =>
-      step.range.startMin === 3 * 1440 + 360 ? BUSY : null,
+      said(step.range.startMin === 3 * 1440 + 360 ? BUSY : null),
     );
     const some = bar({ runs: [], shiftsAt: shifts }, first);
     fireEvent.change(some.input, { target: { value: sentence } });
@@ -11275,7 +11286,7 @@ describe("CB-pre: the bar refuses before it speaks (S196-A, DEF-0060, F-239)", (
 
   it("CB-pre-11: a lot with one step busy elsewhere drops it, names it in one sentence, and lists the rest", async () => {
     const onlyOp1 = vi.fn(async (step: ResolvedCommand | ResolvedMove) =>
-      step.intent === "assign" && step.operatorId === "op1" ? BUSY : null,
+      said(step.intent === "assign" && step.operatorId === "op1" ? BUSY : null),
     );
     const { input, onRunLot } = bar({ runs: [] }, onlyOp1);
     fireEvent.change(input, {
@@ -11575,17 +11586,17 @@ describe("CB-rep: a replace whose incoming person cannot go asks (S198-A, DEF-00
   const BUSY = "Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
   // Two cells are called "Cell 1" in the fixture, so the place is named by its line.
   const ASK_BUSY = `${BUSY} Take Sam Patel off Cell 1 in Line 1 anyway? Nobody would be covering Sam Patel's hours on Cell 1 in Line 1.`;
-  const busyOp1 = vi.fn(async (step: ResolvedCommand | ResolvedMove): Promise<string | null> =>
-    step.intent === "assign" && step.operatorId === "op1" ? BUSY : null,
+  const busyOp1 = vi.fn(async (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> =>
+    said(step.intent === "assign" && step.operatorId === "op1" ? BUSY : null),
   );
-  const free = vi.fn(async (): Promise<string | null> => null);
+  const free = vi.fn(async (): Promise<PrecheckResult> => said(null));
   const runLot = vi.fn(async (r: ResolvedAny[]): Promise<LotResult> => ({
     done: r.length,
     error: null,
   }));
   const bar = (
     over: Partial<ResolveContext>,
-    precheck: (step: ResolvedCommand | ResolvedMove) => Promise<string | null>,
+    precheck: (step: ResolvedCommand | ResolvedMove) => Promise<PrecheckResult>,
   ) =>
     renderBar(
       { runs: [], assignments: [BLK_SP], ...over },
@@ -11765,5 +11776,418 @@ describe("CB-rep: a replace whose incoming person cannot go asks (S198-A, DEF-00
     expect(statusText()).toContain("2. Operator 1 is on Cell 1");
     expect(screen.getByRole("button", { name: "Do all 2" })).toBeTruthy();
     expect(runLot).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * S200-A (DEF-0063, R-469): the replace's question is built from the steps its
+ * press will run. Sam Patel is on Cell 1 in Line 1 twice that day (10 am to 2 pm
+ * and 2 pm to 4 pm); Operator 1 (the incoming person) is busy where the caller
+ * cannot read only when the placement starts at 10 am.
+ */
+describe("CB-rep (S200-A, DEF-0063, R-469): the question names every step the press runs", () => {
+  const REPLACE = "Replace Sam Patel with Operator 1 on Cell 1 in Line 1";
+  const BUSY = "Operator 1 is already on Cell 4 in Line 2 today from 10 am to 2 pm.";
+  const BLK_SP2: ContextAssignment = {
+    ...BLK_SP,
+    id: "blkSp2",
+    startMin: 3 * 1440 + 840,
+    endMin: 3 * 1440 + 960,
+    label: "14:00–16:00",
+  };
+  // Busy ONLY for the placement over Sam's first block.
+  const busyFirst = vi.fn(async (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> =>
+    said(
+      step.intent === "assign" &&
+        step.operatorId === "op1" &&
+        step.range.startMin === BLK_SP.startMin
+        ? BUSY
+        : null,
+    ),
+  );
+  const busyAlways = vi.fn(async (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> =>
+    said(step.intent === "assign" && step.operatorId === "op1" ? BUSY : null),
+  );
+  const runLot = vi.fn(async (r: ResolvedAny[]): Promise<LotResult> => ({
+    done: r.length,
+    error: null,
+  }));
+  const bar = (
+    over: Partial<ResolveContext>,
+    precheck: (step: ResolvedCommand | ResolvedMove) => Promise<PrecheckResult>,
+  ) =>
+    renderBar(
+      { runs: [], assignments: [BLK_SP, BLK_SP2], ...over },
+      null,
+      null,
+      {},
+      { onRunLot: runLot },
+      {},
+      {},
+      {},
+      { precheck },
+    );
+  const say = (input: HTMLInputElement, text: string): void => {
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  };
+
+  afterEach(() => {
+    busyFirst.mockClear();
+    busyAlways.mockClear();
+    runLot.mockClear();
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-rep-8: two blocks, one busy -- the sentence names both removals and the one placement, the button says so, and the press runs exactly those three steps", async () => {
+    const fetchMock = stubFetch();
+    const { input } = bar({}, busyFirst);
+    say(input, REPLACE);
+    await act(async () => {});
+    expect(statusText()).toBe(
+      "Operator 1 is already on Cell 4 in Line 2 today from 10 am to 2 pm, so Sam Patel's 10 am to 2 pm block on Cell 1 in Line 1 cannot go to Operator 1. Take Sam Patel off Cell 1 in Line 1 for both blocks and put Operator 1 on the 2 pm to 4 pm one? Nobody would be covering 10 am to 2 pm.",
+    );
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "Take Sam Patel off, place Operator 1 where possible",
+      "Leave it",
+    ]);
+    expect(runLot).not.toHaveBeenCalled();
+    expect(postedEntry(fetchMock).asked).toBe(statusText());
+
+    fireEvent.click(candidateButtons()[0]);
+    await act(async () => {});
+    expect(runLot).toHaveBeenCalledTimes(1);
+    const [resolved] = runLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolved.map((r) => r.intent)).toEqual(["unassign", "unassign", "assign"]);
+    expect((resolved[2] as ResolvedCommand).operatorId).toBe("op1");
+    expect((resolved[2] as ResolvedCommand).range.startMin).toBe(BLK_SP2.startMin);
+  });
+
+  it("CB-rep-9: two blocks, the incoming person can take none -- the one-block question with the blocks named, 'anyway', and the press runs the two removals alone", async () => {
+    const { input } = bar({}, busyAlways);
+    say(input, REPLACE);
+    await act(async () => {});
+    expect(statusText()).toBe(
+      "Operator 1 is already on Cell 4 in Line 2 today from 10 am to 2 pm. Take Sam Patel off Cell 1 in Line 1 for both blocks anyway? Nobody would be covering Sam Patel's hours on Cell 1 in Line 1.",
+    );
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "Take Sam Patel off anyway",
+      "Leave it",
+    ]);
+    fireEvent.click(candidateButtons()[0]);
+    await act(async () => {});
+    const [resolved] = runLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolved.map((r) => r.intent)).toEqual(["unassign", "unassign"]);
+  });
+
+  it("CB-rep-10: Sam on two cells and the sentence names none -- each block's cell is named in the question", async () => {
+    const onC2: ContextAssignment = { ...BLK_SP2, id: "blkSpC2b", nodeId: "c2" };
+    const { input } = bar({ assignments: [BLK_SP, onC2] }, busyFirst);
+    say(input, "Replace Sam Patel with Operator 1 today");
+    await act(async () => {});
+    expect(statusText()).toBe(
+      "Operator 1 is already on Cell 4 in Line 2 today from 10 am to 2 pm, so Sam Patel's 10 am to 2 pm block on Cell 1 in Line 1 cannot go to Operator 1. Take Sam Patel off Cell 1 in Line 1 and Cell 2 for both blocks and put Operator 1 on the 2 pm to 4 pm one on Cell 2? Nobody would be covering 10 am to 2 pm on Cell 1 in Line 1.",
+    );
+  });
+
+  it("CB-rep-11: one block (unchanged wording) -- CB-rep-1's sentence still reads the same with a second block that Operator 1 can take absent", async () => {
+    const { input } = bar({ assignments: [BLK_SP] }, busyFirst);
+    say(input, REPLACE);
+    await act(async () => {});
+    expect(statusText()).toBe(
+      `${BUSY} Take Sam Patel off Cell 1 in Line 1 anyway? Nobody would be covering Sam Patel's hours on Cell 1 in Line 1.`,
+    );
+  });
+});
+
+/**
+ * S200-A (DEF-0064, R-468): a lot step whose person is already booked on a block
+ * the caller CAN read asks IN THE BAR, numbered as the lot's step and before the
+ * listing -- "Split evenly" or "Skip <name>" -- and writes nothing before the yes.
+ * The probe is scripted: Sam Patel ("sp") is busy on Cell 2 (a block of his the
+ * caller can read), Operator 1 is free.
+ */
+describe("CB-ovl: a lot step that overlaps a readable block asks, split or skip (S200-A, DEF-0064, R-468)", () => {
+  const LOT = "Assign Sam Patel and Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2";
+  const OVERLAP_SAM = "Sam Patel is already on Cell 2 today from 6 am to 2 pm.";
+  const BUSY_OUT = "Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+  const ASK =
+    "1 of 2: Sam Patel is already on Cell 2 today from 6 am to 2 pm. Split Sam Patel's time evenly between Cell 2 and Cell 1, or skip Sam Patel?";
+  const overlapOf = (operatorId: string, sentence = OVERLAP_SAM): PrecheckResult =>
+    operatorId === "sp"
+      ? {
+          kind: "overlap",
+          sentence,
+          blocks: [{ assignmentId: "asg-c2", nodeId: "c2", nodeName: "Cell 2", efficiency: 1 }],
+          capPercent: 100,
+        }
+      : { kind: "ok" };
+  const samOverlaps = vi.fn(async (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> =>
+    overlapOf(step.intent === "assign" ? step.operatorId : ""),
+  );
+  const runLot = vi.fn(async (r: ResolvedAny[]): Promise<LotResult> => ({
+    done: r.length,
+    error: null,
+  }));
+  const bar = (
+    precheck: (step: ResolvedCommand | ResolvedMove) => Promise<PrecheckResult>,
+    over: Partial<ResolveContext> = { runs: [] },
+  ) => renderBar(over, null, null, {}, { onRunLot: runLot }, {}, {}, {}, { precheck });
+  const say = (input: HTMLInputElement, text: string): void => {
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  };
+
+  afterEach(() => {
+    samOverlaps.mockClear();
+    runLot.mockClear();
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-ovl-1: the question comes first -- numbered as the lot's step, both buttons of one width, no listing, nothing written, traced as asked", async () => {
+    const fetchMock = stubFetch();
+    const { input, onOpen } = bar(samOverlaps);
+    say(input, LOT);
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+    // Both steps were probed together, once each.
+    expect(samOverlaps).toHaveBeenCalledTimes(2);
+    expect(statusText()).toBe(ASK);
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "Split evenly",
+      "Skip Sam Patel",
+    ]);
+    expect(document.querySelector('[class*="answerPair"]')).not.toBeNull();
+    expect(statusText()).not.toMatch(/Ready to do/);
+    expect(runLot).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toBe(ASK);
+    expect(entry.answered).toBeNull();
+    expect(entry.ran).toEqual([]);
+  });
+
+  it("CB-ovl-2: Split evenly -- the listing says so, and the one yes writes that step through the split call with even shares and the new assignment, Operator 1's step beside it unchanged", async () => {
+    const fetchMock = stubFetch();
+    const { input } = bar(samOverlaps);
+    say(input, LOT);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Split evenly" }));
+    expect(statusText()).toMatch(
+      /^Ready to do 2 things: 1\. Sam Patel is on Cell 1 .* making Housing A, Sam Patel's time split evenly with Cell 2\. 2\. Operator 1 is on Cell 1 .* making Housing A\. Say yes to do them, or no\.$/,
+    );
+    expect(runLot).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await act(async () => {});
+    expect(runLot).toHaveBeenCalledTimes(1);
+    const [resolved] = runLot.mock.calls[0] as [ResolvedCommand[]];
+    expect(resolved).toHaveLength(2);
+    expect(resolved[0].operatorId).toBe("sp");
+    expect(resolved[0].split).toEqual({
+      adjustments: [{ assignmentId: "asg-c2", efficiencyPercent: 50 }],
+      efficiencyPercent: 50,
+      person: "Sam Patel",
+      with: "Cell 2",
+    });
+    expect(resolved[1].operatorId).toBe("op1");
+    expect(resolved[1].split).toBeUndefined();
+    // R-434: the ask, the answers and the listing stay in the one entry, in order.
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked?.startsWith(`${ASK}\nReady to do 2 things:`)).toBe(true);
+    expect(entry.answered).toBe("Split evenly\nDo all 2");
+    expect(entry.ran[0]).toContain("time split evenly with Cell 2");
+    expect(entry.outcome).toBe("Done, 2 things.");
+  });
+
+  it("CB-ovl-3: Skip Sam Patel -- named as not done in the listing's own words, the rest listed, and the yes writes Operator 1 alone", async () => {
+    const { input } = bar(samOverlaps);
+    say(input, LOT);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Skip Sam Patel" }));
+    expect(statusText()).toMatch(
+      /^Not doing Sam Patel on Cell 1 [^:]*: Sam Patel is already on Cell 2 today from 6 am to 2 pm\. Ready to do 1 thing: Operator 1 is on Cell 1 /,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Do it" }));
+    await act(async () => {});
+    const [resolved] = runLot.mock.calls[0] as [ResolvedCommand[]];
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].operatorId).toBe("op1");
+    expect(resolved[0].split).toBeUndefined();
+  });
+
+  it("CB-ovl-4: a cancel word drops the whole lot, nothing is written; a typed yes does not press either button; a typed button label does", async () => {
+    const fetchMock = stubFetch();
+    const { input } = bar(samOverlaps);
+    say(input, LOT);
+    await act(async () => {});
+    say(input, "yes");
+    expect(statusText()).toBe("Say which one.");
+    expect(runLot).not.toHaveBeenCalled();
+    say(input, "no");
+    expect(statusText()).toBe("Left it.");
+    expect(runLot).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.ran).toEqual([]);
+    cleanup();
+
+    const again = bar(samOverlaps);
+    say(again.input, LOT);
+    await act(async () => {});
+    say(again.input, "Skip Sam Patel");
+    expect(statusText()).toMatch(/^Not doing Sam Patel on Cell 1 /);
+  });
+
+  it("CB-ovl-5: a step busy on a place the caller cannot read still refuses up front with no question of its own; the other step's question follows and the listing carries both notes", async () => {
+    const mixed = vi.fn(async (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> =>
+      step.intent === "assign" && step.operatorId === "op1"
+        ? { kind: "busy_elsewhere", sentence: BUSY_OUT }
+        : overlapOf(step.intent === "assign" ? step.operatorId : ""),
+    );
+    const { input } = bar(mixed);
+    say(input, LOT);
+    await act(async () => {});
+    // Operator 1 asks nothing (R-465); Sam's step is the lot's only step left.
+    expect(statusText()).toBe(
+      "1 of 1: Sam Patel is already on Cell 2 today from 6 am to 2 pm. Split Sam Patel's time evenly between Cell 2 and Cell 1, or skip Sam Patel?",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Split evenly" }));
+    expect(statusText()).toMatch(
+      /^Not doing Operator 1 on Cell 1[^:]*: Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm\. Ready to do 1 thing: Sam Patel is on Cell 1 .*time split evenly with Cell 2\./,
+    );
+  });
+
+  it("CB-ovl-6: two overlapping steps are asked one after the other, each numbered, the trace carrying every ask and answer in order; skipping both is the refusal alone", async () => {
+    const fetchMock = stubFetch();
+    const both = vi.fn(async (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> => ({
+      kind: "overlap",
+      sentence:
+        step.intent === "assign" && step.operatorId === "sp"
+          ? OVERLAP_SAM
+          : "Operator 1 is already on Cell 2 today from 6 am to 2 pm.",
+      blocks: [{ assignmentId: "asg-x", nodeId: "c2", nodeName: "Cell 2", efficiency: 1 }],
+      capPercent: 100,
+    }));
+    const { input } = bar(both);
+    say(input, LOT);
+    await act(async () => {});
+    expect(statusText()).toMatch(/^1 of 2: Sam Patel is already on Cell 2/);
+    fireEvent.click(screen.getByRole("button", { name: "Skip Sam Patel" }));
+    expect(statusText()).toMatch(/^2 of 2: Operator 1 is already on Cell 2/);
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "Split evenly",
+      "Skip Operator 1",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Skip Operator 1" }));
+    await act(async () => {});
+    expect(threadText()).toMatch(
+      /Not doing Sam Patel on Cell 1[^:]*: Sam Patel is already on Cell 2/,
+    );
+    expect(threadText()).toMatch(
+      /Not doing Operator 1 on Cell 1[^:]*: Operator 1 is already on Cell 2/,
+    );
+    expect(threadText()).not.toMatch(/Ready to do/);
+    expect(runLot).not.toHaveBeenCalled();
+    const entry = postedEntry(fetchMock);
+    expect(entry.answered).toBe("Skip Sam Patel\nSkip Operator 1");
+    expect(entry.asked).toMatch(/^1 of 2: [^\n]*\n2 of 2: /);
+    expect(entry.outcome).toMatch(/^refused: Not doing /);
+  });
+
+  it("CB-ovl-7: a SINGLE sentence is unchanged -- the same overlap answer never asks in the bar; the writer is called (the board's split pop-up is its answer, CB-pre-7)", async () => {
+    const { input, onOpen } = renderBar(
+      { runs: [] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      {},
+      { precheck: samOverlaps },
+    );
+    say(input, "Assign Sam Patel to Housing A on Cell 1 in Line 1 from 10 to 2");
+    await act(async () => {});
+    expect(candidateButtons().map((b) => b.textContent)).not.toContain("Split evenly");
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("CB-ovl-8: a SWAP's placements never ask (A's new block overlaps A's own block the lot removes first) -- the listing is the ordinary four steps and the writer stays the gate", async () => {
+    const overlapEverywhere = vi.fn(async (): Promise<PrecheckResult> => ({
+      kind: "overlap",
+      sentence: OVERLAP_SAM,
+      blocks: [{ assignmentId: "x", nodeId: "c2", nodeName: "Cell 2", efficiency: 1 }],
+      capPercent: 100,
+    }));
+    const blkSpC2: ContextAssignment = { ...BLK1, id: "blkSpC2", operatorId: "sp", nodeId: "c2" };
+    const { input } = bar(overlapEverywhere, { runs: [], assignments: [BLK1, blkSpC2] });
+    say(input, "swap Operator 1 and Sam Patel today");
+    await act(async () => {});
+    expect(candidateButtons().map((b) => b.textContent)).not.toContain("Split evenly");
+    expect(statusText()).toMatch(/^Ready to do 4 things: /);
+  });
+
+  const REPLACE = "Replace Sam Patel with Operator 1 on Cell 1 in Line 1";
+  const OP1_BOOKED = "Operator 1 is already on Cell 2 today from 6 am to 2 pm.";
+  const op1Overlap = vi.fn(
+    async (step: ResolvedCommand | ResolvedMove, id = "asg-op1"): Promise<PrecheckResult> =>
+      step.intent === "assign" && step.operatorId === "op1"
+        ? {
+            kind: "overlap",
+            sentence: OP1_BOOKED,
+            blocks: [{ assignmentId: id, nodeId: "c2", nodeName: "Cell 2", efficiency: 1 }],
+            capPercent: 100,
+          }
+        : { kind: "ok" },
+  );
+
+  it("CB-ovl-9 (S200-A review): a replace's incoming person booked on a readable block asks split-or-skip BEFORE any listing, numbered as the lot's step; Split lists both steps and the one yes runs the removal and the split placement", async () => {
+    const { input } = bar(op1Overlap, { runs: [], assignments: [BLK_SP] });
+    say(input, REPLACE);
+    await act(async () => {});
+    expect(statusText()).toBe(
+      "2 of 2: Operator 1 is already on Cell 2 today from 6 am to 2 pm. Split Operator 1's time evenly between Cell 2 and Cell 1, or skip Operator 1?",
+    );
+    expect(statusText()).not.toMatch(/Ready to do/);
+    fireEvent.click(screen.getByRole("button", { name: "Split evenly" }));
+    expect(statusText()).toMatch(
+      /^Ready to do 2 things: 1. Sam Patel is off Cell 1 .* 2. Operator 1 is on Cell 1 .*Operator 1's time split evenly with Cell 2./,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Do all 2" }));
+    await act(async () => {});
+    const [resolved] = runLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolved.map((r) => r.intent)).toEqual(["unassign", "assign"]);
+    expect((resolved[1] as ResolvedCommand).split?.adjustments).toEqual([
+      { assignmentId: "asg-op1", efficiencyPercent: 50 },
+    ]);
+  });
+
+  it("CB-ovl-10 (S200-A review): Skip at that question makes it the replace question, built from what is left -- the overlap sentence is the reason, and the press runs the removal alone", async () => {
+    const { input } = bar(op1Overlap, { runs: [], assignments: [BLK_SP] });
+    say(input, REPLACE);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Skip Operator 1" }));
+    expect(statusText()).toBe(
+      `${OP1_BOOKED} Take Sam Patel off Cell 1 in Line 1 anyway? Nobody would be covering Sam Patel's hours on Cell 1 in Line 1.`,
+    );
+    expect(candidateButtons().map((b) => b.textContent)).toEqual([
+      "Take Sam Patel off anyway",
+      "Leave it",
+    ]);
+    expect(runLot).not.toHaveBeenCalled();
+    fireEvent.click(candidateButtons()[0]);
+    await act(async () => {});
+    const [resolved] = runLot.mock.calls[0] as [ResolvedAny[]];
+    expect(resolved.map((r) => r.intent)).toEqual(["unassign"]);
+  });
+
+  it("CB-ovl-11 (S200-A review): an overlapping block that an EARLIER step of the same lot removes (Sam's own, here) is exempt -- no question, the ordinary listing", async () => {
+    const { input } = bar((step) => op1Overlap(step, "blkSp"), {
+      runs: [],
+      assignments: [BLK_SP],
+    });
+    say(input, REPLACE);
+    await act(async () => {});
+    expect(statusText()).toMatch(/^Ready to do 2 things: 1. Sam Patel is off Cell 1/);
   });
 });
