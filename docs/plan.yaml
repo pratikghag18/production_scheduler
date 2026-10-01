@@ -12260,6 +12260,9 @@ requirements:
     TESTER 1 Oct (199t): DEF-0064 contradicts it --- a lot of two where one person is already booked on
     a block the caller can read prints Ready to do 2 things and is refused after the yes (the single
     sentence is held back with the split question); nothing is written, so minor.
+    TESTER 1 Oct (201t): DEF-0064 verified at f7954a9 for a block on a cell Ana can edit, but DEF-0065 (F-249
+    built in the browser) keeps it contradicted: a block she can read and not edit is still offered Split evenly,
+    listed Ready, and refused after the yes.
 - id: R-432
   title: When one sentence makes several changes and some cannot be made, the board says plainly what it did and what it did not do, and why
   source:
@@ -13077,8 +13080,10 @@ requirements:
   - kind: e2e
     file: e2e/typedWalk.spec.ts
     cases: "both sentence lists green twice against the new wording (R-433), following the board's own move (R-455)"
-  status: covered
+  status: contradicted
   note: >-
+    TESTER 1 Oct (201t): DEF-0065 --- a lot's refusal after a refused split reads "You cannot change
+    fc358b68-47bf-41c9-8e7e-04313e91c430 from here" (a raw node id).
     STATED 24 Sept (session 191). Standard, CLAUDE.md section 7. The maintainer weighed two candidates ---
     the board writes every sentence from templates with pins, or the model is asked a second time to
     rephrase the board's facts --- and chose the first; the second is not parked, it is declined until a
@@ -13337,7 +13342,7 @@ requirements:
     cases: "DEF-0062 (as Ana on the real board: the question, both buttons one width, Sam's block read back after each press and restored)"
   - kind: manual
     steps: "as Ana on the tester's stack (session 198, the lane and the developer's own typed-walk run): 'replace Sam Patel with Priya Shah on Cell 1' asks with both buttons, nothing written before the answer, each button does what it says"
-  status: contradicted
+  status: covered
   note: >-
     STATED 30 Sept (session 197t conversation). DEF-0062 is the defect it answers. BUILT 30 Sept (session 198,
     a637947), DEF-0062 fix-claimed. The replace lot is marked coupled on its expansion; the busy probe and the
@@ -13347,6 +13352,8 @@ requirements:
     and Take off anyway read back, the certificate door the same shape, a swap refused whole). DEF-0063
     (F-248) contradicts it: with two of the outgoing person's blocks and the incoming busy for only one,
     the press also places the incoming on the other block and the question never said so.
+    TESTER 1 Oct (201t): DEF-0063 verified cold as Ana at f7954a9 (two blocks one busy, both busy, one block;
+    each press wrote exactly what its sentence named); back to covered.
 - id: R-467
   title: A lot of independent placements asks a step's certificate question and carries on --- the reason is taken for that step alone, nothing is written before the one yes, and no step is dropped without being named
   source:
@@ -13422,6 +13429,10 @@ requirements:
     follows the single sentence's own question (today the board's split pop-up, "Answer it on the board");
     if a lot cannot hold the board's pop-up between steps, the developer asks the maintainer where the
     question goes before building it (CLAUDE.md section 4, ask where and how).
+    TESTER 1 Oct (201t): DEF-0064 verified at f7954a9 (the question, Split evenly, Skip, a cancel word and the
+    single sentence read back as Ana). Stays contradicted by DEF-0065 (Split offered on a block she cannot edit),
+    DEF-0066 (the numbers "2 of 2" then "1 of 2" when a certificate question precedes) and DEF-0067 ("between
+    Cell 1, Cell 2 and Cell 2").
     WHERE AND HOW, chosen 1 Oct (session 200) from two candidates drawn side by side (in the bar with two
     buttons, or the board's split pop-up held between steps): IN THE BAR. The step's question is numbered
     and reads "1 of 2: Sam Patel is already on Cell 1 today from 6 am to 2 pm. Split his time evenly between
@@ -19316,6 +19327,62 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 201t
+  date: 2026-10-01
+  title: "Tester run over session 200: DEF-0063 and DEF-0064 verified cold as Ana, F-249 built in the browser and filed (DEF-0065), two wording defects (DEF-0066, DEF-0067)"
+  shipped: []
+  commits: []
+  numbers:
+    app_tests: 4969
+    app_test_files: 191
+    tsc: 0
+    eslint: 0
+    db_checks: 937
+    migrations: 85
+    e2e: 62
+  confirmed: true
+  numbers_note: >-
+    Copied from the runners. The report's first vitest run: `Test Files  1 failed | 190 passed (191)`, `Tests  1 failed |
+    4968 passed (4969)`, the one red being src/test/defects/DEF-0020.test.ts (the invite function did not answer an
+    OPTIONS preflight within 10000ms: the tester stack's edge runtime, nine minutes old); alone it passed (`Tests  1 passed
+    (1)`) and a second full `npm run test` read `Test Files  191 passed (191)`, `Tests  4969 passed (4969)`, equal to
+    session 200. No commandBar case went red in either full run (F-251 not reproduced). SQL: every file ok, the per-file
+    lines sum to 937 passed, 0 failed, 0 hard-errors, as session 200. db:types against the stack differed from the
+    committed file by a BOM only (restored). typecheck and lint ok. format:check failed only on the untracked
+    .claude/settings.local.json. e2e: `Running 62 tests using 6 workers`, `1 failed`, `6 skipped`, `55 passed (3.0m)`; the
+    one failure, roleWalk R-465 ("Ana's rail says booked", received "PR Priya Shah Welding free"), passed on its own twice
+    (`2 passed (11.3s)`, rail text "booked (Cell 4, 6 am to 2 pm)"); DEF-0063 and DEF-0064's typed-walk cases passed in the
+    full run. The full report file was lost when a later playwright run cleared test-results; the lines above were copied
+    from it before that.
+  summary: >-
+    Merged Development (fast-forward to fc7fa1f), started the tester stack for this one run with the maintainer's yes,
+    stopped it at the end. DEF-0063 VERIFIED cold as Ana: two Sam blocks with Priya busy for one asks "... Take Sam Patel
+    off Cell 1 for both blocks and put Priya Shah on the 6 pm to 8 pm one? Nobody would be covering 6 am to 2 pm." with
+    "Take Sam Patel off, place Priya Shah where possible" and "Leave it" (284 px each); Leave it wrote nothing; the first
+    button wrote both Sam removals and Priya on 6 to 8 pm only, read back as Dana; both busy asks "for both blocks anyway"
+    and removes only; one block unchanged. DEF-0064 VERIFIED for the editable shape: "1 of 2: Sam Patel is already on
+    Cell 1 today from 6 am to 2 pm. Split ... or skip Sam Patel?" with two buttons of 97 px; Split wrote Cell 1 at 0.5, the
+    new Cell 2 row at 0.5 and Maria at 1.0 with no refusal after the yes; Skip named him as not doing and wrote only Maria;
+    a typed no wrote nothing; the single sentence still opens the board's pop-up. Also walked: Sam plus Lena (certificate
+    question first), a person already on two blocks (0.34, 0.33, 0.33), three people with two overlaps (numbered 2 of 3,
+    3 of 3, Skip on the third), the plant's zone (8 to 10 am is 13:00 to 15:00 UTC). Mutations, all red by name over
+    commandBar, commandResolve, dragGesture, busyElsewhere and trace (904 cases ran each time): precheck ignores overlap
+    (PB-1, PC-4), replace question from the refused block alone (CB-rep-8, CB-rep-10), the split field dropped from the
+    step (CB-ovl-2, 5, 9), the earlier-step exemption removed (CB-ovl-11), the swap exemption removed (CB-ovl-8).
+    FILED: DEF-0065 (minor; F-249 built in the browser with a read-only grant on Cell 4: Split evenly is offered, the
+    listing says Ready, the yes is refused with "You cannot change fc358b68-47bf-41c9-8e7e-04313e91c430 from here" and
+    the other person is never tried; violates R-431, R-468, R-459; no pin, the case needs a grant fixture and
+    rewriteRefusal is not exported), DEF-0066 (cosmetic; "2 of 2" is asked before "1 of 2" when a certificate question
+    comes first) and DEF-0067 (cosmetic; "between Cell 1, Cell 2 and Cell 2"). Requirements: R-466 back to covered
+    (R-469 stays covered); R-431 and R-468 stay contradicted; R-459 now contradicted by DEF-0065. Not worked: F-250 and
+    F-252 (left open by the developer, not worse than described), the sync door of DEF-0063, an overnight span (the bar
+    does not understand "from 11 pm to 1 am", older than this piece). Found nothing wrong: no new sentence names an ISO
+    date, an arrow or the word lot; the two buttons are one width in every pair (the replace pair 284, 157; the split
+    pair 97, 110, 94; the earlier join question's pair of 213 and 98 is a candidate strip with data labels, left as
+    is); no write was reported as done and found missing; a Split taken as Ana on a block she can edit never raised a
+    refusal. I first pointed my dev server at the developer's database by mistake (the shell had not exported the
+    tester's variables); one sign-in and one read-only sentence ("no block"), nothing written there, and I restarted it on
+    the tester's stack before any walk.
 - id: '200'
   date: 2026-10-01
   title: "A lot step whose person is already booked where the supervisor can see asks split-or-skip in the bar, and the replace question says exactly what its press runs: DEF-0063 and DEF-0064 fix-claimed as one piece, R-469 stated, a two-day test flake traced to a leftover timer (F-251)"
