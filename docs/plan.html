@@ -121,7 +121,7 @@ footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);fo
   <div class="stat ok"><span class="n">937</span><span class="l">database checks</span></div>
   <div class="stat"><span class="n">85</span><span class="l">database changes (migrations)</span></div>
   <a class="stat act" href="#defects"><span class="n">2</span><span class="l">open defects — index</span></a>
-  <div class="stat act"><span class="n">355 / 410</span><span class="l">requirements covered by a test · 2 contradicted</span></div>
+  <div class="stat act"><span class="n">355 / 411</span><span class="l">requirements covered by a test · 3 contradicted</span></div>
 </div>
   <p class="fine">Measured at commit <code>a637947</code>. When you run the tests, the count should match <em>exactly</em>; a different number means a test file did not load, which is how a broken suite once looked green.</p>
 </section>
@@ -904,7 +904,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
     <td><span class="chip bad">open</span></td>
     <td>minor</td>
     <td>A lot that puts a person already booked on a block Ana can see says Ready to do 2 things, and the server refuses it after the yes (a single sentence is asked first)</td>
-    <td><a href="#R-431">R-431</a></td>
+    <td><a href="#R-431">R-431</a>, <a href="#R-468">R-468</a></td>
     <td class="fine">2026-10-01 · <a href="defects/DEF-0064.md">file</a></td>
   </tr>
 <tr class="closed">
@@ -3391,7 +3391,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <div class="find" id="DEF-0064">
   <span class="tag">DEF-0064 · minor · stale-permission · open</span>
   <h3>A lot that puts a person already booked on a block Ana can see says Ready to do 2 things, and the server refuses it after the yes (a single sentence is asked first)</h3>
-  <p class="fine">Violates <a href="#R-431">R-431</a> · filed 2026-10-01 by tester · <a href="defects/DEF-0064.md">open the file</a> · <a href="#defects">back to the index</a></p>
+  <p class="fine">Violates <a href="#R-431">R-431</a>, <a href="#R-468">R-468</a> · filed 2026-10-01 by tester · <a href="defects/DEF-0064.md">open the file</a> · <a href="#defects">back to the index</a></p>
   <p><b>Reproduction</b></p>
 <p>Tester's stack, fresh demo seed (Sam Patel is on Cell 1 today 6 am to 2 pm; Cell 2 has nothing 8 am to 10 am; Lena Novak lacks Welding, which Cell 2 needs). Sign in as <b>Ana</b>, open the bar:</p>
 <p>1. &quot;put Sam Patel on Housing A at Cell 2 today from 8 am to 10 am&quot; (the single sentence, for comparison). 2. &quot;put Sam Patel and Lena Novak on Housing A at Cell 2 today from 8 am to 10 am&quot;; at &quot;2 of 2: Not done: Lena Novak    is not certified for Cell 2 ...&quot; type &quot;covering an absence&quot;; then type &quot;yes&quot;. 3. Read the thread and Sam's rows as Dana.</p>
@@ -3405,6 +3405,8 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
 <p>Nothing is written (rows read back unchanged), and the refusal is honest, so this is minor; but it arrives after the yes, and &quot;Lena Novak is not on Cell 2&quot; reads as though she was never going to be. The same with Lena already on Cell 1 at the same hours (200% of 100%, 13 Oct). Session 196's pre-check (<code>refuseBusyLotSteps</code>) only covers a block on a line Ana cannot read; the readable overlap is left to the server.</p>
 <p><b>Lead</b></p>
 <p><b>A suspicion, not a fact.</b> <code>refuseBusyLotSteps</code> in <code>src/features/board/components/CommandBar.tsx</code> probes the server's busy-elsewhere answer only for people the caller cannot read. A step whose person has a block the caller CAN read at that time falls through to the writer, which the capacity trigger refuses. Either run the same probe for every lot step, or treat the readable overlap as the single sentence does (the split question). Not caused by session 198; found while attacking its new doors, and it sits next to F-247.</p>
+<p><b>Maintainer's decision -- 1 Oct, session 199t conversation</b></p>
+<p>Of the two ways the Lead names, the maintainer chose the second (&quot;I agree with option B.&quot;): the lot asks the overlapping step's question the way the single sentence does, then carries on to the next step. It is R-468 in the plan; this defect now violates it as well as R-431. Refusing the step up front (option A) was the alternative and was not chosen.</p>
 </div>
 </section>
 
@@ -5526,7 +5528,7 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
   <h2>Every requirement, and what proves it</h2>
   <p class="lead">One row per thing the product must do. <em>Covered</em> means a test in the suite is named for it; <em>uncovered</em> means nothing but a person checks it; <em>contradicted</em> means an open defect shows the code doing something else.</p>
   <div class="glance"><table class="fixed"><colgroup><col style="width:5.5rem"><col style="width:56%"><col><col style="width:7.5rem"></colgroup>
-<caption>410 requirements · 355 covered · 29 uncovered · 2 contradicted · 24 superseded</caption>
+<caption>411 requirements · 355 covered · 29 uncovered · 3 contradicted · 24 superseded</caption>
 <tbody><tr class="r-covered" id="R-D1">
   <td class="g-n">R-D1</td>
   <td class="reqmain"><b>Profiles reference auth.users by uuid</b><br><span class="fine">user_profiles.user_id is a uuid foreign key to auth.users with ON DELETE CASCADE and a unique (org_id, user_id).</span>
@@ -8396,6 +8398,13 @@ mutations: 19 of 19 caught (M14 by screenshot)</div><p class="fine">§19.88 · D
       <br><span class="fine">tester session 197t (30 Sept), DEF-0061: &quot;put Lena Novak and Sam Patel on Housing A at Cell 2 ...&quot; with Lena short Welding wrote Lena on her reason and never mentioned Sam, or asked a reason and ignored it, session 198 conversation (the maintainer, 30 Sept): shown two candidates side by side --- ask the reason for that step and carry on, or refuse the whole lot as R-425 reads --- the maintainer chose the first · maintainer · STATED 30 Sept (session 198). DEF-0061 is the defect it answers (filed against R-425 and R-432, which carried the contradiction); R-425's claim is narrowed by it, not retired. BUILT 30 Sept (session 198, a637947), DEF-0061 fix-claimed. The per-step reason lives on the lot (Lot.stepOptions, by step index), never on the held single sentence. The numbered question keeps the single sentence's &quot;Not done:&quot; lead so both come from one builder; whether to drop the lead from both is a wording question for the maintainer. F-247 is the edge left open (uncertified and busy at once).</span></td>
   <td class="fine">vitest · <code>src/test/commandBar.test.tsx</code> CB-lot-ask-1 to CB-lot-ask-10 (both orders: the numbered question, the reason taken for that step only, the listing naming both with the reason beside its step, one yes runs both with override.reason on one step; block policy names the step and lists the rest; every step blocked is the refusal alone; no drops the lot; yes re-asks; a reason that parses as a sentence runs as one; a day off the board re-runs the whole sentence; the trace entry at each point)<br>vitest · <code>src/test/dragGesture.test.ts</code> RL-0 (the lot writer passes a step's override and areaOverride to the same writers the single sentence uses)<br>e2e · <code>e2e/typedWalk.spec.ts</code> DEF-0061 (as Ana on the real board, both orders: the question, the reason, the listing, the yes, Lena's row read back with eligibility_override and the reason and Sam's without, then removed; no writes nothing)</td>
   <td class="chipcol"><span class="chip done">covered</span></td>
+</tr>
+<tr class="r-contradicted" id="R-468">
+  <td class="g-n">R-468</td>
+  <td class="reqmain"><b>A lot step whose person is already booked at that time on a place the supervisor can see asks, as the single sentence does, and the lot carries on --- never &quot;Ready to do&quot; followed by a refusal after the yes</b><br><span class="fine">When one step of a lot of independent placements names a person who is already booked at that time on a place the caller can read, the bar does not list the step as ready. It asks that step's question before the listing, numbered as the lot's own step, in the same words and with the same choices the single sentence gets for the same overlap (split the time, or skip that person), and then carries on to the next step. The listing names every step with what was chosen for it (a skipped step is named as not being done, with the reason), and the one yes writes only what the server will take. Nothing is written before that yes. It is R-435 (ask when in doubt) and R-431 (nothing offered the server refuses) applied to the lot; a person busy on a place the caller cannot read keeps R-465's up-front refusal.</span>
+      <br><span class="fine">tester session 199t (1 Oct), DEF-0064: &quot;put Sam Patel and Lena Novak on Housing A at Cell 2 today from 8 am to 10 am&quot; with Sam on Cell 1 6 am to 2 pm listed &quot;Ready to do 2 things&quot; and the server refused after the yes, session 199t conversation (the maintainer, 1 Oct), shown two candidates side by side --- A: refuse that person up front and list the rest, B: ask as the single sentence does (split his time, or skip him) and carry on --- &quot;I agree with option B.&quot; · maintainer · STATED 1 Oct (session 199t conversation). DEF-0064 is the defect it answers. How the choice reads follows the single sentence's own question (today the board's split pop-up, &quot;Answer it on the board&quot;); if a lot cannot hold the board's pop-up between steps, the developer asks the maintainer where the question goes before building it (CLAUDE.md section 4, ask where and how).</span></td>
+  <td class="fine">manual: as Ana on a fresh demo seed, DEF-0064's reproduction: the lot asks Sam's overlap question before any listing, each choice carries on to Lena's step, the listing matches the choice, and the yes writes without a refusal (rows read back as Dana)</td>
+  <td class="chipcol"><span class="chip bad">contradicted</span></td>
 </tr></tbody></table></div>
 </section>
 

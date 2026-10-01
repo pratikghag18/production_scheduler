@@ -13384,6 +13384,30 @@ requirements:
     never on the held single sentence. The numbered question keeps the single sentence's "Not done:" lead so
     both come from one builder; whether to drop the lead from both is a wording question for the maintainer.
     F-247 is the edge left open (uncertified and busy at once).
+- id: R-468
+  title: A lot step whose person is already booked at that time on a place the supervisor can see asks, as the single sentence does, and the lot carries on --- never "Ready to do" followed by a refusal after the yes
+  source:
+  - 'tester session 199t (1 Oct), DEF-0064: "put Sam Patel and Lena Novak on Housing A at Cell 2 today from 8 am to 10 am" with Sam on Cell 1 6 am to 2 pm listed "Ready to do 2 things" and the server refused after the yes'
+  - 'session 199t conversation (the maintainer, 1 Oct), shown two candidates side by side --- A: refuse that person up front and list the rest, B: ask as the single sentence does (split his time, or skip him) and carry on --- "I agree with option B."'
+  stated_by: maintainer
+  claim: >-
+    When one step of a lot of independent placements names a person who is already booked at that time on
+    a place the caller can read, the bar does not list the step as ready. It asks that step's question
+    before the listing, numbered as the lot's own step, in the same words and with the same choices the
+    single sentence gets for the same overlap (split the time, or skip that person), and then carries on to
+    the next step. The listing names every step with what was chosen for it (a skipped step is named as
+    not being done, with the reason), and the one yes writes only what the server will take. Nothing is
+    written before that yes. It is R-435 (ask when in doubt) and R-431 (nothing offered the server refuses)
+    applied to the lot; a person busy on a place the caller cannot read keeps R-465's up-front refusal.
+  verified_by:
+  - kind: manual
+    steps: "as Ana on a fresh demo seed, DEF-0064's reproduction: the lot asks Sam's overlap question before any listing, each choice carries on to Lena's step, the listing matches the choice, and the yes writes without a refusal (rows read back as Dana)"
+  status: contradicted
+  note: >-
+    STATED 1 Oct (session 199t conversation). DEF-0064 is the defect it answers. How the choice reads
+    follows the single sentence's own question (today the board's split pop-up, "Answer it on the board");
+    if a lot cannot hold the board's pop-up between steps, the developer asks the maintainer where the
+    question goes before building it (CLAUDE.md section 4, ask where and how).
 findings:
 - id: F-248
   title: A replace over two of the outgoing person's blocks, the incoming busy for only one --- "Take Sam Patel off anyway" also places Priya on the other block, and the sentence does not say so
