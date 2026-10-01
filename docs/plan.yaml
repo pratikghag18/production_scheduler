@@ -3,7 +3,7 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-09-30'
+  updated: '2026-10-01'
   tip: 'a637947'
   baseline:
     app_tests: 2750
@@ -12092,7 +12092,7 @@ requirements:
     cases: "an uncertified person on Cell 1 asks, a typed reason writes the block with eligibility_override true; the same inside a swap is refused before the yes"
   - kind: manual
     steps: "the reviewer typed the reason in the real bar and read eligibility_override and override_reason back from the database (session 176)"
-  status: contradicted
+  status: covered
   note: >-
     STATED 16 Sept (session 176): "People not trained are being assigned" --- Lena Novak and Tom Baker
     hold no Welding, which Line 1 requires; the single opened the reason pop-up, the swap wrote three
@@ -12100,6 +12100,9 @@ requirements:
     is the rule for a coupled lot (a replace, a swap, a copy --- expansions whose steps the board built
     from one sentence); a lot of independent steps the person typed asks the step's question and carries
     on to its one yes. "Never writes half of itself" holds for both. DEF-0061 fix-claimed (a637947).
+    TESTER 1 Oct (199t): DEF-0061 verified cold as Ana, both orders; R-467 is the rule for a lot of
+    independent steps, this one stands for a coupled lot (a replace and a swap refused or asked, never
+    shrunk).
 - id: R-426
   title: The plant's zone is the one clock --- every day and hour the app shows, reads or writes is in it, and a new standard audits the code that predates it
   source:
@@ -12251,9 +12254,12 @@ requirements:
     cases: "DEF-0060 and F-239 (as Ana on the real board: one Not done, no readout, no join question, trace refused; a slow write reads Working and says nothing as done until it is)"
   - kind: manual
     steps: "the audit this standard triggers (queued 17 Sept): capacity and absence checked before the yes in the bar, each pinned; area and certificates already are (R-425, F-165)"
-  status: covered
+  status: contradicted
   note: >-
     STATED 17 Sept (session 178): "2. Yes".
+    TESTER 1 Oct (199t): DEF-0064 contradicts it --- a lot of two where one person is already booked on
+    a block the caller can read prints Ready to do 2 things and is refused after the yes (the single
+    sentence is held back with the split question); nothing is written, so minor.
 - id: R-432
   title: When one sentence makes several changes and some cannot be made, the board says plainly what it did and what it did not do, and why
   source:
@@ -12279,7 +12285,7 @@ requirements:
   - kind: vitest
     file: src/test/commandResolve.test.ts
     cases: "every resolved step kind carries who and where and what stays (27 cases gained the two fields)"
-  status: contradicted
+  status: covered
   note: >-
     BUILT 28 Sept (session 194, 504a74b), DEF-0052 fix-claimed. STATED 17 Sept (session 178): "3. Yes". RESTATED 28 Sept by the maintainer when shown the two
     columns side by side (the revert the rule asked for, and what the app does). Today's answer is "Did k
@@ -12292,6 +12298,8 @@ requirements:
     its reason in the plant's words), "Not tried:" (every change after the refusal, said as what stays:
     "Tom Baker stays on Cell 1."). A refused change and a change never tried are two different facts
     and are never folded into one line.
+    TESTER 1 Oct (199t): DEF-0061 verified; a lot whose step is refused after the yes still names what
+    was done and not done (seen again in DEF-0064's output).
 - id: R-433
   title: A walk is a spec first --- no sentence list is handed to the maintainer before it runs green twice as an end-to-end spec
   source:
@@ -12340,9 +12348,15 @@ requirements:
     First case: "from 1 to 5" with no am or pm on either hour and both under 7 asks "1 am to 5 am, or 1 pm to
     5 pm?" instead of reading 01:00-05:00.
   verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-lot-ask-1 to CB-lot-ask-10 (a lot step that cannot go asks and carries on, no quiet drop) and CB-rep-1 to CB-rep-7 (a replace that cannot finish asks what to do next)"
+  - kind: e2e
+    file: e2e/typedWalk.spec.ts
+    cases: "DEF-0061 and DEF-0062 (as Ana on the real board: the question, the answer, the rows read back)"
   - kind: manual
     steps: "pinned when the bare-pair question lands (queued 17 Sept); then the grammar's own cases"
-  status: contradicted
+  status: covered
   note: >-
     STATED 17 Sept (session 178): "7. Yes, definitely ask, always ask when in doubt."
     RESTATED 30 Sept (session 197t conversation), wider than two readings of one sentence: "Whenever the bar
@@ -12350,6 +12364,8 @@ requirements:
     Any point where the bar would otherwise drop, shrink or reinterpret part of what was said (a replace whose
     incoming half cannot be placed, R-466; a lot that stops at a question, DEF-0061) is a question, not a
     quiet choice.
+    TESTER 1 Oct (199t): DEF-0061 and DEF-0062 verified --- a lot step that cannot go and a replace that
+    cannot finish both ask what to do next instead of shrinking.
 - id: R-436
   title: '"Clear" empties the place --- the people and the job go, unless the sentence names a part; and the activity log gives an undo'
   source:
@@ -13327,6 +13343,10 @@ requirements:
     a637947), DEF-0062 fix-claimed. The replace lot is marked coupled on its expansion; the busy probe and the
     resolver's certificate and area gates both reach one question. F-248 is the edge left open (two blocks,
     one busy).
+    TESTER 1 Oct (199t): DEF-0062 verified cold as Ana (the sentence, both buttons one width, Leave it
+    and Take off anyway read back, the certificate door the same shape, a swap refused whole). DEF-0063
+    (F-248) contradicts it: with two of the outgoing person's blocks and the incoming busy for only one,
+    the press also places the incoming on the other block and the question never said so.
 - id: R-467
   title: A lot of independent placements asks a step's certificate question and carries on --- the reason is taken for that step alone, nothing is written before the one yes, and no step is dropped without being named
   source:
@@ -19150,6 +19170,53 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 199t
+  date: 2026-10-01
+  title: "Tester run over session 198: DEF-0061 and DEF-0062 verified cold as Ana, two new defects (DEF-0063 a button that does more than its label, DEF-0064 a lot refused after the yes)"
+  shipped: []
+  commits: []
+  numbers:
+    app_tests: 4944
+    app_test_files: 191
+    tsc: 0
+    eslint: 0
+    db_checks: 937
+    migrations: 85
+    e2e: 60
+  confirmed: true
+  numbers_note: >-
+    Copied from the runner's own report (tester-run-2026-10-01-1617): `Test Files  191 passed (191)`, `Tests
+    4944 passed (4944)`, and `Runner says: 4944 tests in 191 files. Plan says 4944 in 191. Match. Exactly.` SQL: every
+    file ok, the per-file lines sum to 937 passed, 0 failed, 0 hard-errors, as session 198. db:types against the
+    tester's stack differed from the committed file by a BOM only (restored). typecheck and lint ok. format:check
+    failed only on the untracked .claude/settings.local.json. e2e: `Running 60 tests using 6 workers`, `54 passed`,
+    `6 skipped`, no failures and no flake (session 198 recorded 58; the two extra are the DEF-0061 and DEF-0062 typed
+    walk cases). CB-rep-1 did not flake in the full run, or in the five mutation runs.
+  summary: >-
+    Merged Development (fast-forward to f522e2c), started the tester stack for this one run with the maintainer's
+    yes, stopped it at the end. DEF-0061 VERIFIED cold as Ana in both orders on 13 and 14 Oct (a day off the board):
+    "1 of 2: Not done: Lena Novak is not certified for Cell 2, missing Welding ...", the reason taken for her step,
+    one listing naming both with her reason, nothing written before the yes, then Lena's row with
+    eligibility_override and the reason and Sam's with neither; "no" at the question and "no" at the final yes each
+    wrote nothing. DEF-0062 VERIFIED: the one sentence, two buttons of one width (155 and 155 px), Leave it wrote
+    nothing, Take Sam Patel off anyway removed Sam's block and wrote nothing for Priya, restored; the certificate
+    door (Lena into Cell 2) asks the same question shape; a swap with an uncertified person is refused whole.
+    Mutations, all red by name: the replace branch disabled (CB-rep-1, 2, 3), the swap branch disabled (CB-rep-6),
+    the step's override dropped from the writer (RL-0 and D13), the lot's resolve ignoring its step options (CB-lot-ask-1,
+    1b, 2, 3, 7, 9), the day-off-board re-run cut to the first step (CB-lot-ask-10); the tree was clean after each.
+    FILED: DEF-0063 (major; F-248 confirmed in the browser: with a second Sam block outside Priya's busy hours the
+    press also writes Priya onto it, unsaid until after; contradicts R-466) and DEF-0064 (minor; a lot of two where
+    one person is already booked on a block Ana can read says Ready to do 2 things and is refused after the yes
+    with 200% of 100%, the single sentence is held back with the split question; contradicts R-431). Requirements:
+    R-425, R-432, R-435 back to covered; R-467 stays covered; R-466 stays contradicted (DEF-0063); R-431 now
+    contradicted (DEF-0064). Found nothing wrong: no readout names an ISO date, arrow or internal word; "Take X off
+    anyway" cannot appear for a place Ana cannot edit because Cells 4 and 6 are not on her board ("No cell called
+    Cell 4 on your board", with the nearest cells offered) and a viewer is given no bar; a copy whose only step is
+    short a certificate is refused whole, which is R-425's coupled-lot rule. Observations, not filed: while the
+    board is moving to a day off the board the status reads "1 of 2: Moved the board to Tue Oct 13." and a reason typed
+    in that moment is answered "I did not understand that"; "swap Sam Patel and Priya Shah today" says "Priya Shah has no
+    block Thu Oct 1." though she has one on a line Ana cannot read (the swap is refused whole either way); the
+    lot's question keeps "Not done:" as its lead before anything was done (the maintainer's wording question from 198).
 - id: '198'
   date: 2026-09-30
   title: "A lot's step that cannot go asks, and a replace asks instead of shrinking: DEF-0061 and DEF-0062 fix-claimed as one piece, R-467 stated by the maintainer, the sweep the tester asked for done (two quiet drops filed as findings)"
