@@ -38,6 +38,7 @@ function outside(
     timerange: `["${startUtc}+00","${endUtc}+00")`,
     efficiency: 1,
     outside: true,
+    editable: false,
   };
 }
 
@@ -51,6 +52,7 @@ const READABLE: CapacityProbeOverlap = {
   timerange: '["2026-09-30 15:00:00+00","2026-09-30 17:00:00+00")',
   efficiency: 1,
   outside: false,
+  editable: true,
 };
 
 // 6 am to 2 pm on Wed 30 Sept in Chicago.
@@ -411,5 +413,75 @@ describe("precheckBeforeWrite (S200-A): the pre-check's fuller answer from the o
       .fn<Probe>()
       .mockResolvedValue({ fits: false, peak: 2, cap: 1, overlapping: [] });
     expect(await precheckBeforeWrite(attempt, deps(nothing))).toEqual({ kind: "ok" });
+  });
+
+  // S202-A (DEF-0065, R-431, R-468): a readable block she cannot CHANGE (the server's
+  // `editable`, app_can_edit_node) makes the split a thing the server refuses.
+  const LOCKED_CELL_4: CapacityProbeOverlap = {
+    ...READABLE,
+    assignmentId: "asg-c4",
+    nodeId: "n-c4",
+    nodeName: "Cell 4",
+    parentName: "Line 2",
+    timerange: '["2026-09-30 11:00:00+00","2026-09-30 19:00:00+00")',
+    editable: false,
+  };
+
+  it("PB-3: a readable block she cannot change is `overlap_locked` -- the same builder's sentence plus the clause, never the product or an id; every editable one is still `overlap`", async () => {
+    const locked = vi
+      .fn<Probe>()
+      .mockResolvedValue({ fits: false, peak: 2, cap: 1, overlapping: [LOCKED_CELL_4] });
+    expect(await precheckBeforeWrite(attempt, deps(locked))).toEqual({
+      kind: "overlap_locked",
+      sentence:
+        "Sam Patel is already on Cell 4 today from 6 am to 2 pm, and you cannot change that block from here.",
+    });
+    const editable = vi.fn<Probe>().mockResolvedValue({
+      fits: false,
+      peak: 2,
+      cap: 1,
+      overlapping: [{ ...LOCKED_CELL_4, editable: true }],
+    });
+    expect((await precheckBeforeWrite(attempt, deps(editable))).kind).toBe("overlap");
+  });
+
+  it("PB-4: the clause counts the blocks -- two locked `those blocks`, one of two locked `one of them`, more `some of them`", async () => {
+    const say = async (rows: CapacityProbeOverlap[]): Promise<string> => {
+      const probe = vi
+        .fn<Probe>()
+        .mockResolvedValue({ fits: false, peak: 3, cap: 1, overlapping: rows });
+      const a = await precheckBeforeWrite(attempt, deps(probe));
+      if (a.kind !== "overlap_locked") throw new Error(`not locked: ${a.kind}`);
+      return a.sentence;
+    };
+    const LOCKED_3 = {
+      ...LOCKED_CELL_4,
+      assignmentId: "asg-c4b",
+      nodeName: "Cell 5",
+      timerange: CELL_3.timerange,
+    };
+    expect(await say([LOCKED_CELL_4, LOCKED_3])).toBe(
+      "Sam Patel is already on Cell 4 today from 6 am to 2 pm and Cell 5 today from 5 pm to 7 pm, and you cannot change those blocks from here.",
+    );
+    expect(await say([CELL_1, LOCKED_3])).toBe(
+      "Sam Patel is already on Cell 1 today from 6 am to 2 pm and Cell 5 today from 5 pm to 7 pm, and you cannot change one of them from here.",
+    );
+    expect(
+      await say([
+        LOCKED_CELL_4,
+        LOCKED_3,
+        { ...CELL_1, timerange: '["2026-09-30 15:00:00+00","2026-09-30 16:00:00+00")' },
+      ]),
+    ).toContain("and you cannot change some of them from here.");
+  });
+
+  it("PB-5: an outside row still wins -- `busy_elsewhere`, never `overlap_locked`, even beside a locked readable block", async () => {
+    const mixed = vi.fn<Probe>().mockResolvedValue({
+      fits: false,
+      peak: 3,
+      cap: 1,
+      overlapping: [LOCKED_CELL_4, PRIYA_CELL_4],
+    });
+    expect((await precheckBeforeWrite(attempt, deps(mixed))).kind).toBe("busy_elsewhere");
   });
 });

@@ -12191,3 +12191,327 @@ describe("CB-ovl: a lot step that overlaps a readable block asks, split or skip 
     expect(statusText()).toMatch(/^Ready to do 2 things: 1. Sam Patel is off Cell 1/);
   });
 });
+
+/**
+ * S202-A (DEF-0066, F-247, DEF-0065, DEF-0067; R-468, R-431, R-459). The probe is
+ * scripted as in CB-ovl: Sam Patel ("sp") is booked on Cell 2 (a block the caller
+ * can read), Operator 1 ("op1") is short Welding for Cell 1 under the warn policy.
+ * Every question a lot asks is asked in step order, after the one probe; a block she
+ * can read but not change is refused up front; the places in the split question are
+ * named once.
+ */
+describe("CB-ord / CB-lock / CB-ovl-12: the lot's questions in step order, locked blocks refused up front, places named once (S202-A)", () => {
+  const SAM_FIRST = "Assign Sam Patel and Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2";
+  const OP1_FIRST = "Assign Operator 1 and Sam Patel to Housing A on Cell 1 in Line 1 from 10 to 2";
+  const OVERLAP_SAM = "Sam Patel is already on Cell 2 today from 6 am to 2 pm.";
+  const LOCKED_SAM =
+    "Sam Patel is already on Cell 2 today from 6 am to 2 pm, and you cannot change that block from here.";
+  const BUSY_OP1 = "Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+  const SAM_ASK =
+    "Sam Patel is already on Cell 2 today from 6 am to 2 pm. Split Sam Patel's time evenly between Cell 2 and Cell 1, or skip Sam Patel?";
+  const OP1_REASON =
+    "Not done: Operator 1 is not certified for Cell 1, missing Welding. Say the reason to schedule anyway, or no.";
+  const SAM_REASON =
+    "Not done: Sam Patel is not certified for Cell 1, missing Welding. Say the reason to schedule anyway, or no.";
+  const gaps = (who: string[]) => (operatorId: string, nodeId: string) =>
+    who.includes(operatorId) && nodeId === "c1a"
+      ? [{ skill: "Welding", state: "never-trained" as const }]
+      : [];
+  const samBlocks = (names: string[]): PrecheckResult => ({
+    kind: "overlap",
+    sentence: OVERLAP_SAM,
+    blocks: names.map((n, i) => ({
+      assignmentId: `asg-${i}`,
+      nodeId: `n-${i}`,
+      nodeName: n,
+      efficiency: 1,
+    })),
+    capPercent: 100,
+  });
+  const probeFor =
+    (answer: (op: string) => PrecheckResult) =>
+    async (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> =>
+      answer(step.intent === "assign" ? step.operatorId : "");
+  const runLot = vi.fn(async (r: ResolvedAny[]): Promise<LotResult> => ({
+    done: r.length,
+    error: null,
+  }));
+  const bar = (
+    precheck: (step: ResolvedCommand | ResolvedMove) => Promise<PrecheckResult>,
+    who: string[] = [],
+    over: Partial<ResolveContext> = {},
+    run: (r: ResolvedAny[]) => Promise<LotResult> = runLot,
+  ) =>
+    renderBar(
+      { runs: [], certificateGaps: gaps(who), eligibilityPolicy: () => "warn", ...over },
+      null,
+      null,
+      {},
+      { onRunLot: run },
+      {},
+      {},
+      {},
+      { precheck },
+    );
+  const say = (input: HTMLInputElement, text: string): void => {
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  };
+
+  afterEach(() => {
+    runLot.mockClear();
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-ord-1 (DEF-0066): Sam's overlap is step 1 and Operator 1's reason is step 2 -- '1 of 2' is asked before '2 of 2', and the trace keeps every ask and answer in that order", async () => {
+    const fetchMock = stubFetch();
+    const probe = vi.fn(probeFor((op) => (op === "sp" ? samBlocks(["Cell 2"]) : { kind: "ok" })));
+    const { input } = bar(probe, ["op1"]);
+    say(input, SAM_FIRST);
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+    // The probe has run, once for each step, BEFORE anything was asked.
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(statusText()).toBe(`1 of 2: ${SAM_ASK}`);
+    fireEvent.click(screen.getByRole("button", { name: "Split evenly" }));
+    expect(statusText()).toBe(`2 of 2: ${OP1_REASON}`);
+    say(input, "covering an absence");
+    expect(statusText()).toMatch(
+      /^Ready to do 2 things: 1\. Sam Patel is on Cell 1 .*time split evenly with Cell 2\. 2\. Operator 1 is on Cell 1 .* The reason given: covering an absence\. Say yes to do them, or no\.$/,
+    );
+    say(input, "yes");
+    await act(async () => {});
+    const [resolved] = runLot.mock.calls[0] as [ResolvedCommand[]];
+    expect(resolved).toHaveLength(2);
+    expect(resolved[0].split?.person).toBe("Sam Patel");
+    expect(resolved[0].override).toBeUndefined();
+    expect(resolved[1].operatorId).toBe("op1");
+    expect(resolved[1].override).toEqual({ reason: "covering an absence" });
+    const entry = postedEntry(fetchMock);
+    expect(
+      entry.asked?.startsWith(`1 of 2: ${SAM_ASK}\n2 of 2: ${OP1_REASON}\nReady to do 2 things:`),
+    ).toBe(true);
+    expect(entry.answered).toBe("Split evenly\ncovering an absence\nyes");
+    expect(entry.outcome).toBe("Done, 2 things.");
+  });
+
+  it("CB-ord-2 (F-247): a step both uncertified and busy elsewhere is refused at the listing with NO reason asked -- one 'Not doing' line, the other step listed", async () => {
+    const fetchMock = stubFetch();
+    const probe = probeFor((op) =>
+      op === "op1" ? { kind: "busy_elsewhere", sentence: BUSY_OP1 } : { kind: "ok" },
+    );
+    const { input } = bar(probe, ["op1"]);
+    say(input, OP1_FIRST);
+    await act(async () => {});
+    expect(statusText()).toMatch(
+      /^Not doing Operator 1 on Cell 1[^:]*: Operator 1 is already on Cell 4 in Line 2 today from 6 am to 2 pm\. Ready to do 1 thing: Sam Patel is on Cell 1 .* Say yes to do it, or no\.$/,
+    );
+    expect(threadText()).not.toContain("Say the reason");
+    say(input, "yes");
+    await act(async () => {});
+    const [resolved] = runLot.mock.calls[0] as [ResolvedCommand[]];
+    expect(resolved.map((r) => r.operatorId)).toEqual(["sp"]);
+    expect(postedEntry(fetchMock).asked).not.toContain("Say the reason");
+  });
+
+  it("CB-ord-3: two reason questions and one overlap, in step order -- Operator 1's reason (1 of 2), Sam's reason (2 of 2), then Sam's overlap (2 of 2) -- and the answers land on their own steps", async () => {
+    const fetchMock = stubFetch();
+    const probe = probeFor((op) => (op === "sp" ? samBlocks(["Cell 2"]) : { kind: "ok" }));
+    const { input } = bar(probe, ["op1", "sp"]);
+    say(input, OP1_FIRST);
+    await act(async () => {});
+    expect(statusText()).toBe(`1 of 2: ${OP1_REASON}`);
+    say(input, "reason one");
+    expect(statusText()).toBe(`2 of 2: ${SAM_REASON}`);
+    say(input, "reason two");
+    expect(statusText()).toBe(`2 of 2: ${SAM_ASK}`);
+    fireEvent.click(screen.getByRole("button", { name: "Split evenly" }));
+    expect(statusText()).toContain("The reason given: reason one.");
+    expect(statusText()).toContain("The reason given: reason two.");
+    say(input, "yes");
+    await act(async () => {});
+    const [resolved] = runLot.mock.calls[0] as [ResolvedCommand[]];
+    expect(resolved[0].override).toEqual({ reason: "reason one" });
+    expect(resolved[1].override).toEqual({ reason: "reason two" });
+    expect(resolved[1].split?.person).toBe("Sam Patel");
+    const entry = postedEntry(fetchMock);
+    expect(
+      entry.asked?.startsWith(
+        `1 of 2: ${OP1_REASON}\n2 of 2: ${SAM_REASON}\n2 of 2: ${SAM_ASK}\nReady to do 2 things:`,
+      ),
+    ).toBe(true);
+    expect(entry.answered).toBe("reason one\nreason two\nSplit evenly\nyes");
+  });
+
+  it("CB-ord-4: 'no' at the current step's question drops the whole lot, nothing written", async () => {
+    const fetchMock = stubFetch();
+    const probe = probeFor((op) => (op === "sp" ? samBlocks(["Cell 2"]) : { kind: "ok" }));
+    const { input } = bar(probe, ["op1"]);
+    say(input, SAM_FIRST);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Split evenly" }));
+    say(input, "no");
+    expect(statusText()).toBe("Left it.");
+    expect(runLot).not.toHaveBeenCalled();
+    expect(postedEntry(fetchMock).outcome).toBe("cancelled");
+  });
+
+  it("CB-ord-5: with no probe wired the reason is still asked once the lot has stepped, numbered over the lot (the pre-probe behaviour, unchanged)", () => {
+    const { input } = renderBar(
+      { runs: [], certificateGaps: gaps(["op1"]), eligibilityPolicy: () => "warn" },
+      null,
+      null,
+      {},
+      { onRunLot: runLot },
+    );
+    say(input, OP1_FIRST);
+    expect(statusText()).toBe(`1 of 2: ${OP1_REASON}`);
+    say(input, "because");
+    expect(statusText()).toMatch(
+      /^Ready to do 2 things: 1\. Operator 1 is on Cell 1 .* The reason given: because\./,
+    );
+  });
+
+  it("CB-lock-1 (DEF-0065): a step whose person is booked on a block she can read but not change is refused up front with the clause -- no split offered, nothing asked, the rest listed, the yes writes the rest", async () => {
+    const fetchMock = stubFetch();
+    const probe = probeFor((op) =>
+      op === "sp" ? { kind: "overlap_locked", sentence: LOCKED_SAM } : { kind: "ok" },
+    );
+    const { input } = bar(probe);
+    say(input, SAM_FIRST);
+    await act(async () => {});
+    expect(statusText()).toMatch(
+      /^Not doing Sam Patel on Cell 1 [^:]*: Sam Patel is already on Cell 2 today from 6 am to 2 pm, and you cannot change that block from here\. Ready to do 1 thing: Operator 1 is on Cell 1 .* Say yes to do it, or no\.$/,
+    );
+    expect(candidateButtons().map((b) => b.textContent)).not.toContain("Split evenly");
+    expect(runLot).not.toHaveBeenCalled();
+    say(input, "yes");
+    await act(async () => {});
+    const [resolved] = runLot.mock.calls[0] as [ResolvedCommand[]];
+    expect(resolved.map((r) => r.operatorId)).toEqual(["op1"]);
+    const entry = postedEntry(fetchMock);
+    expect(entry.asked).toContain("and you cannot change that block from here");
+    expect(entry.asked).not.toMatch(/\d+ of \d+:/);
+  });
+
+  it("CB-lock-2: every step locked -- the refusal alone, nothing to say yes to, the trace says refused", async () => {
+    const fetchMock = stubFetch();
+    const probe = probeFor(() => ({ kind: "overlap_locked", sentence: LOCKED_SAM }));
+    const { input } = bar(probe);
+    say(input, SAM_FIRST);
+    await act(async () => {});
+    expect(threadText()).toMatch(
+      /Not doing Sam Patel on Cell 1[^:]*: Sam Patel is already on Cell 2/,
+    );
+    expect(threadText()).not.toMatch(/Ready to do/);
+    expect(runLot).not.toHaveBeenCalled();
+    expect(postedEntry(fetchMock).outcome).toMatch(/^refused: Not doing /);
+  });
+
+  it("CB-lock-3: a step that can be split (editable) beside one that is locked -- the locked is named and never asked, the editable asks as it always did", async () => {
+    const probe = probeFor((op) =>
+      op === "sp"
+        ? samBlocks(["Cell 2"])
+        : {
+            kind: "overlap_locked",
+            sentence:
+              "Operator 1 is already on Cell 3 today from 6 am to 2 pm, and you cannot change that block from here.",
+          },
+    );
+    const { input } = bar(probe);
+    say(input, SAM_FIRST);
+    await act(async () => {});
+    // Operator 1 is refused; Sam's is the lot's only step left.
+    expect(statusText()).toBe(`1 of 1: ${SAM_ASK}`);
+    fireEvent.click(screen.getByRole("button", { name: "Split evenly" }));
+    expect(statusText()).toMatch(
+      /^Not doing Operator 1 on Cell 1[^:]*: Operator 1 is already on Cell 3 today from 6 am to 2 pm, and you cannot change that block from here\. Ready to do 1 thing: Sam Patel is on Cell 1 /,
+    );
+  });
+
+  it("CB-lock-4: a SINGLE sentence is unchanged (CB-pre-7) -- the same locked answer never refuses in the bar; the writer is called", async () => {
+    const probe = probeFor(() => ({ kind: "overlap_locked", sentence: LOCKED_SAM }));
+    const { input, onOpen } = renderBar(
+      { runs: [] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        precheck: probe,
+      },
+    );
+    say(input, "Assign Sam Patel to Housing A on Cell 1 in Line 1 from 10 to 2");
+    await act(async () => {});
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("CB-lock-5 (R-459): a refusal 'You don't have permission to edit <node id>.' says the cell's NAME when the board knows the id, 'that block' when it does not -- never a uuid", async () => {
+    const UNKNOWN = "fc358b68-47bf-41c9-8e7e-04313e91c430";
+    const probe = probeFor(() => ({ kind: "ok" }));
+    for (const [id, said] of [
+      ["c2", "You cannot change Cell 2 from here."],
+      [UNKNOWN, "You cannot change that block from here."],
+    ] as const) {
+      const failing = vi.fn(async (): Promise<LotResult> => ({
+        done: 0,
+        error: `You don't have permission to edit ${id}.`,
+      }));
+      const { input } = bar(probe, [], {}, failing);
+      say(input, SAM_FIRST);
+      await act(async () => {});
+      say(input, "yes");
+      await act(async () => {});
+      expect(failing).toHaveBeenCalledTimes(1);
+      expect(threadText()).toContain(said);
+      expect(threadText()).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+      cleanup();
+    }
+  });
+
+  it("CB-ovl-12 (DEF-0067): the split question names each place once -- two blocks on one cell, a block on the new step's own cell, three distinct cells", async () => {
+    const asked = async (names: string[]): Promise<string> => {
+      const probe = probeFor((op) => (op === "sp" ? samBlocks(names) : { kind: "ok" }));
+      const { input } = bar(probe);
+      say(input, SAM_FIRST);
+      await act(async () => {});
+      const text = statusText();
+      cleanup();
+      return text;
+    };
+    // Two blocks on Cell 2, the new one on Cell 1: Cell 2 is named once.
+    expect(await asked(["Cell 2", "Cell 2"])).toMatch(
+      /Split Sam Patel's time evenly across those blocks and the new one on Cell 1, or skip Sam Patel\?$/,
+    );
+    // One block on the new step's own cell (the DEF-0067 shape).
+    expect(await asked(["Cell 2", "Cell 1"])).toMatch(
+      /Split Sam Patel's time evenly across those blocks and the new one on Cell 1, or skip Sam Patel\?$/,
+    );
+    expect(await asked(["Cell 1"])).toMatch(
+      /Split Sam Patel's time evenly between that block and the new one on Cell 1, or skip Sam Patel\?$/,
+    );
+    // Three distinct places read as a list, the new one last.
+    expect(await asked(["Cell 2", "Cell 3"])).toMatch(
+      /Split Sam Patel's time evenly between Cell 2, Cell 3 and Cell 1, or skip Sam Patel\?$/,
+    );
+  });
+
+  it("CB-ovl-13 (DEF-0067): the listing's clause names each place once too, and the split carries one share per block", async () => {
+    const probe = probeFor((op) =>
+      op === "sp" ? samBlocks(["Cell 2", "Cell 2"]) : { kind: "ok" },
+    );
+    const { input } = bar(probe);
+    say(input, SAM_FIRST);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Split evenly" }));
+    expect(statusText()).toMatch(/Sam Patel's time split evenly with Cell 2\. 2\./);
+    say(input, "yes");
+    await act(async () => {});
+    const [resolved] = runLot.mock.calls[0] as [ResolvedCommand[]];
+    expect(resolved[0].split?.with).toBe("Cell 2");
+    expect(resolved[0].split?.adjustments).toHaveLength(2);
+  });
+});

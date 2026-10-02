@@ -3512,6 +3512,7 @@ describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
     timerange: '["2026-08-24 06:00:00+00","2026-08-24 14:00:00+00")',
     efficiency: 1,
     outside: true,
+    editable: false,
   };
   const READABLE_ROW = {
     assignmentId: "asg-other",
@@ -3522,6 +3523,7 @@ describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
     timerange: '["2026-08-24 06:00:00+00","2026-08-24 10:00:00+00")',
     efficiency: 1,
     outside: false,
+    editable: true,
   };
   const CAPACITY_REFUSAL = {
     kind: "CapacityExceeded",

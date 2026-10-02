@@ -403,6 +403,19 @@ export interface Lot {
    *  steps the probe already refused (busy on a place the caller cannot read),
    *  aligned with `done`, so the replace question is built from them after. */
   refusals?: Array<string | null>;
+  /**
+   * S202-A (DEF-0066, F-247, R-468): the steps that resolved to a certificate or
+   * area REASON question, resolved here with a placeholder reason ("-", as
+   * `refusalBeforeAsking` does for a single sentence) so the one probe can run
+   * BEFORE any question is asked; each maps to the index of its command in
+   * `commands`. Its real question is asked after the probe, in step order, and the
+   * step it resolves to replaces the placeholder one in `done` (a step is looked up
+   * by identity, so a step the probe refused simply never matches).
+   */
+  provisional?: Map<ResolvedAny, number>;
+  /** S202-A: the index into `done` of the provisional step whose reason question
+   *  stands now -- where the typed reason goes. */
+  asking?: number;
 }
 
 /** S200-A (R-468): one lot step that overlaps a block the caller can read. */

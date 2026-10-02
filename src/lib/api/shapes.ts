@@ -1060,6 +1060,13 @@ export interface CapacityProbeOverlap {
   timerange: string;
   efficiency: number;
   outside: boolean;
+  /**
+   * R-431 / DEF-0065 (migration 0086): the caller may CHANGE this block -- the
+   * server's own `app_can_edit_node` on its place, the check the split call runs.
+   * Always false for an `outside` row. Absent from a server older than 0086 and
+   * then read as false: nothing is offered that the server may refuse.
+   */
+  editable: boolean;
 }
 
 function parseCapacityProbeOverlap(v: Json): CapacityProbeOverlap | null {
@@ -1069,8 +1076,12 @@ function parseCapacityProbeOverlap(v: Json): CapacityProbeOverlap | null {
   // absent reads as a row the caller can read, with no parent named.
   const outside = v.outside === undefined ? false : v.outside;
   const parent_name = v.parent_name === undefined ? null : v.parent_name;
+  // `editable` is absent from a server older than 0086; absent reads as NOT
+  // editable (the safe answer: a split is offered only where it is known to go).
+  const editable = v.editable === undefined ? false : v.editable;
   if (
     !isBool(outside) ||
+    !isBool(editable) ||
     !isStrOrNull(assignment_id) ||
     !isStrOrNull(node_id) ||
     !isStr(node_name) ||
@@ -1091,6 +1102,7 @@ function parseCapacityProbeOverlap(v: Json): CapacityProbeOverlap | null {
     timerange,
     efficiency,
     outside,
+    editable: outside ? false : editable,
   };
 }
 

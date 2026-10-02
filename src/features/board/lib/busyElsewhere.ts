@@ -174,6 +174,9 @@ export function busyElsewhereSentence(facts: BusyElsewhereFacts): string | null 
 export function overlapSentence(facts: BusyElsewhereFacts): string | null {
   const rows = facts.rows.filter((r) => !r.outside);
   if (rows.length === 0) return null;
+  // S202-A (DEF-0065, R-431): the same sentence says so when the caller can READ a
+  // block but not CHANGE it -- the one builder, one more clause.
+  const locked = rows.filter((r) => !r.editable).length;
   const todayIso = isoOfParts(partsInZone(facts.now, facts.zone));
   const ordered = [...rows].sort(
     (a, b) =>
@@ -182,7 +185,18 @@ export function overlapSentence(facts: BusyElsewhereFacts): string | null {
   const blocks = ordered.map((r) =>
     describeBlock(r, facts.zone, facts.dateFormat, todayIso, false),
   );
-  return `${facts.person} is already on ${joinWithAnd(blocks)}.`;
+  const which =
+    locked === 0
+      ? null
+      : rows.length === 1
+        ? "that block"
+        : locked === rows.length
+          ? "those blocks"
+          : locked === 1
+            ? "one of them"
+            : "some of them";
+  const clause = which === null ? "" : `, and you cannot change ${which} from here`;
+  return `${facts.person} is already on ${joinWithAnd(blocks)}${clause}.`;
 }
 
 /** A block of the person's the caller can read, which the bar can split with. */
@@ -205,6 +219,14 @@ export interface OverlapBlock {
 export type PrecheckResult =
   | { kind: "ok" }
   | { kind: "busy_elsewhere"; sentence: string }
+  /**
+   * S202-A (DEF-0065, R-431, R-468): the person does not fit on blocks the caller can
+   * READ, and at least one of them is one she cannot CHANGE (`editable` false, the
+   * server's own `app_can_edit_node`): the split would rewrite it and the server
+   * would refuse. Refused up front like `busy_elsewhere` -- the sentence says so --
+   * and never asked.
+   */
+  | { kind: "overlap_locked"; sentence: string }
   | {
       kind: "overlap";
       sentence: string;
@@ -290,6 +312,11 @@ export async function precheckBeforeWrite(
     return sentence === null ? { kind: "ok" } : { kind: "busy_elsewhere", sentence };
   }
   const sentence = overlapSentence(facts);
+  // S202-A (DEF-0065): a block she can read but not change (the server says which,
+  // `editable`) makes the split a thing the server refuses -- refuse it up front.
+  if (probe.overlapping.some((o) => !o.outside && !o.editable)) {
+    return sentence === null ? { kind: "ok" } : { kind: "overlap_locked", sentence };
+  }
   const blocks: OverlapBlock[] = [];
   for (const o of probe.overlapping) {
     // A readable row always carries both ids (`parseCapacityProbeOverlap`).

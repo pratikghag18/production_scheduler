@@ -985,6 +985,32 @@ function andList(items: readonly string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
+/** S202-A (DEF-0067, R-449): the places of a list named once, in the order given. */
+function distinctPlaces(names: readonly string[]): string[] {
+  return [...new Set(names)];
+}
+
+/**
+ * S202-A (DEF-0067, R-468): the overlap question's own half -- where the time is split.
+ * Each PLACE is named once. When every block is on a place of its own, none the new
+ * step's, they are listed with the new one last ("between Cell 1, Cell 3 and Cell 2");
+ * when two of them share a place, or one is on the new step's own place, the list
+ * would repeat a name, so the question says what it means instead ("across those
+ * blocks and the new one on Cell 2"). The listing's clause (`withSplit`) shares the
+ * same de-duplication.
+ */
+function splitQuestion(o: LotOverlap): string {
+  const cells = o.blocks.map((b) => b.nodeName);
+  const places = distinctPlaces([...cells, o.place]);
+  const where =
+    places.length === cells.length + 1
+      ? `between ${andList(places)}`
+      : o.blocks.length === 1
+        ? `between that block and the new one on ${o.place}`
+        : `across those blocks and the new one on ${o.place}`;
+  return `Split ${o.person}'s time evenly ${where}, or skip ${o.person}?`;
+}
+
 /**
  * S200-A (R-468): a lot step the person chose to split reads, in its own
  * sentence, whose time is split with which places -- "... making Housing A,
@@ -1212,7 +1238,19 @@ function joinWithAnd(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-function rewriteRefusal(message: string): string {
+/** A node id as the server prints it. */
+const NODE_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `nodeNameOf` (S202-A, DEF-0065, R-459) answers a node id with the cell's own name
+ * from the board the bar reads, or null for an id it does not know (another
+ * company's node, a stale board): the server's "You don't have permission to edit
+ * <node id>." is then said with the name, or as "that block", never as a uuid.
+ */
+function rewriteRefusal(
+  message: string,
+  nodeNameOf: (id: string) => string | null = () => null,
+): string {
   const cap = CAP_REFUSAL.exec(message);
   if (cap) {
     const [, name, peak, capPct] = cap;
@@ -1225,7 +1263,14 @@ function rewriteRefusal(message: string): string {
     return `${name} is not certified for ${joinWithAnd(skills)}, which ${cell} needs.`;
   }
   const rights = NO_EDIT_RIGHTS_REFUSAL.exec(message);
-  if (rights) return `You cannot change ${rights[1]} from here.`;
+  if (rights) {
+    const named = nodeNameOf(rights[1]);
+    if (named !== null) return `You cannot change ${named} from here.`;
+    // A message that already carries a name (the toast layer's own wording) stays;
+    // an id nobody can read is never printed.
+    if (NODE_ID_SHAPE.test(rights[1])) return "You cannot change that block from here.";
+    return `You cannot change ${rights[1]} from here.`;
+  }
   if (message === "You don't have permission to change that.") {
     return "You cannot change that from here.";
   }
@@ -2452,7 +2497,7 @@ export function CommandBar({
           entry.ran.push(result.readout ?? readout);
           entry.outcome = "written";
         } else if (result.kind === "refused") {
-          entry.outcome = `refused: ${rewriteRefusal(result.message)}`;
+          entry.outcome = `refused: ${rewriteRefusal(result.message, nodeNameOf)}`;
         } else {
           entry.outcome = "cancelled";
         }
@@ -2619,7 +2664,7 @@ export function CommandBar({
           entry.ran.push(readout);
           entry.outcome = "written";
         } else {
-          entry.outcome = `refused: ${rewriteRefusal(outcome.message)}`;
+          entry.outcome = `refused: ${rewriteRefusal(outcome.message, nodeNameOf)}`;
         }
       }
       if (entry) settleTurn(store, entry);
@@ -3118,6 +3163,12 @@ export function CommandBar({
           return;
         }
       }
+      // S202-A (DEF-0066): the reason questions queued while stepping are asked
+      // now, in step order (`askLotNext`), when there is no probe to wait for.
+      if (lotRef.current !== null && (lotRef.current.provisional?.size ?? 0) > 0) {
+        askLotNext();
+        return;
+      }
       showLotStatus(gateNotes.length > 0 ? gateNotes.join(" ") : undefined);
       return;
     }
@@ -3192,6 +3243,38 @@ export function CommandBar({
       };
       resolveLotStep();
       return;
+    }
+    // S202-A (DEF-0066, F-247, R-468): a certificate or area REASON question is
+    // QUEUED, not asked, while the lot is still stepping. Every answer to it is
+    // the same placement (the reason is only what the write carries), so the step
+    // is resolved for the probe with a placeholder reason, exactly as a single
+    // sentence's `refusalBeforeAsking` does, and its real question is asked after
+    // the one probe, in step order, with the overlap questions (`askLotNext`). A
+    // step the probe refuses is named and never asked its reason (F-247). Any OTHER
+    // question changes WHAT is placed (which shift, join or separate, a day off the
+    // board, an unknown name) and is asked at once, below, as before.
+    if (
+      (gateQuestion.kind === "not_certified" &&
+        gateQuestion.policy === "warn" &&
+        !gateQuestion.inLot) ||
+      (gateQuestion.kind === "outside_area" && !gateQuestion.inLot)
+    ) {
+      const given = lot.stepOptions?.[lot.index] ?? {};
+      const stand = resolveCommand(command, activeCtx, {
+        ...given,
+        overrideReason: given.overrideReason ?? "-",
+        areaReason: given.areaReason ?? "-",
+      });
+      if (stand.ok && stand.resolved.intent !== "headcount") {
+        lotRef.current = {
+          ...lot,
+          done: [...lot.done, stand.resolved],
+          index: lot.index + 1,
+          provisional: new Map(lot.provisional ?? []).set(stand.resolved, lot.index),
+        };
+        resolveLotStep();
+        return;
+      }
     }
     // S198-A (DEF-0061): a day off the board re-runs the WHOLE sentence once
     // the board has moved -- never the one step that met the day, which used to
@@ -3356,6 +3439,11 @@ export function CommandBar({
     return `I could not do that in one go: two of the changes are about ${block}. Say them one at a time.`;
   }
 
+  /** The cell's name for a node id, from the board the bar reads (S202-A, DEF-0065). */
+  function nodeNameOf(id: string): string | null {
+    return lastCtxRef.current?.nodeById.get(id)?.name ?? null;
+  }
+
   /**
    * S51 (brief §2 item 2): every command has resolved -- show every readout
    * numbered, outline everything a removal or a move in the lot would
@@ -3388,7 +3476,12 @@ export function CommandBar({
       ),
     ).then((answers) => {
       // R-465: the steps whose person is busy on a place the caller cannot read.
-      const refusals = answers.map((a) => (a.kind === "busy_elsewhere" ? a.sentence : null));
+      // S202-A (DEF-0065): a person booked on a block she can read but not change
+      // is refused the same way (the sentence says so); only an overlap she can
+      // change is ever asked.
+      const refusals = answers.map((a) =>
+        a.kind === "busy_elsewhere" || a.kind === "overlap_locked" ? a.sentence : null,
+      );
       // Escape, an edit or another sentence has happened since: that one
       // already closed or replaced this turn, and the lot it held goes with it.
       if (traceRef.current !== entry || store.getState().status?.kind !== "reading") {
@@ -3447,6 +3540,10 @@ export function CommandBar({
         });
       }
       if (busyNotes.length === 0 && overlaps.length === 0) {
+        if ((lot.provisional?.size ?? 0) > 0) {
+          askLotNext();
+          return;
+        }
         showLotStatus(gateNotes.length > 0 ? gateNotes.join(" ") : undefined);
         return;
       }
@@ -3462,7 +3559,7 @@ export function CommandBar({
       if (replacing) {
         if (overlaps.length > 0) {
           lotRef.current = { ...lot, overlaps, refusals };
-          askLotOverlap();
+          askLotNext();
           return;
         }
         askReplaceFrom(lot, steps, refusals);
@@ -3491,7 +3588,14 @@ export function CommandBar({
           ...(notes.length > 0 ? { notes } : {}),
           overlaps,
         };
-        askLotOverlap();
+        askLotNext();
+        return;
+      }
+      // S202-A (DEF-0066): the steps still owed a reason are asked now, after the
+      // probe, in step order.
+      if (kept.some((s) => lot.provisional?.has(s))) {
+        lotRef.current = { ...lot, done: kept, ...(notes.length > 0 ? { notes } : {}) };
+        askLotNext();
         return;
       }
       lotRef.current = { ...lot, done: kept };
@@ -3613,6 +3717,21 @@ export function CommandBar({
         .getState()
         .set({ traceCarry: { asked: entry.asked ?? "", answered: entry.answered ?? "" } });
     }
+    // S202-A (DEF-0066): a reason question asked after the probe belongs to the
+    // provisional step standing at `lot.asking`; its command is the one recorded.
+    if (lot.asking !== undefined) {
+      const cmd = lot.provisional?.get(lot.done[lot.asking]);
+      if (cmd !== undefined) {
+        const had = lot.stepOptions?.[cmd] ?? {};
+        lotRef.current = {
+          ...lot,
+          asking: undefined,
+          stepOptions: { ...(lot.stepOptions ?? {}), [cmd]: { ...had, [field]: value } },
+        };
+        askLotNext();
+        return;
+      }
+    }
     const given = lot.stepOptions?.[lot.index] ?? {};
     lotRef.current = {
       ...lot,
@@ -3628,17 +3747,58 @@ export function CommandBar({
    * width. Nothing is written. When every one has been answered the lot goes on
    * to its listing (`finishLotOverlaps`).
    */
-  function askLotOverlap(): void {
+  function askLotNext(): void {
     const lot = lotRef.current;
     if (!lot) return;
-    const overlaps = lot.overlaps ?? [];
-    const next = overlaps.find((o) => o.answer === undefined);
-    if (next === undefined) {
+    const activeCtx = lastCtxRef.current;
+    // S202-A (DEF-0066, F-247, R-468): EVERY question the lot asks after its probe
+    // comes in STEP ORDER -- for step k its reason question (if the step was queued
+    // with a placeholder reason), then its overlap question, then step k+1's -- all
+    // numbered "k of N" over the steps that are left. Then the listing.
+    for (let i = 0; i < lot.done.length; i++) {
+      const cmd = lot.provisional?.get(lot.done[i]);
+      if (cmd !== undefined && activeCtx !== null) {
+        const resolution = resolveCommand(lot.commands[cmd], activeCtx, lot.stepOptions?.[cmd]);
+        if (resolution.ok && resolution.resolved.intent !== "headcount") {
+          // Every reason it needs has been given: the real step stands in for the
+          // provisional one, and the next question is looked for from the top.
+          const done = lot.done.slice();
+          done[i] = resolution.resolved;
+          lotRef.current = { ...lot, done, asking: undefined };
+          askLotNext();
+          return;
+        }
+        const base = resolution.ok
+          ? null
+          : questionToStatus(resolution.question, lot.commands[cmd]);
+        if (base !== null && base.kind === "question") {
+          const next = { ...base, message: `${i + 1} of ${lot.done.length}: ${base.message}` };
+          lotRef.current = { ...lot, asking: i };
+          setStatus(next);
+          if (traceRef.current) {
+            setAsked(traceRef.current, next.message);
+            postTrace(traceRef.current);
+          }
+          return;
+        }
+      }
+      const owed = lot.overlaps?.find((o) => o.step === i && o.answer === undefined);
+      if (owed !== undefined) {
+        askLotOverlap(lot, owed);
+        return;
+      }
+    }
+    if (lot.overlaps !== undefined) {
       finishLotOverlaps(lot);
       return;
     }
-    const cells = andList([...next.blocks.map((b) => b.nodeName), next.place]);
-    const message = `${next.step + 1} of ${lot.done.length}: ${renderReadout(next.sentence)} Split ${next.person}'s time evenly between ${cells}, or skip ${next.person}?`;
+    showLotStatus(
+      lot.notes !== undefined && lot.notes.length > 0 ? lot.notes.join(" ") : undefined,
+    );
+  }
+
+  function askLotOverlap(lot: NonNullable<typeof lotRef.current>, next: LotOverlap): void {
+    const message = `${next.step + 1} of ${lot.done.length}: ${renderReadout(next.sentence)} ${splitQuestion(next)}`;
     const status: Status = {
       kind: "question",
       message,
@@ -3676,7 +3836,7 @@ export function CommandBar({
         })),
         efficiencyPercent: shares[o.blocks.length],
         person: o.person,
-        with: andList(o.blocks.map((b) => b.nodeName)),
+        with: andList(distinctPlaces(o.blocks.map((b) => b.nodeName))),
       },
     };
   }
@@ -3697,7 +3857,7 @@ export function CommandBar({
       ...lot,
       overlaps: (lot.overlaps ?? []).map((o) => (o.step === step ? { ...o, answer } : o)),
     };
-    askLotOverlap();
+    askLotNext();
   }
 
   /** Every overlap answered: a skipped step is named in the listing's own words
@@ -3921,7 +4081,7 @@ export function CommandBar({
     // the one rewriter. Every change after it is said as what STAYS
     // (`notTried`), each step's own sentence, built by the resolver.
     const refused = resolved[done];
-    const reason = rewriteRefusal(result.error);
+    const reason = rewriteRefusal(result.error, nodeNameOf);
     const notDoneText = refused ? `${renderReadout(refused.attempted)}. ${reason}` : reason;
     lines.push(`Not done: ${notDoneText}`);
     const notTried = resolved.slice(done + 1);

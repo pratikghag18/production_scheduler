@@ -323,9 +323,45 @@ describe("parseCapacityProbe", () => {
           timerange: '["2026-08-18 06:00:00+00","2026-08-18 12:00:00+00")',
           efficiency: 0.5,
           outside: false,
+          // A server older than 0086 sends no `editable`: read as NOT editable.
+          editable: false,
         },
       ],
     });
+  });
+
+  // DEF-0065 (0086): the server says which readable blocks the caller may change.
+  it("DEF-0065: carries `editable` when the server sends it, and refuses one that is not a boolean", () => {
+    const row = (valid as { overlapping: Json[] }).overlapping[0] as Record<string, Json>;
+    const yes = parseCapacityProbe({
+      ...valid,
+      overlapping: [{ ...row, outside: false, editable: true }],
+    } as Json);
+    expect(yes?.overlapping[0].editable).toBe(true);
+    const no = parseCapacityProbe({
+      ...valid,
+      overlapping: [{ ...row, outside: false, editable: false }],
+    } as Json);
+    expect(no?.overlapping[0].editable).toBe(false);
+    expect(
+      parseCapacityProbe({ ...valid, overlapping: [{ ...row, editable: "yes" }] } as Json),
+    ).toBeNull();
+  });
+
+  it("DEF-0065: an outside row is never editable, whatever the server says", () => {
+    const row = {
+      assignment_id: null,
+      node_id: null,
+      node_name: "Cell 4",
+      parent_name: "Line 2",
+      product_name: null,
+      timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
+      efficiency: 1,
+      outside: true,
+      editable: true,
+    };
+    const parsed = parseCapacityProbe({ ...valid, overlapping: [row] } as Json);
+    expect(parsed?.overlapping[0].editable).toBe(false);
   });
 
   // R-465 (DEF-0053): a block on a place the caller cannot read arrives with the
@@ -353,6 +389,7 @@ describe("parseCapacityProbe", () => {
         timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
         efficiency: 1,
         outside: true,
+        editable: false,
       },
     ]);
   });
