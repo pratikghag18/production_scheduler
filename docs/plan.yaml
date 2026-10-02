@@ -13080,7 +13080,7 @@ requirements:
   - kind: e2e
     file: e2e/typedWalk.spec.ts
     cases: "both sentence lists green twice against the new wording (R-433), following the board's own move (R-455)"
-  status: contradicted
+  status: covered
   note: >-
     TESTER 1 Oct (201t): DEF-0065 --- a lot's refusal after a refused split reads "You cannot change
     fc358b68-47bf-41c9-8e7e-04313e91c430 from here" (a raw node id).
@@ -13305,7 +13305,7 @@ requirements:
     cases: "R-465: Ana's rail says booked on Cell 4 as the plant admin's says booked, at 10 am with the clock frozen; at the rail's narrowest the name and the word stay readable"
   - kind: manual
     steps: "node src/test/defects/DEF-0053.live.mjs on the tester's stack exits 0 (held: the same answer for both); as Ana in the browser, 'put Priya Shah on Housing A at Cell 1 today from 10 am to noon' then Separate block answers 'Not done: Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.' and her rail reads 'booked (Cell 4, 6 am to 2 pm)'"
-  status: covered
+  status: contradicted
   note: >-
     BUILT 30 Sept (session 195, ecfb3e2 and aee2746), DEF-0053 fix-claimed. The probe answers an operator the
     caller cannot read as the invoker did (no verdict, no rows) rather than refusing: the copy-week planners
@@ -13430,7 +13430,7 @@ requirements:
     cases: "DEF-0064 (as Ana on the real board: the question, Split evenly with Sam's Cell 1 at 0.5 and the new row at 0.5 read back, Skip writing the other person only, restored)"
   - kind: manual
     steps: "as Ana on a fresh demo seed, DEF-0064's reproduction: the lot asks Sam's overlap question before any listing, each choice carries on to the next step, the listing matches the choice, and the yes writes without a refusal (rows read back as Dana)"
-  status: contradicted
+  status: covered
   note: >-
     STATED 1 Oct (session 199t conversation). DEF-0064 is the defect it answers. BUILT 1 Oct (session 200,
     f7954a9), DEF-0064 fix-claimed; stays contradicted for the tester to flip. Left open beside it: F-252 (a
@@ -19396,6 +19396,47 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: 203t
+  date: 2026-10-02
+  title: "Tester run over session 202: DEF-0065, DEF-0066 and DEF-0067 verified cold as Ana, migration 0086 reviewed, two new defects (DEF-0068 the single-sentence door, DEF-0069 the rail)"
+  shipped: []
+  commits: []
+  numbers:
+    app_tests: 4986
+    app_test_files: 191
+    tsc: 0
+    eslint: 0
+    db_checks: 944
+    migrations: 86
+    e2e: 65
+  confirmed: true
+  numbers_note: >-
+    Copied from the runners (report copied to the scratchpad). vitest `Test Files  191 passed (191)`, `Tests  4986 passed
+    (4986)`, the runner's own line `count matches the plan: 4986 in 191`. SQL: every file ok, the per-file lines sum to 944
+    passed, 0 failed, 0 hard-errors, so the plan's 944 matches the runner (68 files, 99_capacity_probe_editable 7 passed).
+    e2e: 65 listed, `6 skipped`, `59 passed (3.7m)`, no failure and no retry; roleWalk R-465 passed this time (but see DEF-0069).
+    typecheck and lint exit 0 (db:types differed from the committed file by a BOM only, restored); format:check failed only
+    on the untracked .claude/settings.local.json. The stack holds 85 migration files, numbered 1 to 86 (65 is unused), 0086
+    applied (capacity_probe contains editable).
+  summary: >-
+    Migration 0086 diffed against 0085 by text: the only changes are the header, one inner-select column, one field in each
+    branch of the row object (outside rows hard-coded false) and the comment; definer, pinned search_path, company boundary,
+    blind answer and the outside rows' null ids all survive; editable is app_can_edit_node, which reads auth.uid(), so it is
+    the caller's; it leaks one boolean on a block the caller can already read. SQL mutants on the stack's test database:
+    editable hard-coded true failed SE1 and SE5; hard-coded false failed SE2, SE4, SE5, SE6. Vitest mutants: overlap_locked
+    ignored in precheckBeforeWrite failed PB-3 and PB-4; the lot's refusal ignoring overlap_locked failed CB-lock-1, 2, 3;
+    places not de-duplicated failed CB-ovl-12, 13; step order reversed failed CB-ord-1, 3, 4, CB-lot-ask-3, CB-ovl-6. DEF-0065
+    verified in the browser as Ana with a read-only grant on Cell 4 (one plain refusal, no Split, Maria written, Priya
+    unchanged) and in the other direction with a supervisor grant (Split offered and written 0.5 and 0.5). DEF-0066 (1 of 2
+    before 2 of 2), F-247's shape and DEF-0067 (0.34, 0.33, 0.33 read back) verified. Adversarial: both people overlapping,
+    one locked and one not, refuses the locked one and asks the other (1 of 1); a replace whose incoming person is locked
+    says "you cannot change that block" and offers Take off anyway or Leave it, which is correct since it never splits. Filed
+    DEF-0068 (a single sentence and the board's pop-up still offer Split over a locked block; the developer's F-254 run for
+    real) and DEF-0069 (the rail says free, not booked, once Ana can read the place off her board; a hypothesis ties it to the
+    201t roleWalk flake). Nothing wrong found with the grants, the company boundary or the stale-refusal direction. Left in
+    the stack's database (a delete was denied by the harness): rows created after 17:30 UTC for Sam Patel, Lena Novak and
+    John Kim, and earlier a delete by creation time may have removed seed blocks of Maria, Priya, Sam and Lena on Cells 1 and
+    2 in the 12 to 16 UTC window; the stack is thrown away.
 - id: '202'
   date: 2026-10-02
   title: "Split is offered only where the supervisor can change the block (the server says which, migration 0086), the lot's questions come in step order, and each place is named once: DEF-0065, DEF-0066 and DEF-0067 fix-claimed as one piece, F-247 and F-249 closed with them, the DEF-0020 cold-start flake fixed (F-253), the developer's stack found two migrations behind (F-255)"
