@@ -13493,6 +13493,28 @@ requirements:
     contradiction). BUILT 1 Oct (session 200, f7954a9), DEF-0063 fix-claimed. The sync door (a certificate
     or area gap at expansion) still refuses the whole replace and its press removes only, said truthfully
     but without this form; giving it the richer form means running the gates per block in expandReplace.
+- id: R-470
+  title: A placement over a block the supervisor can read but not change is refused before anything opens --- the single sentence and the board's own drag say "you cannot change that block from here" and offer no split pop-up
+  source:
+  - 'tester session 203t (2 Oct), DEF-0068: as Ana with a viewer grant on Cell 4, "put Priya Shah on Common Fastener at Cell 1 today from 8 am to 10 am" opened the split pop-up and Confirm was refused after the click'
+  - 'session 203t conversation (the maintainer, 2 Oct), shown two candidates side by side --- A: refuse straight away in the lot''s words, no pop-up; B: open the pop-up without Split, with only Leave it --- and the developer''s recommendation of A: "I agree with you."'
+  stated_by: maintainer
+  claim: >-
+    When the person being placed is already booked at that time on a block the caller can read but cannot
+    change (capacity_probe's editable is false for it), the bar does not open the board's split pop-up for a
+    single sentence. It answers at once, in the same words a lot uses for the same step (R-468's note,
+    session 202): "Not done: Priya Shah is already on Cell 4 today from 6 am to 2 pm, and you cannot change
+    that block from here." Nothing is written and no button is offered. A drag or a create on the board that
+    would open the same pop-up refuses the same way, with the same sentence. Where the caller CAN change
+    every overlapping block, the pop-up opens as before (no stale refusal). It is R-431 (nothing offered that
+    the server refuses) at the single-sentence and board doors.
+  verified_by:
+  - kind: manual
+    steps: "DEF-0068's reproduction as Ana with the viewer grant on Cell 4: the sentence answers the one refusal and no pop-up opens; the same with a drag onto Cell 1 over Priya's hours; with the grant raised to supervisor the pop-up opens and Split writes"
+  status: contradicted
+  note: >-
+    STATED 2 Oct (session 203t conversation). DEF-0068 is the defect it answers. Option B was not chosen
+    because a question whose only answer is no is not a question (R-435 asks when there is a choice).
 findings:
 - id: F-255
   title: The developer's own stack had been running without migration 0085 since 30 Sept --- `db:start` restores a backup taken before it, and nothing said the stack was behind the repository
