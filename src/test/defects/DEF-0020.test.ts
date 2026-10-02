@@ -73,16 +73,30 @@ const FUNCTIONS_BASE = `${supabaseUrl.replace(/\/$/, "")}/functions/v1`;
  */
 const SERVED_PROBE_MS = 10_000;
 
+/**
+ * F-253 (2 Oct, session 202): the 336 ms above was a WARM-ISH runtime. An
+ * edge runtime that has sat idle for a day bundles the function on its first
+ * call, and on the developer's machine that first OPTIONS took longer than
+ * the ten seconds three mornings running (30 Sept, 1 Oct, 2 Oct; the tester
+ * saw the same on its own stack, 201t) -- green alone every time, because
+ * the failed probe had warmed it. So: one retry. The first timeout wakes the
+ * runtime; the second probe is the verdict. A stopped container still fails
+ * both and the case still says so in words -- twenty seconds instead of ten,
+ * still decisive, never "Test timed out".
+ */
 async function functionServed(): Promise<boolean> {
-  try {
-    const res = await fetch(`${FUNCTIONS_BASE}/invite`, {
-      method: "OPTIONS",
-      signal: AbortSignal.timeout(SERVED_PROBE_MS),
-    });
-    return res.status === 200 || res.status === 204;
-  } catch {
-    return false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${FUNCTIONS_BASE}/invite`, {
+        method: "OPTIONS",
+        signal: AbortSignal.timeout(SERVED_PROBE_MS),
+      });
+      return res.status === 200 || res.status === 204;
+    } catch {
+      // A timeout or a refused connection: try once more, then give up.
+    }
   }
+  return false;
 }
 
 async function tokenFor(email: string, password: string): Promise<string> {
@@ -133,7 +147,7 @@ describe("DEF-0020: an email that belongs to another org, but whose auth row GoT
       if (!(await functionServed())) {
         liveBackendGone(
           `DEF-0020: the invite function did not answer an OPTIONS preflight at ${FUNCTIONS_BASE} ` +
-            `within ${SERVED_PROBE_MS}ms (it either refused or hung).`,
+            `within ${SERVED_PROBE_MS}ms on either of two tries (it either refused or hung).`,
         );
       }
       const dana = await tokenFor("dana@example.test", "devpassword");
