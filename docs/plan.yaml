@@ -4,7 +4,7 @@ meta:
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
   updated: '2026-10-02'
-  tip: 'b94a196'
+  tip: '407aef8'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13299,10 +13299,16 @@ requirements:
     cases: "RE-1 to RE-14: elsewhere blocks as coverage, the brackets, the title, Chicago and Tokyo"
   - kind: vitest
     file: src/test/operatorPanel.test.tsx
-    cases: "PE-1 to PE-9: the word, the brackets, the title, pending and failed, the admin unchanged"
+    cases: "PE-1 to PE-10: the word, the brackets, the title, pending and failed, the admin unchanged; a readable block off the board reads booked (DEF-0069)"
+  - kind: sql
+    file: supabase/tests/99_blocks_elsewhere_off_the_board_test.sql
+    cases: "BO1 to BO5 (with the board's root: a readable off-board block is returned with or without the grant, a block under the root never, the plant root returns nothing for the admin, company 2 nothing, a null root is 0085's answer); CB7 to CB9 still green"
+  - kind: vitest
+    file: src/test/blocksElsewhereRoot.test.ts
+    cases: "BR-1, BR-2 (the client passes the board's root to operator_blocks_elsewhere)"
   - kind: e2e
     file: e2e/roleWalk.spec.ts
-    cases: "R-465: Ana's rail says booked on Cell 4 as the plant admin's says booked, at 10 am with the clock frozen; at the rail's narrowest the name and the word stay readable"
+    cases: "R-465: Ana's rail says booked on Cell 4 as the plant admin's says booked, at 10 am with the clock frozen; at the rail's narrowest the name and the word stay readable; DEF-0069: the same with a viewer grant on Cell 4 added and removed inside the case"
   - kind: manual
     steps: "node src/test/defects/DEF-0053.live.mjs on the tester's stack exits 0 (held: the same answer for both); as Ana in the browser, 'put Priya Shah on Housing A at Cell 1 today from 10 am to noon' then Separate block answers 'Not done: Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.' and her rail reads 'booked (Cell 4, 6 am to 2 pm)'"
   status: contradicted
@@ -13509,13 +13515,46 @@ requirements:
     every overlapping block, the pop-up opens as before (no stale refusal). It is R-431 (nothing offered that
     the server refuses) at the single-sentence and board doors.
   verified_by:
+  - kind: vitest
+    file: src/test/commandBar.test.tsx
+    cases: "CB-lock-4 (rewritten, contract changed: a single sentence over a locked block refuses before any readout, trace refused, asked null), CB-lock-6 (a join question whose every answer is locked is not asked; asked when one answer is fine), CB-lock-7 (an editable overlap still reaches the writer)"
+  - kind: vitest
+    file: src/test/dragGesture.test.ts
+    cases: "DG-lock-1 to DG-lock-4 (submitCreateDirect refuses a locked overlap with the sentence and opens no pop-up; 'one of them'; one gate, three answers; the re-time refusal explained in the same words)"
+  - kind: vitest
+    file: src/test/busyElsewhere.test.ts
+    cases: "PB-3b, PB-3c (answerForProbe is the pre-check's answer; the refusal explanation)"
+  - kind: e2e
+    file: e2e/typedWalk.spec.ts
+    cases: "DEF-0068 (as Ana with the viewer grant: the one refusal, no pop-up, the trace; the grant raised to supervisor opens the pop-up and Cancel writes nothing)"
   - kind: manual
-    steps: "DEF-0068's reproduction as Ana with the viewer grant on Cell 4: the sentence answers the one refusal and no pop-up opens; the same with a drag onto Cell 1 over Priya's hours; with the grant raised to supervisor the pop-up opens and Split writes"
+    steps: "DEF-0068's reproduction as Ana with the viewer grant on Cell 4: the sentence answers the one refusal and no pop-up opens; the same with a drag onto Cell 1 over Priya's hours; with the grant raised to supervisor the pop-up opens and Split writes (seen by the lane, session 204)"
   status: contradicted
   note: >-
     STATED 2 Oct (session 203t conversation). DEF-0068 is the defect it answers. Option B was not chosen
     because a question whose only answer is no is not a question (R-435 asks when there is a choice).
+    BUILT 2 Oct (session 204, 407aef8), DEF-0068 fix-claimed; stays contradicted for the tester to flip. The
+    gate is one function (answerForProbe) called by the bar's pre-check, submitCreateDirect and the refusal
+    explainer, so a move or re-time refused by the server over a locked block says the same sentence.
 findings:
+- id: F-256
+  title: The typed walk's grant cases and the role walk's rail cases both touch Ana's grants on Cell 4 and run in different files --- under parallel workers one can read the rail while the other holds the grant
+  tag: Two specs sharing one person's grants
+  status: open
+  found_by: agent
+  stage: S57
+  refs:
+  - R-465
+  - R-433
+  story: >-
+    2 Oct (session 204), the reviewer of DEF-0069's fix, from the config and the specs. playwright.config.ts
+    runs files fully parallel with no worker cap locally; typedWalk is serial within itself, roleWalk is not,
+    and both now add and remove a viewer grant on Cell 4 for Ana (DEF-0065, DEF-0068 in typedWalk; DEF-0069
+    in roleWalk) while roleWalk's R-465 case reads her rail. The tester's 201t run saw exactly this: the rail
+    said "free" once under six workers and "booked" alone --- which was also DEF-0069 itself. Fixed in the
+    product (0087) but the collision between files remains: a bare `npx playwright test` can still flake.
+    The fix is a shared serial group or project for the specs that change demo grants, or --workers=1 written
+    into the walk instructions as the standing rule; the lane and the tester both already run with one worker.
 - id: F-255
   title: The developer's own stack had been running without migration 0085 since 30 Sept --- `db:start` restores a backup taken before it, and nothing said the stack was behind the repository
   tag: A stack behind its migrations
@@ -13536,7 +13575,7 @@ findings:
 - id: F-254
   title: The board's split pop-up (a single sentence, a drag, a create) still offers a split over a block the caller can read but not change --- Confirm is refused by the server after the fact
   tag: A screen that shows what the server will refuse
-  status: open
+  status: fixed
   found_by: agent
   stage: S57
   refs:
@@ -13566,7 +13605,13 @@ findings:
     on 9 Sept against a runtime that answered in 336 ms; an edge runtime idle for a day bundles the function on
     its first call and takes longer than that here, and the failed probe is what warmed it for the rerun.
     Fixed (586d921): one retry --- the first timeout wakes the runtime, the second probe is the verdict, a
-    stopped container still fails both inside twenty seconds and says so in words.
+    stopped container still fails both inside twenty seconds and says so in words. WIDER, 2 Oct (session 204):
+    the first full run after the night had BOTH live pins red, DEF-0022's sign-in with "fetch failed" (a dropped
+    connection, not a slow answer) and DEF-0020's two probes; auth answered 200 a minute later and both passed
+    alone and in the next full run. The developer's whole stack, not only the edge runtime, has a cold first
+    touch after a day idle on this machine (Docker Desktop's port proxy on Windows is the suspect). Not fixed;
+    the rule for now is that a first-run red in src/test/defects/ is re-run alone before it is read as a
+    failure, and db:start could warm the stack with one sign-in.
 - id: F-252
   title: A lot's move or re-time step whose person is already booked on a readable block at the new hours is still listed as ready and refused after the yes --- the overlap question covers a lot's creates only
   tag: An offer the server refuses
@@ -19418,6 +19463,65 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: '204'
+  date: 2026-10-02
+  title: "A placement over a block the supervisor can read but not change is refused before any pop-up opens, at every door, and the rail says booked for a readable block off the board: DEF-0068 and DEF-0069 fix-claimed as one piece with migration 0087, F-254 closed"
+  shipped: []
+  commits:
+  - '407aef8'
+  numbers:
+    app_tests: 4997
+    app_test_files: 192
+    tsc: 0
+    eslint: 0
+    db_checks: 949
+    migrations: 87
+    e2e: 67
+  confirmed: true
+  numbers_note: >-
+    Copied from `npm run test` on this machine after the piece: `Test Files  192 passed (192)`, `Tests  4997 passed
+    (4997)` --- one new file (src/test/blocksElsewhereRoot.test.ts, BR-1, BR-2) and 11 cases gained (CB-lock-6, 7,
+    DG-lock-1 to 4, PB-3b, PB-3c, PE-10, BR-1, BR-2). The baseline before the piece was 4986 in 191 matching 203t,
+    after a first run whose two live pins were red on the stack's cold first touch (F-253 widened; both green
+    alone and in the next full run). tsc exit 0, CONCLUSIVE: db:types ran against the tester's stack after 0087
+    (one line changed, p_root_path on the function's Args) and again against the developer's stack after
+    `migration up` there (the same file to the byte, BOM aside). eslint 0, prettier clean. SQL (the reviewer, the
+    scratch database rebuilt in the tester's container): `99_blocks_elsewhere_off_the_board_test.sql : 5 passed`,
+    `99_capacity_counts_every_block_test.sql : 13 passed` (CB7 to CB9 green with the default root),
+    `99_capacity_review_test.sql : 18 passed` (RV16 names the new signature), every other file 0 failed, 0
+    hard-errors; db_checks is 203t's 944 plus the 5 new. e2e: the lane's typed walk `14 passed (3.1m)` twice,
+    WALK_SET=2 `14 passed (3.0m)`, roleWalk `8 passed (1.6m)` twice; e2e 67 is 203t's 65 plus the two new cases.
+    CI not re-read: no push since 198's green.
+  summary: >-
+    Merged tester (fast-forward to d731b1c): DEF-0065 to DEF-0067 verified, 0086 reviewed and mutated by the
+    tester; DEF-0068 (minor, F-254 seen: the single sentence and the board's split pop-up still offered a split
+    over a block Ana can read but not change) and DEF-0069 (minor: with that read-only grant the rail said "free"
+    for a person booked on Cell 4) open. Reported both before any code, agreed on both; the maintainer had already
+    chosen R-470 in the tester's session (refuse straight away in the lot's words, no pop-up; the board's drag
+    and create doors the same). The tester's stack went up for one run with the maintainer's yes and came down at
+    the end. ONE LANE on Sonnet (docs/agent-briefs/s204-a-no-popup-over-a-locked-block-and-the-rail-says-booked-
+    brief.md), part 1 then part 2 on the shared demo data, browser first as Ana. Part 1: ONE GATE, answerForProbe
+    in busyElsewhere.ts (ok / busy elsewhere / locked / overlap for one probe), called by the bar's pre-check,
+    by submitCreateDirect (a sentence's write, a rail drop, a create) and by the refusal explainer for a move or
+    re-time, so every door says the same sentence --- "Not done: Priya Shah is already on Cell 4 today from 6 am
+    to 2 pm, and you cannot change that block from here." --- before anything opens, and the pop-up still opens
+    where she can change every block; CB-lock-4 rewritten as a contract change (R-470). Part 2: migration 0087
+    EXTRACTED from 0085 by script and asserted on (definer, pinned search_path, the company boundary,
+    app_can_read_operator, the ORDER BY, the grants) gives operator_blocks_elsewhere the board's root as an ltree
+    compared with the same <@ board_window uses, returning every block of a readable person not under that
+    root; a null root is 0085's answer; the two-argument function dropped, the client passes rootPath; the rail
+    reads booked with or without the grant. The lane found the 201t roleWalk flake ("free") was this defect
+    under a parallel spec's grant. REVIEW by a second Sonnet agent (docs/agent-briefs/s204-a-review-brief.md):
+    ship, nothing to change --- the migration matches 0085 line for line but for the signature, the CASE, the
+    DROP and the re-emitted grants; no caller of the old signature remains (the SQL callers resolve through the
+    DEFAULT); a crafted root returns nothing the caller could not already read; the widened explainer's
+    sentence is true for a mix of editable and locked blocks. Its two notes: a stale doc comment in board.ts
+    (fixed by the developer before the commit) and the cross-file grant collision under parallel workers (F-256,
+    queued). After the commit the developer applied 0087 to the DEVELOPER's stack with `migration up` and ran
+    db:types there: the same file to the byte. Both defects fix-claimed with developer notes; R-470 and R-465
+    stay contradicted for the tester to flip. The morning's first full run had both live pins red on the stack's
+    cold first touch (F-253 widened: the whole stack, not only the edge runtime; queued with F-255 as db:start
+    work). The branch is ahead of origin; the maintainer pushes.
 - id: 203t
   date: 2026-10-02
   title: "Tester run over session 202: DEF-0065, DEF-0066 and DEF-0067 verified cold as Ana, migration 0086 reviewed, two new defects (DEF-0068 the single-sentence door, DEF-0069 the rail)"
@@ -28537,21 +28641,23 @@ next:
 # ---------------------------------------------------------------------------
 - kind: task
   stage: S57
-  text: "Push, then the tester verifies DEF-0065, DEF-0066 and DEF-0067 by its own reproductions (DEF-0063 and DEF-0064 are verified); the tester should also try a replace whose incoming is booked on a readable block (the overlap question first, then the replace question from what is left), which only unit cases prove today"
+  text: "Push, then the tester verifies DEF-0068 and DEF-0069 by its own reproductions (DEF-0065 to DEF-0067 are verified); the tester should also drive a drag onto Cell 1 over a locked block (the toast's words) and a replace whose incoming is booked on a readable block, which only unit cases prove today"
   why: >-
-    Session 202 fix-claimed the three together (b94a196, with migration 0086), browser first as Ana; the typed
-    walk holds all three. The replace-plus-overlap order (CB-ovl-9, CB-ovl-10) has no browser proof yet.
+    Session 204 fix-claimed both together (407aef8, with migration 0087), browser first as Ana; the typed walk
+    and the role walk hold them. The drag door and the replace-plus-overlap order (CB-ovl-9, CB-ovl-10) have no
+    browser proof yet.
 - kind: task
   stage: S57
-  text: "F-255: db:start (or the session-start inbox) compares the stack's applied migrations with the directory and says plainly when the developer's stack is behind; the developer runs supabase migration up after any merge that brings a migration"
+  text: "F-255 and F-253 together: db:start compares the stack's applied migrations with the directory and says plainly when the developer's stack is behind, and warms the stack with one sign-in so the first live pin of the day does not read a cold port proxy as a dead dependency; the developer runs supabase migration up after any merge that brings a migration"
   why: >-
-    The maintainer's own board ran two days without 0085 and nothing said so. Small script work, no app code.
+    The maintainer's own board ran two days without 0085 and nothing said so; and three mornings running the
+    first full run had a live pin red that was green alone. Small script work, no app code.
 - kind: task
   stage: S57
-  text: "F-254 (a question for the maintainer first): what the board's split pop-up does when an overlapping block is one the caller cannot change --- refuse before the pop-up in the lot's words, or open it with the locked rows shown and Confirm withheld; then the single sentence, a drag and a create take the same answer"
+  text: "F-256: the specs that change demo grants (typedWalk's DEF-0065/DEF-0068, roleWalk's DEF-0069) share one serial group or project, or --workers=1 becomes the written rule for the walks"
   why: >-
-    The probe already carries editable (0086); only the pop-up's door is left. Two candidates drawn side by side
-    before the lane starts (CLAUDE.md section 4, ask where and how).
+    A bare `npx playwright test` can still flake on the rail while another file holds Ana's grant; the lane and
+    the tester already run with one worker, so this is a config line and a sentence in the tester's brief.
 - kind: task
   stage: S57
   text: "The lot's remaining R-431 edges: F-250 (two steps over one block), F-252 (a lot's move or re-time with a readable overlap asks skip-or-leave); and two edges noted by session 202's review --- a lot step whose question is of another kind (which shift, join) is still asked while stepping and can come before an earlier step's reason; a replace path that would carry a placeholder reason if an expansion ever stopped pre-checking (unreachable today; a guard would close it)"
