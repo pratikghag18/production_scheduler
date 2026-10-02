@@ -415,13 +415,13 @@ SAVEPOINT sp_RV16;
 DO $$
 DECLARE v_ok boolean := true; v_why text := ''; f text;
 BEGIN
-  FOREACH f IN ARRAY ARRAY['operator_peak_load(uuid,tstzrange,numeric,uuid)','capacity_probe(uuid,tstzrange,numeric,uuid)','operator_blocks_elsewhere(timestamptz,timestamptz)'] LOOP
+  FOREACH f IN ARRAY ARRAY['operator_peak_load(uuid,tstzrange,numeric,uuid)','capacity_probe(uuid,tstzrange,numeric,uuid)','operator_blocks_elsewhere(timestamptz,timestamptz,ltree)'] LOOP
     IF has_function_privilege('anon', f, 'EXECUTE') THEN v_ok := false; v_why := v_why || ' anon holds ' || f; END IF;
     IF EXISTS (SELECT 1 FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
                 WHERE p.oid = f::regprocedure AND a.grantee = 0) THEN v_ok := false; v_why := v_why || ' PUBLIC holds ' || f; END IF;
   END LOOP;
   IF NOT has_function_privilege('authenticated', 'capacity_probe(uuid,tstzrange,numeric,uuid)', 'EXECUTE') THEN v_ok := false; v_why := v_why || ' authenticated lost capacity_probe'; END IF;
-  IF NOT has_function_privilege('authenticated', 'operator_blocks_elsewhere(timestamptz,timestamptz)', 'EXECUTE') THEN v_ok := false; v_why := v_why || ' authenticated lacks operator_blocks_elsewhere'; END IF;
+  IF NOT has_function_privilege('authenticated', 'operator_blocks_elsewhere(timestamptz,timestamptz,ltree)', 'EXECUTE') THEN v_ok := false; v_why := v_why || ' authenticated lacks operator_blocks_elsewhere'; END IF;
   IF has_function_privilege('authenticated', 'operator_peak_load(uuid,tstzrange,numeric,uuid)', 'EXECUTE') THEN v_ok := false; v_why := v_why || ' authenticated holds operator_peak_load'; END IF;
   -- the trigger function is not callable as a function at all by signed-in people
   IF has_function_privilege('authenticated', 'check_operator_capacity()', 'EXECUTE') THEN

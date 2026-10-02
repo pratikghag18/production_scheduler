@@ -1610,7 +1610,7 @@ export type Database = {
         Returns: Json
       }
       operator_blocks_elsewhere: {
-        Args: { p_from: string; p_to: string }
+        Args: { p_from: string; p_root_path?: unknown; p_to: string }
         Returns: {
           efficiency: number
           node_name: string

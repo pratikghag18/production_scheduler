@@ -151,7 +151,7 @@ export function bookingWords<T extends RailBlock>(
 }
 
 /**
- * R-465 (DEF-0053): blocks the caller cannot read (`operator_blocks_elsewhere`)
+ * R-465 (DEF-0053): blocks off the board (`operator_blocks_elsewhere`, 0085 and 0087)
  * put into the rail's minute space -- real minutes since the window's first
  * instant, the very arithmetic `boardIndex.ts`'s `parseRangeSafe` does for a
  * block it can read, so such a block counts as coverage exactly like one. A row

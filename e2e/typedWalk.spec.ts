@@ -2836,6 +2836,117 @@ test("DEF-0065: a lot step whose person is booked on a block Ana can read but no
 });
 
 /**
+ * S204-A (DEF-0068, R-470, R-431, R-459): Ana is given a read-only (viewer) grant on Cell 4
+ * of Line 2, so she can SEE Priya Shah's block there (6 am to 2 pm today) and cannot change
+ * it. "put Priya Shah on Common Fastener at Cell 1 today from 8 am to 10 am" is refused at
+ * once, in the lot's words -- one refusal, the board's split pop-up never opens, nothing is
+ * written, and the trace says refused with nothing asked. With the grant RAISED to
+ * supervisor she can change Priya's block: the sentence hands the split to the board's
+ * pop-up as it always did (no stale refusal), and Cancel writes nothing. The grant is put
+ * back either way.
+ */
+test("DEF-0068: a single sentence over a block Ana can read but not change is refused at once -- no split pop-up, nothing written; with the grant raised the pop-up opens", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const cell4 = nodes.cellIdByName.get("Cell 4");
+  if (!cell4) throw new Error("no such cell in Plant A: Cell 4");
+  const priya = await operatorId(dana, "Priya Shah");
+  const readRows = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, operator_id, node_id, timerange, efficiency")
+      .eq("operator_id", priya);
+    if (error) throw new Error(`reading Priya's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const before = await readRows();
+  const beforeIds = new Set(before.map((r) => String(r.id)));
+  const added = async (): Promise<Array<Record<string, unknown>>> =>
+    (await readRows()).filter((r) => !beforeIds.has(String(r.id)));
+  const org = await dana.from("nodes").select("org_id").eq("id", cell4).single();
+  if (org.error) throw new Error(`reading Cell 4's company: ${org.error.message}`);
+  const SENTENCE = "put Priya Shah on Common Fastener at Cell 1 today from 8 am to 10 am";
+  const REFUSED =
+    "Priya Shah is already on Cell 4 today from 6 am to 2 pm, and you cannot change that block from here.";
+  const giveGrant = async (role: "viewer" | "supervisor"): Promise<void> => {
+    const granted = await dana.from("profile_grants").insert({
+      profile_id: ANA_PROFILE_ID,
+      node_id: cell4,
+      org_id: String(org.data.org_id),
+      role,
+    });
+    if (granted.error) throw new Error(`giving Ana the ${role} grant: ${granted.error.message}`);
+  };
+  const takeGrantBack = async (): Promise<void> => {
+    const { error } = await dana
+      .from("profile_grants")
+      .delete()
+      .eq("profile_id", ANA_PROFILE_ID)
+      .eq("node_id", cell4);
+    if (error) console.error(`TAKING ANA'S GRANT BACK FAILED: ${error.message}`);
+  };
+
+  try {
+    await giveGrant("viewer");
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    const from = Date.now();
+    await submit(page, SENTENCE);
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain(`Not done: ${REFUSED}`);
+    }).toPass({ timeout: 60_000, intervals: [300] });
+    await expect(page.getByText(/Split coverage/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Split evenly", exact: true })).toHaveCount(0);
+    expect(await threadTextOf(page), "no raw id in the thread").not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-/,
+    );
+    expect((await added()).length, "the refusal wrote nothing").toBe(0);
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, from);
+      expect(entry.outcome).toBe(`refused: ${REFUSED}`);
+      expect(entry.asked).toBeNull();
+      expect(entry.ran).toHaveLength(0);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+
+    // The grant raised to supervisor: she CAN change Priya's block, so the board's own
+    // split pop-up opens, as it always did. Cancel writes nothing.
+    await takeGrantBack();
+    await giveGrant("supervisor");
+    await page.reload();
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+    const threadBefore = (await threadTextOf(page)).length;
+    await submit(page, SENTENCE);
+    await expect(page.getByText(/Split coverage/).first()).toBeVisible({ timeout: 60_000 });
+    expect((await threadTextOf(page)).slice(threadBefore)).not.toContain(
+      "you cannot change that block",
+    );
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect((await added()).length, "Cancel wrote nothing").toBe(0);
+  } finally {
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    await takeGrantBack();
+    for (const r of before) {
+      await dana.from("assignments").update({ efficiency: r.efficiency }).eq("id", String(r.id));
+    }
+  }
+  expect(await added(), "the rows it wrote are gone").toEqual([]);
+  const left = await dana
+    .from("profile_grants")
+    .select("node_id")
+    .eq("profile_id", ANA_PROFILE_ID)
+    .eq("node_id", cell4);
+  expect(left.data ?? [], "Ana's grant on Cell 4 is gone").toEqual([]);
+});
+
+/**
  * S202-A (DEF-0066, F-247, R-468): the lot's questions come in STEP ORDER. "put Sam
  * Patel and Lena Novak on Common Fastener at Cell 2 today from 8 am to 10 am" as
  * Ana: Sam is already on Cell 1 today (an overlap question, step 1) and Lena is short

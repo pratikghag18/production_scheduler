@@ -561,8 +561,10 @@ export interface CommandBarProps {
    * sentence ("Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2
    * pm.") when a block the caller cannot read makes the person busy
    * (`busy_elsewhere`); S200-A (R-468): `overlap` when they are busy on blocks
-   * the caller CAN read -- a lot's step asks about it in the bar, a single
-   * sentence ignores it (the board's split pop-up answers it); `ok` for
+   * the caller CAN read and change -- a lot's step asks about it in the bar, a
+   * single sentence ignores it (the board's split pop-up answers it);
+   * S204-A (R-470): `overlap_locked` when one of them she can read but not
+   * change -- refused up front, for a single sentence as for a lot's step; `ok` for
    * anything else. Never rejects (a probe that fails is `ok`: the server's
    * write is the gate). Omitted, the bar says and writes exactly as it did
    * before this existed -- every caller that has no probe to give.
@@ -2898,7 +2900,10 @@ export function CommandBar({
           // write. Until it answers the live line says the bar is working,
           // and the trace already holds the entry (DEF-0049's shape).
           answer = precheck(resolved).then((checked): WriteAnswer =>
-            checked.kind === "busy_elsewhere"
+            // S204-A (DEF-0068, R-470, CONTRACT CHANGED): a block she can read but
+            // not change is refused here too, as a place she cannot read is -- the
+            // sentence never reaches the writer and its split pop-up.
+            checked.kind === "busy_elsewhere" || checked.kind === "overlap_locked"
               ? { kind: "refused", message: checked.sentence }
               : callWriter(),
           );
@@ -3035,7 +3040,9 @@ export function CommandBar({
     }
     if (steps.length === 0) return null;
     return Promise.all(steps.map((step) => precheck(step))).then((answers) => {
-      const said = answers.flatMap((x) => (x.kind === "busy_elsewhere" ? [x.sentence] : []));
+      const said = answers.flatMap((x) =>
+        x.kind === "busy_elsewhere" || x.kind === "overlap_locked" ? [x.sentence] : [],
+      );
       return said.length === answers.length ? [...new Set(said)].join(" ") : null;
     });
   }

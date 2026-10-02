@@ -12429,8 +12429,79 @@ describe("CB-ord / CB-lock / CB-ovl-12: the lot's questions in step order, locke
     );
   });
 
-  it("CB-lock-4: a SINGLE sentence is unchanged (CB-pre-7) -- the same locked answer never refuses in the bar; the writer is called", async () => {
-    const probe = probeFor(() => ({ kind: "overlap_locked", sentence: LOCKED_SAM }));
+  it("CB-lock-4 (R-470, CONTRACT CHANGED): a SINGLE sentence over a block she can read but not change is refused before any readout, in the lot's words -- 'Not done: ...' -- and the writer is never called. It used to reach the writer and the board's split pop-up (CB-pre-7 still holds for an overlap she CAN change); the pop-up's Confirm was refused after the click (DEF-0068)", async () => {
+    const fetchMock = stubFetch();
+    const probe = vi.fn(probeFor(() => ({ kind: "overlap_locked", sentence: LOCKED_SAM })));
+    const { input, onOpen } = renderBar(
+      { runs: [] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        precheck: probe,
+      },
+    );
+    say(input, "Assign Sam Patel to Housing A on Cell 1 in Line 1 from 10 to 2");
+    expect(statusText()).toBe("Working…");
+    await act(async () => {});
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(threadText()).toContain(`Not done: ${LOCKED_SAM}`);
+    expect(threadText()).not.toMatch(/making Housing A|Split|Join it|Ready to do/);
+    expect(statusText()).toBe("");
+    expect(candidateButtons()).toHaveLength(0);
+    // R-434: the trace says refused with nothing asked and nothing run.
+    const entry = postedEntry(fetchMock);
+    expect(entry.outcome).toBe(`refused: ${LOCKED_SAM}`);
+    expect(entry.asked).toBeNull();
+    expect(entry.ran).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it("CB-lock-6: a join-or-separate question whose EVERY answer is locked is not asked -- the one refusal, no buttons; asked when only one answer is", async () => {
+    const all = vi.fn(async (): Promise<PrecheckResult> => ({
+      kind: "overlap_locked",
+      sentence: LOCKED_SAM,
+    }));
+    const first = renderBar({ runs: [RUN1] }, null, null, {}, {}, {}, {}, {}, { precheck: all });
+    say(first.input, "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2");
+    await act(async () => {});
+    expect(all).toHaveBeenCalledTimes(2);
+    expect(threadText()).toContain(`Not done: ${LOCKED_SAM}`);
+    expect(candidateButtons()).toHaveLength(0);
+    expect(first.onOpen).not.toHaveBeenCalled();
+    cleanup();
+
+    const someLocked = vi.fn(
+      async (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> =>
+        step.intent === "assign" && step.target.kind === "run"
+          ? { kind: "overlap_locked", sentence: LOCKED_SAM }
+          : { kind: "ok" },
+    );
+    const second = renderBar(
+      { runs: [RUN1] },
+      null,
+      null,
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        precheck: someLocked,
+      },
+    );
+    say(second.input, "Assign Operator 1 to Housing A on Cell 1 in Line 1 from 10 to 2");
+    await act(async () => {});
+    expect(candidateButtons().length).toBeGreaterThan(0);
+  });
+
+  it("CB-lock-7 (CB-pre-7 stays true): an overlap she CAN change still reaches the writer and its readout, no refusal", async () => {
+    const probe = probeFor(() => samBlocks(["Cell 2"]));
     const { input, onOpen } = renderBar(
       { runs: [] },
       null,
@@ -12447,6 +12518,7 @@ describe("CB-ord / CB-lock / CB-ovl-12: the lot's questions in step order, locke
     say(input, "Assign Sam Patel to Housing A on Cell 1 in Line 1 from 10 to 2");
     await act(async () => {});
     expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(threadText()).not.toContain("Not done");
   });
 
   it("CB-lock-5 (R-459): a refusal 'You don't have permission to edit <node id>.' says the cell's NAME when the board knows the id, 'that block' when it does not -- never a uuid", async () => {

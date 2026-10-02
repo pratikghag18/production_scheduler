@@ -1,6 +1,7 @@
 import { test, expect, type Page, type Browser, type Locator } from "@playwright/test";
 import { hasRealBackend, NO_BACKEND_REASON, e2eBaseUrl } from "./env";
 import { fillWindowStart } from "./boardWindow";
+import { signedInClient, loadPlantANodes, PLANT_A_ADMIN } from "./walk/db";
 
 /**
  * THE NET FOR THE "RESOLVED THROUGH THE CALLER'S OWN VIEW" CLASS OF DEFECT.
@@ -688,6 +689,67 @@ test("R-465: Ana's rail says Priya Shah is booked on Cell 4, as the plant admin'
   expect(ana.title, "the hover sentence says it in full").toContain(
     "Priya Shah is on Cell 4 in Line 2 today from 6 am to 2 pm.",
   );
+});
+
+/**
+ * DEF-0069 (R-465, migration 0087): giving Ana MORE read access must not turn "booked" into
+ * "free". With a read-only grant on Cell 4 (the place Priya is booked on, off Ana's Line 1
+ * board) the rail used to read "Priya Shah ... free": the set of blocks elsewhere held only
+ * places she CANNOT read and the board's window only the rows under Line 1. The server now
+ * returns every block off the board's root, readable place or not, so the rail says the
+ * same with the grant as without it. The grant is added and removed inside the case (the
+ * tester suspected the 201t flake of this very read, under another spec's grant).
+ */
+test("R-465 / DEF-0069: Ana's rail says Priya Shah is booked (Cell 4, 6 am to 2 pm) with a read-only grant on Cell 4 exactly as without it", async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const dana = await signedInClient(PLANT_A_ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const cell4 = nodes.cellIdByName.get("Cell 4");
+  if (!cell4) throw new Error("no such cell in Plant A: Cell 4");
+  const org = await dana.from("nodes").select("org_id").eq("id", cell4).single();
+  if (org.error) throw new Error(`reading Cell 4's company: ${org.error.message}`);
+  const ANA = "a0000000-0000-0000-0000-000000000002";
+  const without = await priyaOnTheRail(browser, "ana@example.test");
+  let withGrant: RailReading | null = null;
+  try {
+    const granted = await dana.from("profile_grants").insert({
+      profile_id: ANA,
+      node_id: cell4,
+      org_id: String(org.data.org_id),
+      role: "viewer",
+    });
+    if (granted.error) throw new Error(`giving Ana the viewer grant: ${granted.error.message}`);
+    withGrant = await priyaOnTheRail(browser, "ana@example.test");
+  } finally {
+    const { error } = await dana
+      .from("profile_grants")
+      .delete()
+      .eq("profile_id", ANA)
+      .eq("node_id", cell4)
+      .eq("role", "viewer");
+    if (error) console.error(`TAKING ANA'S VIEWER GRANT BACK FAILED: ${error.message}`);
+  }
+  for (const [label, reading] of [
+    ["without the grant", without],
+    ["with the grant", withGrant],
+  ] as const) {
+    expect(reading?.text, `Ana's rail ${label} says booked`).toMatch(/\bbooked\b/);
+    expect(reading?.text, `and never free ${label}`).not.toMatch(/\bfree\b/);
+    expect(reading?.text, `and names the cell and the hours ${label}`).toContain(
+      "(Cell 4, 6 am to 2 pm)",
+    );
+    expect(reading?.title, `the hover sentence says it in full ${label}`).toContain(
+      "Priya Shah is on Cell 4 in Line 2 today from 6 am to 2 pm.",
+    );
+  }
+  const left = await dana
+    .from("profile_grants")
+    .select("node_id")
+    .eq("profile_id", ANA)
+    .eq("node_id", cell4);
+  expect(left.data ?? [], "Ana's viewer grant is gone").toEqual([]);
 });
 
 test("R-465: at the rail's narrowest Priya Shah's name and word stay readable and the brackets give way", async ({

@@ -3640,6 +3640,95 @@ describe("S195-D: busy on a place the caller cannot read (R-465)", () => {
     expect(toasts()).toEqual([]);
   });
 
+  // S204-A (DEF-0068, R-470): one gate (`answerForProbe`), three answers at the create door.
+  const LOCKED_SAID =
+    "Sam Patel is already on Cell 2 today from 6 am to 10 am, and you cannot change that block from here.";
+  const LOCKED_ROW = { ...READABLE_ROW, editable: false };
+
+  it("DG-lock-1 (R-470): the create door refuses a block she can read but not change, in the lot's words, with NO pop-up, nothing sent and the sentence on the toast and the refusal", async () => {
+    const api = await probeSays([LOCKED_ROW]);
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+
+    let refusal: unknown;
+    await act(async () => {
+      refusal = await submitCreate(result).catch((e: unknown) => e);
+    });
+
+    expect(refusal).toMatchObject({
+      kind: "CapacityExceeded",
+      operatorId: "op-1",
+      elsewhere: LOCKED_SAID,
+    });
+    expect(describeSchedulerError(refusal as never)).toBe(LOCKED_SAID);
+    expect(toasts()).toEqual([LOCKED_SAID]);
+    expect(result.current.popover).toBeNull();
+    expect(api.createAssignment).not.toHaveBeenCalled();
+    expect(api.applySplitCoverage).not.toHaveBeenCalled();
+  });
+
+  it("DG-lock-2: one block she can change beside one she cannot -- still refused ('one of them'), never half a split", async () => {
+    const api = await probeSays([
+      READABLE_ROW,
+      { ...LOCKED_ROW, assignmentId: "asg-locked", nodeName: "Cell 3", nodeId: "cell-3" },
+    ]);
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+    let refusal: unknown;
+    await act(async () => {
+      refusal = await submitCreate(result).catch((e: unknown) => e);
+    });
+    expect((refusal as { elsewhere: string }).elsewhere).toContain(
+      ", and you cannot change one of them from here.",
+    );
+    expect(result.current.popover).toBeNull();
+    expect(api.createAssignment).not.toHaveBeenCalled();
+  });
+
+  it("DG-lock-3: every overlapping block she CAN change opens the pop-up as before (no stale refusal); busy-elsewhere still refuses in the place's words -- one gate, three answers", async () => {
+    await probeSays([READABLE_ROW]);
+    const first = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+    let verdict: unknown;
+    await act(async () => {
+      verdict = await submitCreate(first.result);
+    });
+    expect(verdict).toBe("handed-off");
+    expect(first.result.current.popover?.kind).toBe("split");
+    expect(toasts()).toEqual([]);
+
+    await probeSays([OUTSIDE_ROW]);
+    const second = renderHook(() => useDragGesture(baseArgs(named([]))), { wrapper });
+    let refusal: unknown;
+    await act(async () => {
+      refusal = await submitCreate(second.result).catch((e: unknown) => e);
+    });
+    expect(refusal).toMatchObject({ elsewhere: SAID });
+    expect(second.result.current.popover).toBeNull();
+    expect(toasts()).toEqual([SAID]);
+  });
+
+  it("DG-lock-4: a re-time the server refuses over the cap against a block she cannot change says so, in the same words, to the toast and to the bar (the one gate, asked after the refusal)", async () => {
+    const api = await probeSays([LOCKED_ROW]);
+    vi.mocked(api.updateAssignmentFields).mockRejectedValue(CAPACITY_REFUSAL);
+    const a: IndexedAssignment = {
+      ...crewFixture(),
+      id: "asg-direct",
+      runId: null,
+      productId: "prod-1",
+      startMin: 480,
+      endMin: 600,
+    };
+    const { result } = renderHook(() => useDragGesture(baseArgs(named([a]))), { wrapper });
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.retimeAssignmentFromCommand({
+        assignmentId: "asg-direct",
+        range: { startMin: 480, endMin: 720 },
+        anchor: { x: 10, y: 10 },
+      });
+    });
+    expect(outcome).toEqual({ kind: "refused", message: LOCKED_SAID });
+    expect(toasts()).toEqual([LOCKED_SAID]);
+  });
+
   it("R-465-4: a re-time the server refuses over the cap says the place, in the toast and to the bar; the probe is asked about the same person and hours, the block left out", async () => {
     const api = await probeSays([OUTSIDE_ROW]);
     vi.mocked(api.updateAssignmentFields).mockRejectedValue(CAPACITY_REFUSAL);

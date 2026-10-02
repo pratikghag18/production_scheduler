@@ -266,8 +266,9 @@ export function OperatorPanel({
    */
   widthStorageKey?: string | null;
   /**
-   * R-465 (DEF-0053): the blocks of people this viewer can read on places she
-   * CANNOT read (`operator_blocks_elsewhere`, migration 0085), for the board's
+   * R-465 (DEF-0053): the blocks of people this viewer can read that are NOT
+   * on this board (`operator_blocks_elsewhere`, migrations 0085 and 0087: a place she
+   * cannot read, or one she can read outside the board's root), for the board's
    * own window. They count as coverage exactly like `assignmentsByOperator`,
    * and the chip says the place and the hours in brackets. `undefined` while
    * the read is pending or has failed: the rail then says what it said before

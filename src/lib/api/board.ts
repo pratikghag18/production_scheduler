@@ -78,16 +78,25 @@ export async function probeCapacity(input: CapacityProbeInput): Promise<Capacity
 }
 
 /**
- * `operator_blocks_elsewhere(p_from timestamptz, p_to timestamptz)` (migration
- * 0085, R-465). Generated signature: `{ p_from: string; p_to: string } ->
- * { operator_id, node_name, parent_name, timerange, efficiency }[]`. The blocks
- * of people the caller can read that sit on places the caller cannot read; an
- * empty set for a caller who reads the whole plant.
+ * `operator_blocks_elsewhere(p_from timestamptz, p_to timestamptz, p_root_path
+ * ltree)` (migration 0085, R-465; the root, 0087). Generated signature: `{ p_from: string;
+ * p_to: string; p_root_path?: unknown } -> { operator_id, node_name, parent_name,
+ * timerange, efficiency }[]`. The blocks of people the caller can read that are
+ * not on the board rooted at `rootPath`; an empty set when everything is on it.
  */
-export async function fetchBlocksElsewhere(from: Date, to: Date): Promise<BlockElsewhere[]> {
+export async function fetchBlocksElsewhere(
+  from: Date,
+  to: Date,
+  rootPath: string,
+): Promise<BlockElsewhere[]> {
+  // DEF-0069 (migration 0087): the board's own root, the same ltree string
+  // `board_window` takes. The set is every block of a readable person NOT at or below
+  // that root, whether or not the caller can read its place (a readable place off her
+  // board is no more on the rail than one she cannot read).
   const { data, error } = await supabase.rpc("operator_blocks_elsewhere", {
     p_from: from.toISOString(),
     p_to: to.toISOString(),
+    p_root_path: rootPath,
   });
   if (error) throw toSchedulerError(error);
   const parsed = parseBlocksElsewhere(data as Json);

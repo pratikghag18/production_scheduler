@@ -72,7 +72,7 @@ export function useBoardWindow(rootPath: string, from: Date, to: Date, enabled: 
 export function useBlocksElsewhere(rootPath: string, from: Date, to: Date, enabled: boolean) {
   return useQuery({
     queryKey: boardKeys.elsewhere(rootPath, from, to),
-    queryFn: () => fetchBlocksElsewhere(from, to),
+    queryFn: () => fetchBlocksElsewhere(from, to, rootPath),
     staleTime: 30_000,
     retry: (count, err) => !isSchedulerError(err) && count < 1,
     enabled,

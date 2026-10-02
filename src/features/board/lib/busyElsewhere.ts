@@ -299,14 +299,27 @@ export async function precheckBeforeWrite(
   } catch {
     return { kind: "ok" };
   }
-  if (probe.fits) return { kind: "ok" };
-  const facts: BusyElsewhereFacts = {
+  return answerForProbe(probe, {
     person: deps.personName,
     rows: probe.overlapping,
     zone: deps.zone,
     dateFormat: deps.dateFormat,
     now: (deps.now ?? (() => new Date()))(),
-  };
+  });
+}
+
+/**
+ * S204-A (DEF-0068, R-470, R-449): THE one gate. What ONE `capacity_probe` answer means
+ * for a write that would place a person: `ok` (they fit, or there is nothing to say),
+ * `busy_elsewhere` (a block on a place the caller cannot read), `overlap_locked` (blocks
+ * she can read, at least one she cannot change) or `overlap` (blocks she can read and
+ * change -- the split question). The bar's pre-check (`precheckBeforeWrite`) and the
+ * board's create door (`submitCreateDirect`, which opens the split pop-up) both call
+ * this, so the two can never answer the same probe differently, and a refusal reads the
+ * same sentence wherever it is said (`overlapSentence` carries the locked clause).
+ */
+export function answerForProbe(probe: CapacityProbe, facts: BusyElsewhereFacts): PrecheckResult {
+  if (probe.fits) return { kind: "ok" };
   if (isBusyElsewhere(probe)) {
     const sentence = busyElsewhereSentence(facts);
     return sentence === null ? { kind: "ok" } : { kind: "busy_elsewhere", sentence };
@@ -352,12 +365,17 @@ export async function explainCapacityRefusal(
   } catch {
     return err;
   }
-  const sentence = busyElsewhereSentence({
+  const facts: BusyElsewhereFacts = {
     person: deps.personName,
     rows: probe.overlapping,
     zone: deps.zone,
     dateFormat: deps.dateFormat,
     now: (deps.now ?? (() => new Date()))(),
-  });
-  return sentence === null ? err : { ...err, elsewhere: sentence };
+  };
+  const sentence = busyElsewhereSentence(facts);
+  if (sentence !== null) return { ...err, elsewhere: sentence };
+  // S204-A (R-470): a block she can read but not change is the one gate's `overlap_locked`;
+  // the refusal says so in the same words, instead of the numbers.
+  const answer = answerForProbe(probe, facts);
+  return answer.kind === "overlap_locked" ? { ...err, elsewhere: answer.sentence } : err;
 }

@@ -570,6 +570,20 @@ describe("OperatorPanel: busy on a place the viewer cannot read (R-465)", () => 
     expect(chip.getAttribute("title")).toBeNull();
   });
 
+  it("PE-10 (DEF-0069): a row for a place she CAN read but that is off her board reads exactly like one she cannot -- booked, the cell and the hours, never free (the server decides which rows; the rail needs no flag)", () => {
+    // The set the server returns with the board's root (0087) carries the same five columns
+    // for a readable place as for an unreadable one; this is the row Ana's rail gets for
+    // Priya's Cell 4 block when she holds a viewer grant on Cell 4 under Line 2.
+    renderRail([{ ...CELL_4 }]);
+    const chip = chipOf("Priya Shah");
+    expect(within(chip).queryByText("free")).toBeNull();
+    expect(within(chip).getByText("booked")).not.toBeNull();
+    expect(within(chip).getByText("(Cell 4, 6 am to 2 pm)")).not.toBeNull();
+    expect(chip.getAttribute("title")).toBe(
+      "Priya Shah is on Cell 4 in Line 2 today from 6 am to 2 pm.",
+    );
+  });
+
   it("PE-4: while the read is pending the rail says what it said before it existed, then 'booked' when it lands", () => {
     const { again } = renderRail(undefined);
     const chip = chipOf("Priya Shah");

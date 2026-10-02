@@ -78,7 +78,7 @@ import {
 import { scaledTarget } from "../lib/standardTarget";
 import {
   precheckBeforeWrite,
-  busyElsewhereSentence,
+  answerForProbe,
   explainCapacityRefusal,
   isBusyElsewhere,
   type CapacityAttempt,
@@ -2816,15 +2816,27 @@ export function useDragGesture(args: UseDragGestureArgs) {
           // would refuse any split of it -- the pop-up is NOT offered (R-431)
           // and nothing is sent. The refusal says the place and the hours, on
           // the board and (through the pop-up's own report) in the bar.
-          if (isBusyElsewhere(probe)) {
+          //
+          // S204-A (DEF-0068, R-470): and so would the split of a block she can READ but
+          // not CHANGE (`editable` false) -- refused here, before the pop-up opens, in
+          // the same words the bar's own pre-check says (`answerForProbe`, the ONE gate
+          // both call). Only when she can change every overlapping block does it open.
+          const gate = answerForProbe(probe, {
+            person: index.operatorById.get(operatorId)?.displayName ?? "That person",
+            rows: probe.overlapping,
+            zone: index.zone,
+            dateFormat,
+            now: new Date(),
+          });
+          if (
+            gate.kind === "busy_elsewhere" ||
+            gate.kind === "overlap_locked" ||
+            isBusyElsewhere(probe)
+          ) {
             const sentence =
-              busyElsewhereSentence({
-                person: index.operatorById.get(operatorId)?.displayName ?? "That person",
-                rows: probe.overlapping,
-                zone: index.zone,
-                dateFormat,
-                now: new Date(),
-              }) ?? "That person is already booked then.";
+              gate.kind === "busy_elsewhere" || gate.kind === "overlap_locked"
+                ? gate.sentence
+                : "That person is already booked then.";
             toast.refused(sentence);
             setPopover(null);
             const refusal: SchedulerError = {

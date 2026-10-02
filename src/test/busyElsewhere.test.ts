@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CapacityProbe, CapacityProbeOverlap, SchedulerError } from "@/lib/api";
 import {
   busyElsewhereBeforeWrite,
+  answerForProbe,
   busyElsewhereSentence,
   precheckBeforeWrite,
   explainCapacityRefusal,
@@ -443,6 +444,61 @@ describe("precheckBeforeWrite (S200-A): the pre-check's fuller answer from the o
       overlapping: [{ ...LOCKED_CELL_4, editable: true }],
     });
     expect((await precheckBeforeWrite(attempt, deps(editable))).kind).toBe("overlap");
+  });
+
+  it("PB-3b (S204-A, R-449): answerForProbe IS the gate precheckBeforeWrite applies -- the same probe, the same four answers, without a second copy for the board's create door", async () => {
+    const facts = {
+      person: "Sam Patel",
+      zone: CHICAGO,
+      dateFormat: "d_mon_yyyy" as const,
+      now: new Date("2026-09-30T18:00:00Z"),
+    };
+    const probes: CapacityProbe[] = [
+      { fits: true, peak: 1, cap: 1, overlapping: [LOCKED_CELL_4] },
+      { fits: false, peak: 2, cap: 1, overlapping: [PRIYA_CELL_4, LOCKED_CELL_4] },
+      { fits: false, peak: 2, cap: 1, overlapping: [LOCKED_CELL_4] },
+      { fits: false, peak: 2, cap: 1, overlapping: [CELL_1] },
+      { fits: false, peak: 2, cap: 1, overlapping: [] },
+    ];
+    for (const probe of probes) {
+      const viaPrecheck = await precheckBeforeWrite(
+        attempt,
+        deps(async () => probe),
+      );
+      expect(answerForProbe(probe, { ...facts, rows: probe.overlapping })).toEqual(viaPrecheck);
+    }
+    expect(probes.map((p) => answerForProbe(p, { ...facts, rows: p.overlapping }).kind)).toEqual([
+      "ok",
+      "busy_elsewhere",
+      "overlap_locked",
+      "overlap",
+      "ok",
+    ]);
+  });
+
+  it("PB-3c (S204-A): after a capacity refusal, a block she can read but not change is explained in the same words (the clause); an editable one keeps today's words", async () => {
+    const refusal: SchedulerError = {
+      kind: "CapacityExceeded",
+      operatorId: "op-sam",
+      peak: 2,
+      cap: 1,
+      timerange: '["2026-09-30 13:00:00+00","2026-09-30 15:00:00+00")',
+    };
+    const lockedProbe = vi
+      .fn<Probe>()
+      .mockResolvedValue({ fits: false, peak: 2, cap: 1, overlapping: [LOCKED_CELL_4] });
+    expect(await explainCapacityRefusal(refusal, attempt, deps(lockedProbe))).toEqual({
+      ...refusal,
+      elsewhere:
+        "Sam Patel is already on Cell 4 today from 6 am to 2 pm, and you cannot change that block from here.",
+    });
+    const editableProbe = vi.fn<Probe>().mockResolvedValue({
+      fits: false,
+      peak: 2,
+      cap: 1,
+      overlapping: [{ ...LOCKED_CELL_4, editable: true }],
+    });
+    expect(await explainCapacityRefusal(refusal, attempt, deps(editableProbe))).toBe(refusal);
   });
 
   it("PB-4: the clause counts the blocks -- two locked `those blocks`, one of two locked `one of them`, more `some of them`", async () => {
