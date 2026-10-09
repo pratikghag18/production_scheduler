@@ -43,6 +43,11 @@ bad=""
 
 for f in $staged; do
   git cat-file -e ":$f" 2>/dev/null || continue
+  # A binary blob (an image, a video under docs/media) is not Prettier's to
+  # judge: an ignored path is echoed back through stdout in text mode, the bytes
+  # come out different, and the gate named a .gif and an .mp4 as "unformatted"
+  # on 9 Oct 2026. numstat prints "-" for both counts of a binary file.
+  if git diff --cached --numstat -- "$f" | grep -q '^-'; then continue; fi
   git show ":$f" > "$tmp/blob" 2>/dev/null || continue
 
   # Prettier resolves .prettierrc AND .prettierignore from --stdin-filepath, so
