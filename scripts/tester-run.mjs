@@ -2,7 +2,8 @@
 // scripts/tester-run.mjs — the tester's fixed run order, in one command.
 //
 //   node scripts/tester-run.mjs            the standard run (plan check, types, tsc, lint, format, vitest, sweeps)
-//   node scripts/tester-run.mjs --sql      also run every supabase/tests file against the local stack
+//   node scripts/tester-run.mjs --sql      also run every supabase/tests file against the local stack,
+//                                          plus `dev_demo.sql` and its checks on a database of their own
 //   node scripts/tester-run.mjs --e2e      also run Playwright
 //   node scripts/tester-run.mjs --no-types skip `npm run db:types` (when the local Supabase stack is down;
 //                                          tsc is then INCONCLUSIVE and the report says so)
@@ -24,6 +25,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
+import { resolveWorkdir, statusFilePath } from "./lib/testerStack.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = new Set(process.argv.slice(2));
@@ -32,6 +34,42 @@ const WANT_E2E = args.has("--e2e");
 const SKIP_TYPES = args.has("--no-types");
 const isWin = process.platform === "win32";
 const npm = isWin ? "npm.cmd" : "npm";
+
+// ---------------------------------------------------------------- -1. which stack this run is pointed at
+// R-366: `scripts/tester-stack.mjs up` writes `tester-stack.json` in its
+// generated workdir. When that file exists, point THIS run at it — but only
+// for a variable the environment has not already set, so a session that
+// exported its own values (or the `tester` subagent, delegated from the
+// developer session against whatever is on disk) is never silently
+// overridden. `run()` below hands every child process `process.env` as-is
+// (no `env:` override is passed to spawnSync), so setting it here is enough
+// for the SQL runs and `npm run e2e` alike to inherit it. When the file does
+// not exist, this run is on the developer's shared stack and port — the
+// behaviour from before R-366, unchanged.
+const TESTER_WORKDIR = resolveWorkdir(ROOT);
+const TESTER_STACK_FILE = statusFilePath(TESTER_WORKDIR);
+if (existsSync(TESTER_STACK_FILE)) {
+  const stack = JSON.parse(readFileSync(TESTER_STACK_FILE, "utf8"));
+  const setUnlessPresent = (key, value) => {
+    if (!process.env[key]) process.env[key] = String(value);
+  };
+  setUnlessPresent("VITE_SUPABASE_URL", stack.supabaseUrl);
+  setUnlessPresent("VITE_SUPABASE_ANON_KEY", stack.anonKey);
+  setUnlessPresent("SUPABASE_DB_CONTAINER", stack.dbContainer);
+  setUnlessPresent("E2E_PORT", stack.port);
+  // DEF-0026: the email-following specs read their own stack's mail catcher.
+  setUnlessPresent("E2E_MAIL_URL", stack.mailUrl);
+  if (!process.env.SUPABASE_WORKDIR) process.env.SUPABASE_WORKDIR = TESTER_WORKDIR;
+  console.log(
+    `tester-run: pointed at the tester's own stack — ${process.env.VITE_SUPABASE_URL}, ` +
+      `container ${process.env.SUPABASE_DB_CONTAINER}, port ${process.env.E2E_PORT}.`,
+  );
+} else {
+  console.log(
+    `tester-run: no tester stack found at ${TESTER_STACK_FILE} — running against the ` +
+      "developer's shared stack and port 5173 (run `node scripts/tester-stack.mjs up` for a stack of your own).",
+  );
+}
 
 const report = [];
 const summary = [];
@@ -85,11 +123,45 @@ run("plan validates", "node", ["scripts/render-plan.mjs", "--check"]);
 
 // ---------------------------------------------------------------- 2. generated types, then tsc
 if (!SKIP_TYPES) {
-  const before = existsSync(join(ROOT, "src/lib/database.types.ts"))
-    ? readFileSync(join(ROOT, "src/lib/database.types.ts"), "utf8")
-    : "";
-  const r = run("db:types (regenerate from the local database)", npm, ["run", "db:types"]);
-  const after = readFileSync(join(ROOT, "src/lib/database.types.ts"), "utf8");
+  const typesPath = join(ROOT, "src/lib/database.types.ts");
+  const before = existsSync(typesPath) ? readFileSync(typesPath, "utf8") : "";
+  // R-366: `npm run db:types` always targets the CLI's default workdir (the
+  // developer's) — that script is left alone on purpose, since a second knob
+  // there is not what anyone asked for. On a tester stack (SUPABASE_WORKDIR
+  // set above) the CLI is called directly with --workdir instead, writing the
+  // same file the npm script writes; confirmed 9 Sept that this CLI version
+  // honours --workdir for `gen types --local`.
+  let r;
+  if (process.env.SUPABASE_WORKDIR) {
+    const cmdArgs = [
+      "supabase",
+      "gen",
+      "types",
+      "typescript",
+      "--local",
+      "--workdir",
+      process.env.SUPABASE_WORKDIR,
+    ];
+    H(`db:types (regenerate from the tester's stack) — \`npx ${cmdArgs.join(" ")}\``);
+    const t0 = Date.now();
+    const spawn = spawnSync("npx", cmdArgs, {
+      cwd: ROOT,
+      encoding: "utf8",
+      shell: isWin,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const secs = ((Date.now() - t0) / 1000).toFixed(0);
+    r = { ok: spawn.status === 0, out: (spawn.stdout ?? "") + (spawn.stderr ?? "") };
+    if (r.ok) writeFileSync(typesPath, spawn.stdout ?? "");
+    CODE(r.ok ? spawn.stdout || "(no output)" : r.out || "(no output)");
+    P(`exit ${spawn.status} · ${secs}s`);
+    summary.push(
+      `${r.ok ? "ok  " : "FAIL"}  db:types (tester stack)${r.ok ? "" : ` (exit ${spawn.status})`}`,
+    );
+  } else {
+    r = run("db:types (regenerate from the local database)", npm, ["run", "db:types"]);
+  }
+  const after = readFileSync(typesPath, "utf8");
   if (r.ok && before !== after) {
     P(
       "⚠️ **`database.types.ts` CHANGED when regenerated.** The committed types did not match the database. That is a finding (doc-drift class) — the developer committed a migration without regenerating, or regenerated against a different stack.",
@@ -148,6 +220,14 @@ if (WANT_SQL) {
     .sort();
   run("sql: rebuild the scratch database", "bash", ["scripts/run-sql-test.sh", "--rebuild"]);
   for (const f of tests) run(`sql: ${f}`, "bash", ["scripts/run-sql-test.sh", f]);
+  // ⭐ THE DEMO WORLD, ON ITS OWN DATABASE (DEF-0006). `dev_demo.sql` is what the
+  // running app shows and it was on no runner's path, so migration 0044 could drop
+  // a column the demo still wrote and nothing went red — the fixture simply stopped
+  // building half way through the next `db:reset`. This step APPLIES that file
+  // under ON_ERROR_STOP, which is the half that catches it, and then asks the built
+  // world R-D112's questions. It cannot share `sql_test_db`: `dev_demo.sql` deletes
+  // org 1's seeded content, and the loop above does not rebuild between files.
+  run("sql: dev_demo.sql builds the demo world", "bash", ["scripts/run-sql-test.sh", "--demo"]);
   const upgrades = readdirSync(join(ROOT, "supabase/tests"))
     .filter((f) => /^upgrade_.*\.sql$/.test(f))
     .sort();
@@ -158,6 +238,11 @@ if (WANT_SQL) {
 if (WANT_E2E) run("playwright e2e", npm, ["run", "e2e"]);
 
 // ---------------------------------------------------------------- 5. sweeps no runner performs
+// F-121. Searches that could not be COMPLETED, as distinct from searches that
+// completed and found nothing. A sweep that cannot answer must say so; the one
+// failure a runner-output report cannot flag is a sweep that goes quiet.
+const grepFailures = [];
+
 H("Sweep 1 — columns made NULLABLE since the plan's tip");
 P(
   "A migration that drops NOT NULL is a CLIENT change db:types does not surface: the app keeps compiling and starts refusing real rows (§19.76). For each column below, read every guard in `src/` that mentions it.",
@@ -183,7 +268,13 @@ for (const m of newMigrations) {
   for (const col of drops) {
     const hits = grepSrc(col);
     P(
-      `  - \`${col}\` is mentioned in: ${hits.length ? hits.join(", ") : "NOTHING in src/ — either unused or read through a wildcard select; check the parsers"}`,
+      `  - \`${col}\` is mentioned in: ${
+        hits === null
+          ? "COULD NOT BE SEARCHED — the search itself failed, see the unsearchable list below; read this column by hand"
+          : hits.length
+            ? hits.join(", ")
+            : "NOTHING in src/ — either unused or read through a wildcard select; check the parsers"
+      }`,
     );
   }
   if (drops.length)
@@ -197,10 +288,16 @@ P(
 const typesSrc = readFileSync(join(ROOT, "src/lib/database.types.ts"), "utf8");
 const tables = [...typesSrc.matchAll(/^\s{6}(\w+): \{\s*\n\s{8}Row: \{([\s\S]*?)\n\s{8}\}/gm)];
 const dark = [];
+const unsearchable = [];
 for (const [, table, body] of tables) {
   for (const [, col] of body.matchAll(/^\s{10}(\w+)\??:/gm)) {
     if (["id", "org_id", "created_at", "updated_at"].includes(col)) continue;
-    if (grepSrc(col).length === 0) dark.push(`${table}.${col}`);
+    const hits = grepSrc(col);
+    // F-121: null is "the search did not complete", which looks identical to
+    // "found nowhere" if you only test .length. Calling such a column dark is
+    // how `audit_log.at` was reported unread while AuditPanel.tsx read it.
+    if (hits === null) unsearchable.push(`${table}.${col}`);
+    else if (hits.length === 0) dark.push(`${table}.${col}`);
   }
 }
 if (dark.length) {
@@ -209,6 +306,14 @@ if (dark.length) {
     `READ  ${dark.length} dark column(s): ${dark.slice(0, 6).join(", ")}${dark.length > 6 ? "…" : ""}`,
   );
 } else P("None.");
+if (unsearchable.length) {
+  P(
+    `⚠️ ${unsearchable.length} column(s) could NOT be searched and are NOT claimed either way: ${unsearchable.map((d) => `\`${d}\``).join(", ")}. A name this common floods the search; read these by hand.`,
+  );
+  summary.push(
+    `READ  ${unsearchable.length} column(s) unsearchable by this sweep — not dark, unanswered`,
+  );
+}
 
 H("Sweep 3 — sentences in the code that may describe a rule the server no longer has");
 P(
@@ -225,17 +330,50 @@ const phrases = [
   "the server will",
 ];
 const driftHits = [];
-for (const ph of phrases) for (const h of grepSrc(ph, true)) driftHits.push(`${h}  «${ph}»`);
+for (const ph of phrases) {
+  const hits = grepSrc(ph, true);
+  if (hits === null) continue; // already logged; do not report it as "None."
+  for (const h of hits) driftHits.push(`${h}  «${ph}»`);
+}
 if (driftHits.length) P(driftHits.map((d) => `- ${d}`).join("\n"));
-else P("None.");
+else P(grepFailures.length ? "No hits among the phrases that could be searched." : "None.");
+if (grepFailures.length) {
+  P(
+    `⚠️ ${grepFailures.length} search(es) across all three sweeps did not complete and were NOT counted as absent: ${grepFailures.join("; ")}.`,
+  );
+  summary.push(
+    `READ  ${grepFailures.length} sweep search(es) failed to complete — their subjects are unanswered, not clean`,
+  );
+}
 
 // ---------------------------------------------------------------- 6. write the report
+/**
+ * Files under src/ mentioning `needle`, or NULL when the search could not be
+ * completed — which is not the same answer as "nowhere" and must never be
+ * collapsed into it (F-121).
+ *
+ * The maxBuffer is the same 64 MB `run()` sets above; omitting it here
+ * inherited Node's 1 MB default, and a needle as short as "at" produced
+ * 1,045,919 bytes of matches on this tree. spawnSync then KILLS the child and
+ * reports `status: null`, which the old `status !== 0 -> []` read as "found
+ * nowhere" — reporting `audit_log.at` as a dark column while
+ * AuditPanel.tsx:991 read it directly.
+ */
 function grepSrc(needle, withLine = false) {
   const r = spawnSync("git", ["grep", "-n", "-I", "--fixed-strings", "--", needle, "src/"], {
     cwd: ROOT,
     encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
   });
-  if (r.status !== 0) return [];
+  // git grep: 0 = matched, 1 = no match. Anything else — an error, or null for
+  // a child killed on buffer or signal — means the question went unanswered.
+  if (r.status === 1) return [];
+  if (r.status !== 0) {
+    grepFailures.push(
+      `\`${needle}\` (exit ${r.status}${r.error ? `: ${r.error.message}` : ""}, ${(r.stdout || "").length} bytes read)`,
+    );
+    return null;
+  }
   const lines = r.stdout.split("\n").filter((l) => l && !l.startsWith("src/lib/database.types.ts"));
   if (withLine) return lines.map((l) => l.split(":").slice(0, 2).join(":"));
   return [...new Set(lines.map((l) => l.split(":")[0]))];

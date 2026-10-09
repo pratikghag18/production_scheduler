@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BoardWindow } from "@/lib/api";
-import { buildBoardIndex } from "@/features/board/lib/boardIndex";
+import { buildBoardIndex, policyForNode } from "@/features/board/lib/boardIndex";
 import { DENSITIES } from "@/features/board/lib/geometry";
 
 /**
@@ -159,19 +159,10 @@ function makeFixture(): BoardWindow {
       createdAt: "2026-08-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",
     },
-    {
-      id: "r-cancelled",
-      orgId: "org1",
-      nodeId: "n-cell1",
-      productId: "p1",
-      timerange: '["2026-08-19 06:00:00+00","2026-08-19 14:00:00+00")',
-      plannedHeadcount: 1,
-      notes: null,
-      status: "cancelled",
-      createdBy: null,
-      createdAt: "2026-08-01T00:00:00Z",
-      updatedAt: "2026-08-01T00:00:00Z",
-    },
+    // ⚠️ THE `r-cancelled` FIXTURE IS GONE (R-324), not renamed. A cancelled run
+    // is a state the server can no longer produce — the column does not exist,
+    // and it never could reach that state anyway, since runs are hard-deleted.
+    // The row that stood here was the only reason this file needed a status.
   ];
 
   const assignments = [
@@ -194,25 +185,11 @@ function makeFixture(): BoardWindow {
       createdAt: "2026-08-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",
     },
-    // case 17: cancelled -- excluded from every map
-    {
-      id: "a-cancelled",
-      orgId: "org1",
-      nodeId: "n-cell1",
-      operatorId: "op1",
-      runId: "r1",
-      productId: null,
-      timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
-      efficiency: 0.5,
-      eligibilityOverride: false,
-      overrideReason: null,
-      targetQty: null,
-      targetUnit: null,
-      status: "cancelled",
-      createdBy: null,
-      createdAt: "2026-08-01T00:00:00Z",
-      updatedAt: "2026-08-01T00:00:00Z",
-    },
+    // ⚠️ THE `a-cancelled` ASSIGNMENT FIXTURE IS GONE (R-323), not moved. A
+    // cancelled assignment is a state the server can no longer produce — the
+    // column does not exist — so a fixture carrying one would be testing this
+    // client against a payload it will never receive, which is worse than no
+    // fixture at all. The cancelled RUN above stays; runs kept their status.
     // case 18: malformed timerange -- dropped, droppedRanges += 1, no throw
     {
       id: "a-bad",
@@ -261,6 +238,7 @@ function makeFixture(): BoardWindow {
       employeeRef: null,
       active: true,
       skillIds: [],
+      skillExpiries: [],
     },
     {
       id: "op2",
@@ -269,6 +247,7 @@ function makeFixture(): BoardWindow {
       employeeRef: null,
       active: true,
       skillIds: [],
+      skillExpiries: [],
     },
   ];
   const products = [{ id: "p1", sku: "WX", name: "Widget X", active: true }];
@@ -310,6 +289,22 @@ function makeFixture(): BoardWindow {
     { nodeId: "n-unknownlevel", templateId: null },
   ];
 
+  // R-331: the server's ALREADY-RESOLVED answer for each node — the plant is
+  // strict, Machining under it was relaxed, and `n-unknownlevel` is deliberately
+  // LEFT OUT so a case can measure what an unanswered node falls back to.
+  const nodePolicies = [
+    { nodeId: "n-plant", eligibilityPolicy: "block" },
+    { nodeId: "n-assembly", eligibilityPolicy: "block" },
+    { nodeId: "n-line1", eligibilityPolicy: "block" },
+    { nodeId: "n-cell1", eligibilityPolicy: "block" },
+    { nodeId: "n-machining", eligibilityPolicy: "warn" },
+    { nodeId: "n-cncline", eligibilityPolicy: "warn" },
+    { nodeId: "n-cell6", eligibilityPolicy: "warn" },
+    { nodeId: "n-other", eligibilityPolicy: "block" },
+    { nodeId: "n-otherline", eligibilityPolicy: "block" },
+    { nodeId: "n-otherx", eligibilityPolicy: "block" },
+  ];
+
   return {
     org: { id: "org1", name: "Northwind", settings: { capacity_cap: 1.2 } },
     levels,
@@ -323,6 +318,13 @@ function makeFixture(): BoardWindow {
     shiftTemplates,
     nodeShiftMap,
     cycleTimes,
+    nodePolicies,
+    // R-333 / 0062 (DEF-0017): the board's resolved date format. buildBoardIndex
+    // does not read it, but the fixture carries it so it is an honest payload.
+    dateFormat: "d_mon_yyyy",
+    // R-353 / 0063 (D88a): the board's resolved zone. A UTC payload keeps the
+    // axis at day*1440 and every number in this suite unchanged.
+    timezone: "UTC",
   } as unknown as BoardWindow;
 }
 
@@ -350,14 +352,33 @@ describe("boardIndex.ts", () => {
     expect((idx.assignmentsByNode.get("n-cell1") ?? []).some((a) => a.id === "a1")).toBe(false);
   });
 
-  it("cancelled rows are excluded from every map (case 17)", () => {
-    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
-    const anyCancelledRun = [...idx.runsByNode.values()].flat().some((r) => r.id === "r-cancelled");
-    const anyCancelledAssignment = [...idx.assignmentsByNode.values()]
-      .flat()
-      .some((a) => a.id === "a-cancelled");
-    expect(anyCancelledRun).toBe(false);
-    expect(anyCancelledAssignment).toBe(false);
+  /**
+   * ⚠️ CASE 17 IS GONE ENTIRELY, IN TWO STEPS, AND THE CONTRACT CHANGED BOTH
+   * TIMES RATHER THAN THE CASES BEING WRONG. It asserted that a cancelled RUN
+   * and a cancelled ASSIGNMENT were dropped from every map. R-323 removed the
+   * assignment half; R-324 removed the run half. Neither table has a status now
+   * — a deleted row is deleted — so the states those assertions described can no
+   * longer exist, and a fixture carrying one would be testing this client
+   * against a payload the server cannot produce.
+   *
+   * ⭐ WHAT REPLACES IT IS THE OPPOSITE ASSERTION, and it has to be positive:
+   * "nothing is filtered" is invisible if you only delete a case. So the two
+   * below say that every run and every assignment in the window reaches a map.
+   */
+  it("every run in the window reaches a map — nothing is filtered out", () => {
+    const fixture = makeFixture();
+    const idx = buildBoardIndex(fixture, windowStart, windowEnd, STANDARD);
+    const shown = new Set([...idx.runsByNode.values()].flat().map((r) => r.id));
+    for (const r of fixture.runs) expect(shown.has(r.id)).toBe(true);
+  });
+
+  it("every assignment in the window reaches a map — nothing is filtered out", () => {
+    const fixture = makeFixture();
+    const idx = buildBoardIndex(fixture, windowStart, windowEnd, STANDARD);
+    const shown = new Set([...idx.assignmentsByNode.values()].flat().map((a) => a.id));
+    // Everything except the row case 18 drops for an unparseable timerange.
+    const expected = fixture.assignments.filter((a) => a.id !== "a-bad").map((a) => a.id);
+    for (const id of expected) expect(shown.has(id)).toBe(true);
   });
 
   it("a malformed timerange drops that row, counts it, and does not throw (case 18)", () => {
@@ -434,6 +455,30 @@ describe("boardIndex.ts", () => {
     expect(row?.isTrack).toBe(false);
   });
 
+  it("R-D18a: a node whose level IS schedulable is a track row; one whose level is not is a group row — nothing hardcodes department/line/cell", () => {
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    // n-cell1 sits on lvl-cell (isSchedulable: true)
+    expect(idx.rows.find((r) => r.node.id === "n-cell1")?.isTrack).toBe(true);
+    // n-plant/n-assembly/n-line1 sit on non-schedulable levels
+    expect(idx.rows.find((r) => r.node.id === "n-plant")?.isTrack).toBe(false);
+    expect(idx.rows.find((r) => r.node.id === "n-assembly")?.isTrack).toBe(false);
+    expect(idx.rows.find((r) => r.node.id === "n-line1")?.isTrack).toBe(false);
+  });
+
+  it("R-D18b: indentation (depth) comes from path segment count relative to the root, not from the level's own position", () => {
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    expect(idx.rows.find((r) => r.node.id === "n-plant")?.depth).toBe(0);
+    expect(idx.rows.find((r) => r.node.id === "n-assembly")?.depth).toBe(1);
+    expect(idx.rows.find((r) => r.node.id === "n-line1")?.depth).toBe(2);
+    expect(idx.rows.find((r) => r.node.id === "n-cell1")?.depth).toBe(3);
+    // A sibling branch at the same level depth (machining/cncline/cell6) lands
+    // at the same depths as assembly/line1/cell1 — depth tracks the path, not
+    // a hardcoded department/line/cell scheme.
+    expect(idx.rows.find((r) => r.node.id === "n-machining")?.depth).toBe(1);
+    expect(idx.rows.find((r) => r.node.id === "n-cncline")?.depth).toBe(2);
+    expect(idx.rows.find((r) => r.node.id === "n-cell6")?.depth).toBe(3);
+  });
+
   it("P1-4c: BoardIndex.density round-trips the density it was given", () => {
     for (const d of DENSITIES) {
       const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, d);
@@ -492,5 +537,73 @@ describe("R-316: an assignment carries the target its cell's cycle time implies"
     const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
     expect(idx.assignmentById.get("a1")?.defaultTargetQty).toBe(160);
     expect(idx.assignmentById.get("a-ok")?.defaultTargetQty).toBeNull();
+  });
+});
+
+/**
+ * ⭐ THE HEADLINE IS B-EP1: two cells on the SAME board, in the same company,
+ * answering differently. That is the case the old company-wide scalar could not
+ * express however it was read, and it is the whole reason `board_window` now
+ * sends a map rather than one value.
+ *
+ * ⛔ AND THE REST ARE ABOUT WHAT HAPPENS WHEN THE MAP CANNOT ANSWER. An unknown
+ * node fails SAFE (`block`), never open: guessing the company's `warn` draws an
+ * override tick the server may then refuse — the dead end this work removes.
+ */
+describe("R-331: the eligibility rule is the CELL's, not the company's", () => {
+  it("⭐ B-EP1: two cells on ONE board carry two different policies", () => {
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    expect(policyForNode(idx, "n-cell1")).toBe("block");
+    expect(policyForNode(idx, "n-cell6")).toBe("warn");
+    // ...and the company's own value is still there, unread by the popover.
+    expect(idx.eligibilityPolicy).toBe("warn");
+  });
+
+  it("⛔ B-EP2: a node the payload did not answer for falls back to BLOCK, not to the company", () => {
+    // `n-unknownlevel` is in `nodes` and absent from `node_policies`. Guessing
+    // the company's "warn" here would draw an override tick the server may then
+    // refuse — the dead end this work exists to remove. Refusing something the
+    // server might have allowed is the survivable half of that pair.
+    const idx = buildBoardIndex(makeFixture(), windowStart, windowEnd, STANDARD);
+    expect(idx.eligibilityPolicy).toBe("warn");
+    expect(policyForNode(idx, "n-unknownlevel")).toBe("block");
+    expect(policyForNode(idx, "n-not-on-this-board-at-all")).toBe("block");
+  });
+
+  it("B-EP3: an EMPTY map is the not-yet-loaded board, and reads the company's answer", () => {
+    // The one state in which the company's value IS every node's value: there
+    // are no per-node answers to have missed. `emptyIndex` in BoardPage.
+    const data = makeFixture();
+    data.nodePolicies = [];
+    const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
+    expect(idx.eligibilityPolicyByNode.size).toBe(0);
+    expect(policyForNode(idx, "n-cell1")).toBe("warn");
+  });
+
+  it("B-EP4: an unrecognised policy string is DROPPED, so that node fails safe", () => {
+    // Not coerced, not trusted. A third value from a future migration must
+    // arrive as "we do not know this cell's rule", which is `block`.
+    const data = makeFixture();
+    data.nodePolicies = [
+      { nodeId: "n-cell1", eligibilityPolicy: "refuse-politely" },
+      { nodeId: "n-cell6", eligibilityPolicy: "warn" },
+    ];
+    const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
+    expect(idx.eligibilityPolicyByNode.has("n-cell1")).toBe(false);
+    expect(policyForNode(idx, "n-cell1")).toBe("block");
+    expect(policyForNode(idx, "n-cell6")).toBe("warn");
+  });
+
+  it("B-EP5: the company's value is read defensively and defaults to warn", () => {
+    const data = makeFixture();
+    (data.org as { settings: unknown }).settings = { eligibility_policy: "nonsense" };
+    data.nodePolicies = [];
+    const idx = buildBoardIndex(data, windowStart, windowEnd, STANDARD);
+    expect(policyForNode(idx, "n-cell1")).toBe("warn");
+  });
+
+  it("B-EP6: no index at all is BLOCK — the popover cannot be opened, and this is the safe answer", () => {
+    expect(policyForNode(null, "n-cell1")).toBe("block");
+    expect(policyForNode(undefined, "n-cell1")).toBe("block");
   });
 });

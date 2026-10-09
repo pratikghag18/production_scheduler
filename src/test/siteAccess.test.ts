@@ -33,8 +33,15 @@ import { expect, it } from "vitest";
 import {
   allowedRoles,
   buildAccessRows,
+  canDeactivate,
+  canGrantSystemAdmin,
+  canReactivate,
   canRemoveAccess,
+  canRevokeSystemAdmin,
   canSetRole,
+  currentLevel,
+  levelLabel,
+  levelOptions,
   describeAccess,
   accessPanelState,
   matchesQuery,
@@ -42,6 +49,18 @@ import {
   removalNote,
   removalReason,
   resolvePlace,
+  ROLES_BELOW_ROOT,
+  GRANT_ROLES,
+  sortMembers,
+  subtreeOptions,
+  rolesForNode,
+  moveTargets,
+  accessRank,
+  canManageAccess,
+  canRemoveGrant,
+  grantRoleOptions,
+  rowGrant,
+  type AccessNode,
   type AccessPlace,
   type AccessRow,
   type GrantRole,
@@ -58,7 +77,13 @@ const P_MIX = "d0000000-0000-0000-0000-000000000005";
 const P_NONE = "d0000000-0000-0000-0000-000000000006";
 const P_GHOST = "d0000000-0000-0000-0000-000000000007";
 
-const grant = (nodeId: string, nodeName: string, role: GrantRole) => ({ nodeId, nodeName, role });
+const grant = (nodeId: string, nodeName: string, role: GrantRole) => ({
+  nodeId,
+  nodeName,
+  role,
+  plansShiftId: null,
+  outsideShift: true,
+});
 
 const PAYLOAD = {
   nodeId: PLANT,
@@ -140,6 +165,9 @@ const byId = (id: string): AccessRow =>
     inheritedGrants: [],
     hasAccess: false,
     isSelf: false,
+    active: true,
+    plansShiftId: null,
+    outsideShift: true,
   };
 
 const stranger = (over: Partial<AccessRow> = {}): AccessRow => ({
@@ -150,6 +178,9 @@ const stranger = (over: Partial<AccessRow> = {}): AccessRow => ({
   inheritedGrants: [],
   hasAccess: false,
   isSelf: false,
+  active: true,
+  plansShiftId: null,
+  outsideShift: true,
   ...over,
 });
 
@@ -358,18 +389,104 @@ check("A17: a malformed sweep never throws", () => {
 // A18–A27 — allowedRoles / canRemoveAccess. The mirror of 0021 §4/§5.
 // ---------------------------------------------------------------------------
 
+/* ===========================================================================
+ * ⭐⭐ ADMIN IS A PLANT'S ROLE (DEF-0010, R-340, migration 0053).
+ *
+ * The maintainer, session 71: *"the admin level should only be applied to the
+ * plant root. If you make someone a site admin they automatically get access to
+ * the whole site and not just to a particular hierarchy."*
+ *
+ * ⚠️ THESE CASES MIRROR A SERVER RULE AND ARE WORTH NOTHING ALONE. 0053 refuses
+ * `admin` where `nodes.parent_id IS NOT NULL`, measured over a real session
+ * before this was written: at a plant root the write returns the stored role,
+ * one level down it raises `invalid_argument` with `reason: admin_below_root`,
+ * and `supervisor` one level down still succeeds. If the two ever disagree it is
+ * the SERVER that is right and this list that is stale — R-239 in the direction
+ * DEF-0005 and DEF-0007 both broke.
+ * ======================================================================== */
+
+check("A27 ⭐⭐: below a plant root, admin is not offered at all", () => {
+  const got = allowedRoles(stranger({ directRole: "viewer" }), false, false).join(",");
+  return got === "supervisor,viewer" || got;
+});
+
+check("A28: ...and every other role still is, because only admin was narrowed", () => {
+  // A line supervisor is the ordinary case D114 and 0032 were built for. A fix
+  // that narrowed the whole picker below a root would pass A27 and fail here.
+  const got = allowedRoles(stranger({ directRole: null }), false, false).join(",");
+  return got === "supervisor,viewer" || got;
+});
+
+check("A29 ⭐: at a plant root a company admin still gets all three", () => {
+  // The control for A27: without it, a fix that returned `ROLES_BELOW_ROOT`
+  // everywhere would look correct.
+  const got = allowedRoles(stranger({ directRole: "viewer" }), true, true).join(",");
+  return got === "admin,supervisor,viewer" || got;
+});
+
+check("A30 ⛔: the self-rule still wins below a root, so no control is left empty", () => {
+  // Somebody who ALREADY holds admin on a node below a root -- a grant made
+  // before 0053, which that migration deliberately leaves alone rather than
+  // deleting. Returning `["supervisor","viewer"]` here would render a control
+  // with nothing selected while the person really is an admin there, which is
+  // the state `allowedRoles` exists to avoid. Narrowing must not create it.
+  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), false, false).join(",");
+  return got === "admin" || got;
+});
+
+check("A31: the below-root list is exactly the roles the server will take", () => {
+  // Reads the exported constant rather than restating the pair, so a fourth
+  // role added to `GRANT_ROLES` has one place to be decided, not two.
+  const got = ROLES_BELOW_ROOT.join(",");
+  return got === "supervisor,viewer" || got;
+});
+
+check("A32 ⛔: somebody ELSE's below-root admin grant is drawn as admin (DEF-0012)", () => {
+  // The cell of the table A30 and A48 both missed: not the viewer's own row
+  // (A30), not at a root (A48). It fell through to `ROLES_BELOW_ROOT`, and a
+  // control whose value is not among its options shows the first option, so
+  // the screen said "supervisor" beside "Admin of Area 1". The held role
+  // leads; the two demotions are the moves the server will take.
+  const got = allowedRoles(stranger({ isSelf: false, directRole: "admin" }), true, false).join(",");
+  return got === "admin,supervisor,viewer" || got;
+});
+
+check("A33 ⭐: a control never offers a list that omits the role its subject holds", () => {
+  // The property behind A32, walked over every combination rather than the one
+  // that was found: whatever the viewer and the node, if the person holds a
+  // role here it is among the options, so nothing is ever drawn as a role the
+  // person does not have.
+  for (const viewerIsCompanyAdmin of [true, false]) {
+    for (const isPlantRoot of [true, false]) {
+      for (const isSelf of [true, false]) {
+        for (const directRole of ["admin", "supervisor", "viewer"] as const) {
+          const got = allowedRoles(
+            stranger({ isSelf, directRole }),
+            viewerIsCompanyAdmin,
+            isPlantRoot,
+          );
+          if (!got.includes(directRole)) {
+            return `viewer=${viewerIsCompanyAdmin} root=${isPlantRoot} self=${isSelf} holds=${directRole} offered=${got.join(",")}`;
+          }
+        }
+      }
+    }
+  }
+  return true;
+});
+
 check("A18: a stranger's row offers all three roles", () => {
-  const got = allowedRoles(stranger({ directRole: "viewer" }), false).join(",");
+  const got = allowedRoles(stranger({ directRole: "viewer" }), false, true).join(",");
   return got === "admin,supervisor,viewer" || got;
 });
 
 check("A19 ⭐: your OWN admin grant on this node locks the control to admin", () => {
-  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), false).join(",");
+  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), false, true).join(",");
   return got === "admin" || got;
 });
 
 check("A20 ⭐: ...and a company admin is exempt", () => {
-  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), true).join(",");
+  const got = allowedRoles(stranger({ isSelf: true, directRole: "admin" }), true, true).join(",");
   return got === "admin,supervisor,viewer" || got;
 });
 
@@ -377,14 +494,16 @@ check("A21 ⭐: your own SUPERVISOR grant is not locked", () => {
   // The narrowing. A broad "never your own row" rule passes A19 and fails
   // here — and it is the rule migration 0021 shipped first, contradicting its
   // own comment (§19.51, rule 17).
-  const got = allowedRoles(stranger({ isSelf: true, directRole: "supervisor" }), false).join(",");
+  const got = allowedRoles(stranger({ isSelf: true, directRole: "supervisor" }), false, true).join(
+    ",",
+  );
   return got === "admin,supervisor,viewer" || got;
 });
 
 check("A22 ⭐: adding YOURSELF where you hold no direct grant is not locked", () => {
   // The other half of the narrowing: it takes nothing away, because the
   // stronger covering grant above still decides.
-  const got = allowedRoles(stranger({ isSelf: true, directRole: null }), false).join(",");
+  const got = allowedRoles(stranger({ isSelf: true, directRole: null }), false, true).join(",");
   return got === "admin,supervisor,viewer" || got;
 });
 
@@ -421,6 +540,199 @@ check("A27: somebody else's grant on this node is removable", () => {
   return canRemoveAccess(stranger({ directRole: "supervisor" }), false) === true || "hidden";
 });
 
+// ---------------------------------------------------------------------------
+// AD1–AD8 — canDeactivate / canReactivate. The person-level switch (0076).
+// Mirrors set_profile_active: company admins only, never your own row, and the
+// two are exclusive by the `active` flag. The last-active-admin refusal is the
+// server's, deliberately not mirrored (the row does not carry that fact).
+// ---------------------------------------------------------------------------
+check("AD1: a company admin can deactivate an active person", () => {
+  return canDeactivate(stranger({ active: true }), true) === true || "hidden";
+});
+
+check("AD2: a company admin sees Reactivate, not Deactivate, on a deactivated person", () => {
+  const row = stranger({ active: false });
+  return (
+    (canReactivate(row, true) === true && canDeactivate(row, true) === false) ||
+    `deactivate=${canDeactivate(row, true)} reactivate=${canReactivate(row, true)}`
+  );
+});
+
+check("AD3 ⭐: a SITE admin (not company) is offered neither — it is org-wide", () => {
+  const active = stranger({ active: true });
+  const off = stranger({ active: false });
+  return (
+    (canDeactivate(active, false) === false && canReactivate(off, false) === false) ||
+    `deactivate=${canDeactivate(active, false)} reactivate=${canReactivate(off, false)}`
+  );
+});
+
+check("AD4 ⭐: you cannot deactivate your OWN account", () => {
+  return canDeactivate(stranger({ isSelf: true, active: true }), true) === false || "offered self";
+});
+
+check("AD5 ⭐: nor reactivate your own (you could not be here if inactive)", () => {
+  return canReactivate(stranger({ isSelf: true, active: false }), true) === false || "offered self";
+});
+
+check("AD6: the two are mutually exclusive for a row an admin may act on", () => {
+  const active = stranger({ active: true });
+  const off = stranger({ active: false });
+  return (
+    (canDeactivate(active, true) !== canReactivate(active, true) &&
+      canDeactivate(off, true) !== canReactivate(off, true)) ||
+    "both true or both false"
+  );
+});
+
+check("AD7: buildAccessRows reads active:false from the payload", () => {
+  const v = buildAccessRows(
+    {
+      nodeId: PLANT,
+      nodeName: "Plant 1",
+      people: [{ profileId: "p", email: "p@x.test", active: false, grants: [] }],
+    },
+    null,
+  );
+  return v.rows[0]?.active === false || `active=${v.rows[0]?.active}`;
+});
+
+check("AD8 ⭐: a MISSING active flag reads as active — never invent a lock-out", () => {
+  const v = buildAccessRows(
+    {
+      nodeId: PLANT,
+      nodeName: "Plant 1",
+      people: [{ profileId: "p", email: "p@x.test", grants: [] }],
+    },
+    null,
+  );
+  return v.rows[0]?.active === true || `active=${v.rows[0]?.active}`;
+});
+
+// ---------------------------------------------------------------------------
+// SA1–SA5 — canGrantSystemAdmin / canRevokeSystemAdmin. The org-wide promote
+// (0078). System admins only, never your own row, exclusive by `companyAdmin`.
+// ---------------------------------------------------------------------------
+check("SA1: a system admin can promote a non-admin", () => {
+  return canGrantSystemAdmin(stranger({ companyAdmin: false }), true) === true || "hidden";
+});
+
+check("SA2: a system admin sees Revoke, not Make, on an existing system admin", () => {
+  const row = stranger({ companyAdmin: true });
+  return (
+    (canRevokeSystemAdmin(row, true) === true && canGrantSystemAdmin(row, true) === false) ||
+    `grant=${canGrantSystemAdmin(row, true)} revoke=${canRevokeSystemAdmin(row, true)}`
+  );
+});
+
+check("SA3 ⭐: a non-system-admin viewer is offered neither", () => {
+  const nonAdmin = stranger({ companyAdmin: false });
+  const admin = stranger({ companyAdmin: true });
+  return (
+    (canGrantSystemAdmin(nonAdmin, false) === false &&
+      canRevokeSystemAdmin(admin, false) === false) ||
+    `grant=${canGrantSystemAdmin(nonAdmin, false)} revoke=${canRevokeSystemAdmin(admin, false)}`
+  );
+});
+
+check("SA4 ⭐: you cannot change your OWN system-admin status", () => {
+  return (
+    (canGrantSystemAdmin(stranger({ isSelf: true, companyAdmin: false }), true) === false &&
+      canRevokeSystemAdmin(stranger({ isSelf: true, companyAdmin: true }), true) === false) ||
+    "offered self"
+  );
+});
+
+check("SA5: the two are mutually exclusive for a row a system admin may act on", () => {
+  const nonAdmin = stranger({ companyAdmin: false });
+  const admin = stranger({ companyAdmin: true });
+  return (
+    (canGrantSystemAdmin(nonAdmin, true) !== canRevokeSystemAdmin(nonAdmin, true) &&
+      canGrantSystemAdmin(admin, true) !== canRevokeSystemAdmin(admin, true)) ||
+    "both true or both false"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// LV1–LV9 — the ONE access-level dropdown (R-377): currentLevel / levelLabel /
+// levelOptions. System admin / Site admin / Supervisor / Viewer in one control.
+// ---------------------------------------------------------------------------
+const siteAdminAtRoot = {
+  nodeId: PLANT,
+  role: "admin" as GrantRole,
+  direct: true,
+  plansShiftId: null,
+  outsideShift: true,
+};
+const supOnLine = {
+  nodeId: DEPT,
+  role: "supervisor" as GrantRole,
+  direct: true,
+  plansShiftId: null,
+  outsideShift: true,
+};
+
+check("LV1: the labels read System admin / Site admin / Supervisor / Viewer", () => {
+  const got = ["system", "admin", "supervisor", "viewer"]
+    .map((l) => levelLabel(l as never))
+    .join("|");
+  return got === "System admin|Site admin|Supervisor|Viewer" || got;
+});
+
+check("LV2: currentLevel is system for a company admin, else the grant role, else null", () => {
+  return (
+    (currentLevel(stranger({ companyAdmin: true }), siteAdminAtRoot) === "system" &&
+      currentLevel(stranger(), supOnLine) === "supervisor" &&
+      currentLevel(stranger(), null) === null) ||
+    "wrong current level"
+  );
+});
+
+check("LV3 ⭐: a system admin sees all four levels on a site admin at the root, in order", () => {
+  const got = levelOptions(stranger(), true, siteAdminAtRoot, PLANT, PLANT).join(",");
+  return got === "system,admin,supervisor,viewer" || got;
+});
+
+check(
+  "LV4: on a system-admin row (no node grant) the dropdown shows System admin as current",
+  () => {
+    const row = stranger({ companyAdmin: true });
+    const opts = levelOptions(row, true, null, PLANT, PLANT);
+    return (
+      (currentLevel(row, null) === "system" && opts[0] === "system" && opts.includes("viewer")) ||
+      `current=${currentLevel(row, null)} opts=${opts.join(",")}`
+    );
+  },
+);
+
+check("LV5 ⭐: a SITE admin (not system) is not offered System admin", () => {
+  const got = levelOptions(stranger(), false, supOnLine, PLANT, DEPT).join(",");
+  return got === "supervisor,viewer" || got;
+});
+
+check("LV6 ⭐: your OWN system-admin row is locked to System admin", () => {
+  const got = levelOptions(
+    stranger({ isSelf: true, companyAdmin: true }),
+    true,
+    null,
+    PLANT,
+    PLANT,
+  );
+  return (got.length === 1 && got[0] === "system") || got.join(",");
+});
+
+check("LV7 ⭐: your OWN admin grant is locked (0021 §4), when you are not a system admin", () => {
+  const got = levelOptions(stranger({ isSelf: true }), false, siteAdminAtRoot, PLANT, PLANT);
+  return (got.length === 1 && got[0] === "admin") || got.join(",");
+});
+
+check("LV8: below a plant root, Site admin is not on the menu (admin only at a root)", () => {
+  // A system admin viewing a supervisor on a line: system + the below-root
+  // roles, never 'admin'.
+  const got = levelOptions(stranger(), true, supOnLine, PLANT, DEPT).join(",");
+  return got === "system,supervisor,viewer" || got;
+});
+
 check("A48 ⭐: somebody ELSE's admin grant here is fully editable", () => {
   // ⭐ THIS CASE WAS ADDED BY WRITING THE MUTATION TABLE, BEFORE RUNNING IT.
   // Dropping `row.isSelf` from the self-rule makes it fire on everybody, and
@@ -429,9 +741,9 @@ check("A48 ⭐: somebody ELSE's admin grant here is fully editable", () => {
   // narrowing, A20/A26 walk the exemption, and nothing walked "not me".
   const other = stranger({ isSelf: false, directRole: "admin" });
   return (
-    (allowedRoles(other, false).join(",") === "admin,supervisor,viewer" &&
+    (allowedRoles(other, false, true).join(",") === "admin,supervisor,viewer" &&
       canRemoveAccess(other, false) === true) ||
-    `roles=${allowedRoles(other, false).join(",")} remove=${canRemoveAccess(other, false)}`
+    `roles=${allowedRoles(other, false, true).join(",")} remove=${canRemoveAccess(other, false)}`
   );
 });
 
@@ -960,4 +1272,283 @@ check("G7 ⭐: whatever else is true of a protected row, it is never removable",
     }
   }
   return true;
+});
+
+// ---------------------------------------------------------------------------
+// R-367 -- assigning and moving a person by hierarchy node. The node fixture
+// mirrors the tree above: Plant 1 owns Assembly, Assembly owns Line 1, and a
+// second plant sits alongside to prove a picker on Plant 1 never leaks it.
+// ---------------------------------------------------------------------------
+
+const LINE1 = "30000000-0000-0000-0000-000000000009";
+const PLANT2 = "30000000-0000-0000-0000-00000000000a";
+
+const NODES: readonly AccessNode[] = [
+  { nodeId: PLANT, name: "Plant 1", path: "plant_1" },
+  { nodeId: DEPT, name: "Assembly", path: "plant_1.assembly" },
+  { nodeId: LINE1, name: "Line 1", path: "plant_1.assembly.line_1" },
+  { nodeId: PLANT2, name: "Plant 2", path: "plant_2" },
+];
+
+check("R-367 subtreeOptions: the plant root and everything under it, parent before child", () => {
+  const opts = subtreeOptions(NODES, PLANT);
+  const ids = opts.map((o) => o.nodeId);
+  if (ids.join(",") !== [PLANT, DEPT, LINE1].join(",")) {
+    return `wrong nodes or order: ${JSON.stringify(ids)}`;
+  }
+  const depths = opts.map((o) => o.depth).join(",");
+  if (depths !== "0,1,2") return `wrong depths: ${depths}`;
+  if (!opts[0].isRoot || opts[1].isRoot || opts[2].isRoot) return "isRoot wrong";
+  return true;
+});
+
+check("R-367 subtreeOptions: a sibling plant's branch never appears", () => {
+  const ids = subtreeOptions(NODES, PLANT).map((o) => o.nodeId);
+  return ids.includes(PLANT2) ? "Plant 2 leaked into Plant 1's picker" : true;
+});
+
+check("R-367 subtreeOptions: empty input, unknown root and a null root all yield nothing", () => {
+  if (subtreeOptions([], PLANT).length !== 0) return "empty nodes was not empty";
+  if (subtreeOptions(NODES, "nope").length !== 0) return "unknown root was not empty";
+  if (subtreeOptions(NODES, null).length !== 0) return "null root was not empty";
+  return true;
+});
+
+check(
+  "R-367 subtreeOptions: a path prefix is not a label prefix -- plant_10 is not under plant_1",
+  () => {
+    const tricky: readonly AccessNode[] = [
+      { nodeId: PLANT, name: "Plant 1", path: "plant_1" },
+      { nodeId: PLANT2, name: "Plant 10", path: "plant_10" },
+    ];
+    const ids = subtreeOptions(tricky, PLANT).map((o) => o.nodeId);
+    return ids.length === 1 && ids[0] === PLANT ? true : `leaked: ${JSON.stringify(ids)}`;
+  },
+);
+
+check(
+  "R-367 rolesForNode: admin only at the plant root, supervisor/viewer below and when unchosen",
+  () => {
+    if (rolesForNode(PLANT, PLANT).join(",") !== GRANT_ROLES.join(","))
+      return "root did not offer admin";
+    if (rolesForNode(DEPT, PLANT).join(",") !== ROLES_BELOW_ROOT.join(","))
+      return "dept offered admin";
+    if (rolesForNode(null, PLANT).join(",") !== ROLES_BELOW_ROOT.join(","))
+      return "null offered admin";
+    return true;
+  },
+);
+
+check(
+  "R-367 moveTargets: supervisor may move anywhere in the subtree; an admin fits only the root",
+  () => {
+    const sup = moveTargets(NODES, PLANT, "supervisor").map((o) => o.nodeId);
+    if (sup.join(",") !== [PLANT, DEPT, LINE1].join(","))
+      return `supervisor targets wrong: ${JSON.stringify(sup)}`;
+    const adm = moveTargets(NODES, PLANT, "admin").map((o) => o.nodeId);
+    if (adm.join(",") !== [PLANT].join(","))
+      return `admin was offered a move below root: ${JSON.stringify(adm)}`;
+    return true;
+  },
+);
+
+check(
+  "R-367 canManageAccess: a system admin or a site admin may; a plain supervisor may not",
+  () => {
+    if (!canManageAccess(true, false)) return "company admin was refused";
+    if (!canManageAccess(false, true)) return "site admin (adminAnywhere) was refused";
+    if (canManageAccess(false, false)) return "a supervisor was allowed to manage nodes";
+    return true;
+  },
+);
+
+// ---------------------------------------------------------------------------
+// R-368 -- editing a row's grant in place. rowGrant resolves which grant a row
+// edits; grantRoleOptions and canRemoveGrant carry the role menu and the two
+// removal refusals to that grant, direct or a single one below.
+// ---------------------------------------------------------------------------
+
+// R-442 (S66-b): every `RowGrant` fixture below carries `plansShiftId: null,
+// outsideShift: true` -- the "unrestricted" default -- because this block is
+// about the ROLE menu and the removal rules, not the shift-plan controls,
+// which have their own block further down.
+const directGrant = {
+  nodeId: PLANT,
+  role: "supervisor" as GrantRole,
+  direct: true,
+  plansShiftId: null,
+  outsideShift: true,
+};
+const lineGrant = {
+  nodeId: LINE1,
+  role: "supervisor" as GrantRole,
+  direct: false,
+  plansShiftId: null,
+  outsideShift: true,
+};
+
+check("R-368 rowGrant: a grant on the viewed node is the editable one, marked direct", () => {
+  const g = rowGrant(byId(P_SAM), PLANT);
+  return g !== null && g.nodeId === PLANT && g.role === "supervisor" && g.direct
+    ? true
+    : `got ${JSON.stringify(g)}`;
+});
+
+check(
+  "R-368 rowGrant: a single grant BELOW the viewed node is editable in place, not direct",
+  () => {
+    // raj holds one grant, on Assembly, below Plant 1.
+    const g = rowGrant(byId(P_RAJ), PLANT);
+    return g !== null && g.nodeId === DEPT && g.role === "admin" && !g.direct
+      ? true
+      : `got ${JSON.stringify(g)}`;
+  },
+);
+
+check(
+  "R-442 rowGrant: a direct grant carries its OWN plansShiftId/outsideShift, never an inherited one's",
+  () => {
+    const withPlan = stranger({
+      directRole: "supervisor",
+      hasAccess: true,
+      plansShiftId: "shift-1",
+      outsideShift: false,
+      inheritedGrants: [{ ...grant(DEPT, "Assembly", "viewer"), plansShiftId: "shift-9" }],
+    });
+    const g = rowGrant(withPlan, PLANT);
+    return g !== null && g.plansShiftId === "shift-1" && g.outsideShift === false
+      ? true
+      : `got ${JSON.stringify(g)}`;
+  },
+);
+
+check("R-442 rowGrant: a single INHERITED grant carries its OWN plansShiftId/outsideShift", () => {
+  const g = rowGrant(byId(P_RAJ), PLANT);
+  // raj's one grant (Assembly, admin) is the default, unrestricted shape.
+  return g !== null && g.plansShiftId === null && g.outsideShift === true
+    ? true
+    : `got ${JSON.stringify(g)}`;
+});
+
+check(
+  "R-368 rowGrant: more than one grant below is ambiguous -- null, so the row opens a node",
+  () => {
+    // mixed holds admin ON Plant 1 and viewer on Assembly. Direct wins here, so
+    // build a purely-multi-inherited row to hit the ambiguous branch.
+    const multi = stranger({
+      directRole: null,
+      inheritedGrants: [grant(DEPT, "Assembly", "viewer"), grant(LINE1, "Line 1", "supervisor")],
+      hasAccess: true,
+    });
+    if (rowGrant(multi, PLANT) !== null) return "two grants below resolved to one";
+    // and the no-grant row is null too
+    return rowGrant(byId(P_NONE), PLANT) === null ? true : "a person with no grant resolved one";
+  },
+);
+
+check(
+  "R-368 grantRoleOptions: the grant's own node decides the menu; a legacy admin-below-root keeps admin",
+  () => {
+    if (
+      grantRoleOptions(byId(P_SAM), false, directGrant, PLANT).join(",") !== GRANT_ROLES.join(",")
+    ) {
+      return "root grant did not offer all three";
+    }
+    if (
+      grantRoleOptions(byId(P_SAM), false, lineGrant, PLANT).join(",") !==
+      ROLES_BELOW_ROOT.join(",")
+    ) {
+      return "line grant offered admin";
+    }
+    const adminBelow = {
+      nodeId: DEPT,
+      role: "admin" as GrantRole,
+      direct: false,
+      plansShiftId: null,
+      outsideShift: true,
+    };
+    const opts = grantRoleOptions(byId(P_RAJ), false, adminBelow, PLANT);
+    return opts.includes("admin") ? true : `admin-below-root lost admin: ${opts.join(",")}`;
+  },
+);
+
+check("R-368 grantRoleOptions: you cannot strip your own admin -- only admin offered", () => {
+  const self = stranger({ isSelf: true, directRole: "admin", hasAccess: true });
+  const g = {
+    nodeId: PLANT,
+    role: "admin" as GrantRole,
+    direct: true,
+    plansShiftId: null,
+    outsideShift: true,
+  };
+  return grantRoleOptions(self, false, g, PLANT).join(",") === "admin"
+    ? true
+    : "self admin was offered a downgrade";
+});
+
+check(
+  "R-368 canRemoveGrant: refuses a company admin's row and your own admin, allows the rest",
+  () => {
+    const boss = byId(P_BOSS); // company admin, no grant
+    if (canRemoveGrant(boss, false, directGrant))
+      return "a company admin's row was removable by a site admin";
+    const selfAdmin = stranger({ isSelf: true, directRole: "admin", hasAccess: true });
+    if (
+      canRemoveGrant(selfAdmin, false, {
+        nodeId: PLANT,
+        role: "admin",
+        direct: true,
+        plansShiftId: null,
+        outsideShift: true,
+      })
+    ) {
+      return "own admin was removable";
+    }
+    return canRemoveGrant(byId(P_SAM), false, directGrant)
+      ? true
+      : "an ordinary supervisor was not removable";
+  },
+);
+
+// ---------------------------------------------------------------------------
+// R-369 -- the member list order: highest access tier first, then email A–Z.
+// ---------------------------------------------------------------------------
+
+check("R-369 accessRank: company admin outranks admin, then supervisor, then viewer", () => {
+  const boss = byId(P_BOSS); // company admin
+  const dana = stranger({ directRole: "admin", hasAccess: true });
+  const sam = byId(P_SAM); // supervisor on plant
+  const viva = stranger({ directRole: "viewer", hasAccess: true });
+  const inh = byId(P_RAJ); // admin, but INHERITED (below) -> still ranks as admin
+  const order = [boss, dana, sam, viva].map(accessRank).join(",");
+  if (order !== "0,1,2,3") return `ranks wrong: ${order}`;
+  return accessRank(inh) === 1 ? true : `inherited admin ranked ${accessRank(inh)}`;
+});
+
+check("R-369 sortMembers: tier first, then email A–Z, address-less last, and it is a copy", () => {
+  const rows: AccessRow[] = [
+    stranger({ email: "zoe@x", directRole: "viewer", hasAccess: true }),
+    stranger({ email: "ana@x", directRole: "admin", hasAccess: true }),
+    stranger({ email: null, directRole: "admin", hasAccess: true }),
+    stranger({ email: "bob@x", directRole: "admin", hasAccess: true }),
+    stranger({ email: "cara@x", companyAdmin: true, hasAccess: true }),
+  ];
+  const before = rows.slice();
+  const got = sortMembers(rows).map((r) => r.email);
+  // company admin first; then the three admins A–Z with the null last; then the viewer.
+  if (JSON.stringify(got) !== JSON.stringify(["cara@x", "ana@x", "bob@x", null, "zoe@x"])) {
+    return `order: ${JSON.stringify(got)}`;
+  }
+  return rows.every((r, i) => r === before[i]) ? true : "sorted in place instead of copying";
+});
+
+check("R-369 sortMembers: the A–Z within a tier is case-insensitive", () => {
+  const rows: AccessRow[] = [
+    stranger({ email: "Bianca@x", directRole: "supervisor", hasAccess: true }),
+    stranger({ email: "alan@x", directRole: "supervisor", hasAccess: true }),
+  ];
+  const got = sortMembers(rows).map((r) => r.email);
+  return JSON.stringify(got) === JSON.stringify(["alan@x", "Bianca@x"])
+    ? true
+    : JSON.stringify(got);
 });

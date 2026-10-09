@@ -21,7 +21,39 @@
   padding: 0.75rem 0.875rem;
 }
 
+/* The one variant: twice the shell, for a dialog that sets two candidates side
+   by side (Copy Week, R-339). Still rem, still CSS-owned; capped so it never
+   runs off a narrow viewport. */
+.wide {
+  width: 34rem;
+  max-width: calc(100vw - 2rem);
+}
+
+/* The title is also the drag handle (R-344), so it says so: `grab` at rest and
+   `grabbing` while a drag is running. `user-select: none` stops a drag from
+   selecting the title text instead of moving the box, and `touch-action: none`
+   stops a touch drag from scrolling the page under it -- without it the browser
+   claims the gesture and no pointermove ever reaches us. Nothing else about the
+   title changes; the size stays in rem. */
 .h3 {
   margin: 0 0 0.5rem;
   font-size: 0.8125rem;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.dragging {
+  cursor: grabbing;
+}
+
+/* F-205: `visibility`, never `display: none` -- the shell still measures its
+   own rendered box (`getBoundingClientRect`, Popover.tsx) to place itself,
+   and a collapsed 0x0 box would strand the NEXT placement once this clears.
+   `visibility: hidden` keeps layout (and the measurement) intact while
+   painting nothing; it also removes the box from the tab order and from
+   hit-testing, so nothing behind an invisible dialog can be focused or
+   clicked through it by accident. */
+.concealed {
+  visibility: hidden;
 }

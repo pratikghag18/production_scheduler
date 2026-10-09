@@ -45,6 +45,14 @@
   padding-left: 1.125rem;
 }
 
+/* R-447 data exception, written down rather than forced: the confirm
+   button's own text (`confirmLabel(summary)` in DeleteDialog.tsx) is a
+   sentence built from the deletion preview -- "Delete", or what it actually
+   destroys once the server answers (D106, this file's own header comment
+   note 3) -- never a fixed word. Giving this row one width would mean
+   either truncating that sentence or padding "Deactivate instead"/"Cancel"
+   out to match it on every screen that never has anything to warn about.
+   The row's SHAPE (flex, wrapping) is shared; the width is not. */
 .actions {
   display: flex;
   flex-wrap: wrap;

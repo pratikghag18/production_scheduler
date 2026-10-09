@@ -1,0 +1,3389 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { test, expect, type Page, type Locator } from "@playwright/test";
+import { hasRealBackend, NO_BACKEND_REASON } from "./env";
+import { buildSentences, type Sentence } from "./walk/sentences";
+import { buildSentences2 } from "./walk/sentences2";
+import {
+  signedInClient,
+  loadPlantANodes,
+  operatorId,
+  productId,
+  clearWindow,
+  waitForAssignment,
+  waitForAssignmentGone,
+  waitForRun,
+  assignmentsStartingInWindow,
+  runsStartingInWindow,
+  parseTimerange,
+  plantAAssignments,
+  plantARuns,
+  clearAbsencesSince,
+  waitForAbsence,
+  PASSWORD,
+  PLANT_A_ADMIN,
+  plantZone,
+  type Db,
+  type AssignmentRow,
+} from "./walk/db";
+import { walkDayInZone, addDaysToIso, clockMsInZone } from "./walk/time";
+import { fillWindowStart } from "./boardWindow";
+
+const isoPlusDays = addDaysToIso;
+
+/**
+ * S61-c (docs/agent-briefs/s61-c-typed-walk-spec-brief.md) -- the typed half
+ * of a walk as a Playwright spec: drives the REAL bar on the REAL board and
+ * asserts each answer, so the maintainer is handed only what this has
+ * already passed. `e2e/walk/sentences.ts` is the ordered sentence list (the
+ * data); this file is the runner, the setup/teardown door, and the
+ * database/trace assertions.
+ *
+ * Skips without a backend, same shape as every other signed-in spec here.
+ */
+test.skip(!hasRealBackend, NO_BACKEND_REASON);
+
+// DEF-0057: `playwright.config.ts` runs `fullyParallel: true`, which splits a
+// file's tests across workers. The F-233 case at the foot of this file types
+// its own sentences on the walk's day and Cell 1 while the walk is running, and
+// writes to the same trace file the walk's cross-check reads. File-level
+// serial mode keeps every test of THIS file in one worker, in order: the walk
+// first, F-233 after it, never beside it. (Other files' specs run in other
+// workers; the trace read below picks out the walk's own entries.)
+test.describe.configure({ mode: "serial" });
+
+const ADMIN = PLANT_A_ADMIN;
+
+/**
+ * S71-n (docs/agent-briefs/s71-n-second-walk-list-brief.md): a SECOND
+ * sentence list, `e2e/walk/sentences2.ts`, proved by this SAME spec rather
+ * than a copy of it. Read once at module top, default 1 (the first list,
+ * unchanged). `WALK_SET=2 npx playwright test e2e/typedWalk.spec.ts`
+ * (PowerShell: `$env:WALK_SET="2";` first) selects the second.
+ */
+const WALK_SET = process.env.WALK_SET === "2" ? 2 : 1;
+
+// F-182: the walk runs on a day of its own -- the Monday of NEXT week on
+// Plant A's clock -- never on the day the board opens on. Its last two
+// sentences clear every block on that day, and until 22 Sept that day was
+// today: every run emptied the maintainer's own board, their morning's
+// overtime block included. Every sentence that names a day now says this
+// date (entry 19's own shape); the board is moved here before the first
+// sentence; and nothing before this day is ever read or cleared.
+//
+// F-190: every day and instant below is built from the PLANT'S zone, read
+// from the server at setup (`plantZone`, the same resolver the app and
+// `board_window` use) -- the walk carried America/Chicago as a constant from
+// its brief, the 21 Sept reset left the demo plant with no zone at all (UTC,
+// `board_window`'s own default), and every block the walk wrote landed five
+// hours off. A premise about the world is read from the database (F-181).
+// `initWalkDays` fills these before the first sentence; nothing reads them
+// earlier.
+let ZONE = "UTC";
+let WALK_DAY = "";
+let TOMORROW = "";
+// Within the setup/teardown window (walk day .. walk day + 8) but past the
+// board's own default 3-day window (walk day, +1, +2) -- so it is
+// guaranteed off-board for entry 19's own day-off-board move (R-455, no
+// button since 24 Sept), and still cleaned up at the end.
+let FAR = "";
+let CLEAN_FROM_MS = 0;
+let CLEAN_TO_MS = 0;
+let WALK_DAY_START_MS = 0;
+let WALK_DAY_END_MS = 0;
+let SENTENCES: Sentence[] = [];
+
+/** `hh:mm` on `iso` in the plant's own zone, as epoch ms -- what
+ *  `assignments.timerange` stores a sentence's clock time as. */
+const wallMs = (iso: string, hh: number, mm: number): number => clockMsInZone(iso, ZONE, hh, mm);
+
+function initWalkDays(zone: string): void {
+  ZONE = zone;
+  WALK_DAY = walkDayInZone(zone);
+  TOMORROW = isoPlusDays(WALK_DAY, 1);
+  FAR = isoPlusDays(WALK_DAY, 7);
+  CLEAN_FROM_MS = wallMs(WALK_DAY, 0, 0);
+  CLEAN_TO_MS = wallMs(isoPlusDays(WALK_DAY, 9), 0, 0);
+  WALK_DAY_START_MS = wallMs(WALK_DAY, 0, 0);
+  WALK_DAY_END_MS = wallMs(TOMORROW, 0, 0);
+  SENTENCES =
+    WALK_SET === 2
+      ? buildSentences2({ day: WALK_DAY, tomorrow: TOMORROW, far: FAR })
+      : buildSentences({ day: WALK_DAY, tomorrow: TOMORROW, far: FAR });
+}
+
+async function signIn(page: Page, email: string, path_ = "/"): Promise<void> {
+  await page.goto(`/sign-in?redirect=${encodeURIComponent(path_)}`);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(path_, { timeout: 15_000 });
+}
+
+function statusLine(page: Page): Locator {
+  return page.locator('p[aria-live="polite"]');
+}
+
+/**
+ * DEF-0042 (S194-C fix): R-452 (23 Sept, 1d8d82c) seeds every block inside
+ * its OWN OPERATOR'S home band, and Shift 3 is 22:00-06:00 -- so the demo
+ * seed's own Sunday night block, on the last day of "the current week" the
+ * seed anchors on, runs from Sunday 22:00 to Monday 06:00, and the walk's
+ * own day is, by construction (`walkDayInZone`), the very next Monday. The
+ * walk's first sentence expects Cell 4 already empty and instead finds
+ * Priya Shah's spilled-over block; the same spill inflated the "what the
+ * walk left on the walk day" count from 10 to 14 (DEF-0042's own repro).
+ *
+ * `clearWindow` above only DELETES rows whose range STARTS inside [walk day,
+ * walk day + 9) -- deliberately: nothing before the walk day is ever read or
+ * cleared (F-182), because that earlier day may be one a person is using
+ * right now. A spillover row's range STARTS the day before that window, so
+ * `clearWindow` never sees it, and deleting it anyway would be wrong besides
+ * -- Sunday's 22:00-24:00 part is real, seeded, in-band time nobody asked to
+ * remove. So this TRIMS instead: every assignment and run on the walk's own
+ * places whose range starts before the walk day's midnight and ends after it
+ * has its UPPER bound moved back to exactly that midnight. Sunday keeps its
+ * 22:00-24:00; the walk's Monday starts empty; nothing before midnight is
+ * touched at all -- the same three database tables (`assignments`, `runs`)
+ * and the same authenticated `dana` door the rest of this file's setup uses,
+ * never a second copy of "what counts as this plant's own places."
+ *
+ * Read migration 20260911000079 before worrying this refuses: "a run can
+ * legitimately be shrunk with its crew left outside it ... so 'inside its
+ * run' is NOT an invariant of the table today" -- trimming a run's own upper
+ * bound independently of its assignments' is an accepted shape already, not
+ * a new one. `assignments_resize_guard` (0082) re-asks `supervisor_shift_
+ * allows`, `check_eligibility` and `absence_overlap` on any authenticated
+ * UPDATE that moves a `timerange` -- `supervisor_shift_allows` returns true
+ * unconditionally for an admin grant (no `plans_shift_id`, `app_planning_
+ * grant_for`), and the demo's own `eligibility_policy` is `warn` (silent,
+ * never refused) for the other two, so this shrink-only write goes through
+ * for `dana` (`PLANT_A_ADMIN`) exactly as `clearWindow`'s own deletes do.
+ */
+async function trimSpillIntoWalkDay(
+  dana: Db,
+  nodeIds: string[],
+  walkDayStartMs: number,
+): Promise<{ assignments: number; runs: number }> {
+  const walkDayStartIso = new Date(walkDayStartMs).toISOString();
+  const spills = <T extends { timerange: string }>(rows: T[]): T[] =>
+    rows.filter((r) => {
+      const { startMs, endMs } = parseTimerange(r.timerange);
+      return startMs < walkDayStartMs && endMs > walkDayStartMs;
+    });
+
+  const spillingAssignments = spills(await plantAAssignments(dana, nodeIds));
+  for (const a of spillingAssignments) {
+    const { startMs } = parseTimerange(a.timerange);
+    const { error } = await dana
+      .from("assignments")
+      .update({ timerange: `[${new Date(startMs).toISOString()},${walkDayStartIso})` })
+      .eq("id", a.id);
+    if (error) {
+      throw new Error(
+        `DEF-0042: trimming spilled assignment ${a.id} at the walk day's midnight: ${error.message}`,
+      );
+    }
+  }
+
+  const spillingRuns = spills(await plantARuns(dana, nodeIds));
+  for (const r of spillingRuns) {
+    const { startMs } = parseTimerange(r.timerange);
+    const { error } = await dana
+      .from("runs")
+      .update({ timerange: `[${new Date(startMs).toISOString()},${walkDayStartIso})` })
+      .eq("id", r.id);
+    if (error) {
+      throw new Error(
+        `DEF-0042: trimming spilled run ${r.id} at the walk day's midnight: ${error.message}`,
+      );
+    }
+  }
+
+  return { assignments: spillingAssignments.length, runs: spillingRuns.length };
+}
+
+/**
+ * S63-a review fix (CP-5, the maintainer's own screenshot review, 17 Sept):
+ * once a turn is filed (`commandConversation.ts`'s own `fileTurn`), the live
+ * status line goes back to empty the SAME tick the write settles -- for a
+ * REAL write against the local stack that can be fast enough that this
+ * spec's own poll never catches the readout live at all. The answer is just
+ * as real read from the thread's own last turn instead (its own `asked`
+ * bubble for a plain readout the resolver worded itself -- `nothing_to_do`
+ * -- and its own result bubble, `Written: <readout>`, for an ordinary write,
+ * prefix stripped since no regex here was ever written to expect it), so
+ * `expectAnswered` below checks both in one poll rather than the live line
+ * alone.
+ *
+ * Reviewer fix (S63 review): a bare "last turn" read has no proof it BELONGS
+ * to the sentence just submitted -- a slow write racing a fast subsequent
+ * poll could still be reading the PREVIOUS turn's own result and pass for
+ * the wrong reason. `expectAnswered` below takes a `ThreadSnapshot` (the
+ * turn count) from BEFORE the sentence was submitted and only trusts the
+ * thread once that count has actually grown AND the new last turn's own
+ * `heard` bubble is the exact sentence just typed -- otherwise it keeps
+ * polling the live line alone.
+ */
+/**
+ * The FILED turns only. The bar draws the turn still in flight inside the
+ * same thread body with the same `.turn` class (so its two bubbles space the
+ * way a filed turn's do), and that live turn is the one with the
+ * `aria-live` status paragraph in it -- so it is excluded here, or a
+ * snapshot taken while a previous turn's live line still stood counted one
+ * too many and the thread was never trusted (session 178, the typed walk
+ * failing on the first sentence after a lot).
+ */
+function threadTurns(page: Page): Locator {
+  return page.locator('[class*="threadBody"] > [class*="turn"]:not(:has([aria-live]))');
+}
+
+interface ThreadSnapshot {
+  count: number;
+}
+
+async function snapshotThread(page: Page): Promise<ThreadSnapshot> {
+  return { count: await threadTurns(page).count() };
+}
+
+/**
+ * The text of `loc` if it is on the page NOW, else null -- never a wait.
+ *
+ * Session 178 (the developer, after the walk failed twice on the same two
+ * readouts): a filed turn does not always carry every bubble. A plain
+ * readout such as "Cell 4 has nobody on it …" has an `asked` bubble and NO
+ * result bubble (`turnResultLine` is "" for it, and the bar renders none),
+ * so `locator.textContent()` on the missing one waited with no timeout
+ * inside `expectAnswered`'s poll until the whole entry's budget was gone,
+ * and the walk reported the bar had said "" -- while the trace file showed
+ * the right answer filed within ten seconds. `count()` does not wait.
+ */
+async function textIfPresent(loc: Locator): Promise<string | null> {
+  if ((await loc.count()) === 0) return null;
+  return loc
+    .first()
+    .textContent({ timeout: ACTION_TIMEOUT_MS })
+    .catch(() => null);
+}
+
+async function heardTextOfLastTurn(page: Page): Promise<string | null> {
+  const turn = threadTurns(page).last();
+  if ((await turn.count()) === 0) return null;
+  return textIfPresent(turn.locator('[data-side="you"]'));
+}
+
+async function lastFiledTexts(page: Page): Promise<string[]> {
+  const turn = threadTurns(page).last();
+  if ((await turn.count()) === 0) return [];
+  const asked = await textIfPresent(turn.locator('[class*="turnBoard"]'));
+  const result = await textIfPresent(turn.locator('[class*="turnResult"]'));
+  const out: string[] = [];
+  if (asked) out.push(asked);
+  if (result) out.push(result.startsWith("Written: ") ? result.slice("Written: ".length) : result);
+  return out;
+}
+
+/**
+ * Replaces a bare `expect(statusLine(page)).toHaveText(pattern, ...)` for a
+ * plain readout/`nothing_to_do` regex -- the ONE shape CP-5 can file (and
+ * clear the live line for) before this spec's own poll runs again. A
+ * standing QUESTION never auto-files (nothing has answered it yet), so
+ * `entry.expect.question` above this function's own two call sites keeps
+ * using `statusLine` directly -- there is nothing for it to have moved to.
+ *
+ * `before` and `heard` are the STALE-TURN guard: the thread is only ever
+ * trusted once `threadTurns(page).count()` exceeds `before.count` (a NEW
+ * turn actually landed, not the one that already stood there) AND that new
+ * turn's own `heard` bubble equals `heard` (the sentence THIS call is
+ * waiting on, never a leftover from the entry before it).
+ */
+async function expectAnswered(
+  page: Page,
+  pattern: RegExp,
+  before: ThreadSnapshot,
+  heard: string,
+): Promise<void> {
+  await expect(async () => {
+    const live = await currentStatusText(page);
+    if (pattern.test(live)) return;
+    const afterCount = await threadTurns(page).count();
+    if (afterCount > before.count) {
+      const lastHeard = await heardTextOfLastTurn(page);
+      if (lastHeard === heard) {
+        const filed = await lastFiledTexts(page);
+        if (filed.some((text) => pattern.test(text))) return;
+      }
+    }
+    throw new Error(
+      `neither the live status ("${live}") nor a new thread turn for ${JSON.stringify(heard)} matched ${pattern}`,
+    );
+  }).toPass({ timeout: ENTRY_TIMEOUT_MS, intervals: [250] });
+}
+
+/** The bar's own candidate-button strip (`CommandBar.tsx`: a `div` whose
+ *  CSS-Modules class carries "candidates", rendered right after the status
+ *  line) -- scoped so a near-miss/"Which part?" button lookup by product
+ *  name (e.g. "Housing A") can never match an unrelated board element whose
+ *  own accessible name happens to CONTAIN that product name too (an
+ *  existing assignment chip reads "<person> direct assignment on Housing A,
+ *  08:00 to 12:00", a substring match away from ambiguity). Same
+ *  `[class*="..."]` convention `roleWalk.spec.ts` uses for the shift layer's
+ *  own local class names. */
+function candidateButtons(page: Page): Locator {
+  return page.locator('[class*="candidates"]').getByRole("button");
+}
+
+/** Signs in as Dana, waits for the board, moves it to the walk's own day
+ *  (F-182: never today), and opens the corner launcher (S48-a: the bar lives
+ *  behind it). */
+async function openBoard(page: Page): Promise<void> {
+  await signIn(page, ADMIN, "/");
+  const firstTrack = page.getByLabel(/press Enter to create/).first();
+  await expect(firstTrack).toBeVisible({ timeout: 20_000 });
+  await fillWindowStart(page, WALK_DAY);
+  await expect(firstTrack).toBeVisible({ timeout: 20_000 });
+  await ensureBarOpen(page);
+}
+
+/**
+ * Every Playwright ACTION in this spec carries this explicitly. The project
+ * config sets no `actionTimeout`, and Playwright's own default for one is 0
+ * -- "wait forever" -- so a `fill`/`press` against a bar that is not there
+ * any more (the launcher closed, the board remounted) hangs until the whole
+ * test's budget runs out with nothing said about where it stopped. That is
+ * exactly how a run of this spec stalled for a quarter of an hour on the
+ * twelfth sentence. A bounded action fails where it happens instead.
+ */
+const ACTION_TIMEOUT_MS = 30_000;
+
+/**
+ * The board's own launcher (S48-a) -- the bar lives behind it. Called ONLY
+ * where the panel may genuinely have closed: once to open it, and after an
+ * Escape (`CommandLauncher.tsx`: "Esc closes", and `CommandBar`'s own third
+ * Escape calls `onEscapeIdle`, which is that same `close`).
+ *
+ * NOT called before an ordinary `submit`. `isVisible()` does not wait, so
+ * during a board re-render it can answer "no" about a panel that is open --
+ * and the launcher button TOGGLES, so "re-opening" then shuts the panel and
+ * the very next keystroke has nowhere to land. That is not a hypothetical:
+ * putting this call in `submit` cost a run on its second sentence, where
+ * `fill` found the input and `press` a moment later did not.
+ */
+async function ensureBarOpen(page: Page): Promise<void> {
+  const input = page.locator("#command-bar-input");
+  try {
+    await expect(input).toBeVisible({ timeout: 5_000 });
+    return;
+  } catch {
+    // Genuinely closed -- only now is the toggle safe to press.
+  }
+  // The board itself first: a dev-server full reload drops the page back on
+  // "/" with nothing mounted, and clicking a launcher that is not there yet
+  // is a thirty-second wait that says nothing useful.
+  await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Tell the board" }).click({ timeout: ACTION_TIMEOUT_MS });
+  await expect(input).toBeVisible({ timeout: ACTION_TIMEOUT_MS });
+}
+
+/**
+ * Types `text` into the bar and presses Enter.
+ *
+ * The Enter goes through `page.keyboard`, NOT `locator.press`, and that is
+ * the whole point of this helper. `locator.press` runs Playwright's
+ * actionability checks first, and one of them is STABILITY -- the element's
+ * box must be unchanged across two animation frames. The board behind this
+ * panel re-renders continuously while a lot is writing ("Working…"), so the
+ * input is attached, visible, enabled and focused and still never "stable",
+ * and the press waits out its whole budget. That is not a guess: a run died
+ * on the fifteenth sentence with Playwright's own log reading `locator
+ * resolved to <input … value="yes" id="command-bar-input">` and a timeout
+ * underneath it. `keyboard.press` sends the key to whatever has focus and
+ * asks no such question, which is exactly the right question to not ask
+ * about a keystroke.
+ */
+async function submit(page: Page, text: string): Promise<void> {
+  const input = page.locator("#command-bar-input");
+  await input.fill(text, { timeout: ACTION_TIMEOUT_MS });
+  await input.focus({ timeout: ACTION_TIMEOUT_MS });
+  await page.keyboard.press("Enter");
+}
+
+async function currentStatusText(page: Page): Promise<string> {
+  // Bounded for the same reason every action below is: the status paragraph
+  // only exists while the bar is mounted, and an unbounded `textContent`
+  // against a closed panel waits for the whole test's budget in silence.
+  return ((await statusLine(page).textContent({ timeout: ACTION_TIMEOUT_MS })) ?? "").trim();
+}
+
+/**
+ * How long one sentence may take on the bar before the spec calls it a
+ * failure. Deliberately generous: this walk drives the REAL local model
+ * container, which answers a sentence in roughly 15-20 seconds on this
+ * machine, and `readSentence.ts`'s own `DEFAULT_TIMEOUT_MS` (20s) only
+ * starts the fall-back to the rules AFTER that -- so a single sentence can
+ * legitimately sit on "Reading…" for the better part of a minute when the
+ * container is queuing an aborted request behind the live one. A 30s budget
+ * timed out mid-walk on the sixth sentence for exactly that reason, and a
+ * 120s one on the third, the run where the bar reported "read by the rules
+ * (the model service is off)" -- a container hiccup, a fact about the
+ * machine, not about the bar.
+ */
+const ENTRY_TIMEOUT_MS = 180_000;
+
+interface EntryResult {
+  say: string;
+  barSaid: string;
+  written: string;
+  note?: string;
+  /** Set when the bar answered this sentence with something `expect` does
+   *  not match -- the finding itself, carried to the end of the run. */
+  unpredicted?: string;
+  /** For a `{ button, then }` entry: what the bar showed once the button had
+   *  been pressed and before any typed answer -- the lot's own listing, for
+   *  an entry that then declines it. */
+  listing?: string;
+}
+
+/**
+ * A status-line expectation that FAILS is a finding about the bar, not a
+ * reason to abandon the other twenty sentences: the brief's whole point is
+ * that the maintainer is handed a list every entry of which has been run, so
+ * a truncated walk is worth very little. So a mismatch here is recorded
+ * verbatim (`unpredicted`) and the walk carries on to the next sentence --
+ * and the test FAILS at the end on every row that carries one, with the full
+ * table already printed. Nothing is weakened by this: every `expect` stands
+ * exactly as written, and every DATABASE assertion in the walk below is
+ * still hard and still throws on the spot, so a sentence that claimed a
+ * write it did not make still stops the run where it stands.
+ *
+ * Escape (the bar's own cancel, `CommandBar.tsx`'s keydown handler) closes
+ * the standing question so the NEXT sentence starts clean, and closes the
+ * open trace entry as a cancel (`answered: "escape"`) rather than leaving it
+ * for the next `startTrace` to flush with a null -- which would turn one
+ * finding into two.
+ */
+async function recordMismatch(page: Page, entry: Sentence, what: string): Promise<EntryResult> {
+  const barSaid = await currentStatusText(page);
+  // What the bar was actually OFFERING when it disagreed -- a question whose
+  // buttons are not the ones expected reads as "no button came" otherwise,
+  // and the finding is then unanswerable without another whole run.
+  const offered = await candidateButtons(page)
+    .allTextContents()
+    .catch(() => [] as string[]);
+  await page.locator("#command-bar-input").focus({ timeout: ACTION_TIMEOUT_MS });
+  await page.keyboard.press("Escape");
+  await ensureBarOpen(page);
+  return {
+    say: entry.say,
+    barSaid,
+    written: barSaid,
+    note: entry.note,
+    unpredicted: `${what}\n  expected: ${String(
+      typeof entry.expect === "object" && "button" in entry.expect
+        ? (entry.expect.question ?? `a candidate button labelled "${entry.expect.button}"`)
+        : entry.expect,
+    )}\n  the bar said: ${JSON.stringify(barSaid)}\n  buttons offered: ${JSON.stringify(offered)}`,
+  };
+}
+
+/** Drives one sentence: types it, waits for the bar to settle on `expect`,
+ *  then either presses the named button (and waits for `.then`) or, if
+ *  `answer` is set, types it as a second turn. Returns what the bar showed
+ *  right after `say` (`barSaid`, the table's own middle column) and
+ *  whatever it showed once the turn is fully over (`written`). */
+async function runEntry(page: Page, entry: Sentence): Promise<EntryResult> {
+  // Progress, timestamped: a walk this long that stops somewhere must say
+  // WHICH sentence it stopped on without waiting for the table at the end.
+  console.log(`[${new Date().toISOString()}] SAY: ${entry.say}`);
+  // Reviewer fix (S63 review): taken BEFORE the sentence is even submitted,
+  // so `expectAnswered` below can tell a genuinely NEW turn (this sentence's
+  // own) apart from a stale one already sitting in the thread.
+  const before = await snapshotThread(page);
+  await submit(page, entry.say);
+  if (typeof entry.expect === "object" && "button" in entry.expect) {
+    const button = candidateButtons(page).filter({ hasText: entry.expect.button }).first();
+    // `orDirect`: the bar may skip the question (entry 10's model gap comes
+    // and goes between runs). If the direct readout lands first, the turn is
+    // over here, and the table says so in its middle column.
+    if (entry.expect.orDirect !== undefined) {
+      const direct = entry.expect.orDirect;
+      let landedDirect = false;
+      try {
+        await expect(async () => {
+          if (direct.test(await currentStatusText(page))) {
+            landedDirect = true;
+            return;
+          }
+          if (await button.isVisible()) return;
+          throw new Error("neither the question nor the direct readout yet");
+        }).toPass({ timeout: ENTRY_TIMEOUT_MS, intervals: [300] });
+      } catch {
+        return recordMismatch(
+          page,
+          entry,
+          "neither the question this sentence should have raised nor its direct readout came",
+        );
+      }
+      if (landedDirect) {
+        const barSaid = await currentStatusText(page);
+        const written = await answerIfAny(page, entry, barSaid);
+        return {
+          say: entry.say,
+          barSaid,
+          written,
+          note: `${entry.note ?? ""} [direct, no question]`,
+        };
+      }
+    }
+    try {
+      await expect(button).toBeVisible({ timeout: ENTRY_TIMEOUT_MS });
+      if (entry.expect.question !== undefined) {
+        await expect(statusLine(page)).toHaveText(entry.expect.question, {
+          timeout: ENTRY_TIMEOUT_MS,
+        });
+      }
+    } catch {
+      return recordMismatch(
+        page,
+        entry,
+        "the question this sentence should have raised never came",
+      );
+    }
+    const barSaid = await currentStatusText(page);
+    // Same stability problem `submit` describes, one step further on: a
+    // plain click waits for the button's box to stop moving, and the board
+    // behind the panel does not always oblige. The button has just been
+    // asserted visible, so falling back to a forced click (which skips the
+    // actionability checks, not the element lookup) is safe here.
+    await button.click({ timeout: ACTION_TIMEOUT_MS }).catch(async () => {
+      await button.click({ timeout: ACTION_TIMEOUT_MS, force: true });
+    });
+    try {
+      await expectAnswered(page, entry.expect.then, before, entry.say);
+    } catch {
+      const after = await recordMismatch(page, entry, `after pressing "${entry.expect.button}"`);
+      return { ...after, barSaid };
+    }
+    // A button-form entry may still take a typed answer: the second list's
+    // "split Tom Baker's block" goes through a Did-you-mean button to reach
+    // its own lot, then answers it "yes". (No day_off_board entry does this
+    // any more -- R-455 moves and reruns with no button at all, so those are
+    // plain `RegExp` entries now, handled by the non-button branch below.)
+    const listing = await currentStatusText(page);
+    const written = await answerIfAny(page, entry, listing);
+    return { say: entry.say, barSaid, written, note: entry.note, listing };
+  }
+  try {
+    await expectAnswered(page, entry.expect, before, entry.say);
+  } catch {
+    return recordMismatch(page, entry, "the bar answered this sentence with something else");
+  }
+  const liveBarSaid = await currentStatusText(page);
+  const written = await answerIfAny(page, entry, liveBarSaid);
+  if (entry.writtenSays !== undefined) {
+    // S196-A (R-425, R-459): the reason typed as the answer is read back on
+    // the readout of the write once it is written.
+    try {
+      await expect(async () => {
+        expect(await threadTextOf(page)).toMatch(entry.writtenSays as RegExp);
+      }).toPass({ timeout: 30_000, intervals: [250] });
+    } catch {
+      return recordMismatch(page, entry, "the written readout did not carry the reason given");
+    }
+  }
+  // S194-C follow-up (28 Sept): CP-5/S63-a's own doc on `expectAnswered`
+  // above says the live status line "goes back to empty the SAME tick the
+  // write settles" for a plain readout with no further `answer` -- exactly
+  // this branch's own no-`answer` shape (S47's "runs on its own readout, no
+  // yes", and every `nothing_to_do`). `expectAnswered` already proved the
+  // answer through the FILED thread turn in that case, never the live line.
+  // An empty `barSaid` here does NOT mean the bar said nothing (R-434/R-459:
+  // the bar always answers); it means the walk's own report asked the wrong
+  // place. Falls back to the same filed text `expectAnswered` itself already
+  // trusted -- only when there is no `answer` to wait on, since an entry
+  // THAT has one is waiting on a STANDING question, which never auto-files
+  // (nothing has answered it yet) and so is never empty here for that
+  // reason. `answerIfAny` above already ran on the RAW live value, unchanged,
+  // so this fallback affects only what is reported, never the wait logic.
+  const barSaid =
+    liveBarSaid !== "" || entry.answer !== undefined
+      ? liveBarSaid
+      : ((await lastFiledTexts(page)).at(-1) ?? liveBarSaid);
+  return {
+    say: entry.say,
+    barSaid,
+    written: entry.answer === undefined ? barSaid : written,
+    note: entry.note,
+  };
+}
+
+/** Types `entry.answer`, if it has one, and waits for the turn to be over.
+ *  The turn is over when the status has moved off `standing` AND is not one
+ *  of the bar's own two in-progress words: "Working…" stands for the whole
+ *  of a lot's run (`CommandBar.tsx`'s own comments on `runLotNow`), so
+ *  returning the moment the text merely CHANGED handed the next sentence a
+ *  lot that was still writing -- and the database read after it raced the
+ *  rows it was checking for. Returns what the bar shows once it is over. */
+async function answerIfAny(page: Page, entry: Sentence, standing: string): Promise<string> {
+  if (entry.answer === undefined) return standing;
+  await submit(page, entry.answer);
+  await expect(async () => {
+    const now = await currentStatusText(page);
+    expect(now).not.toBe(standing);
+    expect(now).not.toBe("Working…");
+    expect(now).not.toBe("Reading…");
+  }).toPass({ timeout: ENTRY_TIMEOUT_MS, intervals: [300] });
+  return currentStatusText(page);
+}
+
+test.describe.serial("the typed command bar walks the real board (S61-c)", () => {
+  test("every sentence in the catalogue runs on the real bar, its writes prove out in the database, and the trace records it", async ({
+    page,
+  }) => {
+    // Around two dozen sentences (26 for WALK_SET 1 since the R-461 proof
+    // pair, S194-C follow-up, added four), each a real round trip to the
+    // local model container at roughly 15-20s a turn, plus the database
+    // polls between them: the walk's own floor is about ten minutes on this
+    // machine and a single slow turn (`ENTRY_TIMEOUT_MS`) can add two more.
+    // 540s was under the floor and timed the test out mid-walk; the four new
+    // entries add well under two more minutes, still comfortably inside the
+    // existing ceiling below.
+    test.setTimeout(2_400_000);
+
+    // ------------------------------------------------------------------
+    // Setup, through the database (brief §1) -- the same authenticated
+    // supabase-js door `invite.spec.ts` builds, reused via `e2e/walk/db.ts`.
+    // ------------------------------------------------------------------
+    const dana = await signedInClient(ADMIN);
+    const nodes = await loadPlantANodes(dana);
+    // The plant's zone first (F-190): every day and instant below hangs off it.
+    initWalkDays(await plantZone(dana, nodes.plantId));
+    console.log(`walk day ${WALK_DAY} in ${ZONE} (today's board is never touched: F-182)`);
+    const cellId = (name: string): string => {
+      const id = nodes.cellIdByName.get(name);
+      if (!id) throw new Error(`no such cell in Plant A: ${name}`);
+      return id;
+    };
+    const allCellIds = [...nodes.cellIdByName.values()];
+
+    await clearWindow(dana, nodes.allNodeIds, CLEAN_FROM_MS, CLEAN_TO_MS);
+    // DEF-0042: the seed's own Sunday-night block (Shift 3, 22:00-06:00) can
+    // run into the walk's own Monday -- trimmed here, not deleted, and never
+    // reaching before the walk day's own midnight (see the function's own
+    // comment for why `clearWindow`'s delete-only window cannot do this).
+    const spillTrim = await trimSpillIntoWalkDay(dana, nodes.allNodeIds, WALK_DAY_START_MS);
+    console.log(
+      `trimmed ${spillTrim.assignments} assignment(s) and ${spillTrim.runs} run(s) that spilled ` +
+        `from before ${WALK_DAY} into it (DEF-0042)`,
+    );
+
+    const opId = {
+      sam: await operatorId(dana, "Sam Patel"),
+      maria: await operatorId(dana, "Maria Lopez"),
+      john: await operatorId(dana, "John Kim"),
+      priya: await operatorId(dana, "Priya Shah"),
+      tom: await operatorId(dana, "Tom Baker"),
+      lena: await operatorId(dana, "Lena Novak"),
+    };
+    // S194-C follow-up (28 Sept): "<person> is off <day>" now RECORDS the
+    // absence (R-409 amended); a leftover row from a previous run (this one
+    // died mid-way, or simply finished) would make the SAME sentence answer
+    // `absence_overlap` ("already has an absence recorded") on the next run
+    // instead of recording cleanly -- breaking R-433's own "green twice over
+    // the same data." Cleared here, before any sentence runs, the same
+    // reason `clearWindow` runs first; and again in the teardown below.
+    await clearAbsencesSince(dana, Object.values(opId), WALK_DAY);
+    const prodId = {
+      housingA: await productId(dana, "Housing A"),
+      bracketA: await productId(dana, "Bracket A"),
+      commonFastener: await productId(dana, "Common Fastener"),
+      line1SubA: await productId(dana, "Line 1 Subassembly A"),
+      area2FrameA: await productId(dana, "Area 2 Frame A"),
+    };
+    void prodId; // read for clarity/documentation of the fixture; ids matched by name in the checks below
+
+    // DEF-0057: the trace file is shared by every bar on this machine, so the
+    // cross-check below takes only the entries THIS walk made -- the ones
+    // that began after this instant AND whose `heard` is one of the walk's own
+    // typed sentences. (A trace entry carries no session or page id; `at` and
+    // `heard` are what it has.)
+    const walkStartedAtMs = Date.now();
+    const table: EntryResult[] = [];
+    const surprises: string[] = [];
+    // S71-n: entries whose trace line is EXPECTED to carry a null
+    // `answered` -- discovered live on the second list's own first green
+    // run (24 Sept), a swap's `inLot: true` certificate refusal (entry 13
+    // here: "swap Lena Novak and Priya Shah"), which offers NO candidate and
+    // NO yes/no of its own to answer at all -- unlike a plain `nothing_to_do`
+    // refusal (entry 1, both lists), whose own single turn is filed as its
+    // own answer. Set inside whichever WALK_SET branch below applies; the
+    // trace loop at the end reads this set instead of a single block-scoped
+    // name so it works for either list.
+    //
+    // The first list's own entry 20 (`lenaShortBlock` below) used to belong
+    // here too (F-182: declined by silence, a standing day_off_board
+    // QUESTION with no button pressed and no text typed). R-455 (24 Sept,
+    // lane S72-b, d5a8829) changed `day_off_board` itself into a READOUT
+    // (`status.moving`), and a readout fills in `answered: "auto"` the
+    // instant it is set (`traceQuestionStatus`, CommandBar.tsx) whether or
+    // not a person ever presses anything -- so EVERY entry that crosses a
+    // day_off_board move now got a real `answered` value, that entry
+    // included (repointed, S72-d review, off the real "today" write F-182
+    // itself was about). It is no longer added to this set.
+    //
+    // R-463 (29 Sept) moved entry 20 again: it now names its own day
+    // explicitly (`sentences.ts`'s own long comment on the entry) and never
+    // crosses a day_off_board move at all any more -- it is an ordinary
+    // single-sentence write like entry 2, proven by the DB read just below
+    // its `runEntry` call, same shape as entries 18/19.
+    const answerlessEntries = new Set<Sentence>();
+
+    try {
+      // ------------------------------------------------------------------
+      await openBoard(page);
+
+      if (WALK_SET === 1) {
+        const [
+          clearEmptyCell,
+          nightSetupKeep,
+          nightClearKeep,
+          nightSetupRemove,
+          nightClearRemove,
+          assignWithPart,
+          pluralNearMiss,
+          realNearMiss,
+          noPart,
+          bookingHeadcount,
+          endOfShiftAmbiguous,
+          tomSetup,
+          adjustEnd,
+          swapRefused,
+          split,
+          adjustExtend,
+          headcountForm,
+          lenaSetup,
+          swapSuccess,
+          copyToTomorrow,
+          everyWeekdayNo,
+          tomOverride,
+          dayOffBoardFar,
+          lenaShortBlock,
+          clearArea1,
+          clearArea2,
+        ] = SENTENCES;
+        // `lenaShortBlock` (entry 20) no longer belongs in
+        // `answerlessEntries` -- see that Set's own comment above (R-455
+        // gives it a real `answered`; R-463 later turned it into an
+        // ordinary dated write with no day_off_board move at all).
+
+        // 1. Clear of an empty cell.
+        table.push(await runEntry(page, clearEmptyCell));
+
+        // 1b-1e. R-461's own end-to-end proof (28 Sept, S194-C follow-up):
+        // Cell 5 and Cell 6 are still wholly untouched here (entries 8/14
+        // below are the first to reach them, both daytime hours that never
+        // overlap a 10 pm-6 am block or its day-after remnant), so each
+        // setup+clear pair is a lot of exactly one change -- the other_day_
+        // part question's own Yes/No answer runs it directly (S47), no
+        // second "Ready to do N things" to wait on.
+        //
+        // 1b. Setup: Priya's own Shift 3 block, Cell 5.
+        table.push(await runEntry(page, nightSetupKeep));
+        await waitForAssignment(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 22, 0),
+          endMs: wallMs(TOMORROW, 6, 0),
+        });
+
+        // 1c. Answered No: the block survives, TRIMMED to the day-after's
+        // own part -- its new range starts exactly at that day's midnight
+        // (R-461's `keep_after` fate, an edge move never a delete). Proves
+        // the OTHER day's part (10 pm to midnight) was the one cleared.
+        table.push(await runEntry(page, nightClearKeep));
+        await waitForAssignment(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(TOMORROW, 0, 0),
+          endMs: wallMs(TOMORROW, 6, 0),
+        });
+
+        // 1d. Setup: Maria's own Shift 3 block, Cell 6 -- the symmetric
+        // case, answered the other way next.
+        table.push(await runEntry(page, nightSetupRemove));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 22, 0),
+          endMs: wallMs(TOMORROW, 6, 0),
+        });
+
+        // 1e. Answered Yes: the other day's part is cleared TOO, so the
+        // whole crossing block is gone -- both days' worth, not trimmed.
+        table.push(await runEntry(page, nightClearRemove));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 22, 0),
+          endMs: wallMs(TOMORROW, 6, 0),
+        });
+
+        // 2. Assign with a part.
+        table.push(await runEntry(page, assignWithPart));
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 3. Plural near-miss.
+        table.push(await runEntry(page, pluralNearMiss));
+        await waitForAssignment(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 4"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 4. Real near-miss ("Housing Pay" -> Housing A).
+        table.push(await runEntry(page, realNearMiss));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 4"),
+          startMs: wallMs(WALK_DAY, 13, 0),
+          endMs: wallMs(WALK_DAY, 15, 0),
+        });
+
+        // 5. No part named ("Which part?").
+        table.push(await runEntry(page, noPart));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 16, 0),
+        });
+
+        // 6. A booking with headcount -- a run, not an assignment.
+        table.push(await runEntry(page, bookingHeadcount));
+        {
+          // DEF-0057: polled -- the readout lands before the run's row does.
+          const hit = await waitForRun(dana, {
+            nodeId: cellId("Cell 3"),
+            startMs: wallMs(WALK_DAY, 13, 0),
+            endMs: wallMs(WALK_DAY, 17, 0),
+          });
+          expect(hit, "the booked Bracket A run on Cell 3, 13:00-17:00, should exist").toBeTruthy();
+          expect(hit!.planned_headcount).toBe(3);
+        }
+
+        // 7. "from 2 until end of shift" -- the model-gap case.
+        const shiftResult = await runEntry(page, endOfShiftAmbiguous);
+        table.push(shiftResult);
+        {
+          const literalReading = /02:00–06:00/.test(shiftResult.written);
+          const branch = literalReading
+            ? "02:00-06:00 (literal)"
+            : "14:00-22:00 (the rules' own reading)";
+          if (literalReading) {
+            surprises.push(
+              `"${endOfShiftAmbiguous.say}" was read literally as 02:00, not the rules' 14:00 -- ${branch}.`,
+            );
+          }
+          const [startH, endH] = literalReading ? [2, 6] : [14, 22];
+          await waitForAssignment(dana, {
+            operatorId: opId.priya,
+            nodeId: cellId("Cell 2"),
+            startMs: wallMs(WALK_DAY, startH, 0),
+            endMs: wallMs(WALK_DAY, endH, 0),
+          });
+        }
+
+        // 8. Tom Baker's own setup block (off Line 1 -- no certification
+        // needed), plumbing for the swap-refusal case.
+        table.push(await runEntry(page, tomSetup));
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 9. Adjust: "end" shortens Sam's own Cell 1 block.
+        table.push(await runEntry(page, adjustEnd));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 10. The uncertified swap -- refused before the yes; nothing changes.
+        table.push(await runEntry(page, swapRefused));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 11. A split.
+        table.push(await runEntry(page, split));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 13, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 12. Adjust: "extend" John Kim's own Cell 3 block.
+        table.push(await runEntry(page, adjustExtend));
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+
+        // 13. The headcount form, on the run booked in entry 6.
+        table.push(await runEntry(page, headcountForm));
+        {
+          // Polled, like every other database check here: the readout lands
+          // before the row does (22 Sept: a single read right after it saw the
+          // old count once, on a run where the model timed out and the rules
+          // wrote late).
+          const readHeadcount = async (): Promise<number | null | undefined> => {
+            const { data, error } = await dana
+              .from("runs")
+              .select("planned_headcount, timerange")
+              .eq("node_id", cellId("Cell 3"));
+            expect(error, error?.message).toBeNull();
+            const rows = (data ?? []) as { planned_headcount: number | null; timerange: string }[];
+            const hit = rows.find((r) => {
+              const { startMs, endMs } = parseTimerange(r.timerange);
+              return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
+            });
+            expect(hit, "the Bracket A run on Cell 3 should still be there").toBeTruthy();
+            return hit!.planned_headcount;
+          };
+          const deadline = Date.now() + 45_000;
+          let headcount = await readHeadcount();
+          while (headcount !== 4 && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 300));
+            headcount = await readHeadcount();
+          }
+          expect(headcount).toBe(4);
+        }
+
+        // 14. Lena Novak's own setup block, plumbing for the swap next.
+        table.push(await runEntry(page, lenaSetup));
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+
+        // 15. A swap -- crosses Lena's and John Kim's own blocks.
+        table.push(await runEntry(page, swapSuccess));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 13, 0),
+        });
+
+        // 16. A copy to tomorrow -- Cell 3's own blocks, one day forward.
+        table.push(await runEntry(page, copyToTomorrow));
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(TOMORROW, 8, 0),
+          endMs: wallMs(TOMORROW, 13, 0),
+        });
+
+        // 17. A repeat day answered no -- the listing counts five (Monday to
+        // Friday, `expandRepeatDay`'s own `slice(0, 5)`), and nothing is
+        // written anywhere in that week.
+        const weekdayResult = await runEntry(page, everyWeekdayNo);
+        table.push(weekdayResult);
+        {
+          // Only when the bar actually produced the listing: a status the
+          // catalogue did not predict is already recorded as the finding
+          // (`unpredicted`), and asserting its shape here as well would stop
+          // the walk on the spot and cost every sentence after it -- the very
+          // thing `recordMismatch` exists to prevent.
+          if (weekdayResult.unpredicted === undefined) {
+            // R-455: `everyWeekdayNo`'s `expect` is a plain RegExp now (no
+            // button left to press), so `runEntry`'s non-button branch never
+            // sets `.listing` -- the lot text is `barSaid` itself, same
+            // fallback `listedCount` (entry 21, below) already uses.
+            const listing = weekdayResult.listing ?? weekdayResult.barSaid ?? "";
+            expect(
+              listing.match(/^Ready to do (\d+) things?/)?.[1],
+              `the repeat day's own listing should count five: "${listing}"`,
+            ).toBe("5");
+            // F-158: Monday to Friday of the walk day's own week -- the five
+            // days the repeat names, read off the sentence's own week, never
+            // hand-summed. Every readout in the listing carries its day label,
+            // so each of the five must appear by name.
+            const monday = isoPlusDays(
+              WALK_DAY,
+              -((new Date(`${WALK_DAY}T00:00:00Z`).getUTCDay() + 6) % 7),
+            );
+            for (let i = 0; i < 5; i++) {
+              const iso = isoPlusDays(monday, i);
+              // The board's own day label shape, "Wed Sep 16" -- some ICU
+              // builds put a comma after the weekday, the board's formatter
+              // does not, so the comma is stripped rather than depended on.
+              const label = new Intl.DateTimeFormat("en-US", {
+                timeZone: "UTC",
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+              })
+                .format(new Date(`${iso}T00:00:00Z`))
+                .replace(/,/g, "");
+              expect(listing, `the listing should name ${label}`).toContain(label);
+            }
+          }
+          // Monday of the week the walk day falls in, and the seven days after it --
+          // "no" must have left every one of them empty on that cell.
+          const monday = isoPlusDays(
+            WALK_DAY,
+            -((new Date(`${WALK_DAY}T00:00:00Z`).getUTCDay() + 6) % 7),
+          );
+          const rows = await assignmentsStartingInWindow(
+            dana,
+            [cellId("Cell 4")],
+            wallMs(monday, 0, 0),
+            wallMs(isoPlusDays(monday, 7), 0, 0),
+          );
+          const lenaRows = rows.filter((r) => r.operator_id === opId.lena);
+          expect(lenaRows, '"no" to the lot should have written nothing this week').toHaveLength(0);
+        }
+        // R-455's own move (no button since 24 Sept) widened the window to
+        // the walk day's week here; entry 19 below moves it to the far
+        // Monday, and entry 21 moves it back to the walk day, both without a
+        // press. Entry 20 (R-463, 29 Sept) no longer moves the window at all
+        // -- it names its own day explicitly now, see its own comment below.
+
+        // 18. An uncertified person on Cell 1, under warn -- a typed reason
+        // runs it anyway.
+        table.push(await runEntry(page, tomOverride));
+        {
+          const row = await waitForAssignment(dana, {
+            operatorId: opId.tom,
+            nodeId: cellId("Cell 1"),
+            startMs: wallMs(WALK_DAY, 15, 0),
+            endMs: wallMs(WALK_DAY, 17, 0),
+          });
+          expect(row.eligibility_override, "eligibility_override should be true").toBe(true);
+          expect(row.override_reason).toBe(tomOverride.answer);
+        }
+
+        // 19. A day past the board's own window -- R-455's own move (no
+        // press) moves it.
+        table.push(await runEntry(page, dayOffBoardFar));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(FAR, 8, 0),
+          endMs: wallMs(FAR, 12, 0),
+        });
+
+        // 20. R-463 (29 Sept): a 5-minute block, Lena Novak on Cell 1's one
+        // free slot that afternoon (2pm-2:05pm -- Sam Patel's own two blocks
+        // from entries 9/11 fill 8am-2pm, Tom Baker's from entry 18 starts
+        // at 3pm). No longer day-less (see `sentences.ts`'s own long comment
+        // on this entry for why): it names the walk's own day explicitly.
+        // FOUND LIVE (this lane's own first run): Lena Novak is not
+        // certified for Cell 1 (Welding) -- the same not_certified refusal
+        // entry 18 already proves for Tom Baker on this cell, so this entry
+        // answers it the same way (a typed override reason) and the write
+        // is proven the same way entry 18's is, eligibility_override
+        // included, not just the row's existence.
+        table.push(await runEntry(page, lenaShortBlock));
+        {
+          const row = await waitForAssignment(dana, {
+            operatorId: opId.lena,
+            nodeId: cellId("Cell 1"),
+            startMs: wallMs(WALK_DAY, 14, 0),
+            endMs: wallMs(WALK_DAY, 14, 5),
+          });
+          expect(row.eligibility_override, "eligibility_override should be true").toBe(true);
+          expect(row.override_reason).toBe(lenaShortBlock.answer);
+        }
+        // FOUND LIVE (S194-F's own second consecutive run, same database,
+        // R-433) and FIXED (F-233, this lane): entry 20 is the only create
+        // in this whole walk with no entry between it and a lot that
+        // immediately removes the very row it just made -- `clear Area 1`
+        // (entry 21) used to be able to read a still-optimistic
+        // `optimistic-<uuid>` id off the board index and send it to the
+        // server (`invalid input syntax for type uuid`), a genuine,
+        // pre-existing race in the mutation hooks' own optimistic-update
+        // pattern that R-463 merely exposed for the first time. F-233 closes
+        // it at the source (`commandAssignments.ts`/`BoardPage.tsx`'s own
+        // `runs` list never hand a placeholder row to the resolver at all,
+        // and `CommandBar.tsx`'s own `hasPendingCreate` wait holds a
+        // sentence until the real row lands) -- this walk needs no workaround
+        // of its own any more; removing the one-second wait a prior run of
+        // this lane added here IS the proof.
+
+        // 21 and 22. The clear of the walk day, one sentence per area (R-407: a
+        // place above the cells clears every cell under it). Between them the
+        // two listings must name EVERY block AND EVERY JOB this walk left on
+        // that day (R-436, S70-d: "clear means clearing everything" -- the job
+        // rows join the lot) -- counted against an independent database read
+        // taken before either runs, never a hand-summed number.
+        const beforeClearBlocks = await assignmentsStartingInWindow(
+          dana,
+          allCellIds,
+          WALK_DAY_START_MS,
+          WALK_DAY_END_MS,
+        );
+        const beforeClearJobs = await runsStartingInWindow(
+          dana,
+          allCellIds,
+          WALK_DAY_START_MS,
+          WALK_DAY_END_MS,
+        );
+        const beforeClear = beforeClearBlocks.length + beforeClearJobs.length;
+        const listedCount = (result: EntryResult): number => {
+          // Entry 21's `expect` is a plain RegExp now (R-455: no button left
+          // to press), so `runEntry`'s non-button branch never sets
+          // `.listing` at all -- the lot text is `barSaid` itself, which is
+          // exactly what this falls back to.
+          const match = (result.listing ?? result.barSaid).match(/^Ready to do (\d+) things?/);
+          if (match === null) return Number.NaN; // already recorded as the finding
+          return Number(match[1]);
+        };
+        const area1Result = await runEntry(page, clearArea1);
+        table.push(area1Result);
+        const area1Listed = listedCount(area1Result);
+        const area2Result = await runEntry(page, clearArea2);
+        table.push(area2Result);
+        const area2Listed = listedCount(area2Result);
+        if (area1Result.unpredicted === undefined && area2Result.unpredicted === undefined) {
+          expect(
+            area1Listed + area2Listed,
+            "the two areas' listings together should name every block and every job the walk left on the walk day",
+          ).toBe(beforeClear);
+        }
+        const afterClear = await (async () => {
+          // waitForAssignmentGone needs one specific row; here we want ALL of
+          // them gone, so poll the whole-window count down to zero instead.
+          const deadline = Date.now() + 45_000;
+          for (;;) {
+            const rows = [
+              ...(await assignmentsStartingInWindow(
+                dana,
+                allCellIds,
+                WALK_DAY_START_MS,
+                WALK_DAY_END_MS,
+              )),
+              ...(await runsStartingInWindow(dana, allCellIds, WALK_DAY_START_MS, WALK_DAY_END_MS)),
+            ];
+            if (rows.length === 0) return rows;
+            if (Date.now() > deadline) return rows;
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        })();
+        expect(
+          afterClear,
+          "every block and every job on the walk day should be gone after the two areas' own yeses",
+        ).toHaveLength(0);
+      } else {
+        // ====================================================================
+        // WALK_SET 2 (S71-n, docs/agent-briefs/s71-n-second-walk-list-brief.md)
+        // -- `e2e/walk/sentences2.ts`'s own 22 entries, different people,
+        // cells, hours and days from the first list. Same door as above
+        // (`runEntry`, each entry's own `expect`), and the same standard
+        // CLAUDE.md §4 holds the first list to: a database read after every
+        // write, never trust the status line alone.
+        // ====================================================================
+        const [
+          clearEmptyCell2,
+          priyaAssign2,
+          mariaAssign2,
+          lenaOverride2,
+          johnAssign2,
+          samMisheard2,
+          tomNoPart2,
+          bookHeadcount2,
+          endJohn2,
+          shortenLena2,
+          extendSam2,
+          splitTom2,
+          swapRefused2,
+          swapWrites2,
+          headcountChange2,
+          endOfShiftJohn2,
+          copyToFriday2,
+          everyWeekdayNo2,
+          absenceMaria2,
+          coverSam2,
+          clearLine2_2,
+          clearArea2_2,
+        ] = SENTENCES;
+        // entry 13's own `inLot: true` certificate refusal offers no
+        // candidate and no yes/no -- see this file's own header doc on
+        // `answerlessEntries` above.
+        answerlessEntries.add(swapRefused2);
+
+        // 1. Clear of an empty cell.
+        table.push(await runEntry(page, clearEmptyCell2));
+
+        // 2. Priya Shah -> Cell 1 (certified, Welding).
+        table.push(await runEntry(page, priyaAssign2));
+        await waitForAssignment(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 6, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 3. Maria Lopez -> Cell 6.
+        table.push(await runEntry(page, mariaAssign2));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 4. Lena Novak -> Cell 2, NOT certified -- typed reason, override.
+        table.push(await runEntry(page, lenaOverride2));
+        {
+          const row = await waitForAssignment(dana, {
+            operatorId: opId.lena,
+            nodeId: cellId("Cell 2"),
+            startMs: wallMs(WALK_DAY, 8, 0),
+            endMs: wallMs(WALK_DAY, 12, 0),
+          });
+          expect(row.eligibility_override, "eligibility_override should be true").toBe(true);
+          expect(row.override_reason).toBe(lenaOverride2.answer);
+        }
+
+        // 5. John Kim -> Cell 5.
+        table.push(await runEntry(page, johnAssign2));
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 6. Sam Patel -> Cell 2 (Line 1 -- the area gate's own boundary),
+        // misheard part ("Bracket Pay" -> Bracket A).
+        table.push(await runEntry(page, samMisheard2));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 2"),
+          startMs: wallMs(WALK_DAY, 15, 0),
+          endMs: wallMs(WALK_DAY, 19, 0),
+        });
+
+        // 7. Tom Baker -> Cell 3, no part named ("Which part?").
+        table.push(await runEntry(page, tomNoPart2));
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 8. A booking with headcount -- a run, not an assignment.
+        table.push(await runEntry(page, bookHeadcount2));
+        {
+          // DEF-0057: polled -- the readout lands before the run's row does.
+          const hit = await waitForRun(dana, {
+            nodeId: cellId("Cell 6"),
+            startMs: wallMs(WALK_DAY, 13, 0),
+            endMs: wallMs(WALK_DAY, 17, 0),
+          });
+          expect(
+            hit,
+            "the booked Common Fastener run on Cell 6, 13:00-17:00, should exist",
+          ).toBeTruthy();
+          expect(hit!.planned_headcount).toBe(2);
+        }
+
+        // 9. "end" -- John Kim's own Cell 5 block shortens to 08:00-10:00.
+        table.push(await runEntry(page, endJohn2));
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+
+        // 10. "shorten" -- Lena Novak's own Cell 2 block, by 30 minutes.
+        table.push(await runEntry(page, shortenLena2));
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 2"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 11, 30),
+        });
+
+        // 11. "extend" -- Sam Patel's own Cell 2 block ("assignment" spelling).
+        table.push(await runEntry(page, extendSam2));
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 2"),
+          startMs: wallMs(WALK_DAY, 15, 0),
+          endMs: wallMs(WALK_DAY, 20, 0),
+        });
+
+        // 12. "split" -- Tom Baker's own Cell 3 block.
+        table.push(await runEntry(page, splitTom2));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.tom,
+          nodeId: cellId("Cell 3"),
+          startMs: wallMs(WALK_DAY, 10, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 13. The uncertified swap -- refused before the yes; nothing changes.
+        table.push(await runEntry(page, swapRefused2));
+        await waitForAssignment(dana, {
+          operatorId: opId.lena,
+          nodeId: cellId("Cell 2"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 11, 30),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 6, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 14. A swap that writes -- crosses Maria's and John Kim's own blocks.
+        table.push(await runEntry(page, swapWrites2));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.john,
+          nodeId: cellId("Cell 6"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 12, 0),
+        });
+
+        // 15. The headcount form, on the run booked in entry 8 -- deliberately
+        // not run right after entry 8 (see sentences2.ts's own comment on this
+        // entry: a back-to-back book-then-headcount-change raced the client's
+        // own realtime sync on the first try here).
+        table.push(await runEntry(page, headcountChange2));
+        {
+          const readHeadcount = async (): Promise<number | null | undefined> => {
+            const { data, error } = await dana
+              .from("runs")
+              .select("planned_headcount, timerange")
+              .eq("node_id", cellId("Cell 6"));
+            expect(error, error?.message).toBeNull();
+            const rows = (data ?? []) as { planned_headcount: number | null; timerange: string }[];
+            const hit = rows.find((r) => {
+              const { startMs, endMs } = parseTimerange(r.timerange);
+              return startMs === wallMs(WALK_DAY, 13, 0) && endMs === wallMs(WALK_DAY, 17, 0);
+            });
+            expect(hit, "the Common Fastener run on Cell 6 should still be there").toBeTruthy();
+            return hit!.planned_headcount;
+          };
+          const deadline = Date.now() + 45_000;
+          let headcount = await readHeadcount();
+          while (headcount !== 5 && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 300));
+            headcount = await readHeadcount();
+          }
+          expect(headcount).toBe(5);
+        }
+
+        // 16. "from 4 until end of shift" -- the model-gap case, John Kim's
+        // second Cell 6 block.
+        const shiftResult2 = await runEntry(page, endOfShiftJohn2);
+        table.push(shiftResult2);
+        {
+          const literalReading = /04:00–06:00/.test(shiftResult2.written);
+          const branch = literalReading
+            ? "04:00-06:00 (literal)"
+            : "16:00-22:00 (the rules' own reading)";
+          if (literalReading) {
+            surprises.push(
+              `"${endOfShiftJohn2.say}" was read literally as 04:00, not the rules' 16:00 -- ${branch}.`,
+            );
+          }
+          const [startH, endH] = literalReading ? [4, 6] : [16, 22];
+          await waitForAssignment(dana, {
+            operatorId: opId.john,
+            nodeId: cellId("Cell 6"),
+            startMs: wallMs(WALK_DAY, startH, 0),
+            endMs: wallMs(WALK_DAY, endH, 0),
+          });
+        }
+
+        // 17. A copy to tomorrow -- Cell 5 currently holds Maria's own block
+        // (crossed to her by entry 14's swap). Copying exactly one block
+        // auto-runs (S47), so this is a plain single-write DB check, the same
+        // shape as an ordinary assign.
+        table.push(await runEntry(page, copyToFriday2));
+        await waitForAssignment(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(TOMORROW, 8, 0),
+          endMs: wallMs(TOMORROW, 10, 0),
+        });
+
+        // 18. A repeat day answered no -- next week, five commands, nothing
+        // written.
+        table.push(await runEntry(page, everyWeekdayNo2));
+
+        // 19. An absence (R-409 amended, S194-C follow-up) -- Maria Lopez's
+        // own Cell 5 block is removed AND an absence is recorded for her,
+        // one lot, one yes. Both halves proved: the block gone, and the
+        // absence row present, covering exactly this day.
+        table.push(await runEntry(page, absenceMaria2));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.maria,
+          nodeId: cellId("Cell 5"),
+          startMs: wallMs(WALK_DAY, 8, 0),
+          endMs: wallMs(WALK_DAY, 10, 0),
+        });
+        await waitForAbsence(dana, { operatorId: opId.maria, iso: WALK_DAY });
+
+        // 20. A cover -- Priya Shah's own Cell 1 block becomes Sam Patel's.
+        table.push(await runEntry(page, coverSam2));
+        await waitForAssignmentGone(dana, {
+          operatorId: opId.priya,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 6, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+        await waitForAssignment(dana, {
+          operatorId: opId.sam,
+          nodeId: cellId("Cell 1"),
+          startMs: wallMs(WALK_DAY, 6, 0),
+          endMs: wallMs(WALK_DAY, 14, 0),
+        });
+
+        // 21 and 22. Clear Line 2, then Area 2 -- a DIFFERENT pair of places
+        // than the first list's Area 1/Area 2 (brief §1 item 16). Cell 1 and
+        // Cell 2 (Line 1) are deliberately left for the walk's own teardown
+        // (sentences2.ts's own header doc) -- counted here over Cell 3-6 only.
+        const line2AndArea2CellIds = [
+          cellId("Cell 3"),
+          cellId("Cell 4"),
+          cellId("Cell 5"),
+          cellId("Cell 6"),
+        ];
+        const beforeClearBlocks2 = await assignmentsStartingInWindow(
+          dana,
+          line2AndArea2CellIds,
+          WALK_DAY_START_MS,
+          WALK_DAY_END_MS,
+        );
+        const beforeClearJobs2 = await runsStartingInWindow(
+          dana,
+          line2AndArea2CellIds,
+          WALK_DAY_START_MS,
+          WALK_DAY_END_MS,
+        );
+        const beforeClear2 = beforeClearBlocks2.length + beforeClearJobs2.length;
+        const listedCount2 = (result: EntryResult): number => {
+          const match = (result.listing ?? result.barSaid).match(/^Ready to do (\d+) things?/);
+          if (match === null) return Number.NaN;
+          return Number(match[1]);
+        };
+        const line2Result = await runEntry(page, clearLine2_2);
+        table.push(line2Result);
+        const line2Listed = listedCount2(line2Result);
+        const area2Result2 = await runEntry(page, clearArea2_2);
+        table.push(area2Result2);
+        const area2Listed2 = listedCount2(area2Result2);
+        if (line2Result.unpredicted === undefined && area2Result2.unpredicted === undefined) {
+          expect(
+            line2Listed + area2Listed2,
+            "Line 2's and Area 2's listings together should name every block and every job the walk left there",
+          ).toBe(beforeClear2);
+        }
+        const afterClear2 = await (async () => {
+          const deadline = Date.now() + 45_000;
+          for (;;) {
+            const rows = [
+              ...(await assignmentsStartingInWindow(
+                dana,
+                line2AndArea2CellIds,
+                WALK_DAY_START_MS,
+                WALK_DAY_END_MS,
+              )),
+              ...(await runsStartingInWindow(
+                dana,
+                line2AndArea2CellIds,
+                WALK_DAY_START_MS,
+                WALK_DAY_END_MS,
+              )),
+            ];
+            if (rows.length === 0) return rows;
+            if (Date.now() > deadline) return rows;
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        })();
+        expect(
+          afterClear2,
+          "every block and every job on Line 2/Area 2 should be gone after the two clears",
+        ).toHaveLength(0);
+      }
+
+      // ------------------------------------------------------------------
+      // The trace (brief §4).
+      // ------------------------------------------------------------------
+      const traceFile = path.resolve(process.cwd(), "data/voice/trace/bar.jsonl");
+      const nonVoice = SENTENCES.filter((s) => s.voice !== true);
+      const lastSay = nonVoice[nonVoice.length - 1].say;
+      const ownSentences = new Set(nonVoice.map((s) => s.say));
+      // `postTrace` is fire-and-forget (`CommandBar.tsx`'s own comment), so
+      // the final sentence's line can still be in flight when the database
+      // reads above have already settled. Poll the file until its last line
+      // IS that sentence rather than racing it.
+      const allLines = await (async () => {
+        const deadline = Date.now() + 20_000;
+        for (;;) {
+          const raw = await readFile(traceFile, "utf-8").catch(() => "");
+          // Only the spec's own door: every sentence here is TYPED, so a
+          // spoken turn from a person using the bar at the same time (22
+          // Sept: three spoken clips landed between the walk's own lines and
+          // shifted the slice by one) is not this walk's to judge.
+          const lines = raw
+            .split("\n")
+            .filter((l) => l.trim() !== "")
+            .filter((l) => {
+              try {
+                // DEF-0057: and only this walk's own -- one of its sentences,
+                // started after it began -- so a bar typed into by another
+                // spec in another worker never lands in this slice.
+                const e = JSON.parse(l) as { by?: string; heard?: string; at?: string };
+                return (
+                  e.by === "typed" &&
+                  e.heard !== undefined &&
+                  ownSentences.has(e.heard) &&
+                  e.at !== undefined &&
+                  Date.parse(e.at) >= walkStartedAtMs
+                );
+              } catch {
+                return false;
+              }
+            });
+          const last = lines[lines.length - 1];
+          if (last !== undefined && (JSON.parse(last) as { heard?: string }).heard === lastSay) {
+            return lines;
+          }
+          if (Date.now() > deadline) return lines;
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      })();
+      // S194-C follow-up (28 Sept): an entry that needs a SECOND interaction
+      // -- a typed `answer`, or a pressed candidate button -- posts TWO
+      // trace lines, same `heard`, the second one carrying `revises: true`
+      // (`trace.ts`'s own doc, quoted on `readBarByAt` in
+      // `scripts/voice/clips/score.mjs`: "a write that lands after the
+      // person has already said something else posts a SECOND line, same
+      // `at`, correcting the first"). A plain `allLines.slice(-nonVoice.
+      // length)` counts LINES, not SENTENCES, so any walk with enough
+      // two-line entries (this list has nine: 1c, 1e, the split, both
+      // swaps, the copy, the declined repeat, Tom's override, both area
+      // clears) drops that many lines off the FRONT of the run's own tail --
+      // proved live (28 Sept): with a 26-sentence run and 9 revised entries
+      // (35 lines), `slice(-26)` started at this run's own 10th sentence,
+      // not its first, and "trace line 1" was entry 10's "book Bracket A
+      // ...", never entry 1's "clear Cell 4 ...". This collapses each
+      // consecutive same-`heard` `revises: true` line INTO the line it
+      // revises first, so the walk asserts one settled trace ENTRY per
+      // SENTENCE, the fact `nonVoice.length` actually counts.
+      //
+      // F-233 (29 Sept): collapsed BY `at`, the entry's own key, the way
+      // `readBarByAt` reads the file, no longer by "the line before has the
+      // same `heard`". A sentence is posted when the bar asks or holds it and
+      // corrected at its outcome, and the correction can land after the NEXT
+      // sentence's first line, so a sentence's lines are not always next to
+      // each other. The last line for an `at` is the entry; the entry keeps
+      // the place its first line took.
+      const collapsed: Record<string, unknown>[] = [];
+      const placeOfAt = new Map<unknown, number>();
+      for (const raw of allLines) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const place = placeOfAt.get(parsed.at);
+        if (place !== undefined) {
+          collapsed[place] = parsed;
+        } else {
+          placeOfAt.set(parsed.at, collapsed.length);
+          collapsed.push(parsed);
+        }
+      }
+      const parsedTrace = collapsed.slice(-nonVoice.length);
+      expect(
+        parsedTrace.length,
+        `expected at least ${nonVoice.length} settled trace entries (collapsed) in ${traceFile}`,
+      ).toBe(nonVoice.length);
+      for (let i = 0; i < nonVoice.length; i++) {
+        const entry = parsedTrace[i];
+        expect(entry.heard, `trace line ${i + 1}'s heard`).toBe(nonVoice[i].say);
+        expect(entry.asked, `trace line ${i + 1}'s asked`).not.toBeNull();
+        // R-455 (24 Sept): a day_off_board move is a READOUT now, which
+        // fills in `answered: "auto"` the instant it fires -- entry 20 no
+        // longer belongs in `answerlessEntries` (see that Set's own
+        // comment). R-463 (29 Sept) later took entry 20 off the
+        // day_off_board path entirely (it names its own day now), so its
+        // `answered` comes from the plain single-sentence readout path
+        // instead (S47) -- still real, still not in this set. What is still
+        // genuinely answerless: an `inLot`
+        // certificate refusal with no candidate and no yes/no of its own
+        // (entry 13, second list), and an entry that landed on its direct
+        // readout (orDirect) without ever raising a question at all.
+        const landedDirect = table[i]?.note?.includes("[direct, no question]") ?? false;
+        if (!answerlessEntries.has(nonVoice[i]) && !landedDirect) {
+          expect(entry.answered, `trace line ${i + 1}'s answered`).not.toBeNull();
+        }
+      }
+
+      // ------------------------------------------------------------------
+      // The findings (brief: "any sentence whose answer surprised you ... is
+      // a finding for the developer, not something to work around"). Every
+      // `expect` above stood as written; this is where a sentence the bar
+      // answered differently turns the run red, AFTER the table has been
+      // printed, so the finding arrives with the whole walk around it.
+      // ------------------------------------------------------------------
+      const unpredicted = table.filter((r) => r.unpredicted !== undefined);
+      expect(
+        unpredicted.map((r) => `${r.say}\n  ${r.unpredicted}`).join("\n\n"),
+        "sentences the bar answered with something the catalogue did not predict",
+      ).toBe("");
+    } finally {
+      // ------------------------------------------------------------------
+      // Output for the maintainer (brief §5) -- printed whatever happened,
+      // so a walk that stopped early still hands over every sentence it did
+      // reach.
+      // ------------------------------------------------------------------
+      console.log("\n=== typed walk: sentence -> what the bar said -> what was written ===");
+      for (const row of table) {
+        console.log(`SAY:     ${row.say}`);
+        console.log(`BAR:     ${row.barSaid}`);
+        // The lot a button led to, before the entry answered it -- without
+        // this, an entry whose question came from a real button (a
+        // Did-you-mean, "Which part?") and then declined it prints as
+        // though nothing happened. (Not day_off_board any more -- R-455
+        // moves and reruns with no button, so `.listing` stays undefined
+        // for those and `listedCount` above falls back to `barSaid`.)
+        if (row.listing !== undefined && row.listing !== row.barSaid) {
+          console.log(`LISTING: ${row.listing}`);
+        }
+        if (row.written !== row.barSaid) console.log(`WRITTEN: ${row.written}`);
+        if (row.note) console.log(`NOTE:    ${row.note}`);
+        if (row.unpredicted) console.log(`!! UNPREDICTED: ${row.unpredicted}`);
+        console.log("");
+      }
+      if (surprises.length > 0) {
+        console.log("=== surprises ===");
+        for (const s of surprises) console.log(`- ${s}`);
+      }
+      // afterAll deletes the same again (brief §1) -- done here, in the same
+      // try/finally, since this whole walk is one test.
+      await clearWindow(dana, nodes.allNodeIds, CLEAN_FROM_MS, CLEAN_TO_MS);
+      // S194-C follow-up: the same reason as the setup's own call -- an
+      // absence THIS run recorded must not still be there for the next one.
+      await clearAbsencesSince(dana, Object.values(opId), WALK_DAY);
+    }
+  });
+});
+
+/**
+ * F-233 (S194-G), proving it item 3: "throttle the create's response in the
+ * browser... place, clear at once, and read the database." A standalone
+ * spec, not a 23rd entry in the big walk -- the walk's own back-to-back
+ * timing on a fast local stack is what found the race in the first place
+ * (S194-F); this widens the SAME race deliberately, by holding the
+ * `create_assignment` RPC's own response for two full seconds with
+ * Playwright's `page.route`, so "say the clear before the create has
+ * answered" is no longer a matter of who happens to win a race on a given
+ * run -- it is guaranteed, every time this runs.
+ *
+ * Runs after the main walk (file order, `workers: 1`) so the day it uses is
+ * already empty; cleans up its own row regardless, before and after, so it
+ * is safe to run alone too.
+ */
+// S194-G2 (the reviewer's own repro, "the bar answering 'Cell 1 has nobody
+// on it' over a block just placed"): the delay is an env knob, not always
+// 2000ms -- the brief's own proving step runs this spec ten times at
+// 2000ms AND ten times at 200ms (`F233_THROTTLE_MS=200`), since a SHORTER
+// throttle is what actually exercised the cache-derived signal's own gaps
+// (Finding 1: the placeholder enters the cache only after `onMutate`'s
+// awaited `cancelQueries`, and the bar's write settles before the
+// invalidated refetch lands) -- both gaps are proportionally narrower, and
+// more likely to be missed by a flaky fix, the shorter this delay is.
+// Default unchanged at 2000ms for a plain `npm run e2e` run.
+const F233_THROTTLE_MS = Number(process.env.F233_THROTTLE_MS ?? 2000);
+
+test(`F-233: a create held back (${F233_THROTTLE_MS}ms), then cleared at once, still ends with the row gone (no placeholder id ever reaches the server)`, async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(60_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  initWalkDays(await plantZone(dana, nodes.plantId));
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+  const startMs = wallMs(WALK_DAY, 5, 0);
+  const endMs = wallMs(WALK_DAY, 6, 0);
+
+  // Belt and braces: a leftover row from an earlier failed run of THIS spec
+  // must not make "the row is gone at the end" trivially true for the wrong
+  // reason.
+  await clearWindow(dana, [cell1], startMs, endMs);
+
+  try {
+    // Hold every `create_assignment` RPC response back two seconds --
+    // `supabase.rpc(...)` (mutations.ts) POSTs to exactly this path.
+    await page.route("**/rest/v1/rpc/create_assignment", async (route) => {
+      await new Promise((r) => setTimeout(r, F233_THROTTLE_MS));
+      await route.continue();
+    });
+
+    await signIn(page, ADMIN, "/");
+    const firstTrack = page.getByLabel(/press Enter to create/).first();
+    await expect(firstTrack).toBeVisible({ timeout: 20_000 });
+    await fillWindowStart(page, WALK_DAY);
+    await expect(firstTrack).toBeVisible({ timeout: 20_000 });
+    await ensureBarOpen(page);
+
+    // Place Sam Patel, then say the clear -- but not before the FIRST
+    // sentence's own reading has actually finished (S194-G3: a second Enter
+    // aborts an in-flight READING, `readingAbortRef.current?.abort()`,
+    // `CommandBar.tsx` -- a documented, deliberate design decision (S44-b)
+    // this lane proves but does not change, docs/agent-briefs/
+    // s194-g3-the-hold-regressed-brief.md). Racing that abort here would
+    // make this spec prove the WRONG thing -- a sentence silently dropped
+    // before it ever became a write, nothing to do with F-233's own
+    // mechanism at all. So this waits for the first sentence's own
+    // "Written: …" line before saying the second, WITHOUT weakening what
+    // this spec proves: the throttle is on the CREATE's own network
+    // response, and the bar only shows "Written: …" once that response has
+    // actually landed (`CreatePopover`'s own `submitDirect`, awaited all
+    // the way through) -- so the race this spec exists to prove, "say the
+    // clear before the board has caught up with the write," is STILL real
+    // and STILL exercised: what remains is the narrower, but genuine, gap
+    // between the write landing and the refetch that follows it actually
+    // reaching `ctx` (`awaitingRowIdRef`, `CommandBar.tsx`'s own third-pass
+    // mechanism) -- "clear Cell 1" said the instant "Written: …" appears
+    // still lands inside THAT window every time, since the refetch's own
+    // round trip is never instant either.
+    await submit(
+      page,
+      `Assign Sam Patel to Housing A on Cell 1 in Line 1 from 5am to 6am ${WALK_DAY}`,
+    );
+    await expect(page.getByText(/^Written:/)).toBeVisible({ timeout: 10_000 });
+    await submit(page, `clear Cell 1 ${WALK_DAY}`);
+
+    // Nothing here ever crashed the bar with a raw database error -- the
+    // create lands (held two seconds), the held clear reruns once it does,
+    // and asks its own ordinary yes/no exactly as it would with no race at
+    // all.
+    await expect(async () => {
+      const text = await currentStatusText(page);
+      expect(
+        text.length > 0 ||
+          (await page.getByRole("button", { name: /Do all|Do it|Remove/ }).count()) > 0,
+      ).toBe(true);
+    }).toPass({ timeout: 10_000, intervals: [300] });
+
+    // Answer whatever question the clear raised (a single removal's own
+    // "Remove it", or a lot's "Do all N", or "Do it" for a lot of one) -- either
+    // way, say yes.
+    const removeIt = page.getByRole("button", { name: "Remove it" });
+    const doAll = page.getByRole("button", { name: /^(Do all|Do it)/ });
+    if (await removeIt.isVisible().catch(() => false)) {
+      await removeIt.click();
+    } else if (await doAll.isVisible().catch(() => false)) {
+      await doAll.click();
+    }
+
+    // The database is the proof (CLAUDE.md §4): the row Sam Patel was
+    // placed into, then cleared, is gone -- never left behind by a clear
+    // that silently failed on a placeholder id, and never a real id sent
+    // to a writer while it was still a placeholder (the fault this lane
+    // fixes: an `invalid input syntax for type uuid` from Postgres, which
+    // `docker logs supabase_db_production_scheduler_tester` would show if
+    // it happened).
+    await waitForAssignmentGone(dana, { operatorId: sam, nodeId: cell1, startMs, endMs }, 15_000);
+  } finally {
+    await clearWindow(dana, [cell1], startMs, endMs);
+  }
+});
+
+/**
+ * S195-D (DEF-0054, R-434, R-431, R-459): a sentence that ends in one of the
+ * board's own pop-ups is finished by that pop-up's answer. As Ana (a line
+ * supervisor) on the real board: "extend Sam Patel by 30 minutes" takes Sam off
+ * the job his block sits on, so the board asks Continue?. While it stands the
+ * thread says what the board is asking -- once, in plain words, never "now ends
+ * ..." -- and the trace file already holds the entry (posted at the ask, not
+ * answered). Cancel writes nothing and the thread and the trace say so;
+ * Continue writes the block and both say that. The database is the proof
+ * (CLAUDE.md 4): the row is read back after each answer, and put back after.
+ *
+ * Runs on the plant's own today (the seeded board a person opens on), because
+ * that is where a supervisor's blocks sit on jobs; it restores the one row it
+ * changes, and reads nothing but Sam Patel's block on Cell 1.
+ */
+interface TraceLine {
+  at: string;
+  heard: string;
+  asked: string | null;
+  answered: string | null;
+  ran: string[];
+  outcome: string | null;
+}
+
+/** The last trace line for each `at` (the file is append-only and a later line
+ *  for an `at` corrects the earlier one), for lines heard as `heard` since
+ *  `sinceMs`. */
+async function traceEntriesFor(heard: string, sinceMs: number): Promise<TraceLine[]> {
+  const raw = await readFile(path.resolve(process.cwd(), "data/voice/trace/bar.jsonl"), "utf-8");
+  const byAt = new Map<string, TraceLine>();
+  for (const line of raw.split("\n")) {
+    if (line.trim() === "") continue;
+    const e = JSON.parse(line) as TraceLine;
+    if (e.heard === heard && Date.parse(e.at) >= sinceMs) byAt.set(e.at, e);
+  }
+  return [...byAt.values()];
+}
+
+async function threadTextOf(page: Page): Promise<string> {
+  return (
+    (await page
+      .locator('[class*="threadBody"]')
+      .textContent({ timeout: ACTION_TIMEOUT_MS })
+      .catch(() => "")) ?? ""
+  );
+}
+
+test("DEF-0054: a sentence that ends in the board's own Continue? pop-up is finished by its answer -- Cancel and Continue, in the thread, the trace and the database", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(120_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+
+  // Sam's block on Cell 1 on the plant's own today that sits on a job.
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readBlocks = async () => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, run_id, product_id, timerange")
+      .eq("operator_id", sam)
+      .eq("node_id", cell1);
+    if (error) throw new Error(`reading Sam's blocks: ${error.message}`);
+    return ((data ?? []) as unknown as AssignmentRow[]).filter(
+      (r) =>
+        new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(
+          new Date(parseTimerange(r.timerange).startMs),
+        ) === todayIso,
+    );
+  };
+  const before = (await readBlocks()).find((r) => r.run_id !== null);
+  if (!before) {
+    throw new Error(`the seed has no block of Sam Patel's on Cell 1 today (${todayIso}) on a job`);
+  }
+  const original = parseTimerange(before.timerange);
+  const SENTENCE = "extend Sam Patel by 30 minutes";
+  let restoreError: string | null = null;
+  const ASKING =
+    "The board is asking whether to take Sam Patel off the Housing A job. Answer it on the board.";
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Cancel ----------------------------------------------------------
+    const cancelFrom = Date.now();
+    await submit(page, SENTENCE);
+    await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    // The thread: what the board is asking, once, and no done-form readout.
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain(ASKING);
+      expect(thread.split(ASKING)).toHaveLength(2);
+      expect(thread).not.toMatch(/now ends|it was/);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    // The trace file already holds the entry -- posted at the ask, nobody has
+    // answered it, so a page closed now would still have left this line.
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, cancelFrom);
+      expect(entry).toBeTruthy();
+      expect(entry.outcome).toBe(`popup: ${ASKING}`);
+      expect(entry.asked).toBe(ASKING);
+      expect(entry.answered).toBeNull();
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain("Cancelled. Nothing changed.");
+      expect(thread).not.toMatch(/now ends|it was/);
+      const [entry] = await traceEntriesFor(SENTENCE, cancelFrom);
+      expect(entry.outcome).toBe("cancelled");
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    // Nothing was written: the row is exactly as it was, still on its job.
+    const afterCancel = (await readBlocks()).find((r) => r.id === before.id);
+    expect(afterCancel?.run_id).toBe(before.run_id);
+    expect(parseTimerange(afterCancel!.timerange)).toEqual(original);
+
+    // --- Continue --------------------------------------------------------
+    const continueFrom = Date.now();
+    await submit(page, SENTENCE);
+    await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toMatch(/Written: Sam Patel's block on Cell 1 now ends /);
+      const [entry] = await traceEntriesFor(SENTENCE, continueFrom);
+      expect(entry.outcome).toBe("written");
+      expect(entry.ran).toHaveLength(1);
+      expect(entry.ran[0]).toMatch(/^Sam Patel's block on Cell 1 now ends /);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+    // The database agrees: the block is 30 minutes longer and no longer on the job.
+    await expect(async () => {
+      const row = (await readBlocks()).find((r) => r.id === before.id);
+      expect(row?.run_id).toBeNull();
+      expect(parseTimerange(row!.timerange)).toEqual({
+        startMs: original.startMs,
+        endMs: original.endMs + 30 * 60_000,
+      });
+    }).toPass({ timeout: 15_000, intervals: [300] });
+  } finally {
+    // Put the seed back exactly: the job, the hours, and no product of its own
+    // (a row carries a job OR a product, `assignments_work_identified`).
+    const { error } = await dana
+      .from("assignments")
+      .update({ timerange: before.timerange, run_id: before.run_id, product_id: before.product_id })
+      .eq("id", before.id);
+    restoreError = error?.message ?? null;
+    if (restoreError !== null) console.error(`PUTTING SAM'S BLOCK BACK FAILED: ${restoreError}`);
+  }
+  expect(restoreError, "Sam's block is back as the seed had it").toBeNull();
+});
+
+/**
+ * S195 review (DEF-0054, R-434): the two ways the Continue? question of a
+ * sentence ends WITHOUT its own buttons. Nothing is written by either, so this
+ * leaves the seed alone. (1) A typed "no" is the pop-up's Cancel, through the
+ * board's own door: the thread says "Cancelled. Nothing changed." and the
+ * trace entry is cancelled. (2) A pop-up opened by hand (Enter on a track)
+ * replaces the standing one: before this case the sentence's turn was left
+ * saying "The board is asking ..." for ever, with its trace entry never
+ * answered.
+ */
+test("DEF-0054 review: a typed 'no', and a pop-up opened by hand, each end the Continue? question as cancelled", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(120_000);
+  const SENTENCE = "extend Sam Patel by 30 minutes";
+  const cont = page.getByRole("button", { name: "Continue", exact: true });
+
+  await signIn(page, "ana@example.test", "/");
+  await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+  await ensureBarOpen(page);
+
+  // --- a typed "no" ----------------------------------------------------
+  const noFrom = Date.now();
+  await submit(page, SENTENCE);
+  await expect(cont).toBeVisible({ timeout: 60_000 });
+  await submit(page, "no");
+  await expect(cont).toBeHidden({ timeout: 10_000 });
+  await expect(async () => {
+    expect(await threadTextOf(page)).toContain("Cancelled. Nothing changed.");
+    const [entry] = await traceEntriesFor(SENTENCE, noFrom);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.ran).toEqual([]);
+  }).toPass({ timeout: 10_000, intervals: [250] });
+
+  // --- a pop-up opened by hand -----------------------------------------
+  const handFrom = Date.now();
+  await submit(page, SENTENCE);
+  await expect(cont).toBeVisible({ timeout: 60_000 });
+  await page
+    .getByLabel(/press Enter to create/)
+    .nth(1)
+    .focus();
+  await page.keyboard.press("Enter");
+  await expect(cont).toBeHidden({ timeout: 10_000 });
+  await expect(async () => {
+    const [entry] = await traceEntriesFor(SENTENCE, handFrom);
+    expect(entry.outcome).toBe("cancelled");
+    expect(entry.answered).not.toBeNull();
+    expect(entry.ran).toEqual([]);
+  }).toPass({ timeout: 10_000, intervals: [250] });
+  await page.keyboard.press("Escape");
+});
+
+/**
+ * S196-A (DEF-0060, R-465, R-431): the bar refuses BEFORE it speaks. As Ana on
+ * the real board, Priya Shah is on Cell 4 of Line 2 every day 6 am to 2 pm (the
+ * demo seed), a line Ana cannot read. Both sentences of DEF-0060's reproduction
+ * end in ONE thread line, "Not done: Priya Shah is already on Cell 4 in Line 2
+ * today from 6 am to 2 pm." -- never the readout "Priya Shah is on Cell 2 ..."
+ * before it, and never the join-or-separate question (whose both answers led to
+ * the same refusal). The trace holds the turn refused with nothing asked, and
+ * the database is the proof that nothing was written (Priya's rows, counted
+ * before and after). Writes nothing, so there is nothing to put back.
+ */
+test("DEF-0060: a person busy on a line Ana cannot read is refused in one sentence -- no readout, no join question -- in the thread, the trace and the database", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(120_000);
+
+  const dana = await signedInClient(ADMIN);
+  const priya = await operatorId(dana, "Priya Shah");
+  const countPriya = async (): Promise<number> => {
+    const { data, error } = await dana.from("assignments").select("id").eq("operator_id", priya);
+    if (error) throw new Error(`reading Priya's blocks: ${error.message}`);
+    return (data ?? []).length;
+  };
+  const before = await countPriya();
+  const SAID = "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm.";
+
+  await signIn(page, "ana@example.test", "/");
+  await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+  await ensureBarOpen(page);
+
+  const sentences = [
+    "put Priya Shah on Housing A at Cell 2 today from 10 am to noon",
+    "put Priya Shah on Housing A at Cell 1 today from 10 am to noon",
+  ];
+  for (const [turn, sentence] of sentences.entries()) {
+    const from = Date.now();
+    await submit(page, sentence);
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain(`Not done: ${SAID}`);
+      const [entry] = await traceEntriesFor(sentence, from);
+      expect(entry).toBeTruthy();
+      expect(entry.outcome).toBe(`refused: ${SAID}`);
+    }).toPass({ timeout: 60_000, intervals: [250] });
+
+    // The thread says it once and says nothing else about this sentence: no
+    // readout ("... is on Cell 2 ..."), no join question, no answer buttons.
+    const thread = await threadTextOf(page);
+    expect(thread.split(SAID), "the refusal stands once per turn").toHaveLength(turn + 2);
+    await expect(candidateButtons(page)).toHaveCount(0);
+    const [entry] = await traceEntriesFor(sentence, from);
+    expect(entry.asked).toBeNull();
+    expect(entry.ran).toEqual([]);
+  }
+  // Both turns, in one thread: the readouts of neither are anywhere in it.
+  const thread = await threadTextOf(page);
+  expect(thread).not.toMatch(/Priya Shah is on Cell|making Housing A|Join it|Separate block/);
+  expect(await countPriya(), "nothing was written for Priya").toBe(before);
+});
+
+/**
+ * S196-A (F-239, R-431): nothing is printed as done before it is done. As Ana,
+ * with the PATCH of an assignment held back five seconds, "shorten Sam Patel by
+ * 30 minutes": at 1.5 s the live line reads Working..., the thread has no "now
+ * ends ..." readout, the trace already holds the entry (waiting, nothing asked
+ * yet) and the database still has the old hours. Once the write lands the thread
+ * says Written and the trace says written, with the readout as what it asked;
+ * the block is 30 minutes shorter. The row is put back as the seed had it.
+ */
+test("F-239: a slow write reads Working... and says nothing as done until it is -- then Written, in the thread, the trace and the database", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(120_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readBlocks = async () => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, run_id, product_id, timerange")
+      .eq("operator_id", sam)
+      .eq("node_id", cell1);
+    if (error) throw new Error(`reading Sam's blocks: ${error.message}`);
+    return ((data ?? []) as unknown as AssignmentRow[]).filter(
+      (r) =>
+        new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(
+          new Date(parseTimerange(r.timerange).startMs),
+        ) === todayIso,
+    );
+  };
+  const before = (await readBlocks()).find((r) => r.run_id !== null);
+  if (!before) {
+    throw new Error(`the seed has no block of Sam Patel's on Cell 1 today (${todayIso}) on a job`);
+  }
+  const original = parseTimerange(before.timerange);
+  const SENTENCE = "shorten Sam Patel by 30 minutes";
+  let restoreError: string | null = null;
+
+  try {
+    await page.route("**/rest/v1/assignments?*", async (route) => {
+      if (route.request().method() === "PATCH") await new Promise((r) => setTimeout(r, 5000));
+      await route.continue();
+    });
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    const from = Date.now();
+    await submit(page, SENTENCE);
+    // While the write is held: the line says working, nothing is said as done,
+    // the file already has the entry and the database has the old hours.
+    await expect(statusLine(page)).toHaveText("Working…", { timeout: 60_000 });
+    await page.waitForTimeout(1500);
+    expect(await currentStatusText(page)).toBe("Working…");
+    expect(await threadTextOf(page)).not.toMatch(/now ends|it was/);
+    const [waiting] = await traceEntriesFor(SENTENCE, from);
+    expect(waiting).toBeTruthy();
+    expect(waiting.outcome).toBe("writing");
+    expect(waiting.asked).toBeNull();
+    expect(waiting.ran).toEqual([]);
+    const held = (await readBlocks()).find((r) => r.id === before.id);
+    expect(parseTimerange(held!.timerange)).toEqual(original);
+
+    // Then the write lands: Written, the readout is what the entry asked.
+    await expect(async () => {
+      expect(await threadTextOf(page)).toMatch(/Written: Sam Patel's block on Cell 1 now ends /);
+      const [entry] = await traceEntriesFor(SENTENCE, from);
+      expect(entry.outcome).toBe("written");
+      expect(entry.asked).toMatch(/^Sam Patel's block on Cell 1 now ends /);
+      expect(entry.ran).toHaveLength(1);
+    }).toPass({ timeout: 30_000, intervals: [250] });
+    await expect(async () => {
+      const row = (await readBlocks()).find((r) => r.id === before.id);
+      expect(parseTimerange(row!.timerange)).toEqual({
+        startMs: original.startMs,
+        endMs: original.endMs - 30 * 60_000,
+      });
+    }).toPass({ timeout: 15_000, intervals: [300] });
+  } finally {
+    const { error } = await dana
+      .from("assignments")
+      .update({ timerange: before.timerange, run_id: before.run_id, product_id: before.product_id })
+      .eq("id", before.id);
+    restoreError = error?.message ?? null;
+    if (restoreError !== null) console.error(`PUTTING SAM'S BLOCK BACK FAILED: ${restoreError}`);
+  }
+  expect(restoreError, "Sam's block is back as the seed had it").toBeNull();
+});
+
+/**
+ * S198-A (DEF-0061, R-467, R-425): a sentence that names two people for one place,
+ * one of them short a certificate. As Ana on the real board (Lena Novak lacks
+ * Welding, which Cell 2 needs; the policy is warn; Sam Patel is certified), in
+ * BOTH orders: the bar asks Lena's question numbered as the lot's own, takes the
+ * typed reason for her step, carries on, lists both people with her reason and
+ * writes both on the one yes -- Lena's row carrying the override and its reason,
+ * Sam's carrying none. The first sentence names a day off the board, so it also
+ * proves the board's move brings the WHOLE sentence back, never the one step. A
+ * third sentence answered "no" writes nothing. The thread, the trace (one entry,
+ * the ask, the reason and the yes in order) and the database are all read. The
+ * rows this writes are removed.
+ */
+test("DEF-0061: two people, one short a certificate -- the reason is asked for that step, taken, and both are written on one yes (both orders), 'no' writes nothing", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell2 = nodes.cellIdByName.get("Cell 2");
+  if (!cell2) throw new Error("no such cell in Plant A: Cell 2");
+  const lena = await operatorId(dana, "Lena Novak");
+  const sam = await operatorId(dana, "Sam Patel");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const DAY_A = isoPlusDays(todayIso, 14);
+  const DAY_B = isoPlusDays(todayIso, 15);
+  const DAY_C = isoPlusDays(todayIso, 16);
+  const QUESTION =
+    "Not done: Lena Novak is not certified for Cell 2, missing Welding. Say the reason to schedule anyway, or no.";
+  const readRows = async (): Promise<AssignmentRow[]> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select(
+        "id, node_id, operator_id, product_id, run_id, timerange, eligibility_override, override_reason",
+      )
+      .in("operator_id", [lena, sam])
+      .eq("node_id", cell2);
+    if (error) throw new Error(`reading Lena's and Sam's blocks: ${error.message}`);
+    return (data ?? []) as unknown as AssignmentRow[];
+  };
+  const before = new Set((await readRows()).map((r) => r.id));
+  const isOnDay = (r: AssignmentRow, iso: string): boolean => {
+    const t = parseTimerange(r.timerange);
+    return (
+      t.startMs === clockMsInZone(iso, zone, 15, 0) && t.endMs === clockMsInZone(iso, zone, 17, 0)
+    );
+  };
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Lena first, on a day off the board ---------------------------------
+    const first = `put Lena Novak and Sam Patel on Housing A at Cell 2 ${DAY_A} from 3 pm to 5 pm`;
+    const fromFirst = Date.now();
+    await submit(page, first);
+    await expect(statusLine(page)).toHaveText(`1 of 2: ${QUESTION}`, { timeout: 60_000 });
+    await submit(page, "covering an absence");
+    await expect(statusLine(page)).toHaveText(
+      /^Ready to do 2 things: 1\. Lena Novak is on Cell 2 .* from 3 pm to 5 pm, making Housing A\. The reason given: covering an absence\. 2\. Sam Patel is on Cell 2 .* from 3 pm to 5 pm, making Housing A\. Say yes to do them, or no\.$/,
+      { timeout: 30_000 },
+    );
+    // Nothing is written by the reason, nor by the listing.
+    expect((await readRows()).filter((r) => !before.has(r.id))).toHaveLength(0);
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 2 things.");
+    }).toPass({ timeout: 30_000, intervals: [250] });
+    await expect(async () => {
+      const added = (await readRows()).filter((r) => !before.has(r.id));
+      expect(added).toHaveLength(2);
+      const lenaRow = added.find((r) => r.operator_id === lena);
+      const samRow = added.find((r) => r.operator_id === sam);
+      expect(lenaRow && isOnDay(lenaRow, DAY_A)).toBe(true);
+      expect(samRow && isOnDay(samRow, DAY_A)).toBe(true);
+      // The reason belongs to Lena's step alone.
+      expect(lenaRow?.eligibility_override).toBe(true);
+      expect(lenaRow?.override_reason).toBe("covering an absence");
+      expect(samRow?.eligibility_override).toBe(false);
+      expect(samRow?.override_reason).toBeNull();
+    }).toPass({ timeout: 20_000, intervals: [300] });
+    // The file is written a moment after the rows land: read it until it says so.
+    await expect(async () => {
+      const [entry1] = await traceEntriesFor(first, fromFirst);
+      expect(entry1.asked).toContain(
+        `1 of 2: ${QUESTION}\nReady to do 2 things: 1. Lena Novak is on Cell 2`,
+      );
+      expect(entry1.answered).toBe("covering an absence\nyes");
+      expect(entry1.ran).toHaveLength(2);
+      expect(entry1.ran[0]).toContain("The reason given: covering an absence.");
+      expect(entry1.ran[1]).not.toContain("reason");
+      expect(entry1.outcome).toBe("Done, 2 things.");
+    }).toPass({ timeout: 15_000, intervals: [250] });
+
+    // --- Sam first ------------------------------------------------------------
+    const second = `put Sam Patel and Lena Novak on Housing A at Cell 2 ${DAY_B} from 3 pm to 5 pm`;
+    const fromSecond = Date.now();
+    await submit(page, second);
+    await expect(statusLine(page)).toHaveText(`2 of 2: ${QUESTION}`, { timeout: 60_000 });
+    await submit(page, "covering an absence");
+    await expect(statusLine(page)).toHaveText(
+      /^Ready to do 2 things: 1\. Sam Patel is on Cell 2 .* making Housing A\. 2\. Lena Novak is on Cell 2 .* making Housing A\. The reason given: covering an absence\. Say yes to do them, or no\.$/,
+      { timeout: 30_000 },
+    );
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 2 things.");
+      const added = (await readRows()).filter((r) => !before.has(r.id) && isOnDay(r, DAY_B));
+      expect(added).toHaveLength(2);
+      expect(added.find((r) => r.operator_id === lena)?.override_reason).toBe(
+        "covering an absence",
+      );
+      expect(added.find((r) => r.operator_id === sam)?.override_reason).toBeNull();
+    }).toPass({ timeout: 30_000, intervals: [300] });
+    await expect(async () => {
+      const [entry2] = await traceEntriesFor(second, fromSecond);
+      expect(entry2.answered).toBe("covering an absence\nyes");
+      expect(entry2.outcome).toBe("Done, 2 things.");
+    }).toPass({ timeout: 15_000, intervals: [250] });
+
+    // --- "no" at the question -------------------------------------------------
+    const third = `put Lena Novak and Sam Patel on Housing A at Cell 2 ${DAY_C} from 3 pm to 5 pm`;
+    const fromThird = Date.now();
+    const rowsBeforeNo = (await readRows()).length;
+    await submit(page, third);
+    await expect(statusLine(page)).toHaveText(`1 of 2: ${QUESTION}`, { timeout: 60_000 });
+    await submit(page, "no");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Left it.");
+      const [entry] = await traceEntriesFor(third, fromThird);
+      expect(entry.outcome).toBe("cancelled");
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+    expect((await readRows()).length, "'no' wrote nothing").toBe(rowsBeforeNo);
+  } finally {
+    const added = (await readRows()).filter((r) => !before.has(r.id));
+    if (added.length > 0) {
+      const { error } = await dana
+        .from("assignments")
+        .delete()
+        .in(
+          "id",
+          added.map((r) => r.id),
+        );
+      if (error) console.error(`REMOVING THE WALK'S ROWS FAILED: ${error.message}`);
+    }
+  }
+  expect(
+    (await readRows()).filter((r) => !before.has(r.id)),
+    "the rows it wrote are gone",
+  ).toEqual([]);
+});
+
+/**
+ * S198-A (DEF-0062, R-466): "replace Sam Patel with Priya Shah on Cell 1" as Ana,
+ * with Priya busy on Cell 4 of Line 2 (a line Ana cannot read). The bar says why
+ * in one sentence and ASKS -- take Sam off anyway, or leave it -- and writes
+ * nothing before the answer. "Leave it" leaves Sam's block where it is; "Take Sam
+ * Patel off anyway" removes Sam's Cell 1 blocks for the day and writes nothing for
+ * Priya. Sam's blocks are read back after each press and restored at the end
+ * exactly as the seed had them.
+ */
+test("DEF-0062: a replace whose incoming person is busy elsewhere asks -- Leave it writes nothing, Take Sam Patel off anyway removes Sam's block only", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(180_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+  const priya = await operatorId(dana, "Priya Shah");
+  const readSam = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("*")
+      .eq("operator_id", sam)
+      .eq("node_id", cell1);
+    if (error) throw new Error(`reading Sam's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const countPriya = async (): Promise<number> => {
+    const { data, error } = await dana.from("assignments").select("id").eq("operator_id", priya);
+    if (error) throw new Error(`reading Priya's blocks: ${error.message}`);
+    return (data ?? []).length;
+  };
+  const samBefore = await readSam();
+  const priyaBefore = await countPriya();
+  const SENTENCE = "replace Sam Patel with Priya Shah on Cell 1";
+  const ASK =
+    "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm. Take Sam Patel off Cell 1 anyway? Nobody would be covering Sam Patel's hours on Cell 1.";
+  let restoreError: string | null = null;
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Leave it ---------------------------------------------------------------
+    const fromLeave = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Take Sam Patel off anyway", "Leave it"], {
+      timeout: 60_000,
+    });
+    expect(await currentStatusText(page)).toBe(ASK);
+    // The buttons are one pair of one width (R-447).
+    const widths = await candidateButtons(page).evaluateAll((els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().width)),
+    );
+    expect(widths[0], "the two answers are one width").toBe(widths[1]);
+    // The trace has the ask, and nothing is written before the answer.
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromLeave);
+      expect(entry.asked).toBe(ASK);
+      expect(entry.answered).toBeNull();
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await readSam()).length, "nothing written before the answer").toBe(samBefore.length);
+
+    await page.getByRole("button", { name: "Leave it", exact: true }).click();
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Left it.");
+      const [entry] = await traceEntriesFor(SENTENCE, fromLeave);
+      expect(entry.outcome).toBe("cancelled");
+      expect(entry.answered).toBe("Leave it");
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await readSam()).length, "Leave it wrote nothing").toBe(samBefore.length);
+    expect(await countPriya()).toBe(priyaBefore);
+
+    // --- Take Sam Patel off anyway -----------------------------------------------
+    const fromTake = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Take Sam Patel off anyway", "Leave it"], {
+      timeout: 60_000,
+    });
+    await page.getByRole("button", { name: "Take Sam Patel off anyway", exact: true }).click();
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain("Done, 1 thing.");
+      expect(thread).toMatch(/Written: Sam Patel is off Cell 1/);
+      const [entry] = await traceEntriesFor(SENTENCE, fromTake);
+      expect(entry.answered).toBe("Take Sam Patel off anyway");
+      expect(entry.ran).toHaveLength(1);
+      expect(entry.ran[0]).toMatch(/^Sam Patel is off Cell 1/);
+      expect(entry.outcome).toBe("Done, 1 thing.");
+    }).toPass({ timeout: 20_000, intervals: [250] });
+    // The database agrees: Sam's Cell 1 block for the day is gone, Priya got nothing.
+    await expect(async () => {
+      expect((await readSam()).length).toBeLessThan(samBefore.length);
+    }).toPass({ timeout: 15_000, intervals: [300] });
+    expect(await countPriya()).toBe(priyaBefore);
+  } finally {
+    // Put Sam's blocks back exactly as the seed had them.
+    const have = new Set((await readSam()).map((r) => r.id));
+    const missing = samBefore.filter((r) => !have.has(r.id));
+    if (missing.length > 0) {
+      const { error } = await dana.from("assignments").insert(missing);
+      restoreError = error?.message ?? null;
+      if (restoreError !== null) console.error(`PUTTING SAM'S BLOCKS BACK FAILED: ${restoreError}`);
+    }
+  }
+  expect(restoreError, "Sam's blocks are back as the seed had them").toBeNull();
+  expect((await readSam()).length).toBe(samBefore.length);
+});
+
+/**
+ * S200-A (DEF-0064, R-468): "put Sam Patel and Maria Lopez on Housing A at Cell 2
+ * today from 8 am to 10 am" as Ana, with Sam already on Cell 1 today 6 am to 2 pm
+ * (a block Ana CAN read) and Maria free then. The lot asks Sam's question IN THE
+ * BAR before any listing -- numbered as the lot's step, "Split evenly" and "Skip
+ * Sam Patel" of one width -- and writes nothing before the yes. Split evenly: the
+ * listing says so and the one yes writes Sam's Cell 1 block at half and a new
+ * Cell 2 block at half, and Maria's row beside it. Skip: Sam is named as not done,
+ * the yes writes Maria only. A typed "no" drops the lot. The thread, the trace
+ * and the database are read; every row it writes is removed and Sam's Cell 1
+ * share is put back to what the seed had.
+ */
+test("DEF-0064: a lot step whose person is already booked on a block Ana can read asks in the bar -- Split evenly writes the split, Skip names him and writes the rest, 'no' writes nothing", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  const cell2 = nodes.cellIdByName.get("Cell 2");
+  if (!cell1 || !cell2) throw new Error("no such cell in Plant A: Cell 1 / Cell 2");
+  const sam = await operatorId(dana, "Sam Patel");
+  const maria = await operatorId(dana, "Maria Lopez");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readRows = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, operator_id, node_id, timerange, efficiency")
+      .in("operator_id", [sam, maria]);
+    if (error) throw new Error(`reading Sam's and Maria's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const before = await readRows();
+  const beforeIds = new Set(before.map((r) => String(r.id)));
+  const samCell1Today = before.find(
+    (r) =>
+      r.operator_id === sam &&
+      r.node_id === cell1 &&
+      parseTimerange(String(r.timerange)).startMs === clockMsInZone(todayIso, zone, 6, 0),
+  );
+  if (!samCell1Today) throw new Error(`the seed has no block of Sam Patel's on Cell 1 today 6 am`);
+  const at8to10 = (r: Record<string, unknown>): boolean => {
+    const t = parseTimerange(String(r.timerange));
+    return (
+      t.startMs === clockMsInZone(todayIso, zone, 8, 0) &&
+      t.endMs === clockMsInZone(todayIso, zone, 10, 0)
+    );
+  };
+  const added = async (): Promise<Array<Record<string, unknown>>> =>
+    (await readRows()).filter((r) => !beforeIds.has(String(r.id)));
+  const ASK =
+    "1 of 2: Sam Patel is already on Cell 1 today from 6 am to 2 pm. Split Sam Patel's time evenly between Cell 1 and Cell 2, or skip Sam Patel?";
+  const SENTENCE = "put Sam Patel and Maria Lopez on Housing A at Cell 2 today from 8 am to 10 am";
+  let restoreError: string | null = null;
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Split evenly -----------------------------------------------------------
+    const fromSplit = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Split evenly", "Skip Sam Patel"], {
+      timeout: 60_000,
+    });
+    expect(await currentStatusText(page)).toBe(ASK);
+    const widths = await candidateButtons(page).evaluateAll((els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().width)),
+    );
+    expect(widths[0], "the two answers are one width").toBe(widths[1]);
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromSplit);
+      expect(entry.asked).toBe(ASK);
+      expect(entry.answered).toBeNull();
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await added()).length, "nothing is written before the answer").toBe(0);
+
+    await page.getByRole("button", { name: "Split evenly", exact: true }).click();
+    await expect(statusLine(page)).toHaveText(
+      /^Ready to do 2 things: 1\. Sam Patel is on Cell 2 .* from 8 am to 10 am, making Housing A, Sam Patel's time split evenly with Cell 1\. 2\. Maria Lopez is on Cell 2 .* from 8 am to 10 am, making Housing A\. Say yes to do them, or no\.$/,
+      { timeout: 30_000 },
+    );
+    expect((await added()).length, "the listing wrote nothing").toBe(0);
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 2 things.");
+    }).toPass({ timeout: 30_000, intervals: [250] });
+    // The database: Sam's Cell 1 block is at half, his new Cell 2 block is at half,
+    // and Maria's is whole.
+    await expect(async () => {
+      const rows = await readRows();
+      const cell1Now = rows.find((r) => r.id === samCell1Today.id);
+      expect(Number(cell1Now?.efficiency)).toBeCloseTo(0.5, 3);
+      const mine = rows.filter((r) => !beforeIds.has(String(r.id)));
+      expect(mine).toHaveLength(2);
+      const samNew = mine.find((r) => r.operator_id === sam);
+      const mariaNew = mine.find((r) => r.operator_id === maria);
+      expect(samNew && at8to10(samNew) && samNew.node_id === cell2).toBe(true);
+      expect(Number(samNew?.efficiency)).toBeCloseTo(0.5, 3);
+      expect(mariaNew && at8to10(mariaNew)).toBe(true);
+      expect(Number(mariaNew?.efficiency)).toBeCloseTo(1, 3);
+    }).toPass({ timeout: 20_000, intervals: [300] });
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromSplit);
+      expect(entry.asked).toContain(`${ASK}\nReady to do 2 things: 1. Sam Patel is on Cell 2`);
+      expect(entry.answered).toBe("Split evenly\nyes");
+      expect(entry.ran).toHaveLength(2);
+      expect(entry.ran[0]).toContain("time split evenly with Cell 1");
+      expect(entry.outcome).toBe("Done, 2 things.");
+    }).toPass({ timeout: 15_000, intervals: [250] });
+
+    // Put the split back before the next round.
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    await dana
+      .from("assignments")
+      .update({ efficiency: samCell1Today.efficiency })
+      .eq("id", String(samCell1Today.id));
+    // The board the bar reads is a fresh one: it must not still hold the blocks
+    // just removed (a stale Housing A block on Cell 2 reads as a job to join).
+    await page.reload();
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Skip Sam Patel -----------------------------------------------------------
+    const fromSkip = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Split evenly", "Skip Sam Patel"], {
+      timeout: 60_000,
+    });
+    await page.getByRole("button", { name: "Skip Sam Patel", exact: true }).click();
+    await expect(statusLine(page)).toHaveText(
+      /^Not doing Sam Patel on Cell 2 [^:]*: Sam Patel is already on Cell 1 today from 6 am to 2 pm\. Ready to do 1 thing: Maria Lopez is on Cell 2 .* from 8 am to 10 am, making Housing A\. Say yes to do it, or no\.$/,
+      { timeout: 30_000 },
+    );
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 1 thing.");
+      const mine = await added();
+      expect(mine).toHaveLength(1);
+      expect(mine[0].operator_id).toBe(maria);
+    }).toPass({ timeout: 30_000, intervals: [300] });
+    expect(
+      Number((await readRows()).find((r) => r.id === samCell1Today.id)?.efficiency),
+      "Sam's Cell 1 block was not touched",
+    ).toBeCloseTo(Number(samCell1Today.efficiency), 3);
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromSkip);
+      expect(entry.answered).toBe("Skip Sam Patel\nyes");
+      expect(entry.ran).toHaveLength(1);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    await page.reload();
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- "no" at the question -------------------------------------------------------
+    const fromNo = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Split evenly", "Skip Sam Patel"], {
+      timeout: 60_000,
+    });
+    await submit(page, "no");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Left it.");
+      const [entry] = await traceEntriesFor(SENTENCE, fromNo);
+      expect(entry.outcome).toBe("cancelled");
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+    expect((await added()).length, "'no' wrote nothing").toBe(0);
+  } finally {
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    const { error } = await dana
+      .from("assignments")
+      .update({ efficiency: samCell1Today.efficiency })
+      .eq("id", String(samCell1Today.id));
+    restoreError = error?.message ?? null;
+    if (restoreError !== null) console.error(`PUTTING SAM'S SHARE BACK FAILED: ${restoreError}`);
+  }
+  expect(restoreError, "Sam's Cell 1 share is back as the seed had it").toBeNull();
+  expect(await added(), "the rows it wrote are gone").toEqual([]);
+});
+
+/** Ana's profile in the demo seed (supabase/seed.sql): the one the 202-A cases give a
+ *  read-only grant on Line 2's Cell 4, and take away again. */
+const ANA_PROFILE_ID = "a0000000-0000-0000-0000-000000000002";
+
+/**
+ * S202-A (DEF-0065, R-431, R-468, R-459): Ana is given a read-only (viewer) grant on
+ * Cell 4 of Line 2, so she can SEE Priya Shah's block there (6 am to 2 pm today) and
+ * cannot change it. "put Priya Shah and Maria Lopez on Common Fastener at Cell 1
+ * today from 8 am to 10 am": the split would rewrite Priya's Cell 4 block, which the
+ * server refuses her, so the bar must not offer it -- Priya's step is refused up
+ * front in the plant's words (the block named, and that she cannot change it),
+ * Maria's is listed, nothing is asked, and the one yes writes Maria only. The
+ * thread, the trace and the database are read; the grant and Maria's row are put
+ * back.
+ */
+test("DEF-0065: a lot step whose person is booked on a block Ana can read but not change is refused up front -- no split offered, the rest listed, the yes writes the rest only", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const cell4 = nodes.cellIdByName.get("Cell 4");
+  if (!cell4) throw new Error("no such cell in Plant A: Cell 4");
+  const priya = await operatorId(dana, "Priya Shah");
+  const maria = await operatorId(dana, "Maria Lopez");
+  const readRows = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, operator_id, node_id, timerange, efficiency")
+      .in("operator_id", [priya, maria]);
+    if (error) throw new Error(`reading Priya's and Maria's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const before = await readRows();
+  const beforeIds = new Set(before.map((r) => String(r.id)));
+  const added = async (): Promise<Array<Record<string, unknown>>> =>
+    (await readRows()).filter((r) => !beforeIds.has(String(r.id)));
+  const org = await dana.from("nodes").select("org_id").eq("id", cell4).single();
+  if (org.error) throw new Error(`reading Cell 4's company: ${org.error.message}`);
+  const SENTENCE =
+    "put Priya Shah and Maria Lopez on Common Fastener at Cell 1 today from 8 am to 10 am";
+  let grantAdded = false;
+
+  try {
+    const granted = await dana.from("profile_grants").insert({
+      profile_id: ANA_PROFILE_ID,
+      node_id: cell4,
+      org_id: String(org.data.org_id),
+      role: "viewer",
+    });
+    if (granted.error) throw new Error(`giving Ana the viewer grant: ${granted.error.message}`);
+    grantAdded = true;
+
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    const from = Date.now();
+    await submit(page, SENTENCE);
+    await expect(statusLine(page)).toHaveText(
+      /^Not doing Priya Shah on Cell 1 [^:]*: Priya Shah is already on Cell 4 today from 6 am to 2 pm, and you cannot change that block from here\. Ready to do 1 thing: Maria Lopez is on Cell 1 .* from 8 am to 10 am, making Common Fastener\. Say yes to do it, or no\.$/,
+      { timeout: 60_000 },
+    );
+    expect(await threadTextOf(page), "no raw id in the thread").not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-/,
+    );
+    await expect(page.getByRole("button", { name: "Split evenly", exact: true })).toHaveCount(0);
+    expect((await added()).length, "the refusal and the listing wrote nothing").toBe(0);
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 1 thing.");
+      const mine = await added();
+      expect(mine).toHaveLength(1);
+      expect(mine[0].operator_id).toBe(maria);
+    }).toPass({ timeout: 30_000, intervals: [300] });
+    // Priya's Cell 4 block was not touched.
+    for (const r of before.filter((x) => x.operator_id === priya)) {
+      const now = (await readRows()).find((x) => x.id === r.id);
+      expect(Number(now?.efficiency), "Priya's block is as it was").toBeCloseTo(
+        Number(r.efficiency),
+        3,
+      );
+    }
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, from);
+      expect(entry.asked).toContain("Not doing Priya Shah on Cell 1");
+      expect(entry.asked).toContain("and you cannot change that block from here");
+      expect(entry.ran).toHaveLength(1);
+      expect(entry.outcome).toBe("Done, 1 thing.");
+    }).toPass({ timeout: 15_000, intervals: [250] });
+  } finally {
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    if (grantAdded) {
+      const { error } = await dana
+        .from("profile_grants")
+        .delete()
+        .eq("profile_id", ANA_PROFILE_ID)
+        .eq("node_id", cell4)
+        .eq("role", "viewer");
+      if (error) console.error(`TAKING ANA'S VIEWER GRANT BACK FAILED: ${error.message}`);
+    }
+  }
+  expect(await added(), "the rows it wrote are gone").toEqual([]);
+  const left = await dana
+    .from("profile_grants")
+    .select("node_id")
+    .eq("profile_id", ANA_PROFILE_ID)
+    .eq("node_id", cell4)
+    .eq("role", "viewer");
+  expect(left.data ?? [], "Ana's viewer grant is gone").toEqual([]);
+});
+
+/**
+ * S204-A (DEF-0068, R-470, R-431, R-459): Ana is given a read-only (viewer) grant on Cell 4
+ * of Line 2, so she can SEE Priya Shah's block there (6 am to 2 pm today) and cannot change
+ * it. "put Priya Shah on Common Fastener at Cell 1 today from 8 am to 10 am" is refused at
+ * once, in the lot's words -- one refusal, the board's split pop-up never opens, nothing is
+ * written, and the trace says refused with nothing asked. With the grant RAISED to
+ * supervisor she can change Priya's block: the sentence hands the split to the board's
+ * pop-up as it always did (no stale refusal), and Cancel writes nothing. The grant is put
+ * back either way.
+ */
+test("DEF-0068: a single sentence over a block Ana can read but not change is refused at once -- no split pop-up, nothing written; with the grant raised the pop-up opens", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const cell4 = nodes.cellIdByName.get("Cell 4");
+  if (!cell4) throw new Error("no such cell in Plant A: Cell 4");
+  const priya = await operatorId(dana, "Priya Shah");
+  const readRows = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, operator_id, node_id, timerange, efficiency")
+      .eq("operator_id", priya);
+    if (error) throw new Error(`reading Priya's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const before = await readRows();
+  const beforeIds = new Set(before.map((r) => String(r.id)));
+  const added = async (): Promise<Array<Record<string, unknown>>> =>
+    (await readRows()).filter((r) => !beforeIds.has(String(r.id)));
+  const org = await dana.from("nodes").select("org_id").eq("id", cell4).single();
+  if (org.error) throw new Error(`reading Cell 4's company: ${org.error.message}`);
+  const SENTENCE = "put Priya Shah on Common Fastener at Cell 1 today from 8 am to 10 am";
+  const REFUSED =
+    "Priya Shah is already on Cell 4 today from 6 am to 2 pm, and you cannot change that block from here.";
+  const giveGrant = async (role: "viewer" | "supervisor"): Promise<void> => {
+    const granted = await dana.from("profile_grants").insert({
+      profile_id: ANA_PROFILE_ID,
+      node_id: cell4,
+      org_id: String(org.data.org_id),
+      role,
+    });
+    if (granted.error) throw new Error(`giving Ana the ${role} grant: ${granted.error.message}`);
+  };
+  const takeGrantBack = async (): Promise<void> => {
+    const { error } = await dana
+      .from("profile_grants")
+      .delete()
+      .eq("profile_id", ANA_PROFILE_ID)
+      .eq("node_id", cell4);
+    if (error) console.error(`TAKING ANA'S GRANT BACK FAILED: ${error.message}`);
+  };
+
+  try {
+    await giveGrant("viewer");
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    const from = Date.now();
+    await submit(page, SENTENCE);
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain(`Not done: ${REFUSED}`);
+    }).toPass({ timeout: 60_000, intervals: [300] });
+    await expect(page.getByText(/Split coverage/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Split evenly", exact: true })).toHaveCount(0);
+    expect(await threadTextOf(page), "no raw id in the thread").not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-/,
+    );
+    expect((await added()).length, "the refusal wrote nothing").toBe(0);
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, from);
+      expect(entry.outcome).toBe(`refused: ${REFUSED}`);
+      expect(entry.asked).toBeNull();
+      expect(entry.ran).toHaveLength(0);
+    }).toPass({ timeout: 15_000, intervals: [250] });
+
+    // The grant raised to supervisor: she CAN change Priya's block, so the board's own
+    // split pop-up opens, as it always did. Cancel writes nothing.
+    await takeGrantBack();
+    await giveGrant("supervisor");
+    await page.reload();
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+    const threadBefore = (await threadTextOf(page)).length;
+    await submit(page, SENTENCE);
+    await expect(page.getByText(/Split coverage/).first()).toBeVisible({ timeout: 60_000 });
+    expect((await threadTextOf(page)).slice(threadBefore)).not.toContain(
+      "you cannot change that block",
+    );
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect((await added()).length, "Cancel wrote nothing").toBe(0);
+  } finally {
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    await takeGrantBack();
+    for (const r of before) {
+      await dana.from("assignments").update({ efficiency: r.efficiency }).eq("id", String(r.id));
+    }
+  }
+  expect(await added(), "the rows it wrote are gone").toEqual([]);
+  const left = await dana
+    .from("profile_grants")
+    .select("node_id")
+    .eq("profile_id", ANA_PROFILE_ID)
+    .eq("node_id", cell4);
+  expect(left.data ?? [], "Ana's grant on Cell 4 is gone").toEqual([]);
+});
+
+/**
+ * S202-A (DEF-0066, F-247, R-468): the lot's questions come in STEP ORDER. "put Sam
+ * Patel and Lena Novak on Common Fastener at Cell 2 today from 8 am to 10 am" as
+ * Ana: Sam is already on Cell 1 today (an overlap question, step 1) and Lena is short
+ * Welding for Cell 2 (a reason question, step 2) -- "1 of 2" is asked before "2 of
+ * 2", Split evenly then the reason, the listing, the one yes writing Sam's Cell 1
+ * block at half, his new Cell 2 block at half and Lena's at 100% with her reason.
+ * F-247: with Lena ALSO busy on Cell 4 of Line 2 (a line Ana cannot read; a block this
+ * test inserts), her step is refused before any reason is asked -- one "Not doing"
+ * line, Maria's step listed, nothing asked. Every row written is removed and Sam's
+ * share is put back.
+ */
+test("DEF-0066: the lot asks in step order -- Sam's overlap (1 of 2) before Lena's reason (2 of 2); a step both uncertified and busy elsewhere is refused with no reason asked", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  const cell2 = nodes.cellIdByName.get("Cell 2");
+  const cell4 = nodes.cellIdByName.get("Cell 4");
+  if (!cell1 || !cell2 || !cell4) throw new Error("no such cell in Plant A: Cell 1 / 2 / 4");
+  const sam = await operatorId(dana, "Sam Patel");
+  const lena = await operatorId(dana, "Lena Novak");
+  const maria = await operatorId(dana, "Maria Lopez");
+  const priya = await operatorId(dana, "Priya Shah");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readRows = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select(
+        "id, operator_id, node_id, timerange, efficiency, eligibility_override, override_reason",
+      )
+      .in("operator_id", [sam, lena, maria]);
+    if (error) throw new Error(`reading the blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const before = await readRows();
+  const beforeIds = new Set(before.map((r) => String(r.id)));
+  const added = async (): Promise<Array<Record<string, unknown>>> =>
+    (await readRows()).filter((r) => !beforeIds.has(String(r.id)));
+  const samCell1Today = before.find(
+    (r) =>
+      r.operator_id === sam &&
+      r.node_id === cell1 &&
+      parseTimerange(String(r.timerange)).startMs === clockMsInZone(todayIso, zone, 6, 0),
+  );
+  if (!samCell1Today) throw new Error("the seed has no block of Sam Patel's on Cell 1 today 6 am");
+  const priyaCell4 = await dana
+    .from("assignments")
+    .select("*")
+    .eq("operator_id", priya)
+    .eq("node_id", cell4);
+  const priyaToday = (priyaCell4.data ?? []).find(
+    (r) =>
+      parseTimerange(String((r as Record<string, unknown>).timerange)).startMs ===
+      clockMsInZone(todayIso, zone, 6, 0),
+  ) as Record<string, unknown> | undefined;
+  if (!priyaToday) throw new Error("the seed has no block of Priya Shah's on Cell 4 today 6 am");
+  const SENTENCE =
+    "put Sam Patel and Lena Novak on Common Fastener at Cell 2 today from 8 am to 10 am";
+  const ASK1 =
+    "1 of 2: Sam Patel is already on Cell 1 today from 6 am to 2 pm. Split Sam Patel's time evenly between Cell 1 and Cell 2, or skip Sam Patel?";
+  const ASK2 =
+    "2 of 2: Not done: Lena Novak is not certified for Cell 2, missing Welding. Say the reason to schedule anyway, or no.";
+  let restoreError: string | null = null;
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- the order of the two questions ---------------------------------------
+    const from = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Split evenly", "Skip Sam Patel"], {
+      timeout: 60_000,
+    });
+    expect(await currentStatusText(page)).toBe(ASK1);
+    await page.getByRole("button", { name: "Split evenly", exact: true }).click();
+    await expect(statusLine(page)).toHaveText(ASK2, { timeout: 30_000 });
+    await submit(page, "covering an absence");
+    await expect(statusLine(page)).toHaveText(
+      /^Ready to do 2 things: 1\. Sam Patel is on Cell 2 .* from 8 am to 10 am, making Common Fastener, Sam Patel's time split evenly with Cell 1\. 2\. Lena Novak is on Cell 2 .* from 8 am to 10 am, making Common Fastener\. The reason given: covering an absence\. Say yes to do them, or no\.$/,
+      { timeout: 30_000 },
+    );
+    expect((await added()).length, "nothing is written before the yes").toBe(0);
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 2 things.");
+    }).toPass({ timeout: 30_000, intervals: [250] });
+    await expect(async () => {
+      const rows = await readRows();
+      expect(Number(rows.find((r) => r.id === samCell1Today.id)?.efficiency)).toBeCloseTo(0.5, 3);
+      const mine = rows.filter((r) => !beforeIds.has(String(r.id)));
+      expect(mine).toHaveLength(2);
+      const samNew = mine.find((r) => r.operator_id === sam);
+      const lenaNew = mine.find((r) => r.operator_id === lena);
+      expect(samNew?.node_id).toBe(cell2);
+      expect(Number(samNew?.efficiency)).toBeCloseTo(0.5, 3);
+      expect(lenaNew?.node_id).toBe(cell2);
+      expect(Number(lenaNew?.efficiency)).toBeCloseTo(1, 3);
+      expect(lenaNew?.override_reason).toBe("covering an absence");
+    }).toPass({ timeout: 20_000, intervals: [300] });
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, from);
+      expect(entry.asked).toContain(`${ASK1}\n${ASK2}\nReady to do 2 things`);
+      expect(entry.answered).toBe("Split evenly\ncovering an absence\nyes");
+      expect(entry.outcome).toBe("Done, 2 things.");
+    }).toPass({ timeout: 15_000, intervals: [250] });
+
+    // Put it back before the next round.
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    await dana
+      .from("assignments")
+      .update({ efficiency: samCell1Today.efficiency })
+      .eq("id", String(samCell1Today.id));
+    await page.reload();
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- F-247: uncertified AND busy elsewhere -> refused, no reason asked -------
+    const { id: _pid, ...priyaCopy } = priyaToday;
+    void _pid;
+    const lenaBusy = await dana
+      .from("assignments")
+      .insert({ ...priyaCopy, operator_id: lena })
+      .select("id")
+      .single();
+    if (lenaBusy.error) throw new Error(`inserting Lena's Cell 4 block: ${lenaBusy.error.message}`);
+    const lenaBusyId = String(lenaBusy.data.id);
+    try {
+      const sentence2 =
+        "put Lena Novak and Maria Lopez on Common Fastener at Cell 2 today from 8 am to 10 am";
+      const from2 = Date.now();
+      await page.reload();
+      await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({
+        timeout: 30_000,
+      });
+      await ensureBarOpen(page);
+      await submit(page, sentence2);
+      await expect(statusLine(page)).toHaveText(
+        /^Not doing Lena Novak on Cell 2 [^:]*: Lena Novak is already on Cell 4 in Line 2 today from 6 am to 2 pm\. Ready to do 1 thing: Maria Lopez is on Cell 2 .* from 8 am to 10 am, making Common Fastener\. Say yes to do it, or no\.$/,
+        { timeout: 60_000 },
+      );
+      // Nothing was asked: the only buttons are the listing's own yes and no.
+      expect(await candidateButtons(page).allTextContents()).not.toContain("Split evenly");
+      await submit(page, "no");
+      await expect(async () => {
+        const [entry] = await traceEntriesFor(sentence2, from2);
+        expect(entry.asked).not.toContain("Say the reason");
+        expect(entry.outcome).toBe("cancelled");
+      }).toPass({ timeout: 15_000, intervals: [250] });
+    } finally {
+      await dana.from("assignments").delete().eq("id", lenaBusyId);
+    }
+  } finally {
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    const { error } = await dana
+      .from("assignments")
+      .update({ efficiency: samCell1Today.efficiency })
+      .eq("id", String(samCell1Today.id));
+    restoreError = error?.message ?? null;
+    if (restoreError !== null) console.error(`PUTTING SAM'S SHARE BACK FAILED: ${restoreError}`);
+  }
+  expect(restoreError, "Sam's Cell 1 share is back as the seed had it").toBeNull();
+  expect(await added(), "the rows it wrote are gone").toEqual([]);
+});
+
+/**
+ * S202-A (DEF-0067, R-468): Sam Patel is on TWO blocks today 6 am to 2 pm (Cell 1 at
+ * half, and one on Cell 2 at half, both set up here), and the lot puts him on Cell 2
+ * again. The question names his places once and says the new block is on Cell 2 too,
+ * never "between Cell 1, Cell 2 and Cell 2"; Split evenly writes 0.34, 0.33 and 0.33
+ * (Cell 1, Cell 2, the new Cell 2 block), and the listing's clause reads each place
+ * once. Everything is put back.
+ */
+test("DEF-0067: a person already on two blocks, one on the destination cell, is asked about his places once -- and the split writes three even shares", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  const cell2 = nodes.cellIdByName.get("Cell 2");
+  if (!cell1 || !cell2) throw new Error("no such cell in Plant A: Cell 1 / Cell 2");
+  const sam = await operatorId(dana, "Sam Patel");
+  const john = await operatorId(dana, "John Kim");
+  const product = await productId(dana, "Housing A");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readRows = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("*")
+      .in("operator_id", [sam, john]);
+    if (error) throw new Error(`reading Sam's and John's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const before = await readRows();
+  const beforeIds = new Set(before.map((r) => String(r.id)));
+  const added = async (): Promise<Array<Record<string, unknown>>> =>
+    (await readRows()).filter((r) => !beforeIds.has(String(r.id)));
+  const samCell1Today = before.find(
+    (r) =>
+      r.operator_id === sam &&
+      r.node_id === cell1 &&
+      parseTimerange(String(r.timerange)).startMs === clockMsInZone(todayIso, zone, 6, 0),
+  );
+  if (!samCell1Today) throw new Error("the seed has no block of Sam Patel's on Cell 1 today 6 am");
+  const SENTENCE =
+    "put Sam Patel and John Kim on Common Fastener at Cell 2 today from 8 am to 10 am";
+  const ASK =
+    "1 of 2: Sam Patel is already on Cell 1 today from 6 am to 2 pm and Cell 2 today from 6 am to 2 pm. Split Sam Patel's time evenly across those blocks and the new one on Cell 2, or skip Sam Patel?";
+  let restoreError: string | null = null;
+  let setupId: string | null = null;
+
+  try {
+    const half = await dana
+      .from("assignments")
+      .update({ efficiency: 0.5 })
+      .eq("id", String(samCell1Today.id));
+    if (half.error) throw new Error(`halving Sam's Cell 1 block: ${half.error.message}`);
+    const { id: _id, run_id: _run, product_id: _prod, ...copy } = samCell1Today;
+    void _id;
+    void _run;
+    void _prod;
+    const second = await dana
+      .from("assignments")
+      .insert({ ...copy, node_id: cell2, product_id: product, run_id: null, efficiency: 0.5 })
+      .select("id")
+      .single();
+    if (second.error) throw new Error(`inserting Sam's Cell 2 block: ${second.error.message}`);
+    setupId = String(second.data.id);
+
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    const from = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText(["Split evenly", "Skip Sam Patel"], {
+      timeout: 60_000,
+    });
+    expect(await currentStatusText(page)).toBe(ASK);
+    await page.getByRole("button", { name: "Split evenly", exact: true }).click();
+    await expect(statusLine(page)).toHaveText(
+      /^Ready to do 2 things: 1\. Sam Patel is on Cell 2 .* from 8 am to 10 am, making Common Fastener, Sam Patel's time split evenly with Cell 1 and Cell 2\. 2\. John Kim is on Cell 2 .* from 8 am to 10 am, making Common Fastener\. Say yes to do them, or no\.$/,
+      { timeout: 30_000 },
+    );
+    await submit(page, "yes");
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Done, 2 things.");
+    }).toPass({ timeout: 30_000, intervals: [250] });
+    await expect(async () => {
+      const rows = await readRows();
+      const effOf = (id: string): number =>
+        Number(rows.find((r) => String(r.id) === id)?.efficiency);
+      expect(effOf(String(samCell1Today.id))).toBeCloseTo(0.34, 3);
+      expect(effOf(String(setupId))).toBeCloseTo(0.33, 3);
+      const newSam = rows.find(
+        (r) => !beforeIds.has(String(r.id)) && String(r.id) !== setupId && r.operator_id === sam,
+      );
+      expect(newSam?.node_id).toBe(cell2);
+      expect(Number(newSam?.efficiency)).toBeCloseTo(0.33, 3);
+    }).toPass({ timeout: 20_000, intervals: [300] });
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, from);
+      expect(entry.asked).toContain(ASK);
+      expect(entry.answered).toBe("Split evenly\nyes");
+    }).toPass({ timeout: 15_000, intervals: [250] });
+  } finally {
+    for (const r of await added()) await dana.from("assignments").delete().eq("id", String(r.id));
+    const { error } = await dana
+      .from("assignments")
+      .update({ efficiency: samCell1Today.efficiency })
+      .eq("id", String(samCell1Today.id));
+    restoreError = error?.message ?? null;
+    if (restoreError !== null) console.error(`PUTTING SAM'S SHARE BACK FAILED: ${restoreError}`);
+  }
+  expect(restoreError, "Sam's Cell 1 share is back as the seed had it").toBeNull();
+  expect((await readRows()).map((r) => String(r.id)).sort(), "the rows are the seed's").toEqual(
+    [...beforeIds].sort(),
+  );
+});
+
+/**
+ * S200-A (DEF-0063, R-469): "replace Sam Patel with Priya Shah on Cell 1" as Ana
+ * with Sam on TWO Cell 1 blocks today (6 am to 2 pm, and a second 6 pm to 8 pm
+ * this test inserts) and Priya busy on Cell 4 of Line 2 (a line Ana cannot read)
+ * only 6 am to 2 pm. The question names what its press will run -- both removals
+ * and Priya's placement on the 6 pm block -- and says what stays uncovered; its
+ * first button says so; the press runs exactly that. "Leave it" writes nothing.
+ * Sam's blocks and Priya's rows are read back and put back as the seed had them,
+ * and the inserted block is removed.
+ */
+test("DEF-0063: a replace with two blocks, one of them busy elsewhere, names both removals and the one placement -- and the press writes exactly that", async ({
+  page,
+}) => {
+  test.skip(!hasRealBackend, NO_BACKEND_REASON);
+  test.setTimeout(240_000);
+
+  const dana = await signedInClient(ADMIN);
+  const nodes = await loadPlantANodes(dana);
+  const zone = await plantZone(dana, nodes.plantId);
+  const cell1 = nodes.cellIdByName.get("Cell 1");
+  if (!cell1) throw new Error("no such cell in Plant A: Cell 1");
+  const sam = await operatorId(dana, "Sam Patel");
+  const priya = await operatorId(dana, "Priya Shah");
+  const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(new Date());
+  const readSam = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("*")
+      .eq("operator_id", sam)
+      .eq("node_id", cell1);
+    if (error) throw new Error(`reading Sam's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const readPriya = async (): Promise<Array<Record<string, unknown>>> => {
+    const { data, error } = await dana
+      .from("assignments")
+      .select("id, node_id, timerange")
+      .eq("operator_id", priya);
+    if (error) throw new Error(`reading Priya's blocks: ${error.message}`);
+    return (data ?? []) as Array<Record<string, unknown>>;
+  };
+  const first = (await readSam()).find(
+    (r) => parseTimerange(String(r.timerange)).startMs === clockMsInZone(todayIso, zone, 6, 0),
+  );
+  if (!first) throw new Error("the seed has no block of Sam Patel's on Cell 1 today 6 am");
+  const eveningStart = clockMsInZone(todayIso, zone, 18, 0);
+  const eveningEnd = clockMsInZone(todayIso, zone, 20, 0);
+  const { id: _firstId, ...firstCopy } = first;
+  void _firstId;
+  const inserted = await dana
+    .from("assignments")
+    .insert({
+      ...firstCopy,
+      timerange: `[${new Date(eveningStart).toISOString()},${new Date(eveningEnd).toISOString()})`,
+    })
+    .select("id")
+    .single();
+  if (inserted.error) throw new Error(`inserting Sam's second block: ${inserted.error.message}`);
+  const extraId = String(inserted.data.id);
+  const samBefore = await readSam();
+  const priyaBefore = await readPriya();
+  const priyaIds = new Set(priyaBefore.map((r) => String(r.id)));
+  const SENTENCE = "replace Sam Patel with Priya Shah on Cell 1";
+  const ASK =
+    "Priya Shah is already on Cell 4 in Line 2 today from 6 am to 2 pm, so Sam Patel's 6 am to 2 pm block on Cell 1 cannot go to Priya Shah. Take Sam Patel off Cell 1 for both blocks and put Priya Shah on the 6 pm to 8 pm one? Nobody would be covering 6 am to 2 pm.";
+  const TAKE = "Take Sam Patel off, place Priya Shah where possible";
+  let restoreError: string | null = null;
+
+  try {
+    await signIn(page, "ana@example.test", "/");
+    await expect(page.getByLabel(/press Enter to create/).first()).toBeVisible({ timeout: 30_000 });
+    await ensureBarOpen(page);
+
+    // --- Leave it ---------------------------------------------------------------
+    const fromLeave = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText([TAKE, "Leave it"], { timeout: 60_000 });
+    expect(await currentStatusText(page)).toBe(ASK);
+    const widths = await candidateButtons(page).evaluateAll((els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().width)),
+    );
+    expect(widths[0], "the two answers are one width").toBe(widths[1]);
+    await expect(async () => {
+      const [entry] = await traceEntriesFor(SENTENCE, fromLeave);
+      expect(entry.asked).toBe(ASK);
+      expect(entry.answered).toBeNull();
+      expect(entry.ran).toEqual([]);
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await readSam()).length, "nothing written before the answer").toBe(samBefore.length);
+    await page.getByRole("button", { name: "Leave it", exact: true }).click();
+    await expect(async () => {
+      expect(await threadTextOf(page)).toContain("Left it.");
+      const [entry] = await traceEntriesFor(SENTENCE, fromLeave);
+      expect(entry.outcome).toBe("cancelled");
+    }).toPass({ timeout: 10_000, intervals: [250] });
+    expect((await readSam()).length, "Leave it wrote nothing").toBe(samBefore.length);
+    expect((await readPriya()).length).toBe(priyaBefore.length);
+
+    // --- The press ----------------------------------------------------------------
+    const fromTake = Date.now();
+    await submit(page, SENTENCE);
+    await expect(candidateButtons(page)).toHaveText([TAKE, "Leave it"], { timeout: 60_000 });
+    await page.getByRole("button", { name: TAKE, exact: true }).click();
+    await expect(async () => {
+      const thread = await threadTextOf(page);
+      expect(thread).toContain("Done, 3 things.");
+      const [entry] = await traceEntriesFor(SENTENCE, fromTake);
+      expect(entry.answered).toBe(TAKE);
+      expect(entry.ran).toHaveLength(3);
+      expect(entry.ran[0]).toMatch(/^Sam Patel is off Cell 1/);
+      expect(entry.ran[1]).toMatch(/^Sam Patel is off Cell 1/);
+      expect(entry.ran[2]).toMatch(/^Priya Shah is on Cell 1 .* from 6 pm to 8 pm/);
+      expect(entry.outcome).toBe("Done, 3 things.");
+    }).toPass({ timeout: 20_000, intervals: [250] });
+    // The database says what the question said: both of Sam's blocks are gone, and
+    // Priya has exactly one new row, on Cell 1 from 6 pm to 8 pm.
+    await expect(async () => {
+      expect((await readSam()).length).toBe(samBefore.length - 2);
+      const newRows = (await readPriya()).filter((r) => !priyaIds.has(String(r.id)));
+      expect(newRows).toHaveLength(1);
+      expect(newRows[0].node_id).toBe(cell1);
+      const t = parseTimerange(String(newRows[0].timerange));
+      expect(t).toEqual({ startMs: eveningStart, endMs: eveningEnd });
+    }).toPass({ timeout: 15_000, intervals: [300] });
+  } finally {
+    const have = new Set((await readSam()).map((r) => String(r.id)));
+    const missing = samBefore.filter((r) => !have.has(String(r.id)));
+    if (missing.length > 0) {
+      const { error } = await dana.from("assignments").insert(missing);
+      restoreError = error?.message ?? null;
+      if (restoreError !== null) console.error(`PUTTING SAM'S BLOCKS BACK FAILED: ${restoreError}`);
+    }
+    await dana.from("assignments").delete().eq("id", extraId);
+    const stray = (await readPriya()).filter((r) => !priyaIds.has(String(r.id)));
+    if (stray.length > 0) {
+      await dana
+        .from("assignments")
+        .delete()
+        .in(
+          "id",
+          stray.map((r) => String(r.id)),
+        );
+    }
+  }
+  expect(restoreError, "Sam's blocks are back").toBeNull();
+  expect((await readSam()).length, "the inserted block is gone").toBe(samBefore.length - 1);
+  expect((await readPriya()).length, "Priya's rows are as the seed had them").toBe(
+    priyaBefore.length,
+  );
+});

@@ -866,6 +866,44 @@ it("O6: names sort case-insensitively, so 'bob jones' is not exiled below 'Ana S
 });
 
 /* ===========================================================================
+ * OS — R-441/R-443/R-444: `home_shift_id` on the row, and the shiftless sort
+ * to the top of the Operators tab (S66-b).
+ * =========================================================================== */
+
+it("OS1: a row reads back the band it was given, and null when it has none", () => {
+  const given = { ...ana, homeShiftId: "shift-2" };
+  const rows = operatorRows([given, bob], ANA_TICKETS);
+  expect(rows.find((r) => r.id === ANA)?.homeShiftId).toBe("shift-2");
+  expect(rows.find((r) => r.id === BOB)?.homeShiftId).toBeNull();
+});
+
+it("OS1b: a fixture written before home_shift_id existed reads as no shift, not a crash", () => {
+  // `ana`/`bob` above carry no `homeShiftId` key at all — every fixture this
+  // suite wrote before S66-b. The field is optional for exactly this reason.
+  const rows = operatorRows([ana, bob], ANA_TICKETS);
+  expect(rows.every((r) => r.homeShiftId === null)).toBe(true);
+});
+
+it("R-444: a person with no shift sorts ABOVE one who has one, name order notwithstanding", () => {
+  const zed = { ...bob, id: "z-operator", displayName: "Zed Zephyr", homeShiftId: null };
+  const amy = { ...ana, displayName: "Amy Aaronson", homeShiftId: "shift-1" };
+  const rows = operatorRows([amy, zed], ANA_TICKETS);
+  // "Amy" would sort before "Zed" by name alone; the shiftless group wins.
+  expect(rows.map((r) => r.displayName)).toEqual(["Zed Zephyr", "Amy Aaronson"]);
+});
+
+it("R-444: within the shiftless group, name order is still the tiebreak", () => {
+  const rows = operatorRows(
+    [
+      { ...bob, id: "b1", displayName: "Zoe Shiftless", homeShiftId: null },
+      { ...bob, id: "b2", displayName: "Amy Shiftless", homeShiftId: null },
+    ],
+    [],
+  );
+  expect(rows.map((r) => r.displayName)).toEqual(["Amy Shiftless", "Zoe Shiftless"]);
+});
+
+/* ===========================================================================
  * validateOperatorDraft
  * =========================================================================== */
 

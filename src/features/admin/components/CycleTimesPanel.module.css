@@ -59,9 +59,17 @@
 }
 
 /* The grid's own scroller. Wide content must never make the PAGE scroll
-   sideways, so the overflow is owned here. */
+   sideways, so the overflow is owned here.
+
+   ⭐ THE FROZEN-HEADER STANDARD (docs/conventions.md "Frozen table headers",
+   R-372). `overflow: auto` (not `overflow-x` alone) plus a viewport-relative
+   `max-height` is what makes this region actually bound and scroll, rather
+   than growing to fit every part column and handing the scroll to the page --
+   see `.colHead` and the `thead .rowHead` override below for the sticky half. */
 .scroll {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: min(60dvh, 40rem);
+  overscroll-behavior: contain;
   border: 1px solid var(--grid);
   border-radius: 0.375rem;
 }
@@ -80,7 +88,11 @@
   vertical-align: top;
 }
 
-/* The place column stays put while the parts scroll past it. */
+/* The place column stays put while the parts scroll past it. `.rowHead` is
+   shared by the header's own "Place" cell and every body row's label, so its
+   base rule only carries the LEFT freeze both need; the header instance gets
+   its TOP freeze from the override below rather than here, or every body row
+   would try to stick to the top of the scroll region too. */
 .rowHead {
   position: sticky;
   left: 0;
@@ -91,13 +103,33 @@
   min-width: 11rem;
 }
 
+/* ⭐ THE FROZEN-HEADER STANDARD (docs/conventions.md "Frozen table headers",
+   R-372), the corner. The "Place" header cell is both the frozen column AND
+   the frozen row, so on top of the shared `.rowHead` left-freeze above it
+   also needs `top: 0` and a z-index above the ordinary column headers
+   (`.colHead`, z-index 1) so it paints over them where the two freezes
+   overlap -- the same corner `.mx thead .op` gives the training matrix. */
+.grid thead .rowHead {
+  top: 0;
+  z-index: 2;
+  background: var(--page);
+}
+
 /* ⚠️ EVERY VALUE COLUMN IS THE SAME WIDTH, AND WIDE ENOUGH FOR AN OPEN EDITOR.
    Left to itself the table gave the column holding the open cell whatever the
    input, the unit select and the two buttons needed, so clicking a cell made
    the whole grid reflow around it and the boxes came out ragged. Fixing the
    width means opening a cell changes nothing but that cell; the editor wraps
    onto a second line inside it (`.editor` is a wrapping flex row). */
+/* ⭐ THE FROZEN-HEADER STANDARD (docs/conventions.md "Frozen table headers",
+   R-372). `.colHead` is header-only (no body cell wears it), so it takes its
+   sticky top-freeze directly: `position: sticky; top: 0` with the same
+   opaque `--page` background it already had, and a z-index above the body's
+   unpositioned rows. */
 .colHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--page);
   white-space: nowrap;
   width: 9.5rem;

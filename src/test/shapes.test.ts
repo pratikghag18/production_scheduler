@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseAbsenceInfo,
+  parseBlocksElsewhere,
   parseBoardWindow,
   parseCapacityProbe,
   parseCreateAssignmentResult,
@@ -92,6 +94,12 @@ const boardWindowJson: Json = {
     {
       id: "50000000-0000-0000-0000-000000000001",
       home_node_id: "30000000-0000-0000-0000-000000000003",
+      // R-441 / migration 0082: board_window emits this on every operator
+      // (null = no home band) and parseOperator now REQUIRES the key, the
+      // same "present but possibly null" contract home_node_id already
+      // keeps. homeShift.test.ts covers the parser itself; this fixture only
+      // needs to keep pace with the required shape.
+      home_shift_id: null,
       display_name: "Maria",
       employee_ref: "EMP-001",
       active: true,
@@ -100,7 +108,18 @@ const boardWindowJson: Json = {
       // 0025 and `parseOperator` dropped it, so the board could not tell
       // whether somebody belonged at the cell being scheduled. REQUIRED now.
       site_node_id: "30000000-0000-0000-0000-000000000001",
+      // S39/R-346/0058: the same node's ltree PATH. `board_window` sends it so
+      // that the screen can tell "above this cell" from "another area" without
+      // holding a node the reader's grant does not reach. REQUIRED.
+      site_path: "plant_1",
       skill_ids: ["40000000-0000-0000-0000-000000000001"],
+      // F-087/0048: `board_window` emits this on EVERY operator (`[]` where
+      // nothing is dated) and `parseOperator` REQUIRES it, for the reason
+      // `site_node_ids` is required above: a payload without it comes from a
+      // database that cannot tell a live certificate from a lapsed one, and
+      // carrying on regardless would read "no dates sent" as "nothing has
+      // expired". `certificateExpiry.test.tsx` pins the shape.
+      skill_expiries: [],
     },
   ],
   products: [
@@ -162,6 +181,17 @@ const boardWindowJson: Json = {
       seconds_per_unit: 90,
     },
   ],
+  // R-331 / migration 0051: one RESOLVED answer per node. Two nodes, two
+  // different answers, because that is the shape a company-wide scalar cannot
+  // carry and the reason this key exists at all.
+  can_place: true,
+  node_policies: [
+    { node_id: "30000000-0000-0000-0000-000000000007", eligibility_policy: "block" },
+    { node_id: "30000000-0000-0000-0000-000000000001", eligibility_policy: "warn" },
+  ],
+  // R-333 / migration 0062 (DEF-0017): the date format RESOLVED for the board's
+  // own root, carried as a top-level token beside can_place.
+  date_format: "ymd_slash",
 };
 
 describe("parseBoardWindow", () => {
@@ -176,6 +206,56 @@ describe("parseBoardWindow", () => {
     expect(parsed?.shiftTemplates[0]?.shifts[0]?.breaks[0]?.startMin).toBe(480);
     expect(parsed?.nodeShiftMap[0]?.templateId).toBe("70000000-0000-0000-0000-000000000001");
     expect(parsed?.levels[0]?.templateId).toBe("tpl-a");
+  });
+
+  /**
+   * R-353 / migration 0063 (D88a): the board's zone, carried as a top-level
+   * token. LENIENT, unlike `date_format` — the zone is an open vocabulary the
+   * client cannot validate exhaustively, so an absent key or an unusable name is
+   * a display fallback ('UTC'), not a shape mismatch that would blank the board.
+   */
+  it("carries the board's timezone, defaulting to UTC when absent or unusable", () => {
+    // The fixture omits `timezone` -> the resolver's absence becomes 'UTC'.
+    expect(parseBoardWindow(boardWindowJson)?.timezone).toBe("UTC");
+    // A real IANA name is kept verbatim.
+    expect(
+      parseBoardWindow({ ...boardWindowJson, timezone: "America/Chicago" } as Json)?.timezone,
+    ).toBe("America/Chicago");
+    // A name `Intl` cannot format falls back to 'UTC' rather than nulling the parse.
+    const bad = parseBoardWindow({ ...boardWindowJson, timezone: "Mars/Phobos" } as Json);
+    expect(bad).not.toBeNull();
+    expect(bad?.timezone).toBe("UTC");
+  });
+
+  /**
+   * R-403 / migration 0081 (D129): the command bar mode, carried as a
+   * top-level token beside date_format/timezone. LENIENT IN BOTH
+   * DIRECTIONS, unlike either of those: a MISSING key (an older payload,
+   * predating this migration) reads as 'voice' — that board had the full
+   * bar before the setting existed — but a PRESENT, unrecognised token reads
+   * as 'off', the requirement's own fail-safe rule ("An unrecognised value
+   * read from the server hides the button"). Neither case nulls the parse;
+   * `date_format` is the one field on this payload strict enough to do that.
+   */
+  it("carries the board's command bar mode: missing reads as voice, unrecognised fails safe to off", () => {
+    // The fixture omits `command_bar` -> an older payload reads as 'voice'.
+    expect(parseBoardWindow(boardWindowJson)?.commandBar).toBe("voice");
+    expect(parseBoardWindow({ ...boardWindowJson, command_bar: "off" } as Json)?.commandBar).toBe(
+      "off",
+    );
+    expect(parseBoardWindow({ ...boardWindowJson, command_bar: "typed" } as Json)?.commandBar).toBe(
+      "typed",
+    );
+    expect(parseBoardWindow({ ...boardWindowJson, command_bar: "voice" } as Json)?.commandBar).toBe(
+      "voice",
+    );
+    // A forward-versioned or malformed token fails SAFE -- hidden, not the
+    // permissive default -- and the parse still succeeds.
+    const unknown = parseBoardWindow({ ...boardWindowJson, command_bar: "on" } as Json);
+    expect(unknown).not.toBeNull();
+    expect(unknown?.commandBar).toBe("off");
+    const wrongType = parseBoardWindow({ ...boardWindowJson, command_bar: 1 } as Json);
+    expect(wrongType?.commandBar).toBe("off");
   });
 
   /**
@@ -237,12 +317,94 @@ describe("parseCapacityProbe", () => {
           assignmentId: "9000000a-0000-0000-0000-00000000000a",
           nodeId: "3000000a-0000-0000-0000-00000000000a",
           nodeName: "Cell 4",
+          // A server older than 0085 sends neither key: a readable row, no parent named.
+          parentName: null,
           productName: "Widget Y",
           timerange: '["2026-08-18 06:00:00+00","2026-08-18 12:00:00+00")',
           efficiency: 0.5,
+          outside: false,
+          // A server older than 0086 sends no `editable`: read as NOT editable.
+          editable: false,
         },
       ],
     });
+  });
+
+  // DEF-0065 (0086): the server says which readable blocks the caller may change.
+  it("DEF-0065: carries `editable` when the server sends it, and refuses one that is not a boolean", () => {
+    const row = (valid as { overlapping: Json[] }).overlapping[0] as Record<string, Json>;
+    const yes = parseCapacityProbe({
+      ...valid,
+      overlapping: [{ ...row, outside: false, editable: true }],
+    } as Json);
+    expect(yes?.overlapping[0].editable).toBe(true);
+    const no = parseCapacityProbe({
+      ...valid,
+      overlapping: [{ ...row, outside: false, editable: false }],
+    } as Json);
+    expect(no?.overlapping[0].editable).toBe(false);
+    expect(
+      parseCapacityProbe({ ...valid, overlapping: [{ ...row, editable: "yes" }] } as Json),
+    ).toBeNull();
+  });
+
+  it("DEF-0065: an outside row is never editable, whatever the server says", () => {
+    const row = {
+      assignment_id: null,
+      node_id: null,
+      node_name: "Cell 4",
+      parent_name: "Line 2",
+      product_name: null,
+      timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
+      efficiency: 1,
+      outside: true,
+      editable: true,
+    };
+    const parsed = parseCapacityProbe({ ...valid, overlapping: [row] } as Json);
+    expect(parsed?.overlapping[0].editable).toBe(false);
+  });
+
+  // R-465 (DEF-0053): a block on a place the caller cannot read arrives with the
+  // place and the hours and nothing else.
+  const outsideRow: Record<string, Json> = {
+    assignment_id: null,
+    node_id: null,
+    node_name: "Cell 4",
+    parent_name: "Line 2",
+    product_name: null,
+    timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
+    efficiency: 1,
+    outside: true,
+  };
+
+  it("R-465: accepts an outside row with no ids and no product, and carries the parent's name", () => {
+    const parsed = parseCapacityProbe({ ...valid, overlapping: [outsideRow] } as Json);
+    expect(parsed?.overlapping).toEqual([
+      {
+        assignmentId: null,
+        nodeId: null,
+        nodeName: "Cell 4",
+        parentName: "Line 2",
+        productName: null,
+        timerange: '["2026-08-18 06:00:00+00","2026-08-18 14:00:00+00")',
+        efficiency: 1,
+        outside: true,
+        editable: false,
+      },
+    ]);
+  });
+
+  it("R-465: refuses a READABLE row that arrives without its ids (only an outside row may)", () => {
+    const readableNoIds = { ...outsideRow, outside: false };
+    expect(parseCapacityProbe({ ...valid, overlapping: [readableNoIds] } as Json)).toBeNull();
+    const { outside: _outside, ...absentFlag } = outsideRow;
+    expect(parseCapacityProbe({ ...valid, overlapping: [absentFlag] } as Json)).toBeNull();
+  });
+
+  it("R-465: refuses an outside flag that is not a boolean", () => {
+    expect(
+      parseCapacityProbe({ ...valid, overlapping: [{ ...outsideRow, outside: "yes" }] } as Json),
+    ).toBeNull();
   });
 
   it("rejects a payload missing a required top-level key", () => {
@@ -335,6 +497,26 @@ describe("parseCreateAssignmentResult", () => {
   it("rejects null", () => {
     expect(parseCreateAssignmentResult(null)).toBeNull();
   });
+
+  // R-359 / migration 0069 — the hole this lane closes. A part-day absence
+  // rides back on `create_assignment`'s `absence` key with two additive
+  // instant keys; before the fix `parseAbsenceInfo` read only `from`/`to`/
+  // `reason` and dropped them on the floor.
+  it("R-359: a part-day `absence` key carries its hours through as startsAt/endsAt", () => {
+    const parsed = parseCreateAssignmentResult({
+      ...(valid as Record<string, Json>),
+      absence: {
+        absent: true,
+        from: "2026-09-28",
+        to: "2026-09-28",
+        reason: "sick",
+        starts_at: "2026-09-28T09:00:00.000Z",
+        ends_at: "2026-09-28T13:00:00.000Z",
+      },
+    } as Json);
+    expect(parsed?.absence.startsAt).toBe("2026-09-28T09:00:00.000Z");
+    expect(parsed?.absence.endsAt).toBe("2026-09-28T13:00:00.000Z");
+  });
 });
 
 describe("parseMoveRunResult", () => {
@@ -366,6 +548,107 @@ describe("parseMoveRunResult", () => {
 
   it("rejects null", () => {
     expect(parseMoveRunResult(null)).toBeNull();
+  });
+
+  // R-359 / migration 0069 — the twin of the create_assignment case above,
+  // inside each `absence_warnings` entry.
+  it("R-359: a part-day absence_warnings entry carries its hours through as startsAt/endsAt", () => {
+    const parsed = parseMoveRunResult({
+      ...(valid as Record<string, Json>),
+      absence_warnings: [
+        {
+          operator_id: "50000000-0000-0000-0000-000000000002",
+          absence: {
+            absent: true,
+            from: "2026-09-28",
+            to: "2026-09-28",
+            reason: "sick",
+            starts_at: "2026-09-28T09:00:00.000Z",
+            ends_at: "2026-09-28T13:00:00.000Z",
+          },
+        },
+      ],
+    } as Json);
+    expect(parsed?.absenceWarnings[0]?.absence.startsAt).toBe("2026-09-28T09:00:00.000Z");
+    expect(parsed?.absenceWarnings[0]?.absence.endsAt).toBe("2026-09-28T13:00:00.000Z");
+  });
+});
+
+// R-359 / migration 0069 — `parseAbsenceInfo` itself: the two part-day keys
+// are ADDITIVE, named to match `AbsenceHit` (src/lib/absence.ts) so the two
+// shapes cannot drift.
+describe("parseAbsenceInfo (R-359): the part-day keys are additive", () => {
+  it("passes starts_at/ends_at through as startsAt/endsAt on a part-day hit", () => {
+    const parsed = parseAbsenceInfo({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-09-28",
+      reason: "sick",
+      starts_at: "2026-09-28T09:00:00.000Z",
+      ends_at: "2026-09-28T13:00:00.000Z",
+    } as Json);
+    expect(parsed).toEqual({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-09-28",
+      reason: "sick",
+      startsAt: "2026-09-28T09:00:00.000Z",
+      endsAt: "2026-09-28T13:00:00.000Z",
+    });
+  });
+
+  it("a payload with no part-day keys parses byte-for-byte as it did before this lane", () => {
+    const parsed = parseAbsenceInfo({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+    } as Json);
+    expect(parsed).toEqual({ absent: true, from: "2026-09-28", to: "2026-10-01", reason: "sick" });
+    expect("startsAt" in parsed).toBe(false);
+    expect("endsAt" in parsed).toBe(false);
+  });
+
+  it("a malformed part-day key does not turn a valid whole-day hit into none", () => {
+    // Only one of the pair present.
+    const onlyStart = parseAbsenceInfo({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+      starts_at: "2026-09-28T09:00:00.000Z",
+    } as Json);
+    expect(onlyStart).toEqual({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+    });
+
+    // A part-day key present but not a string.
+    const nonString = parseAbsenceInfo({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+      starts_at: 12345,
+      ends_at: "2026-09-28T13:00:00.000Z",
+    } as unknown as Json);
+    expect(nonString).toEqual({
+      absent: true,
+      from: "2026-09-28",
+      to: "2026-10-01",
+      reason: "sick",
+    });
+  });
+
+  it("an absent:false / missing payload is still {absent:false}, part-day keys or not", () => {
+    expect(parseAbsenceInfo(undefined)).toEqual({
+      absent: false,
+      from: null,
+      to: null,
+      reason: null,
+    });
   });
 });
 
@@ -656,11 +939,68 @@ describe("R-315: board_window hands over the standard cycle times", () => {
   });
 });
 
+describe("R-331: board_window hands over the policy RESOLVED FOR EACH NODE", () => {
+  it("parses node_policies to camelCase, one entry per node", () => {
+    expect(parseBoardWindow(boardWindowJson)?.nodePolicies).toEqual([
+      { nodeId: "30000000-0000-0000-0000-000000000007", eligibilityPolicy: "block" },
+      { nodeId: "30000000-0000-0000-0000-000000000001", eligibilityPolicy: "warn" },
+    ]);
+  });
+
+  it("rejects a payload with no node_policies key at all", () => {
+    // Same stance as cycle_times, with more behind it: this key — and NOT
+    // org.settings — decides whether the popover offers an override tick. A
+    // payload without it that parsed anyway would put the whole board back on
+    // one company-wide answer and look like it was working.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as Record<string, unknown>;
+    delete raw.node_policies;
+    expect(parseBoardWindow(raw as never)).toBeNull();
+  });
+
+  it("rejects an entry missing its node_id", () => {
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      node_policies: Record<string, unknown>[];
+    };
+    delete raw.node_policies[0]!.node_id;
+    expect(parseBoardWindow(raw as never)).toBeNull();
+  });
+
+  it("keeps an unrecognised policy string rather than failing the whole board", () => {
+    // ⚠️ The narrowing to warn/block belongs to boardIndex, not here. A future
+    // migration adding a third value must not stop the board LOADING; it must
+    // land as an unknown node in the index, where `policyForNode` fails SAFE.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      node_policies: Record<string, unknown>[];
+    };
+    raw.node_policies[0]!.eligibility_policy = "refuse-politely";
+    expect(parseBoardWindow(raw as never)?.nodePolicies[0]?.eligibilityPolicy).toBe(
+      "refuse-politely",
+    );
+  });
+});
+
 describe("an operator carries the part of the structure they belong to", () => {
   it("D109/D113: parseOperator keeps site_node_id — it was sent and dropped", () => {
     expect(parseBoardWindow(boardWindowJson)?.operators[0]?.siteNodeId).toBe(
       "30000000-0000-0000-0000-000000000001",
     );
+  });
+
+  it("S39/R-346: and the HOME'S PATH beside it, which is what the split compares", () => {
+    expect(parseBoardWindow(boardWindowJson)?.operators[0]?.sitePath).toBe("plant_1");
+  });
+
+  it("⭐ rejects a row with no site_path rather than reading it as homed nowhere", () => {
+    // Coercing to `""` would be worse than rejecting, and in the opposite
+    // direction from `site_node_id` below: an empty home covers no place, so
+    // `splitPeopleFor` files the person under "the rest of the plant" and the
+    // whole panel disappears behind the click. Same rule as `skill_expiries`:
+    // a payload this client cannot understand is refused, not guessed at.
+    const raw = JSON.parse(JSON.stringify(boardWindowJson)) as {
+      operators: Record<string, unknown>[];
+    };
+    delete raw.operators[0].site_path;
+    expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
   });
 
   it("and rejects a row without one, rather than coercing it to empty", () => {
@@ -672,5 +1012,101 @@ describe("an operator carries the part of the structure they belong to", () => {
     };
     delete raw.operators[0].site_node_id;
     expect(parseBoardWindow(raw as unknown as Json)).toBeNull();
+  });
+});
+
+describe("parseBoardWindow: can_place (R-346, the viewer clause)", () => {
+  it("keeps the server's answer, true or false", () => {
+    expect(parseBoardWindow(boardWindowJson)?.canPlace).toBe(true);
+    expect(
+      parseBoardWindow({ ...(boardWindowJson as object), can_place: false } as Json)?.canPlace,
+    ).toBe(false);
+  });
+
+  it("refuses a payload without it, rather than guessing for an un-migrated database", () => {
+    const { can_place: _dropped, ...without } = boardWindowJson as { can_place: boolean };
+    expect(parseBoardWindow(without as Json)).toBeNull();
+  });
+});
+
+describe("parseBoardWindow: date_format (R-333 / migration 0062, DEF-0017)", () => {
+  it("keeps the resolved token off the payload", () => {
+    // The fixture carries ymd_slash -- the plant's own choice, resolved for the
+    // board's root on the server. The board reads THIS, not useDateFormat.
+    expect(parseBoardWindow(boardWindowJson)?.dateFormat).toBe("ymd_slash");
+    expect(
+      parseBoardWindow({ ...(boardWindowJson as object), date_format: "iso" } as Json)?.dateFormat,
+    ).toBe("iso");
+  });
+
+  it("refuses a payload without it, rather than falling back to the company answer", () => {
+    // Strict like can_place: an absent key is an un-migrated board_window, and
+    // silently defaulting would put the board back on the company-wide format --
+    // the very DEF-0017 bug, made quiet (the silent-empty class).
+    const { date_format: _dropped, ...without } = boardWindowJson as { date_format: string };
+    expect(parseBoardWindow(without as Json)).toBeNull();
+  });
+
+  it("refuses a token outside the closed DateFormat enum", () => {
+    // A well-formed string that is not one of the eight tokens is a payload this
+    // client does not understand; it rejects rather than coercing.
+    expect(
+      parseBoardWindow({ ...(boardWindowJson as object), date_format: "MM-DD-YYYY" } as Json),
+    ).toBeNull();
+    // A JSON null (what the resolver would return uncoalesced) is refused too.
+    expect(
+      parseBoardWindow({ ...(boardWindowJson as object), date_format: null } as Json),
+    ).toBeNull();
+  });
+});
+
+// R-465 (DEF-0053, migration 0085): `operator_blocks_elsewhere` answers a bare
+// array of rows, raw snake_case as PostgREST returns them. Every row below is
+// built from the one constant.
+describe("parseBlocksElsewhere", () => {
+  const ROW: Record<string, Json> = {
+    operator_id: "a0000000-0000-0000-0000-000000000004",
+    node_name: "Cell 4",
+    parent_name: "Line 2",
+    timerange: '["2026-01-15 12:00:00+00","2026-01-15 20:00:00+00")',
+    efficiency: 1,
+  };
+
+  it("accepts rows and converts to camelCase", () => {
+    expect(parseBlocksElsewhere([ROW] as Json)).toEqual([
+      {
+        operatorId: "a0000000-0000-0000-0000-000000000004",
+        nodeName: "Cell 4",
+        parentName: "Line 2",
+        timerange: '["2026-01-15 12:00:00+00","2026-01-15 20:00:00+00")',
+        efficiency: 1,
+      },
+    ]);
+  });
+
+  it("accepts the empty set (a caller who reads the whole plant)", () => {
+    expect(parseBlocksElsewhere([])).toEqual([]);
+  });
+
+  it("accepts a place at a root: parent_name null", () => {
+    const parsed = parseBlocksElsewhere([{ ...ROW, parent_name: null }] as Json);
+    expect(parsed?.[0].parentName).toBeNull();
+  });
+
+  it("refuses the WHOLE set when any row lacks a column or carries the wrong type, column by column", () => {
+    for (const key of Object.keys(ROW)) {
+      const { [key]: _gone, ...without } = ROW;
+      expect(parseBlocksElsewhere([ROW, without] as Json), `without ${key}`).toBeNull();
+      expect(
+        parseBlocksElsewhere([{ ...ROW, [key]: { no: 1 } }] as Json),
+        `type ${key}`,
+      ).toBeNull();
+    }
+  });
+
+  it("refuses an object, null and a scalar where the array belongs", () => {
+    expect(parseBlocksElsewhere({} as Json)).toBeNull();
+    expect(parseBlocksElsewhere(null)).toBeNull();
+    expect(parseBlocksElsewhere("rows")).toBeNull();
   });
 });

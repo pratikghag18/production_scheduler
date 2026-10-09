@@ -1,6 +1,14 @@
 # Production Scheduler
 
-<img width="3787" height="1890" alt="image" src="https://github.com/user-attachments/assets/cd5b1616-8638-44b1-8eec-883ab5f00066" />
+A person dragged from the rail onto a cell, the pre-filled pop-up, and the block on the board:
+
+![Dragging Tom Baker from the operator rail onto Cell 3 opens the pre-filled create pop-up; one click places the block](docs/media/demo-drag.gif)
+
+The [four-minute walk through the app](docs/media/production-scheduler-demo.mp4) (mp4, captions,
+no sound) also shows a run drawn across a cell's empty hours and moved to another cell, a
+missing certificate highlighted while a person is dragged and placed with a recorded reason,
+a double booking caught before anything is written, the week saved as a template, the admin
+screens, and a line supervisor's board, which shows her line and refuses the rest in plain words.
 
 A multi-tenant, real-time production staffing scheduler. Supervisors see a timeline board —
 schedulable units (work cells, in the default vocabulary) as rows, time as columns — and drag

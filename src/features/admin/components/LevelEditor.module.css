@@ -164,6 +164,16 @@
   margin-top: 0.875rem;
 }
 
+/* R-447: this is a dialog footer's own shape (Cancel/Save), even though it
+   sits inline in a card rather than a popover -- one width for both, in the
+   button's own em (`BoardToolbar.module.css`'s `.moreButton`, the same
+   fix), so "Save" does not sit narrower than "Cancel" beside it. */
+.cancelBtn,
+.saveBtn {
+  min-width: 4.5em;
+  text-align: center;
+}
+
 .cancelBtn {
   font-size: 0.7812rem;
   padding: 0.375rem 0.75rem;

@@ -1,0 +1,358 @@
+/**
+ * R-028: a run and a direct assignment may coexist on one cell. The claim is a
+ * rendering distinction — direct assignments draw as standalone blocks carrying
+ * their own product identity (`DirectBlock`), run-attached ones draw as staffing
+ * chips that lean on the run's own band for that identity (`AssignmentChip`) —
+ * proven here by mounting both from the same assignment shape and reading what
+ * each actually shows, not by asserting on a CSS class.
+ *
+ * No pointer events are fired: both components are pure/props-driven, and the
+ * claim under test is what's rendered, not the drag mechanics (dragGesture.test.ts's
+ * job, already covers MOVE for both; CREATE/RESIZE are R-025's still-open gap).
+ */
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { DirectBlock } from "@/features/board/components/DirectBlock";
+import { AssignmentChip } from "@/features/board/components/AssignmentChip";
+import { HighlightProvider } from "@/features/board/lib/highlight";
+import type { IndexedAssignment } from "@/features/board/lib/boardIndex";
+import { DENSITIES } from "@/features/board/lib/geometry";
+import { buildDayAxis } from "@/features/board/lib/time";
+import type { Product, BoardOperator, ShiftTemplate } from "@/lib/api";
+
+const WINDOW_START = new Date("2026-08-24T00:00:00.000Z");
+
+const assignment: IndexedAssignment = {
+  id: "asg-1",
+  orgId: "org-1",
+  nodeId: "cell-1",
+  operatorId: "op-1",
+  operatorDisplayName: null,
+  runId: null,
+  productId: "prod-1",
+  productSku: null,
+  productName: null,
+  productColorToken: null,
+  timerange: "[2026-08-24 06:00:00+00,2026-08-24 10:00:00+00)",
+  efficiency: 1,
+  eligibilityOverride: false,
+  overrideReason: null,
+  areaOverride: false,
+  areaOverrideReason: null,
+  targetQty: null,
+  targetUnit: null,
+  createdBy: null,
+  createdAt: WINDOW_START.toISOString(),
+  updatedAt: WINDOW_START.toISOString(),
+  startMin: 360,
+  endMin: 600,
+  efficiencyPercent: 100,
+  lane: 0,
+  defaultTargetQty: null,
+};
+
+const operator: BoardOperator = {
+  id: "op-1",
+  displayName: "Ana Ortiz",
+  homeNodeId: null,
+  homeShiftId: null,
+  employeeRef: null,
+  active: true,
+  siteNodeId: "n-plant",
+  sitePath: "plant_a",
+  skillIds: [],
+  skillExpiries: [],
+};
+
+const product: Product = {
+  id: "prod-1",
+  name: "Widget A",
+  sku: "W-A",
+  active: true,
+  siteNodeIds: [],
+  offeredNodeIds: [],
+  colorToken: "product-1",
+};
+
+const sharedProps = {
+  density: DENSITIES[1],
+  operator,
+  product,
+  productColorVar: "var(--product-1)",
+  windowStart: WINDOW_START,
+  pxPerHour: 104,
+  windowMinutes: 1440,
+  template: null,
+  dayCount: 1,
+  dayAxis: buildDayAxis(WINDOW_START, 1, "UTC"),
+  zoomIndex: 1 as const,
+  activeDrag: null,
+  onPointerDown: vi.fn(),
+  onPointerMove: vi.fn(),
+  onPointerUp: vi.fn(),
+  onPointerCancel: vi.fn(),
+  onKeyDown: vi.fn(),
+  onKeyUp: vi.fn(),
+};
+
+describe("DirectBlock vs AssignmentChip — the rendering half of R-028", () => {
+  it("B1: a direct assignment carries its own product identity — the block's aria-label says so, and the product name is its own line", () => {
+    render(<DirectBlock assignment={assignment} {...sharedProps} />);
+    const block = screen.getByRole("button");
+    expect(block.getAttribute("aria-label")).toBe(
+      "Ana Ortiz direct assignment on Widget A, 06:00 to 10:00",
+    );
+    expect(screen.getByText(/Widget A · 06:00–10:00/)).toBeTruthy();
+  });
+
+  it("B2: a run-attached chip names no product of its own — the run's band already carries it", () => {
+    render(<AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />);
+    const chip = screen.getByRole("button");
+    // Same person, same window, same product id -- but the chip's own label and
+    // body never say "direct assignment" or the product name, because a chip
+    // sits inside the run's band, which already draws it.
+    expect(chip.getAttribute("aria-label")).toBe("Ana Ortiz on Widget A, 06:00 to 10:00");
+    expect(chip.getAttribute("aria-label")).not.toMatch(/direct assignment/);
+    expect(screen.queryByText(/Widget A/)).toBeNull();
+    expect(screen.getByText(/^06:00–10:00$/)).toBeTruthy();
+  });
+
+  it("B3: both are drawn as accessible buttons, so a keyboard user reaches either the same way", () => {
+    const { unmount } = render(<DirectBlock assignment={assignment} {...sharedProps} />);
+    expect(screen.getByRole("button").getAttribute("tabIndex")).toBe("0");
+    unmount();
+    render(<AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />);
+    expect(screen.getByRole("button").getAttribute("tabIndex")).toBe("0");
+  });
+});
+
+/**
+ * S47 / R-395: the command bar's remove/move/retime question draws an
+ * outline on the block(s) it names -- `useHighlightKind` (`../lib/highlight.ts`),
+ * read here through `HighlightProvider` exactly as `BoardPage` provides it,
+ * never as a prop threaded through `BoardGrid`/`TrackRow`.
+ *
+ * `css: false` in `vitest.config.ts` makes every CSS Module import here
+ * resolve to `{}` (an empty object, confirmed empirically), so
+ * `styles.outlineRemove` is `undefined` in this file exactly as it is inside
+ * `DirectBlock.tsx`/`AssignmentChip.tsx` themselves -- a literal
+ * `toContain("outlineRemove")` would read a class name that never appears
+ * even on a genuinely highlighted block. The R-028 tests above already made
+ * this call ("not by asserting on a CSS class"); this one instead asserts
+ * that the highlighted render's `className` DIFFERS from an unhighlighted
+ * baseline, and an id NOT in the highlight's set renders identically to
+ * that baseline -- true regardless of what the CSS Module transform does
+ * with the class names in any given environment.
+ */
+describe("S47 / R-395: the highlight a remove/move/retime question draws", () => {
+  it("H1: DirectBlock -- the named assignment's class differs from an unhighlighted one; an unnamed id is unaffected", () => {
+    const { container: plain } = render(<DirectBlock assignment={assignment} {...sharedProps} />);
+    const baseline = plain.querySelector('[role="button"]')!.className;
+
+    const { container: named } = render(
+      <HighlightProvider value={{ kind: "remove", assignmentIds: [assignment.id] }}>
+        <DirectBlock assignment={assignment} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    expect(named.querySelector('[role="button"]')!.className).not.toBe(baseline);
+
+    const { container: unnamed } = render(
+      <HighlightProvider value={{ kind: "remove", assignmentIds: ["some-other-block"] }}>
+        <DirectBlock assignment={assignment} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    expect(unnamed.querySelector('[role="button"]')!.className).toBe(baseline);
+  });
+
+  it("H2: AssignmentChip -- same rule, and 'move'/'retime' both draw the same class (never the removal one)", () => {
+    const { container: plain } = render(
+      <AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />,
+    );
+    const baseline = plain.querySelector('[role="button"]')!.className;
+
+    const { container: moved } = render(
+      <HighlightProvider value={{ kind: "move", assignmentIds: [assignment.id] }}>
+        <AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    const withMove = moved.querySelector('[role="button"]')!.className;
+    expect(withMove).not.toBe(baseline);
+
+    const { container: retimed } = render(
+      <HighlightProvider value={{ kind: "retime", assignmentIds: [assignment.id] }}>
+        <AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    // "move" and "retime" both draw `.outlineMove` (never red) -- the SAME
+    // class, so the two renders' class lists match each other exactly.
+    expect(retimed.querySelector('[role="button"]')!.className).toBe(withMove);
+
+    const { container: removed } = render(
+      <HighlightProvider value={{ kind: "remove", assignmentIds: [assignment.id] }}>
+        <AssignmentChip assignment={assignment} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    // A removal draws a DIFFERENT class than a move/retime does.
+    expect(removed.querySelector('[role="button"]')!.className).not.toBe(withMove);
+  });
+
+  /**
+   * S51 (R-400/D127): a several's finished lot status outlines every block
+   * a removal or a move in it would touch AT ONCE, each in its own kind's
+   * colour -- `HighlightProvider`'s value widens to a LIST for exactly this
+   * (`../lib/highlight.ts`); `useHighlightKind` is unchanged for the two
+   * components under test here, which never learn the value can be a list.
+   */
+  it("H3: a list highlight colours each id by its own kind", () => {
+    const other: IndexedAssignment = { ...assignment, id: "asg-2" };
+
+    const { container } = render(
+      <HighlightProvider
+        value={[
+          { kind: "remove", assignmentIds: [assignment.id] },
+          { kind: "move", assignmentIds: [other.id] },
+        ]}
+      >
+        <DirectBlock assignment={assignment} {...sharedProps} />
+        <AssignmentChip assignment={other} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    const buttons = container.querySelectorAll('[role="button"]');
+    expect(buttons).toHaveLength(2);
+
+    // Each button gets ITS OWN kind, not the other's, not neither -- proven
+    // by matching each against a SOLO single-highlight render of the same
+    // kind (H1/H2's own shape), so this does not depend on knowing what the
+    // CSS Module transform actually names the class.
+    const { container: soloRemove } = render(
+      <HighlightProvider value={{ kind: "remove", assignmentIds: [assignment.id] }}>
+        <DirectBlock assignment={assignment} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    expect(buttons[0].className).toBe(soloRemove.querySelector('[role="button"]')!.className);
+
+    const { container: soloMove } = render(
+      <HighlightProvider value={{ kind: "move", assignmentIds: [other.id] }}>
+        <AssignmentChip assignment={other} homeRun={null} {...sharedProps} />
+      </HighlightProvider>,
+    );
+    expect(buttons[1].className).toBe(soloMove.querySelector('[role="button"]')!.className);
+
+    // And they differ from an unhighlighted baseline, and from each other.
+    const { container: plainBlock } = render(
+      <DirectBlock assignment={assignment} {...sharedProps} />,
+    );
+    expect(buttons[0].className).not.toBe(plainBlock.querySelector('[role="button"]')!.className);
+    expect(buttons[0].className).not.toBe(buttons[1].className);
+  });
+});
+
+/**
+ * S66-c (R-441/R-448): THE OT TAG — DC-ot-1..3, exactly the three cases the
+ * brief names (in, overtime, no band -> no tag), pinned on both block shapes
+ * since they share one implementation (`railWords.ts`'s `resolveHomeBand`/
+ * `overtimeMinutes`) but are two separate components. The assignment's own
+ * range is fixed (06:00-10:00, `startMin`/`endMin` 360/600 off the shared
+ * fixture above); only the operator's `homeShiftId` and `template` vary.
+ */
+describe("the OT tag (S66-c, R-441, R-448)", () => {
+  const DAY_SHIFT: ShiftTemplate = {
+    id: "pat-1",
+    name: "Pattern",
+    shifts: [{ id: "s1", name: "Day", startMin: 360, endMin: 840, breaks: [] }], // 06:00-14:00
+  };
+
+  function withHomeShift(homeShiftId: string | null): BoardOperator {
+    return { ...operator, homeShiftId };
+  }
+
+  it("DC-ot-1: the block lies entirely INSIDE the person's own band -> no tag", () => {
+    // 06:00-10:00 sits inside the 06:00-14:00 Day band -- zero overtime.
+    render(
+      <DirectBlock
+        assignment={assignment}
+        {...sharedProps}
+        operator={withHomeShift("s1")}
+        template={DAY_SHIFT}
+      />,
+    );
+    expect(screen.queryByText("OT")).toBeNull();
+  });
+
+  it("DC-ot-2: the block runs OUTSIDE the person's own band -> the tag, with the minute count in its title", () => {
+    // The Day band now starts at 08:00 (480), so the fixture's 06:00-10:00
+    // block runs two hours (120 minutes) before it starts.
+    const lateDayShift: ShiftTemplate = {
+      id: "pat-2",
+      name: "Pattern",
+      shifts: [{ id: "s1", name: "Day", startMin: 480, endMin: 840, breaks: [] }], // 08:00-14:00
+    };
+    render(
+      <AssignmentChip
+        assignment={assignment}
+        homeRun={null}
+        {...sharedProps}
+        operator={withHomeShift("s1")}
+        template={lateDayShift}
+      />,
+    );
+    const tag = screen.getByText("OT");
+    expect(tag.title).toBe("overtime, 120 min");
+
+    // The same fixture on the other block shape draws the identical tag —
+    // one arithmetic, two components (CLAUDE.md §4).
+    render(
+      <DirectBlock
+        assignment={assignment}
+        {...sharedProps}
+        operator={withHomeShift("s1")}
+        template={lateDayShift}
+      />,
+    );
+    const tags = screen.getAllByText("OT");
+    expect(tags[tags.length - 1].title).toBe("overtime, 120 min");
+  });
+
+  it("DC-ot-3: no resolvable band at all -> no tag, in each of its three shapes", () => {
+    // (a) the operator has no home shift recorded.
+    const { unmount: u1 } = render(
+      <AssignmentChip
+        assignment={assignment}
+        homeRun={null}
+        {...sharedProps}
+        operator={withHomeShift(null)}
+        template={DAY_SHIFT}
+      />,
+    );
+    expect(screen.queryByText("OT")).toBeNull();
+    u1();
+
+    // (b) the operator has a home shift, but this cell's own template is
+    // null (no pattern resolves here at all).
+    const { unmount: u2 } = render(
+      <AssignmentChip
+        assignment={assignment}
+        homeRun={null}
+        {...sharedProps}
+        operator={withHomeShift("s1")}
+        template={null}
+      />,
+    );
+    expect(screen.queryByText("OT")).toBeNull();
+    u2();
+
+    // (c) the operator is unknown to this block at all (`operator` is
+    // `undefined`, e.g. a departed person) -- "where the client cannot
+    // know, show nothing".
+    render(
+      <AssignmentChip
+        assignment={assignment}
+        homeRun={null}
+        {...sharedProps}
+        operator={undefined}
+        template={DAY_SHIFT}
+      />,
+    );
+    expect(screen.queryByText("OT")).toBeNull();
+  });
+});

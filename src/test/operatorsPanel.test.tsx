@@ -1,7 +1,26 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { act, render as rtlRender, screen, fireEvent, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { OperatorsPanel } from "@/features/admin/components/OperatorsPanel";
 import { useAdminViewStore } from "@/features/admin/store/adminView";
+
+/**
+ * ⚠️ R-360 / 0069 ADDENDUM. `OperatorsPanel` now renders `OperatorAbsences`
+ * for the selected person (one insertion, wave4-b's brief), which reads and
+ * writes through REAL `@tanstack/react-query` hooks — every other query this
+ * screen makes is mocked at the hook level (see this file's own header), so
+ * this is the first real `useQuery`/`useMutation` this suite's render tree
+ * reaches. `render` is shadowed with a `QueryClientProvider` wrapper so every
+ * existing `render(<OperatorsPanel />)` call site keeps working unchanged;
+ * `@/lib/api`'s mock factory below gains the four functions `OperatorAbsences`
+ * calls, each answering an empty/neutral shape so it renders its "no absences"
+ * state and touches none of this file's own assertions.
+ */
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 /**
  * ⭐ THE SECOND SUITE IN THIS REPO THAT MOUNTS AN ADMIN PANEL, and it exists
@@ -63,6 +82,9 @@ const h = vi.hoisted(() => {
     FORK: "sk-fork",
     WELD: "sk-weld",
     CRANE: "sk-crane",
+    SH1: "sh-1",
+    SH2: "sh-2",
+    TPL: "tpl-shift",
   };
 
   const node = (
@@ -80,7 +102,11 @@ const h = vi.hoisted(() => {
     employeeRef: string | null,
     siteNodeId: string,
     active = true,
-  ) => ({ id: opId, displayName, employeeRef, active, siteNodeId });
+    // R-441/R-443 (S66-b): optional and last, so every existing call site
+    // above (written before home_shift_id existed) keeps reading `undefined`
+    // — the same "no shift" default `OperatorLike.homeShiftId` gives it.
+    homeShiftId: string | null = null,
+  ) => ({ id: opId, displayName, employeeRef, active, siteNodeId, homeShiftId });
 
   // ⭐ ONLY THE BOTTOM LEVEL IS SCHEDULABLE, which is what makes a node a place
   // work can be booked into (`workPlacesFor` filters on exactly this). Plants
@@ -181,11 +207,28 @@ const h = vi.hoisted(() => {
     skipped: 0,
   });
 
+  // R-441/R-443/R-444 (S66-b): a pattern attached to Line A — Ann's own home
+  // node — with two bands, so the Shift column has something to list. `nodes`
+  // reuses the same shape `fetchShiftPatterns` returns (id, name, parentId,
+  // path); the extra fields `baseNodes()` carries (levelId, sortOrder, active)
+  // are simply ignored by `bandsForNode`, which reads only what it needs.
+  const baseShiftPatterns = () => ({
+    templates: [{ id: id.TPL, name: "Standard", siteNodeId: id.LA, active: true }],
+    shifts: [
+      { id: id.SH1, templateId: id.TPL, name: "Shift 1", startMin: 360, endMin: 840 },
+      { id: id.SH2, templateId: id.TPL, name: "Shift 2", startMin: 840, endMin: 1320 },
+    ],
+    breaks: [],
+    attachments: [{ nodeId: id.LA, templateId: id.TPL }],
+    nodes: baseNodes(),
+  });
+
   return {
     id,
     node,
     operator,
     baseData,
+    baseShiftPatterns,
     createMutate: vi.fn(),
     updateMutate: vi.fn(),
     recordMutate: vi.fn(),
@@ -210,6 +253,7 @@ const h = vi.hoisted(() => {
         adminAnywhere: true,
       },
       data: baseData(),
+      shiftPatterns: baseShiftPatterns(),
     },
   };
 });
@@ -226,6 +270,25 @@ vi.mock("@/features/auth/useSession", () => ({
 
 vi.mock("@/lib/api", () => ({
   describeSchedulerError: (e: unknown) => String(e),
+  // R-360 / 0069: OperatorAbsences' own reads/writes. This suite is not about
+  // the absences block — an empty list and a resolved-but-neutral setting are
+  // enough for it to render its "no absences" state and stay out of every
+  // O-numbered case's way.
+  fetchAbsences: () => Promise.resolve({ absences: [], skipped: 0 }),
+  fetchNodeSetting: () => Promise.resolve(null),
+  setAbsence: vi.fn(),
+  removeAbsence: vi.fn(),
+  // S70-a: the person's block asks who it may record for (DEF-0035); an empty
+  // answer keeps every case here about the panel, not the absence form.
+  fetchRecordableAbsencePeople: () => Promise.resolve([]),
+}));
+
+// R-360 / 0069: `OperatorAbsences` imports `absenceKeys` from this file, whose
+// own top-level imports (`ImportWizard`, `../lib/csv`, `../lib/absenceImport`)
+// this suite has no reason to load — `absencesPanel.test.tsx` mocks the same
+// module for the same reason. The key's own shape stands in for the real one.
+vi.mock("@/features/admin/components/AbsencesImport", () => ({
+  absenceKeys: { all: ["absences"] as const },
 }));
 
 // The date-display seam's client hook. The panel reads only `useDateFormat` (for
@@ -233,8 +296,25 @@ vi.mock("@/lib/api", () => ({
 // spares this test a React Query round trip it does not care about. Mocked at
 // the hook, not through `@/lib/api`, so the api factory stays down to the one
 // name this screen uses (same reasoning as the `useDeletion` mock below).
+// ⚠️ THE STUB RECORDS WHAT IT WAS ASKED, not only what it answered. This screen
+// honours the plant filter, so the certification dates it draws belong to the
+// plant on show — and a stub that ignored its arguments would let a panel
+// reading the COMPANY answer pass every case in this file. That is exactly the
+// state the Activity tab shipped in (F-090), found on screen rather than here.
+const dateFormatArgs: unknown[][] = [];
+// R-426: and the ZONE the same way, for the same reason. "Work booked up to"
+// defaults to the plant's today; a stub that ignored its arguments would let a
+// panel reading the COMPANY zone -- or the browser machine's clock -- pass.
+const timezoneArgs: unknown[][] = [];
 vi.mock("@/features/admin/hooks/useOrgSettings", () => ({
-  useDateFormat: () => "d_mon_yyyy",
+  useDateFormat: (...args: unknown[]) => {
+    dateFormatArgs.push(args);
+    return "d_mon_yyyy";
+  },
+  useTimezone: (...args: unknown[]) => {
+    timezoneArgs.push(args);
+    return "America/Chicago";
+  },
 }));
 
 /**
@@ -290,6 +370,22 @@ vi.mock("@/features/admin/hooks/useOperators", () => ({
 vi.mock("@/features/admin/hooks/useDeletion", () => ({
   useDeletionPreview: () => ({ data: undefined, isPending: true, isError: false, error: null }),
   useDeleteOwnedRow: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+/**
+ * R-441/R-443/R-444 (S66-b): the Shift column's own read, `useShiftPatterns`
+ * (`../hooks/useShifts`) — the same "smallest read" `ShiftsPanel` already
+ * makes, mocked at the hook rather than through `@/lib/api` so that factory
+ * stays down to the one name each screen genuinely uses (this file's own
+ * header, on `useDeletion` above).
+ */
+vi.mock("@/features/admin/hooks/useShifts", () => ({
+  useShiftPatterns: () => ({
+    data: h.state.shiftPatterns,
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
 }));
 
 /* ===========================================================================
@@ -439,6 +535,7 @@ beforeEach(() => {
   // predecessors, which is the failure `productsPanel.test.tsx` had to fix once
   // its own fixtures grew a second plant.
   h.state.data = h.baseData();
+  h.state.shiftPatterns = h.baseShiftPatterns();
   // ⚠️ THE STORE IS A MODULE SINGLETON AND OUTLIVES A RENDER. Left set, one
   // case's chosen plant filters the next case's people — the cross-section leak
   // this feature exists to make visible, arriving inside the test file.
@@ -1010,6 +1107,340 @@ describe("OperatorsPanel — recording a training from the place that needs it (
 });
 
 /* ===========================================================================
+ * R-441/R-443/R-444 (S66-b) — THE SHIFT MARK AND THE EDIT FORM'S PICKER.
+ *
+ * CORRECTED 18 Sept (session 179), the maintainer on the S66-b build: "why
+ * reinvent stuff? The shift should have been part of where we select the
+ * hierarchy level, why do we want the user to have multiple places where
+ * they must update?" — and, the same day, on WHERE in the panel: "Move the
+ * shift button in the panel to the right where we have option to edit the
+ * hierarchy level." So the per-row `<select>` this block used to pin is
+ * withdrawn entirely: the row keeps only the red bar and the words, a MARK
+ * the reader cannot act on, and the CONTROL moved to the Edit form, beside
+ * "Belongs to" — the same form, the same Save, one place a fact is changed.
+ *
+ * OS1, OS3 and OS5 keep the RULE they always pinned (the picker lists
+ * exactly the bands the home place resolves; the head count; a retired band
+ * reads "No shift", never a stale value) — only WHERE they look moves, since
+ * the control itself moved. OS2 and OS4 are rewritten to the form: the
+ * CONTRACT changed from a dedicated write that deliberately omitted
+ * `siteNodeId` to one Save that now carries both `siteNodeId` and
+ * `homeShiftId` together. OS6 is new — the maintainer's own acceptance line
+ * for "a way to modify/edit assigned shift".
+ * =========================================================================== */
+
+function shiftSelectFor(who: string): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: `Shift for ${who}` }) as HTMLSelectElement;
+}
+
+/** Select somebody, then open the one form that now carries both pickers. */
+function openEdit(who: string) {
+  pick(who);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+}
+
+/** The header's own line — the place and, since the 18 Sept correction, the
+ *  shift beside it — read as one sentence, not as two separate lookups. */
+function belongsLine(): string {
+  return (screen.getByText(/^Belongs to /).textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+describe("OperatorsPanel — the Shift mark and the Edit form's picker (R-441, R-443, R-444)", () => {
+  it("OS1: the Edit form's picker lists exactly the bands of the pattern the person's home place resolves", () => {
+    render(<OperatorsPanel />);
+    openEdit("Ann Adams");
+    expect(optionLabels(shiftSelectFor("Ann Adams"))).toEqual(["No shift", "Shift 1", "Shift 2"]);
+  });
+
+  it("OS1b: a place with no pattern attached offers only 'No shift'", () => {
+    render(<OperatorsPanel />);
+    // Zoe's home node (Line Z) carries no attachment in the fixture.
+    openEdit("Zoe Zhang");
+    expect(optionLabels(shiftSelectFor("Zoe Zhang"))).toEqual(["No shift"]);
+  });
+
+  it("OS2 ⭐⭐ a person with no shift sorts to the top, and the row's own MARK reads 'No shift' — never a control", () => {
+    // Neither Ann nor Zoe has a home_shift_id in the fixture, so both are
+    // "no shift" today; give Ann one so the sort and the two words have
+    // something to tell apart.
+    h.state.data.operators = [
+      h.operator(id.ANN, "Ann Adams", "A-1", id.LA, true, id.SH1),
+      h.operator(id.ZOE, "Zoe Zhang", "Z-9", id.LZ),
+    ];
+    render(<OperatorsPanel />);
+    // "Ann Adams" would sort before "Zoe Zhang" by name alone — the shiftless
+    // row (Zoe) wins regardless, and R-444's own words are on her row.
+    const names = within(aside())
+      .getAllByRole("button", { name: /Adams|Zhang/ })
+      .map((b) => b.textContent ?? "");
+    expect(names[0]).toMatch(/Zoe Zhang/);
+    // ⚠️ THE CONTRACT CHANGED HERE: this used to read a `<select>`'s `.value`;
+    // the row carries no control at all now, only the words beside it, so the
+    // case reads the row's own text and confirms no combobox rode along.
+    const zoeRow = within(aside())
+      .getByRole("button", { name: /Zoe Zhang/ })
+      .closest("li")!;
+    const annRow = within(aside())
+      .getByRole("button", { name: /Ann Adams/ })
+      .closest("li")!;
+    expect(within(zoeRow).getByText("No shift")).toBeTruthy();
+    expect(within(annRow).getByText("Shift 1")).toBeTruthy();
+    expect(within(zoeRow).queryByRole("combobox")).toBeNull();
+    expect(within(annRow).queryByRole("combobox")).toBeNull();
+  });
+
+  it("OS3: the tab's head says how many people have no shift", () => {
+    render(<OperatorsPanel />);
+    // Neither Ann nor Zoe carries a home_shift_id in the base fixture.
+    expect(screen.getByText("2 people have no shift.")).toBeTruthy();
+  });
+
+  it("OS3b: the count reads a plain sentence at zero, not a bare '0'", () => {
+    h.state.data.operators = [
+      h.operator(id.ANN, "Ann Adams", "A-1", id.LA, true, id.SH1),
+      h.operator(id.ZOE, "Zoe Zhang", "Z-9", id.LZ, true, id.SH1),
+    ];
+    render(<OperatorsPanel />);
+    expect(screen.getByText("Everybody here has a shift.")).toBeTruthy();
+  });
+
+  it("OS4 ⭐⭐ choosing a band in the Edit form and saving carries it AND the place through one Save", () => {
+    // ⚠️ THE CONTRACT CHANGE: the withdrawn per-row control sent `homeShiftId`
+    // alone, `siteNodeId` deliberately omitted (R-443/R-444 as first built —
+    // see the old comment this replaces). The maintainer's one-place rule
+    // folds the shift into the SAME form that already sends `siteNodeId`, so
+    // Save now sends both together.
+    render(<OperatorsPanel />);
+    openEdit("Ann Adams");
+    fireEvent.change(shiftSelectFor("Ann Adams"), { target: { value: id.SH2 } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(h.updateMutate).toHaveBeenCalledTimes(1);
+    const sent = h.updateMutate.mock.calls[0][0] as {
+      id: string;
+      displayName: string;
+      employeeRef: string | null;
+      homeShiftId: string | null;
+      siteNodeId: string;
+    };
+    expect(sent.id).toBe(id.ANN);
+    expect(sent.homeShiftId).toBe(id.SH2);
+    expect(sent.siteNodeId).toBe(id.LA);
+    // And the person's own name/reference travel unchanged, exactly as they
+    // always did on this Save.
+    expect(sent.displayName).toBe("Ann Adams");
+    expect(sent.employeeRef).toBe("A-1");
+  });
+
+  it("OS4b: choosing 'No shift' in the Edit form writes null, not the empty string", () => {
+    h.state.data.operators = [
+      h.operator(id.ANN, "Ann Adams", "A-1", id.LA, true, id.SH1),
+      h.operator(id.ZOE, "Zoe Zhang", "Z-9", id.LZ),
+    ];
+    render(<OperatorsPanel />);
+    openEdit("Ann Adams");
+    fireEvent.change(shiftSelectFor("Ann Adams"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const sent = h.updateMutate.mock.calls[0][0] as { homeShiftId: string | null };
+    expect(sent.homeShiftId).toBeNull();
+  });
+
+  it("OS5: a person whose band was retired (home_shift_id gone NULL server-side) reads No shift on the row's mark and in the form, never a stale value", () => {
+    // The FK's ON DELETE SET NULL already did the work server-side (0082) —
+    // Ann's home_shift_id is null in the base fixture, exactly as it would be
+    // the moment after her band was retired. This is the client's half of
+    // R-443's promise ("leaves them visibly without a shift"): reading that
+    // NULL back and showing "No shift", never the band's old id or name —
+    // on the row's own mark, and in the Edit form's picker.
+    render(<OperatorsPanel />);
+    const annRow = within(aside())
+      .getByRole("button", { name: /Ann Adams/ })
+      .closest("li")!;
+    expect(within(annRow).getByText("No shift")).toBeTruthy();
+    openEdit("Ann Adams");
+    expect(shiftSelectFor("Ann Adams").value).toBe("");
+  });
+
+  it("OS6 ⭐⭐ the maintainer's own acceptance line: open Edit, change the shift, save — the update carries the new id, and the header reads it", () => {
+    const first = render(<OperatorsPanel />);
+    pick("Ann Adams");
+    expect(belongsLine()).toBe("Belongs to Line A · No shift");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(shiftSelectFor("Ann Adams"), { target: { value: id.SH2 } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const sent = h.updateMutate.mock.calls[0][0] as { id: string; homeShiftId: string | null };
+    expect(sent.id).toBe(id.ANN);
+    expect(sent.homeShiftId).toBe(id.SH2);
+    // ⚠️ NO OPTIMISTIC UPDATE (the component's own header explains why): the
+    // screen reflects a write only once the refetch it triggers lands. Standing
+    // in for that refetch, the fixture is mutated the way the server's own
+    // response would leave it and the panel is mounted again — the same shape
+    // a real invalidate-and-refetch would show on screen. The first tree is
+    // unmounted first: two mounts left in the DOM at once is two "Ann Adams"
+    // rows, not a re-render of one.
+    first.unmount();
+    h.state.data.operators = [
+      h.operator(id.ANN, "Ann Adams", "A-1", id.LA, true, id.SH2),
+      h.operator(id.ZOE, "Zoe Zhang", "Z-9", id.LZ),
+    ];
+    render(<OperatorsPanel />);
+    pick("Ann Adams");
+    expect(belongsLine()).toBe("Belongs to Line A · Shift 2");
+  });
+
+  it("R-443: the create form offers the same dropdown, narrowed to the chosen 'Belongs to'", () => {
+    render(<OperatorsPanel />);
+    const belongsTo = belongsToInAdd();
+    fireEvent.change(belongsTo, { target: { value: id.LA } });
+    const shiftAdd = within(aside()).getByRole("combobox", { name: "Shift (optional)" });
+    expect(optionLabels(shiftAdd as HTMLSelectElement)).toEqual(["No shift", "Shift 1", "Shift 2"]);
+    fireEvent.change(shiftAdd, { target: { value: id.SH1 } });
+    fireEvent.change(within(aside()).getByRole("textbox", { name: "Name" }), {
+      target: { value: "New Person" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    const sent = h.createMutate.mock.calls[0][0] as { homeShiftId: string | null };
+    expect(sent.homeShiftId).toBe(id.SH1);
+  });
+});
+
+/* ===========================================================================
+ * THE MAINTAINER, 18 SEPT: "IS IT POSSIBLE TO CREATE A SORTING HERE FOR NAMES
+ * AND SHIFTS? LIKE WE DO COLUMNS IN A TABLE?"
+ *
+ * "Person" and "Shift" are sort buttons now — a real `<button>` in the
+ * heading, the heading's own text as its accessible name, `aria-sort` on
+ * the enclosing `columnheader`. Sorting by Person is the display name;
+ * sorting by Shift is the band's own START TIME (Shift 1 before Shift 2),
+ * never its name, with "No shift" first ascending. The default order —
+ * nothing clicked yet — stays R-444's own (no shift first, then name), and
+ * the chosen sort lives in plain component state: it does not survive past
+ * this mount.
+ *
+ * ⭐ CORRECTED 18 SEPT, SAME DAY, TWO MORE THINGS THE MAINTAINER SAW:
+ * "The column names are not telling me naturally that I can sort them, also,
+ * I see no way to go to default, it is only going asc or desc once I click
+ * on it." So a heading now cycles ascending → descending → DEFAULT (a third
+ * click on the active heading clears `sort` back to `null`, `aria-sort`
+ * "none", the list back to R-444's own order) — OS7/OS8 below drive that
+ * third click too, and OS9 is the click on its own. Every heading also
+ * carries a `SortMark` AT REST, before anything is clicked — neutral on
+ * both, direction on whichever is active — which the last test in this
+ * block checks for.
+ * =========================================================================== */
+
+function personHeaderBtn(): HTMLButtonElement {
+  return screen.getByRole("button", { name: "Person" }) as HTMLButtonElement;
+}
+function shiftHeaderBtn(): HTMLButtonElement {
+  return screen.getByRole("button", { name: "Shift" }) as HTMLButtonElement;
+}
+function ariaSortOf(btn: HTMLButtonElement): string | null {
+  return btn.closest('[role="columnheader"]')?.getAttribute("aria-sort") ?? null;
+}
+/** The people list, in the order the rows actually render. Matched by
+ *  substring, not split from `textContent` — the name and meta spans sit
+ *  adjacent in the DOM with no space between them (`Ann AdamsA-1 · …`). */
+function rowOrder(): string[] {
+  const NAMES = ["Ann Adams", "Ora Orphan", "Zoe Zhang"];
+  return within(aside())
+    .getAllByRole("button", { name: /Adams|Zhang|Orphan/ })
+    .map((b) => NAMES.find((n) => (b.textContent ?? "").includes(n)) ?? b.textContent ?? "");
+}
+
+/** Three people whose shift and name orders disagree, so a case that passed
+ *  by coincidence (the two orders happening to match) cannot hide here. */
+function threeSortableOperators() {
+  h.state.data.operators = [
+    // Shift 2 (start 840) — last by shift, first by name.
+    h.operator(id.ANN, "Ann Adams", "A-1", id.LA, true, id.SH2),
+    // No shift — first by shift (the sentinel), last by name.
+    h.operator(id.ZOE, "Zoe Zhang", "Z-9", id.LZ),
+    // Shift 1 (start 360) — middle by shift, middle by name.
+    h.operator(id.ORA, "Ora Orphan", "O-7", "n-gone", true, id.SH1),
+  ];
+}
+
+describe("OperatorsPanel — sortable Person/Shift columns (the maintainer, 18 Sept)", () => {
+  it("the heading starts unsorted, and the default order is R-444's own (no shift first, then name)", () => {
+    threeSortableOperators();
+    render(<OperatorsPanel />);
+    expect(ariaSortOf(personHeaderBtn())).toBe("none");
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("none");
+    expect(rowOrder()).toEqual(["Zoe Zhang", "Ann Adams", "Ora Orphan"]);
+  });
+
+  it("OS7 ⭐⭐ sorting by Shift cycles ascending, descending, then back to default on the third click", () => {
+    threeSortableOperators();
+    render(<OperatorsPanel />);
+    fireEvent.click(shiftHeaderBtn());
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("ascending");
+    // No shift (Zoe), then Shift 1 (Ora, 360), then Shift 2 (Ann, 840) — a
+    // NAME sort would have read Ann, Ora, Zoe, so this also proves the sort
+    // key really is the band's start time and not its label.
+    expect(rowOrder()).toEqual(["Zoe Zhang", "Ora Orphan", "Ann Adams"]);
+    fireEvent.click(shiftHeaderBtn());
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("descending");
+    expect(rowOrder()).toEqual(["Ann Adams", "Ora Orphan", "Zoe Zhang"]);
+    // The third click on the SAME heading is the maintainer's fix: back to
+    // the default order, not a third pass at descending-then-ascending.
+    fireEvent.click(shiftHeaderBtn());
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("none");
+    expect(rowOrder()).toEqual(["Zoe Zhang", "Ann Adams", "Ora Orphan"]);
+  });
+
+  it("OS8 ⭐⭐ sorting by Person, both directions, and the heading carries aria-sort", () => {
+    threeSortableOperators();
+    render(<OperatorsPanel />);
+    fireEvent.click(personHeaderBtn());
+    expect(ariaSortOf(personHeaderBtn())).toBe("ascending");
+    expect(rowOrder()).toEqual(["Ann Adams", "Ora Orphan", "Zoe Zhang"]);
+    fireEvent.click(personHeaderBtn());
+    expect(ariaSortOf(personHeaderBtn())).toBe("descending");
+    expect(rowOrder()).toEqual(["Zoe Zhang", "Ora Orphan", "Ann Adams"]);
+    // Switching to the OTHER column starts it fresh at ascending, and the
+    // column just left behind reads "none" again — only one heading is ever
+    // the active sort.
+    fireEvent.click(shiftHeaderBtn());
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("ascending");
+    expect(ariaSortOf(personHeaderBtn())).toBe("none");
+  });
+
+  it("OS9 ⭐⭐ the third click restores the default order and aria-sort none; both headings show a mark at rest", () => {
+    threeSortableOperators();
+    render(<OperatorsPanel />);
+    // Before anything is clicked, BOTH headings already carry a mark — the
+    // maintainer's other complaint, "the column names are not telling me
+    // naturally that I can sort them" — and both read `aria-sort` "none".
+    expect(personHeaderBtn().querySelector("svg")).not.toBeNull();
+    expect(shiftHeaderBtn().querySelector("svg")).not.toBeNull();
+    expect(ariaSortOf(personHeaderBtn())).toBe("none");
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("none");
+
+    fireEvent.click(personHeaderBtn()); // ascending
+    fireEvent.click(personHeaderBtn()); // descending
+    fireEvent.click(personHeaderBtn()); // back to default
+    expect(ariaSortOf(personHeaderBtn())).toBe("none");
+    expect(ariaSortOf(shiftHeaderBtn())).toBe("none");
+    expect(rowOrder()).toEqual(["Zoe Zhang", "Ann Adams", "Ora Orphan"]);
+    // The mark is still there, at rest, on the heading that was just active —
+    // going to default does not leave a bare, unmarked word behind.
+    expect(personHeaderBtn().querySelector("svg")).not.toBeNull();
+  });
+
+  it("a text glyph never carries the direction — the active heading's mark is the shared SortMark icon, titled for the gesture", () => {
+    threeSortableOperators();
+    render(<OperatorsPanel />);
+    expect(personHeaderBtn().title).toBe("Sort by person");
+    expect(shiftHeaderBtn().title).toBe("Sort by shift");
+    fireEvent.click(personHeaderBtn());
+    // `SortMark` renders an `<svg>`; the heading's own visible text stays the
+    // bare word, exactly as it read before any heading was ever clicked.
+    expect(personHeaderBtn().querySelector("svg")).not.toBeNull();
+    expect(personHeaderBtn().textContent).toBe("Person");
+  });
+});
+
+/* ===========================================================================
  * WHERE THEY BELONG, WITHOUT AN EDIT MODE.
  *
  * The maintainer: *"does not show where they belong until you hit edit, not the
@@ -1031,7 +1462,11 @@ describe("OperatorsPanel — the header says where somebody belongs", () => {
     // control that also offers to MOVE them, which is not where a read-only
     // answer should have to be looked up.
     expect(screen.queryByRole("combobox", { name: "Where Ann Adams belongs" })).toBeNull();
-    expect(screen.getByText("Belongs to Line A")).toBeTruthy();
+    // ⭐ R-444, CORRECTED 18 Sept: the shift reads right here too, beside the
+    // place — "Move the shift button in the panel to the right where we have
+    // option to edit the hierarchy level." Ann carries no home_shift_id in
+    // the base fixture.
+    expect(screen.getByText("Belongs to Line A · No shift")).toBeTruthy();
   });
 
   it("O39 ⭐⭐ the LEAF is drawn and the whole chain is the tooltip", () => {
@@ -1039,24 +1474,38 @@ describe("OperatorsPanel — the header says where somebody belongs", () => {
     // in this company can each hold a "Line 1", so a header reading "Line 1"
     // names one of three areas. The path answers it and is too long to draw
     // beside a name, so it is the `title` — `scope.ts`'s own pair, used the way
-    // every other admin screen uses it.
+    // every other admin screen uses it. The `title` still names the PLACE
+    // alone — the shift is plain text beside it, not part of the path.
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    const where = screen.getByText("Belongs to Line A");
+    const where = screen.getByText("Belongs to Line A · No shift");
     expect(where.getAttribute("title")).toBe("Plant 1 › Line A");
     // And it is the person's OWN area, not their root — Ann belongs to a LINE
     // (D109: an area need not be a root), which is the whole reason the places
     // list can hold a ⚠ row one line over.
-    expect(where.textContent).not.toBe("Belongs to Plant 1");
+    expect(where.textContent).not.toBe("Belongs to Plant 1 · No shift");
+  });
+
+  it("O42 ⭐ the dates are asked for the CHOSEN plant, not the company (F-090)", () => {
+    // The gap the maintainer found on Activity, swept for here. The shared date
+    // seam was never the problem — this screen has always drawn its dates
+    // through `formatCalendarDay`. What was wrong is WHICH format it asked for,
+    // a question that did not exist until settings became per-plant.
+    render(<OperatorsPanel />);
+    dateFormatArgs.length = 0;
+    showPlant(id.P1);
+    expect(dateFormatArgs.at(-1)?.[1]).toBe(id.P1);
+    showPlant(null);
+    expect(dateFormatArgs.at(-1)?.[1] ?? null).toBeNull();
   });
 
   it("O40: it follows the selection rather than sticking to whoever was read first", () => {
     render(<OperatorsPanel />);
     pick("Ann Adams");
-    expect(screen.getByText("Belongs to Line A")).toBeTruthy();
+    expect(screen.getByText("Belongs to Line A · No shift")).toBeTruthy();
     pick("Zoe Zhang");
-    expect(screen.getByText("Belongs to Line Z")).toBeTruthy();
-    expect(screen.queryByText("Belongs to Line A")).toBeNull();
+    expect(screen.getByText("Belongs to Line Z · No shift")).toBeTruthy();
+    expect(screen.queryByText("Belongs to Line A · No shift")).toBeNull();
   });
 
   it("O41 ⭐ an area this reader cannot resolve says so, rather than going blank", () => {
@@ -1071,6 +1520,6 @@ describe("OperatorsPanel — the header says where somebody belongs", () => {
     ];
     render(<OperatorsPanel />);
     pick("Ora Orphan");
-    expect(screen.getByText("Belongs to Somewhere else")).toBeTruthy();
+    expect(screen.getByText("Belongs to Somewhere else · No shift")).toBeTruthy();
   });
 });

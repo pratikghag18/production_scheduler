@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { DevProfileSwitcher } from "./DevProfileSwitcher";
 import { useSession } from "./useSession";
@@ -108,6 +108,11 @@ export default function SignInPage() {
           <button type="submit" className={styles.submit} disabled={submitting}>
             {submitting ? "Signing in…" : "Sign in"}
           </button>
+
+          {/* P1-6d (S24): the way in to the forgotten-password flow. */}
+          <p className={styles.forgot}>
+            <Link to="/forgot-password">Forgot your password?</Link>
+          </p>
         </form>
 
         {/* Dev-only sign-in, self-gated on `import.meta.env.DEV`. Renders

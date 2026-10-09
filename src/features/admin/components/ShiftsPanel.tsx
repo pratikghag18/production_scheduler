@@ -97,6 +97,14 @@ import {
   type ShiftView,
 } from "../lib/shiftDraft";
 import { indentedLabel, scopeIndex, scopeOptions } from "../lib/scope";
+/* ⭐ THE LABEL IS IMPORTED, NOT RETYPED, and it is worth a line. `retireActionLabel`
+   is `../lib/trainings`' two-word pure helper ("Retire" / "Bring back") and the
+   Trainings screen is where this whole shape comes from (`skills.active`, session
+   18). Copying the two strings into this file instead would leave two screens free
+   to drift into "Deactivate"/"Reactivate" on one and "Retire"/"Bring back" on the
+   other for the identical act — a second convention for one idea, which costs more
+   than the import does. */
+import { retireActionLabel } from "../lib/trainings";
 import { nodesInPlant, rowsInPlant } from "../lib/plantFilter";
 import { usePlantFilter } from "../hooks/usePlantFilter";
 import {
@@ -109,9 +117,15 @@ import {
   useDeleteShift,
   useDetachPattern,
   useRenamePattern,
+  useSetPatternActive,
   useShiftPatterns,
   useUpdateShift,
 } from "../hooks/useShifts";
+// R-443 (S66-b): "retiring a band or its pattern that people point at first
+// shows the count ... and asks where they go" — the read and the write both
+// already exist for a different screen (`OperatorsPanel`'s own Shift column);
+// this reuses them rather than inventing a parallel mechanism.
+import { useHomeShiftHolders, useUpdateOperator } from "../hooks/useOperators";
 import { DeleteDialog } from "./DeleteDialog";
 import styles from "./ShiftsPanel.module.css";
 
@@ -237,6 +251,7 @@ export function ShiftsPanel() {
 
   const createPattern = useCreatePattern();
   const renamePattern = useRenamePattern();
+  const setPatternActive = useSetPatternActive();
   const createShift = useCreateShift();
   const updateShift = useUpdateShift();
   const deleteShift = useDeleteShift();
@@ -245,6 +260,12 @@ export function ShiftsPanel() {
   const updateBreak = useUpdateBreak();
   const attachPattern = useAttachPattern();
   const detachPattern = useDetachPattern();
+
+  // R-443 (S66-b): who currently points at a band, for the retire warning's
+  // count and reassignment list; the write is the ordinary operator update
+  // path, never a second door.
+  const holdersQuery = useHomeShiftHolders(canQuery);
+  const updateOperator = useUpdateOperator();
 
   const [newName, setNewName] = useState("");
   const [newOwner, setNewOwner] = useState("");
@@ -266,6 +287,17 @@ export function ShiftsPanel() {
   const [attachDraft, setAttachDraft] = useState<Readonly<Record<string, string>>>({});
   /** Keyed by the row the message belongs to, so it never lands on a stranger. */
   const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null);
+
+  // R-443 (S66-b): the retire-warning gate, armed only when at least one
+  // person points at the band (or, for a pattern, at any band inside it)
+  // about to go — see `shiftHoldersFor` / `patternHoldersFor` below.
+  const [retireWarning, setRetireWarning] = useState<
+    | { kind: "shift"; shiftId: string; shiftName: string; patternId: string }
+    | { kind: "pattern"; patternId: string; patternName: string }
+    | null
+  >(null);
+  /** `""` = "Leave them without a shift" (R-443's own default, straightforward-order safe). */
+  const [retireDestination, setRetireDestination] = useState("");
 
   const view = patternRows(query.data);
   const pending = !canQuery || query.isLoading;
@@ -296,6 +328,26 @@ export function ShiftsPanel() {
   const hiddenNodes = view.nodes.length - visibleNodes.length;
   const visiblePatterns = rowsInPlant(view.patterns, plant.choice, plant.plants, nodesById);
   const hiddenPatterns = view.patterns.length - visiblePatterns.length;
+
+  /* ⭐⭐ RETIRED OR IN USE — `shift_templates.active`, migration 0029.
+     ⚠️ READ FROM THE RAW TEMPLATE ROWS, NOT FROM `PatternView`, and not because
+     that is tidier. `patternRows` assembles the view out of five tables and does
+     not carry the flag; this panel is where the flag is needed and the raw rows
+     are already in hand, exactly as `readableNodes` above is. Nothing else in the
+     app reads the column — `resolve_shift_template` does not, and `board_window`
+     does not even emit it — so this map is the whole of the feature's state.
+     ⚠️ `!== false`, not `?? true`: a `PatternView` exists only because
+     `parseShiftTemplateRow` accepted a row, and that guard REJECTS a row with no
+     boolean `active`, so a miss here is impossible rather than a third state to
+     invent a default for. */
+  const activeById = new Map(
+    (query.data?.templates ?? []).filter((t) => t !== null).map((t) => [t.id, t.active]),
+  );
+  function isInUse(p: PatternView): boolean {
+    return activeById.get(p.id) !== false;
+  }
+  const livePatterns = visiblePatterns.filter(isInUse);
+  const retiredPatterns = visiblePatterns.filter((p) => !isInUse(p));
 
   // ⭐ EVERY NODE, NOT JUST ROOTS (0025 / D103). `patternRows` already returns
   // every node with its depth and path for the attachment card below, so the
@@ -375,6 +427,123 @@ export function ShiftsPanel() {
   }
   function errorFor(key: string): string | null {
     return rowError !== null && rowError.key === key ? rowError.message : null;
+  }
+
+  /* -------------------------------------------------------------------------
+   * R-443 (S66-b): retiring a band, or the pattern holding it, that people
+   * point at. The read is `holdersQuery.data` (S66-b's own "smallest read");
+   * the write is `updateOperator`, the SAME path the Operators tab's own
+   * Shift column uses — extend the input, not a second door.
+   * ---------------------------------------------------------------------- */
+
+  function shiftHoldersFor(shiftId: string) {
+    return (holdersQuery.data ?? []).filter((h) => h.homeShiftId === shiftId);
+  }
+
+  function patternHoldersFor(pattern: PatternView) {
+    const ids = new Set(pattern.shifts.map((s) => s.id));
+    return (holdersQuery.data ?? []).filter((h) => ids.has(h.homeShiftId));
+  }
+
+  /**
+   * Where the warning can offer to move people: the OTHER bands of the same
+   * pattern first (R-443: "the other bands of that pattern") when there IS a
+   * surviving same pattern (a single band being retired) — `null` for
+   * `siblingsOf` when the whole pattern is going, since none of its own bands
+   * survive to be offered — then every band of any other LIVE pattern,
+   * qualified with its own name so a band from "Nights" is never confused
+   * with one from "Standard" — R-443's "and of any newer pattern on that
+   * place", approximated as any pattern currently on offer rather than
+   * walked per affected person's own node (every person here may belong to a
+   * different place; see this lane's own report for the scope this
+   * simplification leaves open).
+   *
+   * ⚠️ `excludePatternId` IS ALWAYS THE PATTERN BEING RETIRED, whether or not
+   * `siblingsOf` is supplied — a shift-level retire must not ALSO qualify its
+   * own siblings a second time as "Shift 2 (Standard)" alongside the plain
+   * "Shift 2" `siblingsOf` already offered, and a pattern-level retire must
+   * not offer any of the doomed pattern's own bands at all. Found by this
+   * lane's own test (SH1d): passing nothing here let the pattern being
+   * deleted offer ITS OWN bands as a destination for the people it was about
+   * to orphan.
+   */
+  function destinationBands(
+    excludePatternId: string,
+    siblingsOf: PatternView | null,
+    excludeShiftId?: string,
+  ): { id: string; label: string }[] {
+    const out: { id: string; label: string }[] = [];
+    if (siblingsOf !== null) {
+      for (const s of siblingsOf.shifts) {
+        if (s.id !== excludeShiftId) out.push({ id: s.id, label: s.name });
+      }
+    }
+    for (const p of livePatterns) {
+      if (p.id === excludePatternId) continue;
+      for (const s of p.shifts) out.push({ id: s.id, label: `${s.name} (${p.name})` });
+    }
+    return out;
+  }
+
+  /**
+   * Move every affected person to `retireDestination`, or leave them without
+   * a shift (`""`) — in which case NOTHING is written here at all: deleting
+   * the band (or the pattern's every band) fires the composite FK's
+   * `ON DELETE SET NULL` (0082) on its own, which is the "leaves them
+   * visibly without a shift" half of R-443 already built. Only a move to a
+   * REAL band needs a write, one per person, before the delete proceeds —
+   * in that order, so nobody's row is ever read back home-shift-less between
+   * the two.
+   */
+  async function confirmRetire() {
+    if (retireWarning === null) return;
+    const key =
+      retireWarning.kind === "shift"
+        ? `shift-${retireWarning.shiftId}`
+        : `delete-${retireWarning.patternId}`;
+    clear(key);
+    const holders =
+      retireWarning.kind === "shift"
+        ? shiftHoldersFor(retireWarning.shiftId)
+        : patternHoldersFor(
+            view.patterns.find((p) => p.id === retireWarning.patternId) ?? {
+              id: "",
+              name: "",
+              siteNodeId: "",
+              ownerLabel: "",
+              shifts: [],
+              overlaps: [],
+              attachedNodeIds: [],
+              attachedCount: 0,
+            },
+          );
+    const destination = retireDestination === "" ? null : retireDestination;
+    try {
+      if (destination !== null) {
+        await Promise.all(
+          holders.map((h) =>
+            updateOperator.mutateAsync({
+              id: h.id,
+              displayName: h.displayName,
+              employeeRef: h.employeeRef,
+              homeShiftId: destination,
+            }),
+          ),
+        );
+      }
+      if (retireWarning.kind === "shift") {
+        deleteShift.mutate({ shiftId: retireWarning.shiftId }, { onError: (e) => fail(key, e) });
+      } else {
+        // Opens the ordinary `DeleteDialog` below, exactly as a click on
+        // "Delete this pattern" always has — this warning is a gate IN
+        // FRONT of that flow, not a replacement for its own confirmation.
+        setConfirmId(retireWarning.patternId);
+      }
+      setRetireWarning(null);
+      setRetireDestination("");
+    } catch (e) {
+      fail(key, e);
+    }
   }
 
   function submitNewPattern() {
@@ -575,48 +744,109 @@ export function ShiftsPanel() {
           <span className={styles.meta}>{shift.duration}</span>
           {shift.crossesMidnight && <span className={styles.nextDayTag}>overnight</span>}
           <span className={styles.spacer} />
-          <button
-            type="button"
-            className={styles.btn}
-            onClick={() =>
-              setShiftEdit(
-                editing
-                  ? null
-                  : {
-                      id: shift.id,
-                      form: {
-                        name: shift.name,
-                        start: timeOf(shift.startMin),
-                        end: timeOf(shift.endMin),
+          {/* R-447: Edit|Cancel, Add break|Cancel break and Delete share one
+              track width -- never one sized to its own word. */}
+          <span className={styles.shiftActions}>
+            <button
+              type="button"
+              className={styles.btn}
+              onClick={() =>
+                setShiftEdit(
+                  editing
+                    ? null
+                    : {
+                        id: shift.id,
+                        form: {
+                          name: shift.name,
+                          start: timeOf(shift.startMin),
+                          end: timeOf(shift.endMin),
+                        },
                       },
-                    },
-              )
-            }
-          >
-            {editing ? "Cancel" : "Edit"}
-          </button>
-          <button
-            type="button"
-            className={styles.btn}
-            onClick={() => setBreakFor(adding ? null : { shiftId: shift.id, form: BLANK_BREAK })}
-          >
-            {adding ? "Cancel break" : "Add break"}
-          </button>
-          <button
-            type="button"
-            className={styles.dangerBtn}
-            disabled={deleteShift.isPending}
-            onClick={() => {
-              clear(`shift-${shift.id}`);
-              deleteShift.mutate(
-                { shiftId: shift.id },
-                { onError: (e) => fail(`shift-${shift.id}`, e) },
-              );
-            }}
-          >
-            Delete
-          </button>
+                )
+              }
+            >
+              {editing ? "Cancel" : "Edit"}
+            </button>
+            <button
+              type="button"
+              className={styles.btn}
+              onClick={() => setBreakFor(adding ? null : { shiftId: shift.id, form: BLANK_BREAK })}
+            >
+              {adding ? "Cancel break" : "Add break"}
+            </button>
+            <button
+              type="button"
+              className={styles.dangerBtn}
+              disabled={deleteShift.isPending}
+              onClick={() => {
+                clear(`shift-${shift.id}`);
+                // R-443: retiring a band that people point at warns first,
+                // with the count, and asks where they go — never a silent
+                // delete for a band somebody is actually on.
+                const holders = shiftHoldersFor(shift.id);
+                if (holders.length === 0) {
+                  deleteShift.mutate(
+                    { shiftId: shift.id },
+                    { onError: (e) => fail(`shift-${shift.id}`, e) },
+                  );
+                } else {
+                  setRetireDestination("");
+                  setRetireWarning({
+                    kind: "shift",
+                    shiftId: shift.id,
+                    shiftName: shift.name,
+                    patternId: pattern.id,
+                  });
+                }
+              }}
+            >
+              Delete
+            </button>
+          </span>
         </div>
+
+        {retireWarning !== null &&
+          retireWarning.kind === "shift" &&
+          retireWarning.shiftId === shift.id && (
+            <div className={styles.confirm}>
+              <p className={styles.rowNote}>
+                {(() => {
+                  const n = shiftHoldersFor(shift.id).length;
+                  return n === 1
+                    ? `1 person works ${shift.name}.`
+                    : `${n} people work ${shift.name}.`;
+                })()}{" "}
+                Create the new shift first, then retire this one — where should they go?
+              </p>
+              <select
+                className={styles.select}
+                aria-label={`Where ${shift.name}'s people go`}
+                value={retireDestination}
+                onChange={(e) => setRetireDestination(e.target.value)}
+              >
+                <option value="">Leave them without a shift</option>
+                {destinationBands(pattern.id, pattern, shift.id).map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {/* R-447: "Retire X"/Cancel share one track width. */}
+              <span className={styles.confirmActions}>
+                <button
+                  type="button"
+                  className={styles.dangerBtn}
+                  disabled={updateOperator.isPending || deleteShift.isPending}
+                  onClick={() => void confirmRetire()}
+                >
+                  Retire {shift.name}
+                </button>
+                <button type="button" className={styles.btn} onClick={() => setRetireWarning(null)}>
+                  Cancel
+                </button>
+              </span>
+            </div>
+          )}
 
         {editing && shiftEdit !== null && (
           <div className={styles.editRow}>
@@ -839,11 +1069,16 @@ export function ShiftsPanel() {
     const open = openPatternId === pattern.id;
     const renaming = activeRename !== null && activeRename.id === pattern.id;
     const confirming = activeConfirmId === pattern.id;
+    const inUse = isInUse(pattern);
+    const rowClass = [
+      styles.patternRow,
+      open ? styles.patternRowOpen : null,
+      inUse ? null : styles.retiredRow,
+    ]
+      .filter((c) => c !== null)
+      .join(" ");
     return (
-      <li
-        className={open ? `${styles.patternRow} ${styles.patternRowOpen}` : styles.patternRow}
-        key={pattern.id}
-      >
+      <li className={rowClass} key={pattern.id}>
         {/* ⭐ ONE DOOR (the maintainer, 2 Sept). The name USED to be a button that
             toggled the shift list on its own. Opening it that way left the Edit
             button still reading "Edit" over an already-open row — the name said
@@ -863,6 +1098,38 @@ export function ShiftsPanel() {
           {pattern.attachedCount === 1 ? "1 place" : `${pattern.attachedCount} places`}
         </span>
         <div className={styles.rowActions}>
+          {/* ⭐⭐ RETIRE FIRST, EDIT SECOND, DELETE LAST (and Delete is still a
+              link on its own line below). The order on screen is the decision:
+              retiring is reversible and deleting is not, so the reversible act
+              is the one nearest to hand. Same order, same two words and the same
+              helper as the Trainings screen — `skills.active` got exactly this
+              treatment in session 18 and a second vocabulary for one idea would
+              cost more than it is worth.
+              ⚠️ NAMED FOR ITS ROW (`aria-label`), like every Retire on the
+              Trainings screen: a column of buttons all called "Retire" leaves a
+              screen-reader user choosing between identical controls with no way
+              to tell which pattern they are about. */}
+          <button
+            type="button"
+            className={styles.btn}
+            aria-label={`${retireActionLabel(inUse)} ${pattern.name}`}
+            title={
+              inUse
+                ? "Stop offering it when pointing a place at a pattern. Places already attached keep running it."
+                : "Offer it again when pointing a place at a pattern."
+            }
+            disabled={setPatternActive.isPending}
+            onClick={() => {
+              const key = `active-${pattern.id}`;
+              clear(key);
+              setPatternActive.mutate(
+                { templateId: pattern.id, active: !inUse },
+                { onError: (e) => fail(key, e) },
+              );
+            }}
+          >
+            {retireActionLabel(inUse)}
+          </button>
           <button
             type="button"
             className={styles.btn}
@@ -977,20 +1244,87 @@ export function ShiftsPanel() {
             `node_shift_templates` and it is useful before the dialog opens —
             and the confirmation names the same number from the server.
 
-            ⚠️ AND THERE IS STILL NO DEACTIVATE HERE. 0029 gives
-            `shift_templates` an `active` column so all four owned lists mean
-            the same thing, but nothing reads or writes it yet: the column is
-            in the schema and the control is owed. Offering a Deactivate button
-            that changed a flag no screen renders would be worse than the gap.
-            See docs/roadmap.md. */}
-        {pattern.attachedCount > 0 && (
+            ⭐ AND THE "THERE IS STILL NO DEACTIVATE HERE" NOTE THAT SAT HERE IS
+            GONE WITH THE GAP IT DESCRIBED. It said 0029 had given
+            `shift_templates` an `active` column that nothing read or wrote, and
+            that a Deactivate button over a flag no screen renders would be worse
+            than the gap. Both halves are answered: the Retire control above
+            writes it and this row draws it. */}
+        {inUse && pattern.attachedCount > 0 && (
           <p className={styles.rowNote}>
             {`Attached to ${pattern.attachedCount} ${
               pattern.attachedCount === 1 ? "place" : "places"
             }.`}
           </p>
         )}
-        {confirming ? (
+
+        {/* ⚠️⚠️ WHAT RETIRING DID NOT DO, SAID OUT LOUD. `shift_templates.active`
+            is ADVISORY — 0029's own comment on the column is *"not offered when
+            attaching a pattern to a node ... nodes already attached keep
+            resolving to it"*, and `resolve_shift_template` never reads it. So
+            the word "Retired" alone, over a pattern a cell still runs every
+            night, reads as "nobody runs this any more", which is the one thing
+            putting it away did not do. The count is this panel's own read of
+            `node_shift_templates`, the same number the column above shows. */}
+        {!inUse && (
+          <p className={styles.rowNote}>
+            <span className={styles.tag}>Retired</span>{" "}
+            {pattern.attachedCount === 0
+              ? "Not offered when pointing a place at a pattern."
+              : `Not offered when pointing a place at a pattern. ${
+                  pattern.attachedCount === 1
+                    ? "1 place still runs it"
+                    : `${pattern.attachedCount} places still run it`
+                }, until you point ${
+                  pattern.attachedCount === 1 ? "it" : "them"
+                } somewhere else below.`}
+          </p>
+        )}
+        {errorFor(`active-${pattern.id}`) !== null && (
+          <p className={styles.rowError}>{errorFor(`active-${pattern.id}`)}</p>
+        )}
+        {retireWarning !== null &&
+        retireWarning.kind === "pattern" &&
+        retireWarning.patternId === pattern.id ? (
+          <div className={styles.confirm}>
+            <p className={styles.rowNote}>
+              {(() => {
+                const n = patternHoldersFor(pattern).length;
+                return n === 1
+                  ? `1 person works a shift in ${pattern.name}.`
+                  : `${n} people work a shift in ${pattern.name}.`;
+              })()}{" "}
+              Deleting it takes every one of its bands with it — where should they go?
+            </p>
+            <select
+              className={styles.select}
+              aria-label={`Where ${pattern.name}'s people go`}
+              value={retireDestination}
+              onChange={(e) => setRetireDestination(e.target.value)}
+            >
+              <option value="">Leave them without a shift</option>
+              {destinationBands(pattern.id, null).map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {/* R-447: "Continue to delete"/Cancel share one track width. */}
+            <span className={styles.confirmActions}>
+              <button
+                type="button"
+                className={styles.dangerBtn}
+                disabled={updateOperator.isPending}
+                onClick={() => void confirmRetire()}
+              >
+                Continue to delete
+              </button>
+              <button type="button" className={styles.btn} onClick={() => setRetireWarning(null)}>
+                Cancel
+              </button>
+            </span>
+          </div>
+        ) : confirming ? (
           <DeleteDialog
             kind="shift_template"
             id={pattern.id}
@@ -1009,7 +1343,20 @@ export function ShiftsPanel() {
               className={styles.linkBtn}
               onClick={() => {
                 clear(`delete-${pattern.id}`);
-                setConfirmId(pattern.id);
+                // R-443: retiring a pattern that people point at (through any
+                // of its bands) warns first, exactly as a single band does —
+                // deleting the pattern cascades every one of its shifts.
+                const holders = patternHoldersFor(pattern);
+                if (holders.length === 0) {
+                  setConfirmId(pattern.id);
+                } else {
+                  setRetireDestination("");
+                  setRetireWarning({
+                    kind: "pattern",
+                    patternId: pattern.id,
+                    patternName: pattern.name,
+                  });
+                }
               }}
             >
               Delete this pattern
@@ -1088,7 +1435,9 @@ export function ShiftsPanel() {
         <h2 className={styles.h2}>Shift patterns</h2>
         <p className={styles.hint}>
           A pattern is the set of shifts a place runs. Everything here is a clock time; a shift that
-          runs past midnight shows its end marked +1d, so 22:00–06:00 +1d is a night shift.
+          runs past midnight shows its end marked +1d, so 22:00–06:00 +1d is a night shift. Retiring
+          a pattern stops it being offered when you point a place at one; anywhere already attached
+          keeps running it until you move that place yourself.
         </p>
 
         {pending && <p className={styles.status}>Loading shift patterns…</p>}
@@ -1155,7 +1504,11 @@ export function ShiftsPanel() {
                   : `No shift patterns in ${plant.label}.`}
               </p>
             ) : (
-              <>
+              /* ⭐ FROZEN HEADER (docs/conventions.md "Frozen table headers",
+                 R-372). `.listHead` pins to the top of this bounded box while
+                 every row underneath it — live AND retired — scrolls beneath,
+                 so the column names never leave with the page. */
+              <div className={styles.tableScroll}>
                 <div className={styles.listHead}>
                   <span>Pattern</span>
                   <span>Owned by</span>
@@ -1170,8 +1523,33 @@ export function ShiftsPanel() {
                   <span>Attached to</span>
                   <span />
                 </div>
-                <ul className={styles.list}>{visiblePatterns.map(renderPattern)}</ul>
-              </>
+                {/* ⚠️ THE HEADER IS DRAWN EVEN WHEN THE LIVE LIST IS EMPTY,
+                    because the retired list underneath uses the same five
+                    tracks and a table of unlabelled columns is worse than a
+                    header standing over one sentence. */}
+                {livePatterns.length === 0 ? (
+                  <p className={styles.status}>Every pattern here is retired.</p>
+                ) : (
+                  <ul className={styles.list}>{livePatterns.map(renderPattern)}</ul>
+                )}
+
+                {/* ⭐ RETIRED PATTERNS ARE AN ORDINARY, POPULATED PART OF THIS
+                    SCREEN — retiring is the main action, so what has been put
+                    away has to be somewhere a person can find it and bring it
+                    back. Same shape as the Trainings screen, with ONE
+                    difference: the heading is not drawn over "Nothing retired."
+                    when nothing is. Trainings has a card of its own and can
+                    afford the empty section; this panel already carries two
+                    counted footnotes and a skipped-rows line under the same
+                    list, and a fourth permanent line saying nothing happened
+                    would bury the three that say something did. */}
+                {retiredPatterns.length > 0 && (
+                  <>
+                    <h3 className={styles.h3}>Retired</h3>
+                    <ul className={styles.list}>{retiredPatterns.map(renderPattern)}</ul>
+                  </>
+                )}
+              </div>
             )}
 
             {/* ⚠️ TRIMMED, NOT SILENT — and named by `plant.label` rather than
@@ -1217,18 +1595,36 @@ export function ShiftsPanel() {
           </p>
           <ul className={styles.nodeList}>
             {visibleNodes.map((n) => {
-              /* ⭐ THE OPTIONS ARE THE VISIBLE PATTERNS PLUS, IF IT IS NOT
+              /* ⭐ THE OPTIONS ARE THE PATTERNS ON OFFER PLUS, IF IT IS NOT
                  AMONG THEM, THE ONE THIS PLACE IS ACTUALLY RUNNING. A row that
                  dropped its own attachment from the list would render as
                  "Inherit from above" — a positive claim about this place that
                  is simply false, and one click from becoming true. Attaching
                  needs `app_is_admin_for(node_id)` and says nothing about who
                  owns the pattern, so a company admin can and does put one
-                 plant's pattern on another's node; this is that case. */
+                 plant's pattern on another's node; this is that case.
+
+                 ⭐⭐ AND "ON OFFER" IS `livePatterns`, NOT `visiblePatterns`,
+                 SINCE THE RETIRE CONTROL LANDED. This is the ONE thing
+                 `shift_templates.active` means — migration 0029's comment on the
+                 column, verbatim: *"False = retired: not offered when attaching a
+                 pattern to a node."* The database refuses nothing here, so this
+                 client is the whole of the rule, which is the LESSER of the two
+                 mistakes house rule 4 ranks: a screen that refuses what the
+                 server allows is recoverable in one click (bring it back), and
+                 one that offers what the server refuses is not.
+
+                 ⚠️ THE SECOND ARM NOW COVERS A RETIRED ATTACHMENT AS WELL AS A
+                 FILTERED-AWAY ONE, and it has to, because retiring detaches
+                 NOTHING: `resolve_shift_template` never reads `active`, so a
+                 place attached to a pattern the day before it was retired goes
+                 on running it. Dropping it from this row would be the panel
+                 claiming a change the server never made. */
+              const offered = livePatterns;
               const options =
-                n.templateId === null || visiblePatternIds.has(n.templateId)
-                  ? visiblePatterns
-                  : [...visiblePatterns, ...view.patterns.filter((p) => p.id === n.templateId)];
+                n.templateId === null || offered.some((p) => p.id === n.templateId)
+                  ? offered
+                  : [...offered, ...view.patterns.filter((p) => p.id === n.templateId)];
 
               /* ⚠️⚠️ THE DRAFT IS RESOLVED AGAINST THOSE OPTIONS, NOT TRUSTED.
                  `attachDraft` is keyed by node id and holds a PATTERN id, and

@@ -107,6 +107,7 @@ export function BoardGrid({
   dragApi,
   setDropRowResolver,
   onFitScaleChange,
+  onWindowEdgeChange,
   dateFormat = DEFAULT_DATE_FORMAT,
 }: {
   index: BoardIndex;
@@ -153,6 +154,17 @@ export function BoardGrid({
    * parent is a normal post-render update, not a render-phase one.
    */
   onFitScaleChange: (scale: number) => void;
+  /**
+   * S67 (F-170): reports whether the horizontal scroll is at (or past) the
+   * loaded window's right edge, the same way `onFitScaleChange` above
+   * reports the vertical fit -- fired from an effect, not during render, for
+   * the same reason. `BoardToolbar`'s end-of-window note used to render
+   * unconditionally; this is the real signal it needed and nothing else in
+   * the tree already exposed (`scroll`/`railWidth`/`trackWidth`/`viewport`
+   * are this component's own internal state). Optional so every existing
+   * direct render of this component keeps compiling without it.
+   */
+  onWindowEdgeChange?: (atEnd: boolean) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // P1-4c D47: `--rail-w` is now `calc(232px * var(--ui-scale))` in
@@ -267,6 +279,23 @@ export function BoardGrid({
 
   const pxPerHour = ZOOMS[zoomIndex].pxPerHour;
   const trackWidth = minutesToPx(index.windowMinutes, pxPerHour);
+
+  // S67 (F-170): "at the edge" requires BOTH that there is somewhere to
+  // scroll TO (`hasOverflow` -- a window that already fits the viewport with
+  // no scrollbar is not "at the edge", it simply has no edge to reach) and
+  // that the scroll has actually reached it. `rawMaxScrollLeft` is the SAME
+  // formula the resize-observer clamp and the scroll-to-now effect below
+  // already use (`railWidth + trackWidth - viewport.width`) -- one more
+  // reader of it, not a second definition. The 1px slack on the comparison
+  // absorbs the browser's own scroll-snapping/subpixel rounding so a person
+  // who has genuinely scrolled all the way right is not read as "not quite
+  // at the edge" by a fraction of a pixel.
+  const rawMaxScrollLeft = railWidth + trackWidth - viewport.width;
+  const hasOverflow = rawMaxScrollLeft > 1;
+  const atMaxScrollLeft = hasOverflow && scroll.left >= rawMaxScrollLeft - 1;
+  useEffect(() => {
+    onWindowEdgeChange?.(atMaxScrollLeft);
+  }, [atMaxScrollLeft, onWindowEdgeChange]);
 
   // --- D58: register the drop-row resolver. `resolveDropRow` (pure,
   // harness-tested §10) does the binary search; everything geometry-
@@ -451,12 +480,28 @@ export function BoardGrid({
     // mean the initial scroll silently never happens (T9).
     if (viewport.width <= 0) return;
     if (lastNowNonceRef.current === scrollToNowNonce) return;
-    lastNowNonceRef.current = scrollToNowNonce;
 
     const nowMin = (Date.now() - index.windowStart.getTime()) / MS_PER_MINUTE;
     // "now" outside the loaded window is normal (the user paged to another
     // week) — leave their scroll position alone rather than jumping to an edge.
+    //
+    // ⚠️ RETURN WITHOUT CONSUMING THE NONCE (F-159 follow-up). `index` here can
+    // still be the PREVIOUS window's: `useBoardWindow` keeps previous data
+    // across a refetch (R-424), so between a window move and its payload
+    // landing this effect runs once against the old index. The nonce used to be
+    // spent on that run — `nowMin < 0`, return, and when the new window's index
+    // arrived the nonce was already marked done and the board never scrolled.
+    // That is exactly what F-159's own `anchorToZone` produced: it bumps the
+    // nonce at the same moment it moves the window, so R-055's "on first mount
+    // the board scrolls so now sits a quarter of the way across" silently did
+    // not happen. The nonce is a PROMISE OF A SCROLL and is only discharged by
+    // one; `index.windowStart`/`windowMinutes` are in the deps below, so the
+    // promise is kept the moment an index whose window holds now arrives.
+    //
+    // Prev/Next still never re-scroll: their nonce is unchanged AND already
+    // consumed by the mount scroll, so the guard above returns before this.
     if (nowMin < 0 || nowMin > index.windowMinutes) return;
+    lastNowNonceRef.current = scrollToNowNonce;
 
     const trackViewport = Math.max(0, viewport.width - railWidth);
     const target = minutesToPx(nowMin, pxPerHour) - trackViewport * NOW_LEAD_FRACTION;
@@ -539,9 +584,8 @@ export function BoardGrid({
       <div ref={railProbeRef} className={styles.railProbe} aria-hidden="true" />
       <div className={styles.canvas} style={{ width: railWidth + trackWidth }}>
         <BoardHeader
-          windowStart={index.windowStart}
-          dayCount={index.dayCount}
-          windowMinutes={index.windowMinutes}
+          dayAxis={index.dayAxis}
+          zone={index.zone}
           zoomIndex={zoomIndex}
           railWidth={railWidth}
           visibleMinRange={visibleMinRange}
@@ -571,6 +615,8 @@ export function BoardGrid({
                     windowStart={index.windowStart}
                     windowMinutes={index.windowMinutes}
                     dayCount={index.dayCount}
+                    dayAxis={index.dayAxis}
+                    zone={index.zone}
                     zoomIndex={zoomIndex}
                     railWidth={railWidth}
                     trackWidth={trackWidth}
@@ -586,7 +632,7 @@ export function BoardGrid({
                   row={row}
                   level={levelById.get(row.node.levelId)}
                   template={index.templateForNode.get(row.node.id) ?? null}
-                  dayCount={index.dayCount}
+                  dayAxis={index.dayAxis}
                   zoomIndex={zoomIndex}
                   trackWidth={trackWidth}
                   railWidth={railWidth}

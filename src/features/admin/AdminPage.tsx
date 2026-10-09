@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 // `fetchHierarchyTree` moved to src/lib/api/hierarchy.ts by the design session:
 // `src/lib/api/` is the only place allowed to touch supabase, snake_case or
@@ -12,6 +12,12 @@ import { buildShapeSummaries, filterEditableShapes, resolveSelectedShape } from 
 import { nodesInPlant } from "./lib/plantFilter";
 import { usePlantFilter } from "./hooks/usePlantFilter";
 import { useAdminViewStore } from "./store/adminView";
+import {
+  readRailWidth,
+  writeRailWidth,
+  railKey,
+  clampWidthToFloor,
+} from "@/features/board/lib/railWidth";
 import { LevelEditor } from "./components/LevelEditor";
 import { NodeTreeEditor } from "./components/NodeTreeEditor";
 import { ShapePicker } from "./components/ShapePicker";
@@ -21,12 +27,15 @@ import { SiteAccessPanel } from "./components/SiteAccessPanel";
 // OWN file and never this one. See any of the four for why.
 import { ShiftsPanel, SHIFTS_PANEL_READY } from "./components/ShiftsPanel";
 import { OperatorsPanel, OPERATORS_PANEL_READY } from "./components/OperatorsPanel";
+import { AbsencesPanel, ABSENCES_PANEL_READY } from "./components/AbsencesPanel";
 import { TrainingsPanel, TRAININGS_PANEL_READY } from "./components/TrainingsPanel";
 import { MatrixPanel, MATRIX_PANEL_READY } from "./components/MatrixPanel";
 import { ProductsPanel, PRODUCTS_PANEL_READY } from "./components/ProductsPanel";
 import { CycleTimesPanel, CYCLE_TIMES_PANEL_READY } from "./components/CycleTimesPanel";
 import { ImportPanel, IMPORT_PANEL_READY } from "./components/ImportPanel";
 import { SettingsPanel, SETTINGS_PANEL_READY } from "./components/SettingsPanel";
+import { TemplatesPanel, TEMPLATES_PANEL_READY } from "./components/TemplatesPanel";
+import { AuditPanel, AUDIT_PANEL_READY } from "./components/AuditPanel";
 import { PanelToggle } from "@/components/PanelToggle";
 import styles from "./AdminPage.module.css";
 
@@ -51,12 +60,15 @@ type SectionId =
   | "access"
   | "shifts"
   | "operators"
+  | "absences"
   | "trainings"
   | "matrix"
   | "products"
   | "cycletimes"
   | "import"
-  | "settings";
+  | "templates"
+  | "settings"
+  | "audit";
 
 /*
  * ⭐ §19.62 — `enabled` IS NOT A LITERAL FOR THE QUEUED SECTIONS, AND THAT IS
@@ -68,10 +80,25 @@ type SectionId =
  */
 // ⚠️ `companyAdminOnly` IS A SEPARATE AXIS FROM `adminSectionsFor`. That helper
 // returns "all" for a site admin too (adminAnywhere), so it cannot express
-// "system admin ONLY" — and Settings is exactly that: an org-wide preference set
-// once for the whole company (0037). The flag is filtered on `profile.role`
-// below, and the server RPC refuses a non-admin regardless, so this only hides a
-// tab that could tell a site admin nothing but no.
+// "system admin ONLY". The flag is filtered on `profile.role` below — the client
+// mirror of `app_is_admin()`, the same predicate the policy runs.
+//
+// ⛔⛔ ONE TAB CARRIES IT, AND THE SECOND ONE COST A DEFECT (DEF-0007 / R-239).
+// Settings carried this flag too, from 0037, when the tab really was one
+// org-wide preference set once for the whole company. Migration 0050 added
+// `node_settings` and `set_node_setting`, gated `app_is_admin() OR
+// app_is_admin_for(node)`, and 0052 moved the date format under the same shape.
+// From then on the server took a PLANT admin's writes on their OWN plant and
+// this rail hid the tab that makes them — R-239 backwards, and R-333's whole
+// point ("choose a plant and the tab edits THAT plant's values") unreachable for
+// the person who runs one plant. The flag stayed because the comment justifying
+// it stayed true-sounding two migrations after it stopped being true.
+//
+// ⭐ SO THE TEST FOR THIS FLAG IS NOT "is the screen important". It is: would
+// the server REFUSE, or silently do nothing, for every person `adminSectionsFor`
+// lets through? Activity is the only tab where the answer is yes. Anything that
+// varies per node is decided by the panel, against the same predicate the server
+// runs — `SettingsPanel` does exactly that with `canAdministerPlant`.
 const SECTIONS: ReadonlyArray<{
   id: SectionId;
   label: string;
@@ -82,6 +109,10 @@ const SECTIONS: ReadonlyArray<{
   { id: "access", label: "Access", enabled: true },
   { id: "shifts", label: "Shifts", enabled: SHIFTS_PANEL_READY },
   { id: "operators", label: "Operators", enabled: OPERATORS_PANEL_READY },
+  // R-357: Absences sits with the people sections and is offered to the same
+  // supervisors Operators is (adminSectionsFor). Who may actually record one is
+  // the server's per-person-place call; this only offers the tab.
+  { id: "absences", label: "Absences", enabled: ABSENCES_PANEL_READY },
   // ⭐⭐ TRAININGS IS ITS OWN SECTION, AND IT SITS BESIDE OPERATORS BECAUSE
   // THAT IS WHERE IT USED TO LIVE. It was a "Ticket types" toggle INSIDE the
   // Operators panel, reachable only after picking a person — so managing the
@@ -108,9 +139,36 @@ const SECTIONS: ReadonlyArray<{
   // to show a line's roll-up (R-317).
   { id: "cycletimes", label: "Cycle times", enabled: CYCLE_TIMES_PANEL_READY },
   { id: "import", label: "Import", enabled: IMPORT_PANEL_READY },
-  // System-admin only (see `companyAdminOnly` note above). Org-wide preferences,
-  // the first being the date-display format (0037 / `src/lib/format/dates.ts`).
-  { id: "settings", label: "Settings", enabled: SETTINGS_PANEL_READY, companyAdminOnly: true },
+  // R-356: named week templates for the chosen plant. Admins only — it is NOT
+  // in `adminSectionsFor`'s supervisor list, and "all" covers admins. Saving
+  // and applying live on the board; this section renames and deletes.
+  { id: "templates", label: "Templates", enabled: TEMPLATES_PANEL_READY },
+  // ⭐⭐ COMPANY-ADMIN ONLY, AND THE FLAG IS DECIDING THE SAME THING THE
+  // POLICY DOES. `audit_log_select` (0008) is `app_is_admin() and org_id =
+  // app_current_org()`, and `app_is_admin()` is `user_profiles.role = 'admin'`
+  // (0018) — the ORG-WIDE role, which is `isCompanyAdmin` below. For a SITE
+  // admin the first term is false, so the read returns ZERO ROWS: not an error,
+  // not a refusal, an empty list indistinguishable from *"nothing has ever
+  // changed here"*. `adminSectionsFor` cannot express that (it returns "all" for
+  // anybody with `adminAnywhere`), which is exactly why this second axis exists
+  // and why Settings already uses it. `auditAccess.test.tsx` holds the two
+  // together.
+  //
+  // ⭐ ACTIVITY SITS ABOVE SETTINGS (R-369, maintainer: "swap the settings and
+  // activity tab"). Order in this array is order in the rail.
+  { id: "audit", label: "Activity", enabled: AUDIT_PANEL_READY, companyAdminOnly: true },
+  // ⭐⭐ NO `companyAdminOnly` — AND ITS ABSENCE IS THE FIX FOR DEF-0007, so it is
+  // worth a sentence rather than a blank. Settings is per-plant (R-333): the tab
+  // follows the plant control at the top, and `set_node_setting` takes a plant
+  // admin's write on their own plant. Every scope this tab can be in is decided
+  // INSIDE the panel, by `canAdministerPlant` on the chosen plant's path — the
+  // same expression as `app_is_admin_for(node)` — which is the only place that
+  // knows which plant is chosen. The rail cannot answer a per-node question, so
+  // it must not try: on the company scope the panel shows the controls disabled
+  // with the reason in words, on a plant they administer it shows working
+  // pickers, and on a plant they may only read it shows no control and says
+  // whose place it is.
+  { id: "settings", label: "Settings", enabled: SETTINGS_PANEL_READY },
 ];
 
 /**
@@ -206,6 +264,14 @@ function sectionIconBody(id: SectionId) {
           <path d="M3.4 13.5c0-2.6 2.05-4.15 4.6-4.15s4.6 1.55 4.6 4.15" />
         </>
       );
+    case "absences": // a calendar with a day crossed out — someone away
+      return (
+        <>
+          <rect x="2.5" y="3" width="11" height="10.5" rx="1" />
+          <path d="M2.5 6h11M5.5 2v2.4M10.5 2v2.4" />
+          <path d="M6.2 8.7l3.6 3.2M9.8 8.7l-3.6 3.2" />
+        </>
+      );
     case "trainings": // a mortarboard — the training catalogue
       return (
         <>
@@ -250,11 +316,28 @@ function sectionIconBody(id: SectionId) {
     // cog: one closed path alternating a tip arc at r=5.9 with a root arc at
     // r=4.3, and a hub. Six teeth, not eight — at 16px eight tips and their
     // gaps fall below a stroke's width apart and silt up into a ring.
+    // A page with ruled lines and one turned corner — a record of what happened,
+    // not a clock (which is Shifts) and not a grid (which is the Matrix).
+    case "audit": // a document with lines: the log
+      return (
+        <>
+          <path d="M4 1.75h5L12.25 5v9.25H4Z" />
+          <path d="M9 1.75V5h3.25" />
+          <path d="M6 8.25h4.25M6 10.75h4.25" />
+        </>
+      );
     case "settings": // a gear: six teeth on the rim, and a hub
       return (
         <>
           <path d="M13.77 6.77 A5.90 5.90 0 0 1 13.77 9.23 L12.04 9.47 A4.30 4.30 0 0 1 11.29 10.76 L11.95 12.38 A5.90 5.90 0 0 1 9.82 13.61 L8.75 12.23 A4.30 4.30 0 0 1 7.25 12.23 L6.18 13.61 A5.90 5.90 0 0 1 4.05 12.38 L4.71 10.76 A4.30 4.30 0 0 1 3.96 9.47 L2.23 9.23 A5.90 5.90 0 0 1 2.23 6.77 L3.96 6.53 A4.30 4.30 0 0 1 4.71 5.24 L4.05 3.62 A5.90 5.90 0 0 1 6.18 2.39 L7.25 3.77 A4.30 4.30 0 0 1 8.75 3.77 L9.82 2.39 A5.90 5.90 0 0 1 11.95 3.62 L11.29 5.24 A4.30 4.30 0 0 1 12.04 6.53 L13.77 6.77 Z" />
           <circle cx="8" cy="8" r="1.85" />
+        </>
+      );
+    case "templates": // stacked sheets: a saved week to stamp again
+      return (
+        <>
+          <rect x="4.5" y="2.5" width="8" height="9.5" rx="1" />
+          <path d="M3.5 4.5 L3.5 13 A0.5 0.5 0 0 0 4 13.5 L10.5 13.5" fill="none" />
         </>
       );
   }
@@ -269,6 +352,32 @@ function readRailCollapsed(): boolean {
     return false;
   }
 }
+
+/**
+ * R-446: the standard's first hit outside the board -- this rail resizes by
+ * its edge and remembers its width per person through `panelSize.ts`, the
+ * same shape `railWidth.ts` already gives the operator rail (`readRailWidth`/
+ * `writeRailWidth` are reused as-is: a width-only pair over `panelSize.ts`'s
+ * localStorage round trip). Only the KEY differs -- `railKey` in
+ * `railWidth.ts` prefixes the operator rail's own key (user + board root)
+ * with `rail:`; this page has no root, so the key is the signed-in user's id
+ * alone, prefixed with `admin-rail:` (passed as `railKey`'s own second
+ * argument, RR-1 below) so the two stores never collide under the one shared
+ * `commandLauncher.panelSize.*` namespace. `userId === null` (session not
+ * yet known): the same `null`-means-session-only contract every function
+ * down this chain already carries.
+ *
+ * RR-1 (reviewer, S68-a review): this used to carry its own `adminRailKey`
+ * and `clampAdminRailWidth`, retyping `railWidth.ts`'s `railKey` and clamp
+ * under new names instead of generalising them -- exactly the "own storage"
+ * shape R-446 exists to rule out, even though the actual localStorage
+ * round trip (`readRailWidth`/`writeRailWidth`) was already shared. Fixed by
+ * giving `railKey` a `prefix` argument and `railWidth.ts` a floor-only
+ * `clampWidthToFloor` that both this file and `clampRailWidth` itself now
+ * call; `OP-1..OP-4` (`operatorPanel.test.tsx`) stay green because
+ * `clampRailWidth`'s own signature and behaviour are unchanged.
+ */
+const ADMIN_RAIL_PREFIX = "admin-rail:";
 
 export default function AdminPage() {
   const [section, setSection] = useState<SectionId>("hierarchy");
@@ -285,6 +394,97 @@ export default function AdminPage() {
       return next;
     });
   const { session, profile, loading: sessionLoading } = useSession();
+
+  /* -------------------------------------------------------------------
+   * R-446: THE RAIL'S OWN REMEMBERED WIDTH.
+   *
+   * `null` until either a stored value is loaded or a drag sets one — the
+   * same convention `OperatorPanel.tsx`'s `width` state uses, and for the
+   * same reason: the rail sizes to its CSS default (`.rail`'s
+   * `width: var(--rail-w)`) until there is a real number to override it
+   * with, rather than forcing one on a rail nobody has ever dragged.
+   * ------------------------------------------------------------------- */
+  const [railWidth, setRailWidth] = useState<number | null>(null);
+
+  // The board keys the operator rail by user + board root
+  // (`historyStorageKey`); this page has no root, so `session.user.id` alone
+  // is the whole key — the raw session id, not `profile.userId`, so the key
+  // is available the moment auth resolves rather than waiting on the
+  // separate `user_profiles` read (the same value `BoardPage` reads for its
+  // own `historyKey`).
+  const railStorageKey = railKey(session?.user.id ?? null, ADMIN_RAIL_PREFIX);
+
+  // R-446: a zero-size probe whose CSS `width` IS `var(--rail-w)` — see
+  // `AdminPage.module.css`'s `.railProbe` for why this is a measurement, not
+  // a retyped constant.
+  const railProbeRef = useRef<HTMLSpanElement | null>(null);
+  function currentRailFloor(): number {
+    return railProbeRef.current?.getBoundingClientRect().width ?? 0;
+  }
+
+  // Restore on mount and whenever the person changes (a fresh
+  // `railStorageKey`) — mirrors `OperatorPanel.tsx`'s own restore effect over
+  // `railWidth.ts` exactly. Never re-runs on `railCollapsed` toggling, so
+  // collapsing and reopening leaves this alone and a reopen finds the same
+  // width still in state.
+  useEffect(() => {
+    const stored = readRailWidth(railStorageKey);
+    setRailWidth(stored !== null ? clampWidthToFloor(stored, currentRailFloor()) : null);
+  }, [railStorageKey]);
+
+  /**
+   * R-446: a pointer drag on the rail's right-edge handle, tracked with
+   * `setPointerCapture` on the handle itself (CR-2's own fix, carried by
+   * every resize handle in the app) — a raw `document.addEventListener`
+   * misses a release outside the browser window entirely, leaving the drag
+   * stuck open. `railDragRef` (a ref, not state) holds `latest`; `railWidth`
+   * itself would still read the value from BEFORE this render's
+   * `setRailWidth`, a stale read for exactly the reason `OperatorPanel.tsx`'s
+   * own `railDragRef` doc gives. The rail grows to the RIGHT, so the delta is
+   * (current - start), not (start - current).
+   */
+  const railDragRef = useRef<{
+    startX: number;
+    startWidth: number;
+    floor: number;
+    latest: number;
+    pointerId: number;
+  } | null>(null);
+
+  function handleRailPointerDown(e: React.PointerEvent<HTMLDivElement>): void {
+    e.preventDefault();
+    const floor = currentRailFloor();
+    const startWidth = railWidth ?? floor;
+    railDragRef.current = {
+      startX: e.clientX,
+      startWidth,
+      floor,
+      latest: startWidth,
+      pointerId: e.pointerId,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function handleRailPointerMove(e: React.PointerEvent<HTMLDivElement>): void {
+    const drag = railDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const next = clampWidthToFloor(drag.startWidth + (e.clientX - drag.startX), drag.floor);
+    drag.latest = next;
+    setRailWidth(next);
+  }
+
+  /** Ends a resize on either `pointerup` or `pointercancel` -- see
+   *  `OperatorPanel.tsx`'s own `endRailResize` doc for why both matter. */
+  function endRailResize(e: React.PointerEvent<HTMLDivElement>): void {
+    const drag = railDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    railDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    writeRailWidth(railStorageKey, drag.latest);
+  }
+
   // ⭐⭐ D114: THE RAIL IS FILTERED, NOT THE PANELS. A supervisor gets the same
   // Operators and Trainings screens everybody else does — they simply show what
   // that person's grants reach, which those screens already know how to do.
@@ -298,8 +498,10 @@ export default function AdminPage() {
   const allowedSections = adminSectionsFor(profile?.role, profile?.adminAnywhere);
   // ⚠️ `companyAdminOnly` is the SECOND gate, and it is NOT redundant with
   // `allowedSections`: that returns "all" for a site admin (adminAnywhere), so
-  // without this a site admin would be offered Settings — an org-wide screen the
-  // server then refuses. Only the org-wide role 'admin' is a system admin.
+  // without this a site admin would be offered Activity — a read that hands them
+  // ZERO ROWS rather than a refusal. Only the org-wide role 'admin' is a system
+  // admin. ⛔ Settings used to be filtered here too and must not be again; the
+  // block above `SECTIONS` carries why (DEF-0007).
   const isCompanyAdmin = profile?.role === "admin";
   const visibleSections = SECTIONS.filter(
     (s) =>
@@ -322,6 +524,49 @@ export default function AdminPage() {
   // not two call sites independently re-deriving the same D91-shaped
   // condition (`!canQuery || isLoading`) and risking them drifting apart.
   const hierarchyLoading = !canQuery || isLoading;
+
+  /* ---------------------------------------------------------------------
+   * ⭐⭐ THE SERVER HAS ALREADY DECIDED THIS, AND THE SCREEN ONLY HAS TO SAY IT.
+   *
+   * `adminAccess` lets a supervisor in on purpose (D114) and its own comment
+   * admits the cost: *"this admits a supervisor with no grants at all, who will
+   * find two empty lists."* What nobody wrote down is what those empty lists
+   * LOOK LIKE to the person in front of them — a search box, "Nobody matches
+   * that.", and an "Add someone" form the database refuses. **The app is
+   * broken / my data failed to load / nobody has given me anything yet are
+   * three different facts and the screen said none of them.**
+   *
+   * ⚠️ NO NEW CLIENT PERMISSION RULE IS INVENTED HERE. `nodes_select`
+   * (migration 0019 §6) is
+   *
+   *     org_id = app_current_org()
+   *     AND (app_is_admin() OR nodes.path <@ any of app_grant_paths(false))
+   *
+   * so the rows in `data.nodes` ARE the server's answer to "what may you
+   * read", already computed by the same predicate `app_can_read_node` uses.
+   * For anybody who is not a system admin the first term is false, which
+   * leaves exactly one reason for an EMPTY, SUCCESSFUL read: no grant of
+   * theirs covers anything. That is the sentence below, and it is the
+   * server's sentence, not this file's.
+   *
+   * ⚠️ AND IT IS THE WHOLE SCREEN, not one tab. `app_can_read_owned` (0028)
+   * hangs off the same `app_grant_paths(false)`, so an operator, a training, a
+   * product and a shift pattern are all unreadable for exactly the same
+   * person. One explanation here beats four empty panels.
+   *
+   * ⚠️⚠️ A SYSTEM ADMIN IS EXEMPT, AND THE EXEMPTION IS THE POLICY'S OWN FIRST
+   * TERM. `app_is_admin()` is `user_profiles.role = 'admin'` (0018), which is
+   * `profile.role` here — the mirror `isCompanyAdmin` above already draws. For
+   * them zero nodes means the COMPANY has no places yet, not that they lack
+   * access; telling them otherwise would be false and would hide the Hierarchy
+   * tab where the first plant gets created.
+   *
+   * ⚠️ `data !== undefined` IS LOAD-BEARING. A failed read and an empty one are
+   * the two states this whole block exists to separate, and `isError` renders
+   * its own line below. Nothing is claimed about access until the answer is in.
+   * ------------------------------------------------------------------- */
+  const nothingShared =
+    data !== undefined && profile != null && !isCompanyAdmin && data.nodes.length === 0;
 
   /* ---------------------------------------------------------------------
    * ⭐⭐ WHICH PLANT THIS SCREEN IS SHOWING — roadmap 1(c).
@@ -430,6 +675,18 @@ export default function AdminPage() {
    */
   const visibleAccessPlaces = accessPlaces.filter((p) => plantNodeIds.has(p.nodeId));
 
+  // R-367: the node picker in `SiteAccessPanel` slices each plant's subtree out
+  // of this by path. `data.nodes` is already `nodes_select`'s answer to "what
+  // may you read", so it carries every plant the viewer administers and nothing
+  // else; the panel scopes it to the ONE plant its own dropdown has chosen.
+  // Only the three fields the picker needs, so the panel takes no dependency on
+  // `BoardNode`'s full shape.
+  const accessNodes = (data?.nodes ?? []).map((n) => ({
+    nodeId: n.id,
+    name: n.name,
+    path: n.path,
+  }));
+
   /* ---------------------------------------------------------------------
    * ⭐⭐ THE STRUCTURE PICKER IS NARROWED BY THE PLANT FILTER TOO, AND
    * WITHOUT THIS THE HIERARCHY TAB CARRIES TWO CONTROLS THAT DO THE SAME JOB.
@@ -472,12 +729,97 @@ export default function AdminPage() {
   // second way for the list to shrink.
   const resolvedShapeId = resolveSelectedShape(plantSummaries, selectedShapeId);
 
+  /**
+   * ⭐ THE RAIL GOES TOO, AND THAT IS THE POINT. Every section a person in this
+   * state can reach reads through `app_grant_paths(false)` (see the block
+   * above), so three rail buttons onto three empty panels is the defect wearing
+   * navigation. There is nothing to choose between, so there is no chooser —
+   * the same rule `plantControlVisible` applies one level down.
+   *
+   * ⚠️ THE WORDS DO TWO JOBS AND BOTH ARE DELIBERATE. The heading names the
+   * fact ("nothing has been shared"), and the first line rules out the two
+   * things a reader would otherwise suspect first — that the app is broken, or
+   * that a read failed. Saying only "No operators" leaves all three
+   * possibilities open, which is where this screen started.
+   *
+   * ⚠️ It also says WHO can change it and WHERE, because "you have no access"
+   * with no next step is a dead end. Access is granted on the Access tab
+   * (`SiteAccessPanel`), which only an administrator can see.
+   */
+  /* ---------------------------------------------------------------------
+   * ⛔⛔ NO RAIL UNTIL THIS COMPONENT'S OWN SESSION HAS ANSWERED, and the word
+   * OWN is the whole point. `RequireAdmin` already gates this page on
+   * `adminAccess(..., loading)` and renders "Loading…" while pending — but it
+   * calls `useSession()` and so does this file, and those are two INDEPENDENT
+   * instances with their own `loading` and their own `profile` (the standing
+   * "useSession() called in five components" debt). So the gate's copy can
+   * finish, admit you, and mount this page while THIS copy still has
+   * `profile === null`.
+   *
+   * ⚠️ AND A NULL PROFILE IS NOT A NEUTRAL STATE HERE. `adminSectionsFor`
+   * answers `["operators", "trainings", "matrix"]` for an unknown person —
+   * correct as a floor, and indistinguishable on screen from the real answer
+   * for a supervisor. So a company admin opening /admin drew a THREE-TAB rail
+   * for a moment before it became eleven, and a site admin's Settings tab
+   * appeared late. Found by the first browser test that ever signed in
+   * (`e2e/signedIn.spec.ts`); no unit case could see it, because they mock
+   * `useSession` and a mock has only one answer to disagree with.
+   *
+   * This is D97/D91's standing lesson — a permission answer shown before the
+   * answer has landed reads as a permission BUG to the person it happens to —
+   * applied to the rail rather than to the refusal sentence. N5 in
+   * `adminNoGrants.test.tsx` already holds that line for the "nothing has been
+   * shared" heading; this holds it for the menu.
+   *
+   * ⭐ IT IS A GUARD, NOT THE CURE. The cure is one `SessionProvider` at the
+   * root so there is a single answer to disagree with, which is the parked debt
+   * item. Until then every reader of `useSession` owes its own version of this.
+   * ------------------------------------------------------------------- */
+  if (sessionLoading) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.content}>
+          <p className={styles.status}>Loading…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (nothingShared) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.content}>
+          <div className={styles.emptyScope}>
+            <h1 className={styles.h1}>Nothing has been shared with you yet</h1>
+            <p className={styles.emptyLead}>
+              This screen loaded correctly and nothing failed to load. Your account simply has not
+              been given access to any part of the company yet, so there are no places, people or
+              trainings here for you to manage.
+            </p>
+            <p className={styles.emptyNote}>
+              An administrator grants access on the Access tab, by naming the plant, line or cell
+              you look after. Ask whoever set up your account; this screen fills in as soon as they
+              do, with no further sign-in.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.page}>
       <nav
         className={railCollapsed ? `${styles.rail} ${styles.railCollapsed}` : styles.rail}
         aria-label="Admin sections"
+        // R-446: only an OPEN rail takes the dragged width — collapsed always
+        // falls back to `.railCollapsed`'s own `width: auto`, same as
+        // `OperatorPanel.tsx`'s `open && width !== null` inline-style gate.
+        style={!railCollapsed && railWidth !== null ? { width: railWidth } : undefined}
       >
+        {/* See `currentRailFloor`'s own comment above: a zero-size probe whose
+            resolved `width` IS the current `--rail-w`, as a real px number. */}
+        <span ref={railProbeRef} className={styles.railProbe} aria-hidden="true" />
         {/* ⭐ THE ONE CONTROL THAT SURVIVES A COLLAPSE. When the rail is shut it
             is the only thing in it, so it must always be reachable — the section
             buttons are the thing being hidden, never this. `aria-expanded` names
@@ -516,9 +858,44 @@ export default function AdminPage() {
             {!s.enabled && <span className={styles.soon}>soon</span>}
           </button>
         ))}
+        {/* R-446: the rail's own drag handle, right edge only — collapsed has
+            nothing to widen into, same rule `OperatorPanel.tsx`'s own handle
+            follows. */}
+        {!railCollapsed && (
+          <div
+            className={styles.railHandle}
+            onPointerDown={handleRailPointerDown}
+            onPointerMove={handleRailPointerMove}
+            onPointerUp={endRailResize}
+            onPointerCancel={endRailResize}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize admin sections"
+          />
+        )}
       </nav>
 
       <div className={styles.content}>
+        {/* ⭐⭐ THE READ THAT FAILED IS THE WHOLE SCREEN'S READ, SO IT IS SAID ON
+            EVERY TAB. This line used to live inside the Hierarchy branch alone —
+            which was fine while everyone who could open this screen could see
+            that tab, and stopped being fine at D114: a supervisor lands on
+            Operators, so the one read every section is scoped by could fail and
+            leave them looking at a screen with nothing on it and no alert
+            anywhere. That is the same "is it broken or am I not allowed?"
+            question the empty-scope branch above exists to answer, arriving by
+            the other road — and it MUST NOT share that branch's wording, because
+            this one is worth refreshing and that one is not.
+            ⚠️ It names the SCOPE rather than the hierarchy: on the Operators tab
+            "couldn't load the hierarchy" would sound like somebody else's
+            problem, when what is missing is the list of places this whole screen
+            is filtered by. */}
+        {isError && (
+          <p className={styles.status} role="alert">
+            Couldn&rsquo;t load which parts of the company you can see, so this screen may be
+            showing less than it should. Try refreshing the page.
+          </p>
+        )}
         {/* ⭐ SPELLED OUT, ALWAYS, WHENEVER IT APPLIES — see the block above.
             The `<select>` IS the chip: it names the plant in the header of
             every section rather than hiding the state behind a menu.
@@ -562,11 +939,10 @@ export default function AdminPage() {
                 That is §19.8's exact mistake — guarding the cache but not the
                 loading flag — and it is why `decideSessionUpdate` exists. */}
             {(!canQuery || isLoading) && <p className={styles.status}>Loading…</p>}
-            {isError && (
-              <p className={styles.status} role="alert">
-                Couldn't load the hierarchy. Try refreshing the page.
-              </p>
-            )}
+            {/* The failure line moved UP, to `.content`, so it reaches every
+                section rather than this one — see its comment there. It is not
+                repeated here: two alerts for one failed read is two things to
+                keep in step and one of them would drift. */}
             {data && (
               // `ShapePicker` renders above `LevelEditor` in the left
               // column (§7.3); `NodeTreeEditor` still spans the full right
@@ -643,9 +1019,11 @@ export default function AdminPage() {
             <h1 className={styles.h1}>Access</h1>
             <SiteAccessPanel
               places={visibleAccessPlaces}
+              nodes={accessNodes}
               treeLoading={hierarchyLoading}
               viewerProfileId={profile?.id ?? null}
               viewerIsCompanyAdmin={profile?.role === "admin"}
+              viewerAdminAnywhere={profile?.adminAnywhere === true}
             />
           </>
         )}
@@ -666,6 +1044,13 @@ export default function AdminPage() {
           <>
             <h1 className={styles.h1}>Operators</h1>
             <OperatorsPanel />
+          </>
+        )}
+
+        {activeSection === "absences" && (
+          <>
+            <h1 className={styles.h1}>Absences</h1>
+            <AbsencesPanel />
           </>
         )}
 
@@ -704,10 +1089,28 @@ export default function AdminPage() {
           </>
         )}
 
+        {activeSection === "templates" && (
+          <>
+            <h1 className={styles.h1}>Templates</h1>
+            <TemplatesPanel />
+          </>
+        )}
+
         {activeSection === "settings" && (
           <>
             <h1 className={styles.h1}>Settings</h1>
             <SettingsPanel />
+          </>
+        )}
+
+        {/* ⚠️ THE HEADING IS "Activity", NOT "Audit log". The rail label and the
+            heading are the same word for the same reason every other section's
+            are, and "activity" is what a person looking for "who changed this"
+            would scan for. The panel itself is `AuditPanel`, after the table. */}
+        {activeSection === "audit" && (
+          <>
+            <h1 className={styles.h1}>Activity</h1>
+            <AuditPanel />
           </>
         )}
       </div>

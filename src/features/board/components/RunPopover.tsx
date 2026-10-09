@@ -36,7 +36,9 @@ export function RunPopover({
   anchor,
   windowStart,
   dateFormat = DEFAULT_DATE_FORMAT,
+  zone,
   products,
+  readOnly = false,
   onCancel,
   onSave,
   onDelete,
@@ -46,7 +48,15 @@ export function RunPopover({
   anchor: { x: number; y: number };
   windowStart: Date;
   dateFormat?: DateFormat;
+  zone?: string;
   products: Product[];
+  /**
+   * DEF-0015 / R-239 / R-346: true for a viewer. The run's details are shown —
+   * product, planned headcount, notes, time, crew — but no editable field and
+   * no Save or Delete, only Close, because the server refuses those writes for
+   * this person. Decided in `BoardPage` from the server's `can_place`.
+   */
+  readOnly?: boolean;
   onCancel: () => void;
   onSave: (runId: string, notes: string | null, plannedHeadcount: number | null) => void;
   onDelete: (runId: string, mode: "cascade" | "detach") => void;
@@ -58,7 +68,33 @@ export function RunPopover({
 
   const staffedHc = crew.reduce((sum, a) => sum + a.efficiencyPercent / 100, 0);
   const product = products.find((p) => p.id === productId);
-  const timeLabel = `${formatFull(addMinutes(windowStart, run.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, run.endMin))} · staffed ${formatNumber(staffedHc)}/${run.plannedHeadcount ?? "—"}`;
+  const timeLabel = `${formatFull(addMinutes(windowStart, run.startMin), dateFormat, zone)} – ${formatClock(addMinutes(windowStart, run.endMin), zone)} · staffed ${formatNumber(staffedHc)}/${run.plannedHeadcount ?? "—"}`;
+
+  // DEF-0015 / R-239 / R-346: the viewer's pop-up. Details shown, no editable
+  // field and no Save or Delete, only Close — the server refuses those writes.
+  if (readOnly) {
+    return (
+      <BoardPopover
+        anchor={anchor}
+        onClose={onCancel}
+        title={`Run — ${product?.name ?? productId}`}
+      >
+        <div className={styles.body}>
+          <div className={styles.time}>Planned headcount: {run.plannedHeadcount ?? "—"}</div>
+          {run.notes ? <div className={styles.time}>Notes: {run.notes}</div> : null}
+          <div className={styles.time}>{timeLabel}</div>
+          {crew.length > 0 && (
+            <div className={styles.time}>{crew.length} crew assigned to this run.</div>
+          )}
+          <div className={styles.row}>
+            <button type="button" onClick={onCancel}>
+              Close
+            </button>
+          </div>
+        </div>
+      </BoardPopover>
+    );
+  }
 
   return (
     <BoardPopover anchor={anchor} onClose={onCancel} title={`Run — ${product?.name ?? productId}`}>

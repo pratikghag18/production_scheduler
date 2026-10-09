@@ -1,0 +1,204 @@
+# S43-a — fine-tuning the voice model on Google Colab
+
+This is the maintainer's step-by-step for turning the training set (S42-a) into a scored
+model. Written for someone who has never opened Colab. Background: `docs/voice-commands-plan.md`
+("Is a small local model enough", "Stage 4"), `docs/agent-briefs/s43-a-first-model-brief.md`.
+
+Nothing in the app changes from running this. No model is served until its score clears the bar.
+
+## What the pieces are
+
+| file                                        | what                                                                                                                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `scripts/voice/train/prepare.mjs`           | turns `data/voice/train.jsonl` and the committed `data/voice/heldout.jsonl` into the four files Colab needs (the three data files plus a stamped COPY of the notebook, F-148)  |
+| `scripts/voice/train/system_prompt.txt`     | the short system prompt (R-417) — read by `prepare.mjs` and, through `manifest.json`, by the notebook; the one that trains and serves the model; never retyped in either place |
+| `scripts/voice/train/system_prompt.long.md` | the long form of the prompt, kept as the human-readable description of every field (R-417). Not read by any code since 15 Sept — documentation only                            |
+| `scripts/voice/train/train_qwen3.ipynb`     | the Colab notebook that fine-tunes Qwen3 1.7B and scores it                                                                                                                    |
+| `scripts/voice/train/score_port.py`         | a Python port of `scripts/voice/score.mjs`'s arithmetic — the notebook's own table, and a standalone check you can run here                                                    |
+| `scripts/voice/train/check_notebook.py`     | pulls every code cell out of the notebook and checks it compiles — no GPU or Colab needed                                                                                      |
+
+## Steps
+
+1. **On this machine:** `npm run voice:generate` (writes `data/voice/train.jsonl`, gitignored,
+   7000 rows) then `npm run voice:prepare`. The folder `data/voice/colab/` now holds four files:
+   `train.chat.jsonl`, `heldout.jsonl`, `manifest.json`, and a COPY of the notebook,
+   `train_qwen3.ipynb`, with this run's own fingerprints baked into its Settings cell (F-148 —
+   see step 2). The command prints the manifest — check `trainRows` and `heldoutRows` look
+   right, and note `ruleParserBaseline`: that is the number the trained model has to beat.
+
+2. **Google Drive:** make a folder `scheduler-voice/data` (first time only). **Delete every file
+   already in that folder before uploading**, then upload the three data files from
+   `data/voice/colab/` there (`train.chat.jsonl`, `heldout.jsonl`, `manifest.json` — the notebook
+   copy goes to Colab itself, step 3 below, not to this Drive folder), and check each file's size
+   and date in the Drive folder afterward. Do this every run: the fifth Colab run found all three
+   data files stale on Drive, including `manifest.json` itself — an old same-named file had been
+   left in place instead of the one that run actually prepared. How is not known (a same-named web
+   upload is one way that can happen, but the maintainer found no evidence it was); delete-then-
+   upload-then-check is the reliable habit regardless of cause. The notebook's own data-load cell
+   is the real check — it refuses to proceed on a stale file (F-148), naming which one and both
+   hashes and row counts, rather than silently training or scoring against the wrong data.
+
+3. **Colab:** open `data/voice/colab/train_qwen3.ipynb` — the COPY `npm run voice:prepare` just
+   wrote, with this run's fingerprints baked in — NOT `scripts/voice/train/train_qwen3.ipynb`, the
+   source file in the repo, which carries only a placeholder and refuses to run at all (F-148:
+   "this notebook has not been prepared"). (File → Upload notebook.) Also upload
+   `scripts/voice/train/score_port.py` into the notebook's own file browser (the folder icon on
+   the left, drag the file in, or use its upload button) — the scoring cell imports it from
+   `/content/score_port.py` and fails with a plain message if it is missing. Then:
+   Runtime → Change runtime type → T4 GPU, then Runtime → Run all. The first code cell to run
+   after mounting Drive checks the three data files there against this notebook's own baked-in
+   fingerprints and prints one line per file confirming it matches, or refuses (F-148) naming
+   whichever file is stale, before touching training or prediction at all. Measured on the second
+   run,
+   a T4 with fp16 and batch 16 x 2: training took over an hour and the (then 400-row, then 500-row
+   -- S50 added a fifth intent, `several`, then 800-row -- S56 added replace/swap/copy, an eighth
+   intent, now 1000-row -- S58 added split/headcount, a tenth) Predict cell about another hour
+   (one row at a time, six to nine seconds each), so plan on at least two and a half hours end to
+   end on a T4 -- the Predict cell's own share of that grows roughly with the held-out row count
+   (500 to 1000 is +100%), so treat "two and a half hours" as the pre-S56 floor, not a fresh
+   measurement, until the maintainer's next real run confirms it.
+   The "30 to 60 minutes" this file said before was an estimate, not a
+   measurement. A paid L4 runs the same notebook unchanged (it picks bf16 by itself) in roughly
+   a third of the time; switch runtimes between cells, never mid-training, because a checkpoint
+   saved under fp16 resumes badly under bf16. The first run trained on bf16 emulation (a T4 has
+   no bf16 hardware, but a recent torch answers "supported" anyway) and took over six hours
+   before that was caught. If
+   the session disconnects mid-training, run it again — training resumes from its last
+   checkpoint (saved every 50 steps on Drive) instead of restarting.
+
+   To stop a training run cleanly by hand instead of waiting for a disconnect: interrupt the
+   training cell (the stop button), then run a new cell containing
+   `trainer.save_model(ADAPTER_DIR); tokenizer.save_pretrained(ADAPTER_DIR)`, then use
+   Runtime → "Run after" from the Predict cell to continue without retraining. A `Run all` on
+   any later day finds that saved adapter and, if it matches the CURRENT data, prints that
+   training is being skipped and goes straight to prediction and scoring.
+
+   The notebook now refuses an adapter or a checkpoint trained on OTHER data on its own
+   (F-147): beside `adapter_config.json` and beside the newest `checkpoint-<step>`, the Train
+   cell writes its own `trained-on.json` (the manifest's `gitSha`, `trainRows`, `heldoutRows`,
+   `seeds`, and — F-148 — `train.chat.jsonl`'s and `heldout.jsonl`'s sha256, taken from
+   `manifest.json`'s own `files` block rather than re-hashed, since the data-load cell has
+   already checked that block against Drive) the moment training starts or finishes.
+   Before skipping training or resuming a checkpoint, that stamp is read back and compared
+   field by field against the CURRENT run's own data; a mismatch prints both sides and stops
+   the cell (`raise SystemExit`) — no setting overrides a mismatch. A folder with no stamp at
+   all (an adapter or a checkpoint saved before this change) is refused the same way, unless,
+   for the adapter only, `ALLOW_UNSTAMPED_ADAPTER = True` is set in the Settings cell to
+   knowingly reuse it as is. This closes the same hole F-145 closed for `predictions.jsonl` one
+   folder over — the fifth run found the fourth run's adapter this way and nearly scored the
+   fifth run's held-out set against the wrong model.
+
+   The only reason to delete the adapter folder (`scheduler-voice/run-qwen3-1.7b/adapter`) or
+   the `checkpoints` folder under the same run folder now is to retrain on the SAME data —
+   the notebook already refuses to reuse either one across different data by itself. (Before
+   F-147, a checkpoint saved under an old `MAX_LEN`, F-142 say, would resume as if nothing had
+   changed; that is exactly the case the stamp now catches.)
+
+   The Predict cell prints its first row's timing alone — `first row: 1.3s for 42 tokens` — so
+   an emulated-precision slow path (see above) is visible within seconds instead of a blank cell
+   for the whole 1000-row pass (S58: 100 rows each across ten intents, `split`/`headcount` now
+   included alongside `replace`/`swap`/`copy`), then one line every 25 rows: `225/1000 rows, 310s,
+0.73 rows/s, 2 failed to parse`. It writes `predictions.jsonl` one row at a time as each is decided, not all
+   at once at the end, so a session killed mid-prediction (Colab's free tier has a two-hour
+   deadline) can just be re-run: it skips the ids already in the file and prints how many, and
+   continues from there instead of starting the 1000 rows over. That resume is by id, and only
+   safe against the SAME `heldout.jsonl` it started against (F-145: the fourth Colab run's
+   `predictions.jsonl` was resumed against a `heldout.jsonl` that had been silently regenerated
+   under it, so 400 predictions answered sentences that were no longer in the committed file).
+   Re-running the Predict cell on a DIFFERENT held-out file must start from a deleted
+   `predictions.jsonl` — the cell now refuses to resume across files, checking each existing
+   row's `sentence` against the current held-out row of the same id and stopping with an
+   F-145 message before skipping anything if they differ (or if the file predates this check).
+
+4. **When it finishes**, download `predictions.jsonl` and `model-q4_k_m.gguf` from the run
+   folder in Drive (`scheduler-voice/run-qwen3-1.7b/`, a fixed name — the exact path is printed
+   by the Settings cell and again by the last markdown cell) into `data/voice/runs/<timestamp>/`
+   locally (gitignored).
+
+5. **Score it here** — this is the number that counts, not the notebook's own printout:
+
+   ```
+   node scripts/voice/score.mjs --heldout data/voice/heldout.jsonl --predictions data/voice/runs/<timestamp>/predictions.jsonl --bar 0.95
+   ```
+
+   Paste the table to the developer session; it goes on S43's card. The scorer checks the
+   sentences too (F-145): a `predictions.jsonl` written by the current notebook carries each
+   row's `sentence` alongside `id`/`form`, and the scorer refuses to print a table at all if any
+   of them does not match the held-out row of the same id — a plain sign the predictions file
+   and the held-out file disagree, instead of a silently wrong score. A `predictions.jsonl` from
+   before this change (no `sentence` field on any row) still scores, with one extra line in the
+   summary: `sentences not checked: N rows (predictions from before F-145)`.
+
+6. **What "good" looks like:** clean at or above 95%; perturbed far above the rule parser's
+   baseline (`ruleParserBaseline.perturbed` in the manifest — currently 8.6% (S58: up from 4.75%
+   once split/headcount joined and gave the same perturbation catalogue more surface to land on;
+   S56 review: that 4.75% was itself down from 6.25% once a reviewer fix stopped two templates
+   drawing the never-said "this night" and filled in A14-duration's missing "half an
+   hour"/decimal spellings, which changed which sentences land on a perturbable word at all; up
+   from S52-c's own 5.2% before replace/swap/copy joined); the plan expects
+   90% or better on sentences shaped like the training ones). A field the model invents that
+   the training data never had (`"type":"assign"`, say) does not fail a row by itself — the
+   scorer ignores any key the expected form does not have and reports it on the "extra keys
+   ignored" line instead, since the resolver only ever reads the fields it knows. Below the
+   bar, the developer session changes the settings cell or the data, not the board.
+
+## What you can check without Colab, on this machine
+
+- `npm run voice:prepare` runs end to end, prints a manifest, and writes a stamped notebook
+  copy to `data/voice/colab/train_qwen3.ipynb` (F-148) — upload that, not
+  `scripts/voice/train/train_qwen3.ipynb`.
+- `npx vitest run src/test/voiceTrain.test.ts src/test/voiceData.test.ts` — the pure pieces
+  (the chat-row format, the predictions-file round trip through `score.mjs`, the manifest's
+  sample) and the training-set generator underneath it.
+- `python -m py_compile scripts/voice/train/score_port.py` and
+  `python scripts/voice/train/check_notebook.py` — every code cell in the notebook is
+  syntactically valid Python, checked without `torch` or `transformers` installed (compilation
+  checks syntax only; it does not run the cells or need the imports to resolve).
+- `python scripts/voice/train/score_port.py data/voice/heldout.jsonl <a predictions file>`
+  prints the same numbers as `npm run voice:score` on the same file — built and checked once,
+  in the report for S43-a.
+
+## What is NOT checked without a GPU
+
+The training cells themselves — the model loads, the LoRA adapter trains, generation produces
+usable JSON, the merge and GGUF export run, `llama-quantize` builds and runs — are **unverified
+until the maintainer's first real run in Colab**. This lane has no GPU and cannot reach Colab.
+Library APIs used (`SFTConfig(assistant_only_loss=True)`, `apply_chat_template(...,
+enable_thinking=False)`, `dtype=` on `from_pretrained`) are believed current for the pinned
+versions as of 12 Sept 2026 (see the install cell's comments and the S43-a report for how each
+version was chosen), but "believed current" is not "run and passed". If a cell errors on first
+run, that is expected findings work, not a sign the notebook was never tried — say what failed
+and paste it back to the developer session.
+
+Three things the first real Colab run already found and the notebook now works around: (1)
+`transformers.set_seed` imports TensorFlow to check `is_tf_available()`, and Colab's TensorFlow
+broke under a protobuf version installed later in the same cell, so the install and load-data
+cells now force `transformers` off the TensorFlow path outright; (2) llama.cpp's own
+`requirements-convert_hf_to_gguf.txt` silently downgraded `transformers` to 4.57.6 (and would
+have swapped `torch` for a CPU-only 2.11.0 build), so the install cell no longer installs that
+file at all, only the two packages the converter script itself needs beyond what is already
+present; (3) `peft`'s LoRA tuner refused Colab's preinstalled `torchao` 0.10.0 (it wants
+`>=0.16.0`) the moment `get_peft_model()` probed for it, so the install cell now uninstalls
+`torchao` outright, since this pipeline never uses it. Expect more of this shape on the next
+run — Colab's preinstalled packages are not this repo's to pin, and any of them can surprise a
+pinned five.
+
+The Setup cell may be run again in the same runtime — a Colab disconnect and reconnect, say —
+without failing on the llama.cpp clone; it checks for `convert_hf_to_gguf.py` in
+`/content/llama.cpp` first and skips the clone when the folder is already there (F-141).
+
+Two real runs scored `product` at 2.5% before the cause was found: `MAX_LEN = 512` was shorter
+than a full training conversation, so `SFTConfig(max_length=MAX_LEN)` silently cut every row off
+before the answer — the system prompt alone ran 450 tokens then, and the answer comes last.
+`MAX_LEN` went 1280 (raised from 1024 in S50, when the widened prompt and a several of three
+measured about 940 tokens) to 1536 at S56's first pass and to 1792 at its second, when
+replace/swap/copy and the widened grammar's own longer sentences pushed the longest chat row to
+about 1449 tokens — and back down to 512 at S56-c (R-417), when the fifth run's ~1,500-token
+system prompt moved to documentation (`system_prompt.long.md`) and training and serving switched
+to the ~178-token short prompt in `system_prompt.txt`, re-measured the same way against the
+regenerated `train.chat.jsonl` at 436 tokens for the longest row. `512` here is a coincidence, not
+a reversion to the F-142 bug: it comes from the same "next 128 above the measured maximum" rule
+as every other value in this history, and the cell after the chat-template round trip tokenises
+every training conversation the same way the trainer will, prints the median and longest length
+seen, and asserts the longest is under `MAX_LEN` before training is allowed to start (F-142) — so
+an undersized `MAX_LEN` still cannot pass silently.

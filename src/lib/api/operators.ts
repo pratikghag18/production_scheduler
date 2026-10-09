@@ -43,12 +43,17 @@
    --------------------------------------------------------------------------- */
 import { supabase } from "@/lib/supabase";
 import { requireWritten, shapeMismatch, toSchedulerError } from "./errors";
+import { fetchAll } from "./paging";
 import type { BoardNode, HierarchyLevel } from "./shapes";
 
 // ---------------------------------------------------------------------------
-// Row shapes. camelCase out; `home_node_id` and `certified_at` are read by
-// NOTHING in this app and are deliberately absent — a field on a type is an
-// invitation to surface it.
+// Row shapes. camelCase out; `certified_at` is read by NOTHING in this app
+// and is deliberately absent — a field on a type is an invitation to surface
+// it. `home_node_id` USED to be the other one and is not any more (DEF-0035):
+// `AbsencesPanel`'s Person list has to mirror `set_absence`'s own gate,
+// `app_can_edit_node(coalesce(home_node_id, site_node_id))`
+// (`20260907000069_absence_by_the_hour.sql:285`), and `site_node_id` alone is
+// the wrong half of that coalesce whenever the two differ.
 // ---------------------------------------------------------------------------
 
 export interface OperatorRecord {
@@ -70,6 +75,26 @@ export interface OperatorRecord {
   /** `'manual'` by default; an imported person carries their source here. */
   source: string;
   externalId: string | null;
+  /**
+   * R-441/R-443, migration 0082: the BAND this person normally works, by id
+   * -- never its name (a rename or an hours change carries everyone along
+   * because the pointer survives it, D137's correction). `null` = no home
+   * band recorded, which `shift_fit` answers `no_shift` for.
+   */
+  homeShiftId: string | null;
+  /**
+   * `operators.home_node_id` — DEF-0035, added additively (nothing renamed,
+   * `home_shift_id`'s own pattern above). Nullable, "an unenforced
+   * roster-filter default pointing at any node"
+   * (`20260827000023_shared_list_owners.sql:89`) — NOT the ownership root
+   * `siteNodeId` names. `set_absence` / `remove_absence` gate on
+   * `coalesce(home_node_id, site_node_id)`, never on `site_node_id` alone, so
+   * a screen that mirrors that gate has to carry this column too or it
+   * disagrees with the server for every person whose home differs from their
+   * site. `null` = no home node recorded, which the same coalesce reads as
+   * "use the site".
+   */
+  homeNodeId: string | null;
 }
 
 export interface SkillRecord {
@@ -180,10 +205,34 @@ export function parseOperatorRecord(v: unknown): OperatorRecord | null {
   const siteNodeId = str(v.site_node_id);
   const source = str(v.source);
   const externalId = strOrNull(v.external_id);
+  // R-441 / 0082: nullable (most people have no home band yet), so
+  // `strOrNull` — `undefined` (the key absent) still rejects the row, the
+  // same contract every other column here keeps.
+  const homeShiftId = strOrNull(v.home_shift_id);
+  // DEF-0035: nullable the same way, and for the same reason -- `strOrNull`
+  // so a missing SELECT is rejected rather than silently read as "no home".
+  const homeNodeId = strOrNull(v.home_node_id);
   if (id === null || displayName === null || source === null || siteNodeId === null) return null;
-  if (employeeRef === undefined || externalId === undefined) return null;
+  if (
+    employeeRef === undefined ||
+    externalId === undefined ||
+    homeShiftId === undefined ||
+    homeNodeId === undefined
+  ) {
+    return null;
+  }
   if (typeof v.active !== "boolean") return null;
-  return { id, displayName, employeeRef, active: v.active, siteNodeId, source, externalId };
+  return {
+    id,
+    displayName,
+    employeeRef,
+    active: v.active,
+    siteNodeId,
+    source,
+    externalId,
+    homeShiftId,
+    homeNodeId,
+  };
 }
 
 export function parseSkillRecord(v: unknown): SkillRecord | null {
@@ -297,12 +346,33 @@ export interface OperatorsAdminData {
 }
 
 export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
-  const [operatorsRes, skillsRes, operatorSkillsRes, requirementsRes, nodesRes, levelsRes] =
+  // All six are paged to exhaustion through `fetchAll`, which THROWS on a failed
+  // OR a short read (paging.ts) — the same "all six throw" contract as before,
+  // now also proof against `max_rows = 1000` silently truncating any of them.
+  // Every one is this screen's content: without any of them the answer to
+  // "where can this person work" is not a shorter list, it is a WRONG list, and
+  // a wrong list here reads as a tick.
+  const [operatorRows, skillRows, operatorSkillRows, requirementRows, nodeRows, levelRows] =
     await Promise.all([
-      supabase
-        .from("operators")
-        .select("id, display_name, employee_ref, active, site_node_id, source, external_id")
-        .order("display_name"),
+      // ⚠️ EVERY ORDER ENDS IN A UNIQUE KEY. `.range()` pages an ordered list,
+      // and a non-unique order (or none) lets rows change pages between requests
+      // — a skip or repeat past 1000 rows that still looks complete (paging.ts).
+      // The entity reads end in `id` (the PK); the two join tables carry no `id`
+      // and are ordered on their full composite PK instead.
+      fetchAll((from, to) =>
+        supabase
+          .from("operators")
+          // ⚠️ WAS A SECOND, INLINE COPY OF OPERATOR_COLUMNS (below), found
+          // while adding home_shift_id (S66-a, CLAUDE.md §4: "a column list
+          // that appears twice is a bug with a delay on it"). Unified onto
+          // the one constant so the next column cannot be added to one copy
+          // and not the other, the exact defect apiSkillShape.test.ts exists
+          // to catch on SKILL_COLUMNS/OPERATOR_SKILL_COLUMNS.
+          .select(OPERATOR_COLUMNS)
+          .order("display_name")
+          .order("id")
+          .range(from, to),
+      ),
       // ⚠⚠ `SKILL_COLUMNS`, NEVER A SECOND COPY OF THE SAME LIST. This read
       // spelled the columns out inline, so when `active` was added to the
       // constant and `parseSkillRecord` began REQUIRING it, this call kept
@@ -311,7 +381,9 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
       // Operators screen with nothing to grant. §19.76's rule with the
       // arrow reversed: there, a nullable COLUMN broke a hand-written guard;
       // here, a stricter GUARD broke a hand-written column list.
-      supabase.from("skills").select(SKILL_COLUMNS).order("name"),
+      fetchAll((from, to) =>
+        supabase.from("skills").select(SKILL_COLUMNS).order("name").order("id").range(from, to),
+      ),
       // ⚠⚠ `OPERATOR_SKILL_COLUMNS`, AND THIS IS THE SAME BUG TWICE IN ONE
       // FILE. The `skills` read a few lines up spelled its columns out inline
       // too; when `active` was added to the constant and the parser began
@@ -322,35 +394,46 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
       // rather than by anything the suite could see.
       // ⭐ **A column list that appears twice is a bug with a delay on it.**
       // `apiSkillShape.test.ts` now holds both pairs to each other.
-      supabase.from("operator_skills").select(OPERATOR_SKILL_COLUMNS),
-      supabase.from("node_skill_requirements").select("node_id, skill_id"),
-      supabase
-        .from("nodes")
-        .select("id, parent_id, level_id, name, path, sort_order, active")
-        .order("sort_order"),
-      supabase
-        .from("hierarchy_levels")
-        .select("id, template_id, position, name, is_schedulable")
-        .order("position"),
+      fetchAll((from, to) =>
+        supabase
+          .from("operator_skills")
+          .select(OPERATOR_SKILL_COLUMNS)
+          .order("operator_id")
+          .order("skill_id")
+          .range(from, to),
+      ),
+      fetchAll((from, to) =>
+        supabase
+          .from("node_skill_requirements")
+          .select("node_id, skill_id")
+          .order("node_id")
+          .order("skill_id")
+          .range(from, to),
+      ),
+      fetchAll((from, to) =>
+        supabase
+          .from("nodes")
+          .select("id, parent_id, level_id, name, path, sort_order, active")
+          .order("sort_order")
+          .order("id")
+          .range(from, to),
+      ),
+      fetchAll((from, to) =>
+        supabase
+          .from("hierarchy_levels")
+          .select("id, template_id, position, name, is_schedulable")
+          .order("position")
+          .order("id")
+          .range(from, to),
+      ),
     ]);
 
-  // All six THROW on error, with no `editable_shape_ids`-style exception.
-  // Every one of them is this screen's content: without any of them the
-  // answer to "where can this person work" is not a shorter list, it is a
-  // WRONG list — and a wrong list here reads as a tick.
-  if (operatorsRes.error) throw toSchedulerError(operatorsRes.error);
-  if (skillsRes.error) throw toSchedulerError(skillsRes.error);
-  if (operatorSkillsRes.error) throw toSchedulerError(operatorSkillsRes.error);
-  if (requirementsRes.error) throw toSchedulerError(requirementsRes.error);
-  if (nodesRes.error) throw toSchedulerError(nodesRes.error);
-  if (levelsRes.error) throw toSchedulerError(levelsRes.error);
+  const operators = parseList(operatorRows, parseOperatorRecord);
+  const skills = parseList(skillRows, parseSkillRecord);
+  const operatorSkills = parseList(operatorSkillRows, parseOperatorSkillRecord);
+  const requirements = parseList(requirementRows, parseNodeSkillRequirementRecord);
 
-  const operators = parseList(operatorsRes.data, parseOperatorRecord);
-  const skills = parseList(skillsRes.data, parseSkillRecord);
-  const operatorSkills = parseList(operatorSkillsRes.data, parseOperatorSkillRecord);
-  const requirements = parseList(requirementsRes.data, parseNodeSkillRequirementRecord);
-
-  const nodes: BoardNode[] = (nodesRes.data ?? []).map((r) => ({
+  const nodes: BoardNode[] = nodeRows.map((r) => ({
     id: r.id,
     parentId: r.parent_id,
     levelId: r.level_id,
@@ -364,7 +447,7 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
     sortOrder: r.sort_order,
     active: r.active,
   }));
-  const levels: HierarchyLevel[] = (levelsRes.data ?? []).map((r) => ({
+  const levels: HierarchyLevel[] = levelRows.map((r) => ({
     id: r.id,
     templateId: r.template_id,
     position: r.position,
@@ -413,8 +496,11 @@ export async function fetchOperatorsAdmin(): Promise<OperatorsAdminData> {
  *                                         without `requireWritten`.
  * =========================================================================== */
 
-const OPERATOR_COLUMNS =
-  "id, display_name, employee_ref, active, site_node_id, source, external_id";
+// ⭐ EXPORTED so a test can hold it against `parseOperatorRecord`, the same
+// pairing `SKILL_COLUMNS`/`parseSkillRecord` and `OPERATOR_SKILL_COLUMNS` are
+// exported for below (homeShift.test.ts, added with home_shift_id).
+export const OPERATOR_COLUMNS =
+  "id, display_name, employee_ref, active, site_node_id, source, external_id, home_shift_id, home_node_id";
 /**
  * ⚠⚠ EXPORTED SO A TEST CAN HOLD IT AND `parseSkillRecord` TO EACH OTHER.
  * They are two halves of one contract — what we ask the database for, and what
@@ -451,6 +537,12 @@ export interface CreateOperatorInput {
    * What survives is the org check: the node must exist in this org.
    */
   siteNodeId: string;
+  /**
+   * R-441 / 0082: the band this person normally works. Optional — most
+   * people are created with none and given one later; omit for "no home
+   * band", the column's own default (NULL).
+   */
+  homeShiftId?: string | null;
 }
 
 export async function createOperator(input: CreateOperatorInput): Promise<OperatorRecord> {
@@ -461,6 +553,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Operat
       display_name: input.displayName,
       employee_ref: input.employeeRef,
       site_node_id: input.siteNodeId,
+      home_shift_id: input.homeShiftId ?? null,
     })
     .select(OPERATOR_COLUMNS);
   if (error) throw toSchedulerError(error);
@@ -485,15 +578,34 @@ export interface UpdateOperatorInput {
    * the old owner while the screen showed the new one.
    */
   siteNodeId?: string;
+  /**
+   * R-441 / 0082: the band this person normally works. **Omit the field to
+   * leave it alone; pass `null` to clear it.** Nullable, unlike `siteNodeId`
+   * above, so `undefined` and `null` are two different answers here — the
+   * same `in`-tested contract `updateSkillRecord` keeps for its own nullable
+   * columns, not the `!== undefined` one `siteNodeId` uses for its NOT NULL
+   * column.
+   */
+  homeShiftId?: string | null;
 }
 
 export async function updateOperator(input: UpdateOperatorInput): Promise<OperatorRecord> {
-  const patch: { display_name: string; employee_ref: string | null; site_node_id?: string } = {
+  const patch: {
+    display_name: string;
+    employee_ref: string | null;
+    site_node_id?: string;
+    home_shift_id?: string | null;
+  } = {
     display_name: input.displayName,
     employee_ref: input.employeeRef,
   };
   // Only when the caller actually supplied it — see the interface comment.
   if (input.siteNodeId !== undefined) patch.site_node_id = input.siteNodeId;
+  // `in`, not `!== undefined`: home_shift_id is NULLABLE, so `null` (clear
+  // it) and "not supplied" (leave it alone) must read as two different
+  // things — the same test updateSkillRecord uses for its own nullable
+  // columns.
+  if ("homeShiftId" in input) patch.home_shift_id = input.homeShiftId ?? null;
 
   const { data, error } = await supabase
     .from("operators")
@@ -533,6 +645,62 @@ export async function deleteOperator(id: string): Promise<void> {
   const { data, error } = await supabase.from("operators").delete().eq("id", id).select("id");
   if (error) throw toSchedulerError(error);
   requireWritten(data as unknown[] | null);
+}
+
+/* ===========================================================================
+ * R-443 (S66-b): retiring a band or its pattern. `ShiftsPanel` needs to warn
+ * with a COUNT of the people who point at the band being retired before it
+ * lets the delete through — but that screen has no reason to carry the whole
+ * operators-admin payload (skills, tickets, requirements, the tree) just to
+ * count and name a handful of rows. This is that "smallest read": the id,
+ * name, reference and home band of every person who HAS a home band, nothing
+ * else. `fetchOperatorsAdmin` above stays the one read the Operators tab
+ * itself uses; this is a second, narrower one for a screen that is not it.
+ * =========================================================================== */
+
+export interface HomeShiftHolder {
+  id: string;
+  displayName: string;
+  employeeRef: string | null;
+  homeShiftId: string;
+}
+
+function parseHomeShiftHolder(v: unknown): HomeShiftHolder | null {
+  if (!isRecord(v)) return null;
+  const id = str(v.id);
+  const displayName = str(v.display_name);
+  const employeeRef = strOrNull(v.employee_ref);
+  const homeShiftId = str(v.home_shift_id);
+  if (id === null || displayName === null || homeShiftId === null || employeeRef === undefined) {
+    return null;
+  }
+  return { id, displayName, employeeRef, homeShiftId };
+}
+
+/**
+ * Every operator who currently has a home band, org-wide (RLS-scoped to the
+ * caller, same as every other read in this file). Skip-and-count is not worth
+ * it here — a row this cannot read is a row `ShiftsPanel`'s warning would
+ * otherwise silently under-count, so an unreadable row is dropped and the
+ * caller's own UI says the count came from what could be read, exactly as
+ * every list in this app already qualifies a possibly-partial number.
+ */
+export async function fetchHomeShiftHolders(): Promise<HomeShiftHolder[]> {
+  const rows = await fetchAll((from, to) =>
+    supabase
+      .from("operators")
+      .select("id, display_name, employee_ref, home_shift_id")
+      .not("home_shift_id", "is", null)
+      .order("home_shift_id")
+      .order("id")
+      .range(from, to),
+  );
+  const out: HomeShiftHolder[] = [];
+  for (const row of rows) {
+    const parsed = parseHomeShiftHolder(row);
+    if (parsed !== null) out.push(parsed);
+  }
+  return out;
 }
 
 export interface CreateSkillInput {
@@ -666,15 +834,13 @@ export async function setSkillDocumentNumber(
   return firstOrThrow(data, parseSkillRecord, "setSkillDocumentNumber");
 }
 
-export async function renameSkill(input: { id: string; name: string }): Promise<SkillRecord> {
-  const { data, error } = await supabase
-    .from("skills")
-    .update({ name: input.name })
-    .eq("id", input.id)
-    .select(SKILL_COLUMNS);
-  if (error) throw toSchedulerError(error);
-  return firstOrThrow(data, parseSkillRecord, "renameSkill");
-}
+// ⚠️ `renameSkill` USED TO SIT HERE AND IS GONE (D105). It patched `name`
+// alone, which is why a training's owner was settable once at creation and
+// never again — the limitation the Trainings hint used to admit to.
+// `updateSkill` below replaced it: an ABSENT key means "leave it alone", so a
+// rename still sends only a name, and the owner became editable in the same
+// write. Nothing had called it since; removed so the next reader does not pick
+// the narrower of two functions that look interchangeable.
 
 export interface UpdateSkillInput {
   id: string;

@@ -1,0 +1,11 @@
+# DEF-0058 (R-366). Every text file is checked out with LF on every machine,
+# whatever core.autocrlf says. Git for Windows defaults to autocrlf=true, and a
+# fresh checkout (the tester's worktree, a clone, a branch switch) then wrote
+# the shell runner and the .mjs scripts with CRLF: bash refused
+# scripts/run-sql-test.sh at its `set -o pipefail` line, and a script that opens
+# with a shebang failed to import. The index has always held LF; this makes the
+# working tree hold what the index and CI hold.
+* text=auto eol=lf
+
+# Pictures are never text.
+*.png binary

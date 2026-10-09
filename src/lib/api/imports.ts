@@ -199,6 +199,8 @@ async function insertImportedOperator(input: {
   externalId: string | null;
   siteNodeId: string;
   source: string;
+  /** R-441/R-443 (S66-b): the band the plan matched by name, or `null`. */
+  homeShiftId: string | null;
 }): Promise<string> {
   const payload: OperatorInsert = {
     org_id: input.orgId,
@@ -207,6 +209,7 @@ async function insertImportedOperator(input: {
     site_node_id: input.siteNodeId,
     external_id: input.externalId,
     source: input.source,
+    home_shift_id: input.homeShiftId,
   };
   const { data, error } = await supabase.from("operators").insert(payload).select("id");
   if (error) throw toSchedulerError(error);
@@ -243,14 +246,19 @@ export async function applyOperatorImport(
           externalId: o.externalId,
           siteNodeId: o.plantNodeId,
           source: ctx.source,
+          homeShiftId: o.homeShiftId,
         });
         inserted += 1;
       } else {
         // ⚠️ siteNodeId OMITTED — leave the person's plant alone (rule 1).
+        // `homeShiftId` follows the plan's own "absent means leave alone"
+        // contract (S66-b) — spread in only when the row's Shift column
+        // named a band, exactly as `updateOperator`'s own `in` test reads it.
         await updateOperator({
           id: o.operatorId,
           displayName: o.displayName,
           employeeRef: o.employeeRef,
+          ...("homeShiftId" in o ? { homeShiftId: o.homeShiftId } : {}),
         });
         updated += 1;
       }

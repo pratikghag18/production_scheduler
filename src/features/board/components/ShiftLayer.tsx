@@ -7,7 +7,7 @@ import {
   shiftBoundaries,
   intersects,
 } from "../lib/geometry";
-import { formatClock, addMinutes } from "../lib/time";
+import { formatClock, addMinutes, type DayAxis } from "../lib/time";
 import styles from "./ShiftLayer.module.css";
 
 /**
@@ -17,14 +17,16 @@ import styles from "./ShiftLayer.module.css";
  */
 export function ShiftLayer({
   template,
-  dayCount,
+  dayAxis,
   windowStart,
+  zone,
   pxPerHour,
   visibleMinRange,
 }: {
   template: ShiftTemplate | null;
-  dayCount: number;
+  dayAxis: DayAxis;
   windowStart: Date;
+  zone?: string;
   pxPerHour: number;
   visibleMinRange: [number, number];
 }) {
@@ -32,20 +34,20 @@ export function ShiftLayer({
 
   const gaps = useMemo(() => {
     if (!template) return [];
-    return offShiftGaps(template, dayCount).filter(([s, e]) => intersects(s, e, visStart, visEnd));
-  }, [template, dayCount, visStart, visEnd]);
+    return offShiftGaps(template, dayAxis).filter(([s, e]) => intersects(s, e, visStart, visEnd));
+  }, [template, dayAxis, visStart, visEnd]);
 
   const breaks = useMemo(() => {
     if (!template) return [];
-    return breakInstances(template, dayCount).filter((b) =>
+    return breakInstances(template, dayAxis).filter((b) =>
       intersects(b.startMin, b.endMin, visStart, visEnd),
     );
-  }, [template, dayCount, visStart, visEnd]);
+  }, [template, dayAxis, visStart, visEnd]);
 
   const boundaries = useMemo(() => {
     if (!template) return [];
-    return shiftBoundaries(template, dayCount).filter((m) => m >= visStart - 1 && m <= visEnd + 1);
-  }, [template, dayCount, visStart, visEnd]);
+    return shiftBoundaries(template, dayAxis).filter((m) => m >= visStart - 1 && m <= visEnd + 1);
+  }, [template, dayAxis, visStart, visEnd]);
 
   if (!template) return null;
 
@@ -62,7 +64,7 @@ export function ShiftLayer({
         />
       ))}
       {breaks.map((b, i) => {
-        const label = `${b.shiftBreak.name} · ${formatClock(addMinutes(windowStart, b.startMin))}–${formatClock(addMinutes(windowStart, b.endMin))}`;
+        const label = `${b.shiftBreak.name} · ${formatClock(addMinutes(windowStart, b.startMin), zone)}–${formatClock(addMinutes(windowStart, b.endMin), zone)}`;
         return (
           <div
             key={`brk-${b.shiftBreak.id}-${i}`}

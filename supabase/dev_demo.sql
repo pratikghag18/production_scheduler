@@ -100,6 +100,13 @@ BEGIN
   DELETE FROM operators               WHERE org_id = v_org;
   DELETE FROM skills                  WHERE org_id = v_org;
   DELETE FROM profile_grants          WHERE org_id = v_org;
+  -- F-177 (18 Sept, session 179): two tables younger than this teardown point at
+  -- the demo's rows -- a week template (0067) at a plant, an absence (0066) at a
+  -- person -- and a re-seed after either had been written stopped at the node
+  -- loop with "still referenced from table week_templates". Deleted here so the
+  -- demo can be re-anchored on a stack that has been used.
+  DELETE FROM week_templates          WHERE org_id = v_org;
+  DELETE FROM absences                WHERE org_id = v_org;
 
   -- A structure that belongs to a site points AT a node, so break that link
   -- before the nodes go. The ORIGINAL 'Standard Plant' structure has no site
@@ -192,7 +199,15 @@ END $$;
 INSERT INTO auth.users (id, email) VALUES
   ('00000000-0000-0000-0000-00000000dec1', 'dana@example.test'),
   ('00000000-0000-0000-0000-00000000dec2', 'quinn@example.test'),
-  ('00000000-0000-0000-0000-00000000dec3', 'rosa@example.test')
+  ('00000000-0000-0000-0000-00000000dec3', 'rosa@example.test'),
+  -- Three VIEWERS, one per plant (the maintainer, 6 Sept: "create few dummy
+  -- viewers for all plants"). R-346's viewer clause is what they exist to
+  -- show: a viewer sees the board and nothing else -- no Operators panel, no
+  -- create form, read-only pop-ups -- and reads only the people at their own
+  -- places. Their grant is the plant root, role viewer.
+  ('00000000-0000-0000-0000-00000000dec4', 'viva@example.test'),
+  ('00000000-0000-0000-0000-00000000dec5', 'vito@example.test'),
+  ('00000000-0000-0000-0000-00000000dec6', 'vina@example.test')
 ON CONFLICT DO NOTHING;
 
 -- ⭐ ORG-WIDE `viewer`, NOT `admin`, FOR THE THREE SITE ADMINS. One org-wide
@@ -205,7 +220,13 @@ INSERT INTO user_profiles (id, org_id, user_id, role, default_create_mode) VALUE
   ('d0000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001',
    '00000000-0000-0000-0000-00000000dec2', 'viewer', 'run'),
   ('d0000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001',
-   '00000000-0000-0000-0000-00000000dec3', 'viewer', 'run')
+   '00000000-0000-0000-0000-00000000dec3', 'viewer', 'run'),
+  ('d0000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001',
+   '00000000-0000-0000-0000-00000000dec4', 'viewer', 'run'),
+  ('d0000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000001',
+   '00000000-0000-0000-0000-00000000dec5', 'viewer', 'run'),
+  ('d0000000-0000-0000-0000-000000000006', '10000000-0000-0000-0000-000000000001',
+   '00000000-0000-0000-0000-00000000dec6', 'viewer', 'run')
 ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role;
 
 DO $$
@@ -217,6 +238,13 @@ BEGIN
   SELECT 'd0000000-0000-0000-0000-000000000002', v, v_org, 'admin' FROM d_fix WHERE k = 'B:plant';
   INSERT INTO profile_grants (profile_id, node_id, org_id, role)
   SELECT 'd0000000-0000-0000-0000-000000000003', v, v_org, 'admin' FROM d_fix WHERE k = 'C:plant';
+  -- The viewers: Viva on Plant A, Vito on Plant B, Vina on Plant C.
+  INSERT INTO profile_grants (profile_id, node_id, org_id, role)
+  SELECT 'd0000000-0000-0000-0000-000000000004', v, v_org, 'viewer' FROM d_fix WHERE k = 'A:plant';
+  INSERT INTO profile_grants (profile_id, node_id, org_id, role)
+  SELECT 'd0000000-0000-0000-0000-000000000005', v, v_org, 'viewer' FROM d_fix WHERE k = 'B:plant';
+  INSERT INTO profile_grants (profile_id, node_id, org_id, role)
+  SELECT 'd0000000-0000-0000-0000-000000000006', v, v_org, 'viewer' FROM d_fix WHERE k = 'C:plant';
 
   -- ⭐ Ana is granted a LINE, not a plant. She must still see Plant A's
   -- plant-wide parts (owner ABOVE her grant) and none of Plant B's.
@@ -318,7 +346,13 @@ BEGIN
            CASE WHEN o.display_name LIKE '%3' THEN (now() + interval '20 days')::date END
       FROM operators o, skills s
      WHERE o.org_id = v_org AND s.org_id = v_org
-       AND o.display_name IN ('Operator ' || v_letter || '2',
+       -- F-181 (18 Sept, session 179): the first person (Sam Patel on Plant A)
+       -- holds Welding as well as the Line 1 Cert below, because the typed walk
+       -- and the maintainer's own list put Sam on Cell 1, which requires it; the
+       -- stack that passed the walk had that row from a lane's hand, not the
+       -- seed, and a re-seed lost it. Tom Baker (5) stays the uncertified case.
+       AND o.display_name IN ('Operator ' || v_letter || '1',
+                              'Operator ' || v_letter || '2',
                               'Operator ' || v_letter || '3',
                               'Operator ' || v_letter || '4')
        -- ⚠⚠ THE OWNER IS PART OF THE LOOKUP NOW, AND HAS TO BE. All three
@@ -381,24 +415,98 @@ BEGIN
     INSERT INTO node_shift_templates (org_id, node_id, template_id)
     VALUES (v_org, v_plant, v_tpl);
   END LOOP;
+
+  -- R-441 (18 Sept, session 179; the maintainer: "assign shifts to all operators
+  -- randomly"): every demo person gets a band of the pattern their plant runs,
+  -- the same on every seed -- the walks and the tester can name who is on
+  -- which shift.
+  -- ⚠️ 21 Sept (F-187): the pattern is the PLANT's, found by walking up from
+  -- the person's own site to its root -- not by `st.site_node_id =
+  -- o2.site_node_id`, which only ever matched people owned at the root. The
+  -- one person per plant owned at Line 1 (EMP-x001, Sam Patel on Plant A)
+  -- joined nothing and kept `home_shift_id` NULL, so the walk's own person
+  -- showed "No shift" while R-441 promises every operator a home shift.
+  -- ⭐ R-462 (DEF-0045, the maintainer, 28 Sept: "spread Plant A's people
+  -- across all three shifts"). A hash of the employee ref (`abs(hashtext(...))
+  -- % count(*)`) landed all six of Plant A's people on Shift 2 or 3, so the
+  -- rail Ana (Line 1's supervisor) sees stood empty all of Shift 1's hours
+  -- (06:00-14:00 Chicago) even though a band did cover "now" -- DEF-0045.
+  -- Round-robin by EACH PLANT'S OWN employee-ref order is still deterministic
+  -- (no `random()`, R-441's own promise) and covers every shift of every
+  -- plant whenever a plant has at least as many people as shifts (6 and 3
+  -- here): rank 1 gets the first shift by `start_min`, rank 2 the second, and
+  -- so on, wrapping. `EMP-<n>001` -- the one person per plant owned at Line 1
+  -- (Sam Patel on Plant A) -- sorts first within its own plant by
+  -- construction (`lpad(i::text, 3, '0')`, i starting at 1), so this ALSO
+  -- guarantees that person lands on the plant's own first shift (Shift 1)
+  -- with no separate rule naming them -- exactly what Ana's rail needs.
+  UPDATE operators o SET home_shift_id = pick.shift_id
+    FROM (
+      WITH ranked AS (
+        -- ⚠️ Reviewer note (S194-C follow-up, 28 Sept): this ranks by
+        -- `employee_ref` TEXT order, not by anything that names a person as
+        -- "already placed" -- adding a demo operator whose ref SORTS BEFORE
+        -- an existing one (an `EMP-<n>000`, say, or any ref that is not the
+        -- next unused `EMP-<n>NNN` in sequence) re-ranks every person after
+        -- it and moves them onto a DIFFERENT shift, silently, the next reset.
+        -- A new demo operator's `employee_ref` must APPEND (the next unused
+        -- number for its plant), never be inserted ahead of an existing one,
+        -- or this comment's own promise about Sam Patel (EMP-<n>001, always
+        -- rank 1, always Shift 1) stops being reliable for whoever reads it.
+        SELECT o2.id AS operator_id, root.id AS root_id,
+               row_number() OVER (PARTITION BY root.id ORDER BY o2.employee_ref) AS rnk
+          FROM operators o2
+          JOIN nodes own ON own.id = o2.site_node_id
+          JOIN nodes root ON root.org_id = own.org_id AND root.parent_id IS NULL AND root.path @> own.path
+         WHERE o2.org_id = v_org
+      ),
+      shifts_by_root AS (
+        SELECT root.id AS root_id, array_agg(s.id ORDER BY s.start_min) AS shift_ids
+          FROM nodes root
+          JOIN shift_templates st ON st.org_id = v_org AND st.site_node_id = root.id
+          JOIN shifts s ON s.template_id = st.id
+         WHERE root.org_id = v_org AND root.parent_id IS NULL
+         GROUP BY root.id
+      )
+      SELECT r.operator_id,
+             sbr.shift_ids[1 + ((r.rnk - 1) % array_length(sbr.shift_ids, 1))] AS shift_id
+        FROM ranked r
+        JOIN shifts_by_root sbr ON sbr.root_id = r.root_id
+    ) AS pick
+   WHERE o.id = pick.operator_id;
 END $$;
 
 -- ---------------------------------------------------------------------------
 -- 6. A WEEK OF SCHEDULE, so no board opens empty.
 --
--- Anchored on `date_trunc('week', now())`, so it is always the current week
--- rather than a fixed date that drifts into the past.
+-- Anchored on the Monday of the current week IN THE DEMO PLANT'S ZONE, so it
+-- is always the current week rather than a fixed date that drifts into the
+-- past, and every hour below is the wall-clock hour it names in that zone.
+--
+-- ⭐ R-450 (the maintainer, 22 Sept: "The demo plant should be in Chicago
+-- timezone"). Until then this block added '6 hours' to a UTC Monday, so the
+-- seeded Shift 1 was 06:00 UTC, which read as 06:00 only while the plant had
+-- no zone at all -- and as 01:00 the moment someone set Chicago on the
+-- Settings tab (F-190: the typed walk wrote five hours off on a reset stack).
+-- The zone is named ONCE (v_zone), the day is a plain local timestamp, and
+-- each range is that local wall clock turned into an instant with AT TIME
+-- ZONE, which is DST-correct (a 06:00 on the changeover Sunday is still
+-- 06:00). Section 6b below sets the same zone company-wide, so the board
+-- reads these rows back as the hours written here after every reset.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
   v_org uuid := '10000000-0000-0000-0000-000000000001';
-  v_letter text; v_day timestamptz; v_cell uuid; v_run uuid; v_prod uuid;
-  v_i int; v_d int;
+  v_zone text := 'America/Chicago';
+  v_letter text; v_day timestamp; v_cell uuid; v_run uuid; v_prod uuid;
+  v_i int; v_d int; v_from timestamptz; v_to timestamptz;
+  v_op uuid; v_start int; v_end int;
 BEGIN
-  v_day := date_trunc('week', now());
+  -- Monday 00:00 of the current week, on the plant's own calendar.
+  v_day := date_trunc('week', now() AT TIME ZONE v_zone);
 
   FOREACH v_letter IN ARRAY ARRAY['A','B','C'] LOOP
-    FOR v_d IN 0..2 LOOP
+    FOR v_d IN 0..6 LOOP
       FOR v_i IN 1..4 LOOP
         SELECT v INTO v_cell FROM d_fix WHERE k = v_letter || ':cell' || v_i;
 
@@ -411,23 +519,124 @@ BEGIN
            AND p.sku = 'PN-' || (ascii(v_letter) - ascii('A') + 1)
                        || (CASE WHEN v_i <= 2 AND v_d = 1 THEN '003' ELSE '001' END);
 
-        INSERT INTO runs (org_id, node_id, product_id, timerange, status, planned_headcount)
-        VALUES (v_org, v_cell, v_prod,
-                tstzrange(v_day + (v_d || ' days')::interval + interval '6 hours',
-                          v_day + (v_d || ' days')::interval + interval '14 hours'),
-                'planned', 1)
+        -- ⭐ R-452 (23 Sept; the maintainer: "why is each and every assignment
+        -- tagged as OT?"). The fixed 06:00-14:00 window below used to be
+        -- Shift 1's hours for every cell, but R-441 puts each person onto
+        -- Shift 1, 2 or 3 of the plant's pattern (a hash at the time; R-462,
+        -- 28 Sept, replaced the hash with a round-robin, see §5 above) --
+        -- Plant A's six people all landed on Shift 2 or 3 under that first
+        -- hash, so every seeded block sat entirely outside its own operator's
+        -- home band and `overtimeMinutes()` (read by AssignmentChip/
+        -- DirectBlock) tagged all of it OT. The board was reading the seed
+        -- correctly; the seed was contradicting itself. Each block now runs
+        -- in the SEEDED OPERATOR's own home band instead.
+        SELECT o.id, s.start_min, s.end_min INTO v_op, v_start, v_end
+          FROM operators o
+          JOIN shifts s ON s.id = o.home_shift_id
+         WHERE o.org_id = v_org AND o.display_name = 'Operator ' || v_letter || v_i;
+
+        -- §5's UPDATE (above, ~419-445) runs before this block and already
+        -- RAISEs if any operator is left shiftless (~716); this is a second,
+        -- local guard so a future reorder of §5 after §6 fails loudly here
+        -- too, instead of silently seeding a NULL-band block that would read
+        -- as all-day OT again.
+        IF v_start IS NULL THEN
+          RAISE EXCEPTION 'dev_demo: Operator % has no home shift while seeding its schedule (R-452)', v_letter || v_i;
+        END IF;
+
+        -- ⚠️ NO `status` COLUMN. Migration 0044 dropped `runs.status` (R-324);
+        -- this line still named it for one session and the demo world stopped
+        -- building here (DEF-0006). `dev_demo_test.sql` now applies this file
+        -- on a runner, so the next dropped column fails loudly instead.
+        -- The seeded operator's own home band on day v_d, as Chicago
+        -- wall-clock instants (R-452) -- Shift 3 (1320-1800 minutes) crosses
+        -- midnight into the next day, which is still one valid tstzrange.
+        v_from := (v_day + (v_d || ' days')::interval + (v_start || ' minutes')::interval) AT TIME ZONE v_zone;
+        v_to   := (v_day + (v_d || ' days')::interval + (v_end   || ' minutes')::interval) AT TIME ZONE v_zone;
+
+        INSERT INTO runs (org_id, node_id, product_id, timerange, planned_headcount)
+        VALUES (v_org, v_cell, v_prod, tstzrange(v_from, v_to), 1)
         RETURNING id INTO v_run;
 
         INSERT INTO assignments (org_id, node_id, operator_id, run_id, timerange, efficiency)
-        SELECT v_org, v_cell, o.id, v_run,
-               tstzrange(v_day + (v_d || ' days')::interval + interval '6 hours',
-                         v_day + (v_d || ' days')::interval + interval '14 hours'),
-               1.000
-          FROM operators o
-         WHERE o.org_id = v_org AND o.display_name = 'Operator ' || v_letter || v_i;
+        VALUES (v_org, v_cell, v_op, v_run, tstzrange(v_from, v_to), 1.000);
       END LOOP;
     END LOOP;
   END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 6b. THE DEMO COMPANY'S ZONE (R-450).
+--
+-- The company-wide fallback every plant inherits (0063: orgs.settings.timezone,
+-- read by app_resolve_node_setting and board_window's COALESCE). Set here, in
+-- the seed, so a reset never turns the demo back into a UTC plant; set at the
+-- company rather than on each root so a fourth plant would inherit it too. The
+-- hours in section 6 are written in this same zone (v_zone there and the
+-- literal here are the one fact; D13 in dev_demo_test.sql holds them together).
+-- ---------------------------------------------------------------------------
+UPDATE orgs
+   SET settings = COALESCE(settings, '{}'::jsonb) || '{"timezone": "America/Chicago"}'::jsonb
+ WHERE id = '10000000-0000-0000-0000-000000000001';
+
+-- ---------------------------------------------------------------------------
+-- 6a. PLANT A'S REAL NAMES (R-423, DEF-0034).
+--
+-- The maintainer, 15 Sept (session 174): "the operator names being A1, A2,
+-- etc is a bit more challenging to understand vs actual people names, should
+-- we try modifying plant A with actual people names?" That used to be a
+-- standalone rename script, kept out of the seed and applied by hand against
+-- this machine's database only -- no reset or e2e path ran it, so every
+-- fresh stack kept "Operator A1".."Operator A6" and `e2e/linePeople.spec.ts`
+-- and `e2e/viewerBoard.spec.ts` failed on every automated run (DEF-0034).
+-- The maintainer, 21 Sept: "put the real names in the seed." So the standalone
+-- script is deleted and this file names the six directly.
+--
+-- ⚠️ WHY THIS IS ITS OWN SECTION AND NOT PART OF THE LOOP IN §2/§4. Section 4
+-- builds the six operators per plant as `'Operator ' || v_letter || i`, and
+-- everything downstream of that INSERT keys on that exact display name: the
+-- training grants above (lines ~354-357, ~371), the F-181 Welding row, and
+-- the week of schedule's assignments (§6, `o.display_name = 'Operator ' ||
+-- v_letter || v_i`). Renaming inside the loop would break every one of those
+-- lookups for Plant A alone. So the rename happens here, AFTER the schedule
+-- is built and keyed on the old names, and BEFORE the dev credentials below.
+--
+-- `employee_ref` is left exactly as it was -- it is the literal string
+-- 'EMP-1001' .. 'EMP-1006', not a derived abbreviation like "A1": this seed
+-- builds fresh, so there is no old name to guard the UPDATE on, and the EMP
+-- refs are the key instead. `src/lib/command/resolve.ts` matches a spoken
+-- person word against `displayName` first and `employeeRef` second (its
+-- lines ~2062-2065), comparing against the ref field's actual contents -- so
+-- nothing about voice resolution changes by keeping the refs.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_org uuid := '10000000-0000-0000-0000-000000000001'; v_named int;
+BEGIN
+  UPDATE operators SET display_name = 'Sam Patel'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1001';
+  UPDATE operators SET display_name = 'Maria Lopez'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1002';
+  UPDATE operators SET display_name = 'John Kim'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1003';
+  UPDATE operators SET display_name = 'Priya Shah'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1004';
+  UPDATE operators SET display_name = 'Tom Baker'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1005';
+  UPDATE operators SET display_name = 'Lena Novak'
+    WHERE org_id = v_org AND employee_ref = 'EMP-1006';
+
+  -- Pairwise, not two IN lists: six rows that each carry SOME real name would
+  -- pass a looser count with two people swapped.
+  SELECT count(*) INTO v_named
+    FROM operators o
+    JOIN (VALUES ('EMP-1001', 'Sam Patel'),   ('EMP-1002', 'Maria Lopez'),
+                 ('EMP-1003', 'John Kim'),    ('EMP-1004', 'Priya Shah'),
+                 ('EMP-1005', 'Tom Baker'),   ('EMP-1006', 'Lena Novak')) AS want(ref, name)
+      ON want.ref = o.employee_ref AND want.name = o.display_name
+   WHERE o.org_id = v_org;
+  IF v_named <> 6 THEN
+    RAISE EXCEPTION 'dev_demo: Plant A real names missing (R-423)';
+  END IF;
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -465,7 +674,10 @@ UPDATE auth.users AS u SET
 FROM (VALUES
   ('00000000-0000-0000-0000-00000000dec1'::uuid, 'dana@example.test'),
   ('00000000-0000-0000-0000-00000000dec2'::uuid, 'quinn@example.test'),
-  ('00000000-0000-0000-0000-00000000dec3'::uuid, 'rosa@example.test')
+  ('00000000-0000-0000-0000-00000000dec3'::uuid, 'rosa@example.test'),
+  ('00000000-0000-0000-0000-00000000dec4'::uuid, 'viva@example.test'),
+  ('00000000-0000-0000-0000-00000000dec5'::uuid, 'vito@example.test'),
+  ('00000000-0000-0000-0000-00000000dec6'::uuid, 'vina@example.test')
 ) AS v(id, email)
 WHERE u.id = v.id;
 
@@ -479,7 +691,10 @@ SELECT
 FROM auth.users u
 WHERE u.id IN ('00000000-0000-0000-0000-00000000dec1',
                '00000000-0000-0000-0000-00000000dec2',
-               '00000000-0000-0000-0000-00000000dec3')
+               '00000000-0000-0000-0000-00000000dec3',
+               '00000000-0000-0000-0000-00000000dec4',
+               '00000000-0000-0000-0000-00000000dec5',
+               '00000000-0000-0000-0000-00000000dec6')
   AND NOT EXISTS (SELECT 1 FROM auth.identities i
                    WHERE i.user_id = u.id AND i.provider = 'email');
 
@@ -492,8 +707,12 @@ DECLARE
   v_org uuid := '10000000-0000-0000-0000-000000000001';
   v_roots int; v_nodes int; v_structs int; v_prod int; v_ops int;
   v_unowned int; v_narrow int; v_runs int; v_orphan int; v_logins int;
-  v_placeless int; v_shared int;
+  v_placeless int; v_shared int; v_shiftless int;
 BEGIN
+  -- R-441 (F-187): every demo person has a home shift, the line-owned one
+  -- included. NULL here means the shift pick above joined nothing for them.
+  SELECT count(*) INTO v_shiftless FROM operators
+   WHERE org_id = v_org AND home_shift_id IS NULL;
   SELECT count(*) INTO v_roots FROM nodes WHERE org_id = v_org AND parent_id IS NULL;
   SELECT count(*) INTO v_nodes FROM nodes WHERE org_id = v_org;
   -- one copied structure per plant, plus the original the copies came from
@@ -545,7 +764,8 @@ BEGIN
 
   SELECT count(*) INTO v_logins FROM auth.users
    WHERE email IN ('admin@example.test','dana@example.test','quinn@example.test',
-                   'rosa@example.test','ana@example.test','marco@example.test')
+                   'rosa@example.test','ana@example.test','marco@example.test',
+                   'viva@example.test','vito@example.test','vina@example.test')
      AND encrypted_password IS NOT NULL;
 
   IF v_roots <> 3 THEN RAISE EXCEPTION 'dev_demo: % root plants, expected 3', v_roots; END IF;
@@ -553,11 +773,12 @@ BEGIN
   IF v_structs <> 4 THEN RAISE EXCEPTION 'dev_demo: % structures, expected 4 (one per plant + the original)', v_structs; END IF;
   IF v_prod <> 13 THEN RAISE EXCEPTION 'dev_demo: % products, expected 13 (12 per-plant + 1 shared across two plants, D115)', v_prod; END IF;
   IF v_ops <> 18 THEN RAISE EXCEPTION 'dev_demo: % operators, expected 18', v_ops; END IF;
+  IF v_shiftless <> 0 THEN RAISE EXCEPTION 'dev_demo: % operators with no home shift, expected 0 (R-441, F-187)', v_shiftless; END IF;
   IF v_unowned <> 0 THEN RAISE EXCEPTION 'dev_demo: % company-wide operators/skills/patterns, expected 0 (D108)', v_unowned; END IF;
   IF v_placeless <> 0 THEN RAISE EXCEPTION 'dev_demo: % products offered in no plant, expected 0 (D115)', v_placeless; END IF;
   IF v_shared <> 2 THEN RAISE EXCEPTION 'dev_demo: the shared part is in % plants, expected 2 (D115)', v_shared; END IF;
   IF v_narrow < 6 THEN RAISE EXCEPTION 'dev_demo: only % product places below a root, expected >= 6 (D109)', v_narrow; END IF;
-  IF v_runs <> 36 THEN RAISE EXCEPTION 'dev_demo: % runs, expected 36', v_runs; END IF;
+  IF v_runs <> 84 THEN RAISE EXCEPTION 'dev_demo: % runs, expected 84', v_runs; END IF;
   IF v_orphan <> 0 THEN RAISE EXCEPTION 'dev_demo: % runs use a product owned outside them', v_orphan; END IF;
-  IF v_logins <> 6 THEN RAISE EXCEPTION 'dev_demo: % of 6 accounts have a password', v_logins; END IF;
+  IF v_logins <> 9 THEN RAISE EXCEPTION 'dev_demo: % of 9 accounts have a password', v_logins; END IF;
 END $$;

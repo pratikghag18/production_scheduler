@@ -2,16 +2,27 @@ import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-q
 import {
   applySplitCoverage,
   createAssignment,
+  reassignAssignment,
+  moveAssignment,
   toEfficiency,
   toTstzRange,
+  deleteAssignment,
   updateAssignmentFields,
   type Assignment,
   type AssignmentFieldEdit,
   type BoardWindow,
   type CreateAssignmentInput,
+  type ReassignAssignmentInput,
+  type MoveAssignmentInput,
   type SplitCoverageInput,
 } from "@/lib/api";
 import { boardKeys } from "./useBoardWindow";
+import {
+  makePlaceholderId,
+  beginPendingCreate,
+  endPendingCreate,
+  withPendingCreateCounting,
+} from "../lib/optimisticId";
 
 type BoardKey = ReturnType<typeof boardKeys.window>;
 
@@ -32,14 +43,16 @@ export function useCreateAssignment(rootPath: string, from: Date, to: Date) {
   const queryClient = useQueryClient();
   const key = boardKeys.window(rootPath, from, to);
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: (input: CreateAssignmentInput) => createAssignment(input),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: key });
       const previous = snapshotBoard(queryClient, key);
       if (previous) {
         const optimistic: Assignment = {
-          id: `optimistic-${crypto.randomUUID()}`,
+          // F-233: the one place this id is built -- `isPlaceholderId`
+          // (optimisticId.ts) is the one place it is checked.
+          id: makePlaceholderId(),
           orgId: previous.org.id,
           nodeId: input.nodeId,
           operatorId: input.operatorId,
@@ -62,7 +75,6 @@ export function useCreateAssignment(rootPath: string, from: Date, to: Date) {
           overrideReason: input.overrideReason ?? null,
           targetQty: input.targetQty ?? null,
           targetUnit: input.targetUnit ?? null,
-          status: "planned",
           createdBy: null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -77,17 +89,31 @@ export function useCreateAssignment(rootPath: string, from: Date, to: Date) {
     onError: (_err, _input, context) => {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
+    // F-233, third pass (S194-G3): RETURNED, not merely awaited internally
+    // -- React Query keeps a mutation `isPending` until whatever `onSettled`
+    // itself returns has settled, so returning `invalidateQueries`'s own
+    // promise (chained with `.finally` rather than an `async`/`await` body,
+    // so there is no question of what this function's own returned promise
+    // actually is) is what makes "a create mutation is pending" mean "the
+    // board's own data still holds only the placeholder, never yet the real
+    // row" for the WHOLE life of the write, not just until the server has
+    // answered. `endPendingCreate` (paired with the synchronous
+    // `beginPendingCreate` `withPendingCreateCounting` below puts on
+    // `mutate`/`mutateAsync`) rides the same promise down.
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      return queryClient.invalidateQueries({ queryKey: key }).finally(() => {
+        endPendingCreate();
+      });
     },
   });
+  return withPendingCreateCounting(mutation);
 }
 
 export function useApplySplitCoverage(rootPath: string, from: Date, to: Date) {
   const queryClient = useQueryClient();
   const key = boardKeys.window(rootPath, from, to);
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: (input: SplitCoverageInput) => applySplitCoverage(input),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: key });
@@ -102,7 +128,7 @@ export function useApplySplitCoverage(rootPath: string, from: Date, to: Date) {
         if (input.newAssignment) {
           const na = input.newAssignment;
           const optimistic: Assignment = {
-            id: `optimistic-${crypto.randomUUID()}`,
+            id: makePlaceholderId(),
             orgId: previous.org.id,
             nodeId: na.nodeId,
             operatorId: na.operatorId,
@@ -120,7 +146,6 @@ export function useApplySplitCoverage(rootPath: string, from: Date, to: Date) {
             overrideReason: na.overrideReason ?? null,
             targetQty: na.targetQty ?? null,
             targetUnit: na.targetUnit ?? null,
-            status: "planned",
             createdBy: null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -134,10 +159,33 @@ export function useApplySplitCoverage(rootPath: string, from: Date, to: Date) {
     onError: (_err, _input, context) => {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+    // F-233, third pass (S194-G3): RETURNED -- see `useCreateAssignment`'s
+    // own identical comment above for why. Paired with the conditional
+    // `beginPendingCreate` on `mutate`/`mutateAsync` below -- only a call
+    // whose own `newAssignment` was present counted one up, so this always
+    // counts the same call back down, success or failure alike.
+    onSettled: (_data, _err, input) => {
+      return queryClient.invalidateQueries({ queryKey: key }).finally(() => {
+        if (input.newAssignment) endPendingCreate();
+      });
     },
   });
+  return {
+    ...mutation,
+    // F-233, second pass: ONLY when `newAssignment` is present does this
+    // call add a placeholder row at all (`onMutate` above, `if
+    // (input.newAssignment)`) -- an adjustment-only split (dialling down
+    // existing crew, nothing new) creates no row to wait for, so it must
+    // not hold a later sentence for five seconds over nothing.
+    mutate: (...args: Parameters<typeof mutation.mutate>) => {
+      if (args[0].newAssignment) beginPendingCreate();
+      return mutation.mutate(...args);
+    },
+    mutateAsync: (...args: Parameters<typeof mutation.mutateAsync>) => {
+      if (args[0].newAssignment) beginPendingCreate();
+      return mutation.mutateAsync(...args);
+    },
+  };
 }
 
 export function useUpdateAssignmentFields(rootPath: string, from: Date, to: Date) {
@@ -162,7 +210,6 @@ export function useUpdateAssignmentFields(rootPath: string, from: Date, to: Date
                     : {}),
                   ...("targetQty" in edit ? { targetQty: edit.targetQty ?? null } : {}),
                   ...("targetUnit" in edit ? { targetUnit: edit.targetUnit ?? null } : {}),
-                  ...(edit.status !== undefined ? { status: edit.status } : {}),
                   ...(edit.timerange
                     ? { timerange: toTstzRange(edit.timerange.start, edit.timerange.end) }
                     : {}),
@@ -177,7 +224,169 @@ export function useUpdateAssignmentFields(rootPath: string, from: Date, to: Date
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+/**
+ * R-343: change WHO is on an assignment, in place.
+ *
+ * Same four-step optimistic pattern as `useUpdateAssignmentFields` above and
+ * the same invalidation, with one difference worth stating: the optimistic row
+ * moves `operatorId` and CLEARS BOTH OVERRIDE PAIRS unless this call is the one
+ * setting them. `reassign_assignment` normalises the flags to the placement it
+ * has just made — an override that belonged to the person who has left the row
+ * is not an override any more — so an optimistic row that kept them would badge
+ * the chip "certification override" for the length of one round trip and then
+ * un-badge it.
+ *
+ * ⚠️ `operatorDisplayName` IS SET TO NULL, NOT GUESSED. The board index resolves
+ * a chip's name from `operatorById` (the window's own operator list), and this
+ * field is the D110 fallback for a person who is no longer in it. Writing the
+ * new person's name here would be inventing server data; leaving the OLD name
+ * would draw the previous person on the chip until the refetch lands.
+ */
+export function useReassignAssignment(rootPath: string, from: Date, to: Date) {
+  const queryClient = useQueryClient();
+  const key = boardKeys.window(rootPath, from, to);
+
+  return useMutation({
+    mutationFn: (input: ReassignAssignmentInput) => reassignAssignment(input),
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = snapshotBoard(queryClient, key);
+      if (previous) {
+        queryClient.setQueryData<BoardWindow>(key, {
+          ...previous,
+          assignments: previous.assignments.map((a) =>
+            a.id === input.assignmentId
+              ? {
+                  ...a,
+                  operatorId: input.operatorId,
+                  operatorDisplayName: null,
+                  eligibilityOverride: input.eligibilityOverride ?? false,
+                  overrideReason: input.overrideReason ?? null,
+                  areaOverride: input.areaOverride ?? false,
+                  areaOverrideReason: input.areaOverrideReason ?? null,
+                }
+              : a,
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => {
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+/**
+ * S41-c: move a block to another cell and/or other hours (`move_assignment`,
+ * migration 0080). Mirrors `useReassignAssignment` above exactly: the same
+ * four-step optimistic pattern, the same onSettled invalidation, and the
+ * same reason for clearing both override pairs unless THIS call is the one
+ * setting them (a stale override belongs to the placement that has just
+ * moved away).
+ *
+ * ⚠️ `productId` IS LEFT UNTOUCHED, DELIBERATELY. The server may carry a
+ * run-attached row's PRODUCT forward as a direct `product_id` (`v_product :=
+ * COALESCE(v_row.product_id, the run's product)`), but the effective product
+ * for a run-attached row is not known on the client optimistically — only
+ * the server has the run row to resolve it from. Leaving `productId` as it
+ * was (`null` for a run-attached row) and setting only `runId: null` is
+ * honest about what the client actually knows; the refetch on settle
+ * supplies the real value.
+ */
+export function useMoveAssignment(rootPath: string, from: Date, to: Date) {
+  const queryClient = useQueryClient();
+  const key = boardKeys.window(rootPath, from, to);
+
+  return useMutation({
+    mutationFn: (input: MoveAssignmentInput) => moveAssignment(input),
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = snapshotBoard(queryClient, key);
+      if (previous) {
+        queryClient.setQueryData<BoardWindow>(key, {
+          ...previous,
+          assignments: previous.assignments.map((a) =>
+            a.id === input.assignmentId
+              ? {
+                  ...a,
+                  nodeId: input.nodeId,
+                  timerange: toTstzRange(input.start, input.end),
+                  runId: null,
+                  eligibilityOverride: input.eligibilityOverride ?? false,
+                  overrideReason: input.overrideReason ?? null,
+                  areaOverride: input.areaOverride ?? false,
+                  areaOverrideReason: input.areaOverrideReason ?? null,
+                }
+              : a,
+          ),
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => {
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+/**
+ * Delete an assignment (R-323). The row goes; nothing is marked.
+ *
+ * ⭐ THE OPTIMISTIC UPDATE IS A REMOVAL NOW, not a field patch. This used to be
+ * `useUpdateAssignmentFields` writing `status: "cancelled"`, and the board's
+ * index then filtered that row out — two steps to make one block disappear, and
+ * a soft delete nobody could see the other half of. Now the block is dropped
+ * from the cached window and the row is dropped from the table.
+ *
+ * ⚠️ THE ROLLBACK MATTERS MORE HERE THAN ON AN EDIT. If the server refuses —
+ * and it will, silently and with zero rows, for anyone without edit rights on
+ * that cell, which is why `deleteAssignment` checks the row count — the block
+ * has already vanished from the screen. `onError` puts the whole previous
+ * window back, so a refused delete restores the block rather than leaving a
+ * hole that only a reload explains.
+ */
+export function useDeleteAssignment(rootPath: string, from: Date, to: Date) {
+  const queryClient = useQueryClient();
+  const key = boardKeys.window(rootPath, from, to);
+
+  return useMutation({
+    mutationFn: (assignmentId: string) => deleteAssignment(assignmentId),
+    onMutate: async (assignmentId: string) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = snapshotBoard(queryClient, key);
+      if (previous) {
+        queryClient.setQueryData<BoardWindow>(key, {
+          ...previous,
+          assignments: previous.assignments.filter((a) => a.id !== assignmentId),
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous);
+    },
+    onSettled: () => {
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }

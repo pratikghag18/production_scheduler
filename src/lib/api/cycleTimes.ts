@@ -25,6 +25,7 @@
  */
 import { supabase } from "@/lib/supabase";
 import { requireWritten, toSchedulerError } from "./errors";
+import { fetchAll } from "./paging";
 
 /**
  * One `node_product_cycle_times` row as the admin screen needs it.
@@ -87,11 +88,21 @@ export function parseAdminCycleTime(row: unknown): AdminCycleTime | null {
  * lie when the truth is that the read did not happen.
  */
 export async function fetchCycleTimes(): Promise<ReadonlyArray<AdminCycleTime | null>> {
-  const { data, error } = await supabase
-    .from("node_product_cycle_times")
-    .select(CYCLE_TIME_COLUMNS);
-  if (error) throw toSchedulerError(error);
-  return (data ?? []).map((row) => parseAdminCycleTime(row));
+  // Paged to exhaustion (paging.ts): `node_product_cycle_times` is one row per
+  // node x product and is the read most likely to cross `max_rows = 1000`, so a
+  // truncated grid would silently blank cells that really do have a target.
+  // Ordered on the full composite PK `(node_id, product_id)` — `.range()` pages
+  // an ordered list, and an unordered read can skip or repeat rows across a page
+  // boundary past 1000 rows while still looking complete (paging.ts).
+  const data = await fetchAll((from, to) =>
+    supabase
+      .from("node_product_cycle_times")
+      .select(CYCLE_TIME_COLUMNS)
+      .order("node_id")
+      .order("product_id")
+      .range(from, to),
+  );
+  return data.map((row) => parseAdminCycleTime(row));
 }
 
 export interface CycleTimeInput {

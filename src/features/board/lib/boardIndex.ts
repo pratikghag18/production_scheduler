@@ -28,6 +28,7 @@ import type {
 } from "@/lib/api";
 import { parseTstzRange, fromEfficiency } from "@/lib/api";
 import { packLanes, trackRowHeight, type Density } from "./geometry";
+import { buildDayAxis, zonedTimeToInstant, type DayAxis } from "./time";
 import { buildCycleTimeIndex, cycleTimeKey, standardTargetQty } from "./standardTarget";
 
 export interface BoardRow {
@@ -62,9 +63,22 @@ export type IndexedAssignment = Assignment & {
 };
 
 export interface BoardIndex {
+  /** D88a: the window's local-midnight instant IN THE PLANT'S ZONE (`zone`
+   *  below), not UTC — the x = 0 origin every minute coordinate is measured
+   *  from. Runs/assignments (absolute instants) are turned into real minutes
+   *  against this, so their positions follow the plant's clock. */
   windowStart: Date;
   windowMinutes: number;
   dayCount: number;
+  /** D88a / migration 0063 (R-353): the IANA zone the board draws in, off the
+   *  payload. Handed to the formatters (`formatClock(d, zone)`) and used to
+   *  build `dayAxis`. */
+  zone: string;
+  /** D88a: the per-window day grid (local midnights as instants + real-minute
+   *  offsets + `wallToOffset`). Every board geometry call that used to multiply
+   *  by 1440 goes through this, so a DST changeover day is 1380/1500 min wide
+   *  and a shift keeps its wall-clock start (D88b). */
+  dayAxis: DayAxis;
   rows: BoardRow[];
   runsByNode: Map<string, IndexedRun[]>;
   assignmentsByNode: Map<string, IndexedAssignment[]>;
@@ -87,8 +101,32 @@ export interface BoardIndex {
   skillById: Map<string, Skill>;
   nodeById: Map<string, BoardNode>;
   capacityCap: number;
-  /** P1-4e D64: `org.settings.eligibility_policy`, defensively read. */
+  /**
+   * P1-4e D64: `org.settings.eligibility_policy`, defensively read — THE
+   * COMPANY'S answer, which since R-331 is only what a node INHERITS when
+   * nothing nearer overrides it.
+   *
+   * ⚠️ NOT WHAT THE POPOVER READS. `policyForNode` below is, and this is its
+   * fallback for the one case where the map cannot answer at all: a payload
+   * carrying no per-node map (a board that has not loaded, `emptyIndex` in
+   * `BoardPage`). Where there are no per-node answers, the company's IS every
+   * node's answer, which is exactly what the pre-0051 board did.
+   */
   eligibilityPolicy: "warn" | "block";
+  /**
+   * ⭐ R-331 / migration 0051: the eligibility rule RESOLVED FOR EACH NODE, as
+   * `board_window` answered it — nearest ancestor-or-self with an override,
+   * else the company's, else `warn`. One entry per node in the window.
+   *
+   * ⛔ NOTHING HERE RESOLVES ANYTHING, AND THAT IS DELIBERATE. Walking the
+   * ancestry in the browser (as `templateForNode` beside it does) would mean
+   * walking the `node_settings` rows the caller can READ, and a supervisor
+   * granted a line cannot read the override on their plant's root — so their
+   * board would fall through to the company's `warn` and offer an override
+   * tick on a plant deliberately set to `block`. Read `shapes.ts`'s
+   * `NodePolicy` and migration 0051's header for the full argument.
+   */
+  eligibilityPolicyByNode: Map<string, "warn" | "block">;
   droppedRanges: number;
   /** D45: the density every row in `rows` was laid out at. */
   density: Density;
@@ -140,14 +178,176 @@ function readEligibilityPolicy(settings: Json): "warn" | "block" {
   return "warn";
 }
 
+/**
+ * ⭐ R-331: THE ONE QUESTION THE POPOVER ASKS — what does the eligibility rule
+ * say AT THIS CELL. `BoardPage` calls this and hands the answer to
+ * `CreatePopover`, which turns it into `blocked` / `needsOverride`.
+ *
+ * ⛔ AN UNKNOWN NODE FALLS BACK TO `"block"`, AND THAT IS THE FAIL-SAFE
+ * DIRECTION, not the cautious-looking one. The two ways to be wrong are not
+ * symmetric:
+ *
+ *   fail OPEN  (guess `warn`)  — the screen draws an override tick, the planner
+ *                                writes a reason, presses Create, and the
+ *                                server refuses it. A DEAD END, and the exact
+ *                                defect this migration exists to remove (F-087
+ *                                was the same shape).
+ *   fail SAFE  (guess `block`) — the screen refuses something the server might
+ *                                have allowed. Visibly wrong, nobody is
+ *                                scheduled onto work they are not certified
+ *                                for, and it is the side CLAUDE.md names: "a
+ *                                screen that shows what the server will refuse
+ *                                is worse than one that refuses what the server
+ *                                allows".
+ *
+ * ⚠️ AN EMPTY MAP IS A DIFFERENT STATE FROM A MISSING ENTRY and is handled
+ * differently on purpose. `board_window` builds `node_policies` from the same
+ * `scoped_nodes` CTE that produces `nodes`, and `parseBoardWindow` is strict
+ * about the key, so a LOADED board always has an entry for every node it drew —
+ * a miss there means we are being asked about a node this payload never
+ * described, and we do not know its rule. An entirely empty map is instead the
+ * not-yet-loaded board (`emptyIndex`), where there are no per-node answers to
+ * miss and the company's value is every node's value.
+ */
+export function policyForNode(
+  index: Pick<BoardIndex, "eligibilityPolicyByNode" | "eligibilityPolicy"> | null | undefined,
+  nodeId: string,
+): "warn" | "block" {
+  if (!index) return "block";
+  const forNode = index.eligibilityPolicyByNode.get(nodeId);
+  if (forNode !== undefined) return forNode;
+  if (index.eligibilityPolicyByNode.size === 0) return index.eligibilityPolicy;
+  return "block";
+}
+
+/**
+ * The calendar day an instant falls on IN THE BOARD'S OWN FRAME —
+ * `"YYYY-MM-DD"`, the same text a Postgres `date` arrives as.
+ *
+ * ⚠️ THIS IS A SEAM, NOT A CONVENIENCE, AND D88a DID NOT MOVE IT. It STAYS UTC,
+ * and that is a decision made WITH THE SERVER, not against it. `check_eligibility`
+ * compares `expires_at < upper(p_timerange)::date`, and that `::date` cast
+ * happens in the DATABASE SESSION's timezone — which is UTC for PostgREST and is
+ * NOT set per plant. So the server decides the certificate "end day" in UTC. The
+ * two sides of this comparison are a contract, and CLAUDE.md's rule is that they
+ * must never be in different zones: since the server stays UTC, the client stays
+ * UTC. D88a changed how an instant is DRAWN on the axis (`zone`), not which day
+ * the server counts a certificate against — so a plant-local `boardDay` here
+ * would silently disagree with `check_eligibility` for exactly the shifts that
+ * run to the end of a day. `toISOString().slice(0, 10)` is the UTC day and is
+ * kept. (If the DB session tz is ever set to the plant zone, BOTH sides move
+ * together — never one.)
+ */
+export function boardDay(instant: Date): string {
+  return instant.toISOString().slice(0, 10);
+}
+
+/**
+ * One reason a person is not eligible at a cell — and WHICH of the two reasons
+ * it is, because they are different problems with different fixes.
+ *
+ * ⛔ `never-trained` NEEDS A COURSE BOOKED. `lapsed` NEEDS A RENEWAL. Collapsing
+ * them into "not eligible" is most of what made the old screen unhelpful: it
+ * sent a planner looking for a training slot for somebody who only had to
+ * re-sign a ticket, and it said nothing at all about the person whose ticket
+ * ran out last month.
+ */
+export type CertificateGap =
+  { skill: Skill; state: "never-trained" } | { skill: Skill; state: "lapsed"; expiresAt: string };
+
+/**
+ * F-087 — `check_eligibility`'s verdict, reached on the client, for the window
+ * the planner is actually about to write. An EMPTY result means eligible.
+ *
+ * ⭐ THE SERVER'S RULE, TRANSCRIBED RATHER THAN APPROXIMATED (migration 0009,
+ * unchanged since):
+ *
+ *     missing  = required AND NOT held
+ *     expiring = required AND held AND expires_at IS NOT NULL
+ *                AND (upper_inf(window) OR expires_at < upper(window)::date)
+ *     eligible = no missing AND no expiring
+ *
+ * Four things about that rule are load-bearing here:
+ *
+ *  1. `missing` and `expiring` are DISJOINT in the server too — `missing` is a
+ *     `NOT EXISTS` against the held rows and `expiring` is a JOIN onto them —
+ *     so a training never held is never also reported as lapsed. The `continue`
+ *     below is that, not a shortcut.
+ *  2. The comparison is STRICT. A certificate that expires ON the window's last
+ *     day is still valid; `<=` here would refuse the final legal shift, which
+ *     is a screen refusing what the server allows (CLAUDE.md §4).
+ *  3. An OPEN-ENDED window counts EVERY dated certificate as lapsed —
+ *     `upper_inf`. There is no finite day to compare against, so any real
+ *     expiry falls inside it. `windowEnd === null` is that case.
+ *  4. Only REQUIRED trainings are judged. A stale ticket for something this
+ *     cell never asks for is not this cell's problem, and warning about it
+ *     would make every warning worth ignoring.
+ *
+ * The dates are compared AS TEXT: `expires_at` is a Postgres `date`, so both
+ * sides are fixed-width zero-padded `"YYYY-MM-DD"`, for which lexicographic
+ * order IS chronological order — and no `Date` is constructed from a
+ * timezone-less day, which is the bug `src/lib/format/dates.ts` was written to
+ * end.
+ *
+ * `windowEnd` is the END of the range being created — `addMinutes(windowStart,
+ * range.endMin)`, the same instant `submitCreateDirect` puts in the tstzrange's
+ * upper bound. It is asked per render, because the drag handles and the shift
+ * chips move it while the popover is open.
+ */
+export function certificateGaps(
+  operator: Pick<BoardOperator, "skillIds" | "skillExpiries">,
+  requiredSkills: readonly Skill[],
+  windowEnd: Date | null,
+): CertificateGap[] {
+  if (requiredSkills.length === 0) return [];
+  const endDay = windowEnd === null ? null : boardDay(windowEnd);
+  const gaps: CertificateGap[] = [];
+  for (const skill of requiredSkills) {
+    if (!operator.skillIds.includes(skill.id)) {
+      gaps.push({ skill, state: "never-trained" });
+      continue;
+    }
+    const dated = operator.skillExpiries.find((e) => e.skillId === skill.id);
+    // No date on the row: the certificate does not expire. `expires_at IS NOT
+    // NULL` is the server's first condition, and 0048 sends only dated rows,
+    // so "absent" and "NULL" are the same statement here.
+    if (dated === undefined) continue;
+    if (endDay === null || dated.expiresAt < endDay) {
+      gaps.push({ skill, state: "lapsed", expiresAt: dated.expiresAt });
+    }
+  }
+  return gaps;
+}
+
 export function buildBoardIndex(
   data: BoardWindow,
   windowStart: Date,
   windowEnd: Date,
   density: Density,
 ): BoardIndex {
-  const windowMinutes = (windowEnd.getTime() - windowStart.getTime()) / 60_000;
-  const dayCount = windowMinutes / 1440;
+  // D88a: the board's ORIGIN is the plant-local midnight of the day the user
+  // navigated to. `windowStart` arrives as the store's UTC-midnight "which day"
+  // marker (kept UTC because the zone is unknown at store-init); its UTC
+  // calendar day IS that day, and `zonedTimeToInstant` turns it into that day's
+  // LOCAL midnight in the payload's zone — computed HERE from `data.timezone`,
+  // synchronously, so the axis origin never lags the zone by a render. For a UTC
+  // zone this is `windowStart` unchanged and every number below is pixel-
+  // identical to the pre-D88 output.
+  // `?? "UTC"` guards a hand-built fixture that omits the key; a real payload
+  // always carries it (`parseBoardWindow` defaults it to 'UTC' via
+  // `coerceTimezone`), so this only bites in tests.
+  const zone = (data.timezone as string | undefined) ?? "UTC";
+  const dayCount = Math.round((windowEnd.getTime() - windowStart.getTime()) / 60_000 / 1440);
+  const origin = zonedTimeToInstant(
+    zone,
+    windowStart.getUTCFullYear(),
+    windowStart.getUTCMonth() + 1,
+    windowStart.getUTCDate(),
+    0,
+    0,
+  );
+  const dayAxis = buildDayAxis(origin, dayCount, zone);
+  const windowMinutes = dayAxis.windowMinutes;
 
   const nodeById = new Map<string, BoardNode>();
   for (const n of data.nodes) nodeById.set(n.id, n);
@@ -166,8 +366,8 @@ export function buildBoardIndex(
     try {
       const { start, end } = parseTstzRange(timerange);
       return {
-        startMin: (start.getTime() - windowStart.getTime()) / 60_000,
-        endMin: (end.getTime() - windowStart.getTime()) / 60_000,
+        startMin: (start.getTime() - origin.getTime()) / 60_000,
+        endMin: (end.getTime() - origin.getTime()) / 60_000,
       };
     } catch {
       droppedRanges += 1;
@@ -175,9 +375,14 @@ export function buildBoardIndex(
     }
   }
 
-  // Cancelled rows are dropped from every map (rule/case 17).
-  const activeRuns = data.runs.filter((r) => r.status !== "cancelled");
-  const activeAssignments = data.assignments.filter((a) => a.status !== "cancelled");
+  // ⭐ NOTHING IS FILTERED HERE ANY MORE (R-323, R-324). Two lines used to sit
+  // here dropping rows whose status was 'cancelled' — case 17, the client half
+  // of a soft delete. Neither table has a status now: a deleted run and a
+  // deleted assignment are both gone from the database, so every row that
+  // arrives in the window is live by construction. Keeping a filter would mean
+  // keeping a way for the board to hide work that really exists.
+  const activeRuns = data.runs;
+  const activeAssignments = data.assignments;
 
   const runsByNode = new Map<string, IndexedRun[]>();
   const runById = new Map<string, IndexedRun>();
@@ -220,6 +425,23 @@ export function buildBoardIndex(
   // R-315: the standard seconds-per-unit for each (cell, product) in scope.
   // Usually empty — a cycle time is optional everywhere.
   const cycleTimeByKey = buildCycleTimeIndex(data.cycleTimes);
+
+  // R-331: the server's per-node answer, transcribed. ⚠️ NO ANCESTRY WALK HERE
+  // — unlike `templateForNode` right above, which resolves nearest-ancestor in
+  // the browser, this is already resolved. `resolve_shift_template` may be
+  // walked here because a template a caller cannot read is a template that is
+  // not theirs; an eligibility override they cannot read is still THEIR RULE,
+  // and missing it fails open (see `policyForNode`).
+  //
+  // A value that is neither `warn` nor `block` is dropped rather than trusted,
+  // so a key a future migration widens can never arrive as an unchecked string
+  // — and a dropped entry then reads as "unknown", which fails safe.
+  const eligibilityPolicyByNode = new Map<string, "warn" | "block">();
+  for (const p of data.nodePolicies) {
+    if (p.eligibilityPolicy === "warn" || p.eligibilityPolicy === "block") {
+      eligibilityPolicyByNode.set(p.nodeId, p.eligibilityPolicy);
+    }
+  }
 
   // Rule 2: an assignment belongs to the row named by `assignment.nodeId`,
   // never by its run's node.
@@ -348,9 +570,11 @@ export function buildBoardIndex(
   });
 
   return {
-    windowStart,
+    windowStart: origin,
     windowMinutes,
     dayCount,
+    zone,
+    dayAxis,
     rows,
     runsByNode,
     assignmentsByNode,
@@ -367,6 +591,7 @@ export function buildBoardIndex(
     nodeById,
     capacityCap: readCapacityCap(data.org.settings),
     eligibilityPolicy: readEligibilityPolicy(data.org.settings),
+    eligibilityPolicyByNode,
     droppedRanges,
     density,
   };

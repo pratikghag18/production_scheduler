@@ -167,6 +167,54 @@ BEGIN
   END IF;
 END $$;
 
+\echo 'Case 19b: check_eligibility itself walks MULTIPLE levels of ancestry (R-048) -- a requirement on Plant 1 (root) reaches Cell 1 (root -> Assembly -> Line 1 -> Cell 1, three hops), which a plain parent_id lookup would not'
+DO $$
+DECLARE
+  v_skill uuid := gen_random_uuid();
+  v_op_without uuid := gen_random_uuid();
+  v_op_with uuid := gen_random_uuid();
+  v_res jsonb;
+  v_missing_ids jsonb;
+BEGIN
+  INSERT INTO skills (id, org_id, name, site_node_id)
+  VALUES (v_skill, '10000000-0000-0000-0000-000000000001', 'Root Induction (Case 19b)',
+          '30000000-0000-0000-0000-000000000001');
+
+  -- The requirement sits on the ROOT, not on Cell 1's immediate parent (Line 1)
+  -- or grandparent (Assembly) -- so a one-hop or naive parent_id walk would
+  -- miss it, and only a full ltree ancestor walk (target.path <@ anc.path)
+  -- finds it three levels down.
+  INSERT INTO node_skill_requirements (node_id, skill_id, org_id)
+  VALUES ('30000000-0000-0000-0000-000000000001', v_skill, '10000000-0000-0000-0000-000000000001');
+
+  INSERT INTO operators (id, org_id, display_name, site_node_id) VALUES
+    (v_op_without, '10000000-0000-0000-0000-000000000001', 'Case 19b Operator Without', '30000000-0000-0000-0000-000000000001'),
+    (v_op_with, '10000000-0000-0000-0000-000000000001', 'Case 19b Operator With', '30000000-0000-0000-0000-000000000001');
+  INSERT INTO operator_skills (operator_id, skill_id, org_id)
+  VALUES (v_op_with, v_skill, '10000000-0000-0000-0000-000000000001');
+
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000a1', true);
+  SET LOCAL ROLE authenticated;
+
+  v_res := check_eligibility('30000000-0000-0000-0000-000000000007', v_op_without,
+    tstzrange('2099-01-01T00:00:00+00', '2099-01-01T08:00:00+00'));
+  v_missing_ids := (SELECT jsonb_agg(m->>'id') FROM jsonb_array_elements(v_res->'missing_skills') m);
+  IF NOT (v_res->>'eligible')::boolean = false OR v_missing_ids IS NULL
+     OR NOT (v_missing_ids ? v_skill::text) THEN
+    RAISE EXCEPTION 'FAIL: root-level requirement not found three hops down for the operator without it: %', v_res;
+  END IF;
+
+  v_res := check_eligibility('30000000-0000-0000-0000-000000000007', v_op_with,
+    tstzrange('2099-01-01T00:00:00+00', '2099-01-01T08:00:00+00'));
+  v_missing_ids := (SELECT jsonb_agg(m->>'id') FROM jsonb_array_elements(v_res->'missing_skills') m);
+  IF v_missing_ids IS NOT NULL AND (v_missing_ids ? v_skill::text) THEN
+    RAISE EXCEPTION 'FAIL: the operator who HOLDS the root-level skill was still reported missing it: %', v_res;
+  END IF;
+
+  RESET ROLE;
+EXCEPTION WHEN OTHERS THEN RESET ROLE; RAISE;
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- §19.63 — THE CONSTRAINT NAME IS MIRRORED INTO THE CLIENT, SO IT IS PINNED.
 --

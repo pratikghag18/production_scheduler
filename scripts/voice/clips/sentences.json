@@ -1,0 +1,51 @@
+[
+  { "n": 1, "text": "clear Cell 4 today" },
+  { "n": 2, "text": "Assign John Kim to Housing A on Cell 3 in Line 2 from 8am to 12pm today" },
+  {
+    "n": 3,
+    "text": "Assign Priya Shah to Common Fasteners on Cell 4 in Line 2 from 8am to 12pm today"
+  },
+  {
+    "n": 4,
+    "text": "Assign Maria Lopez to Housing Pay on Cell 4 in Line 2 from 1pm to 3pm today"
+  },
+  { "n": 5, "text": "Assign Sam Patel to Cell 1 from 8am to 4pm today" },
+  { "n": 6, "text": "book Bracket A on Cell 3 in Line 2 for 3 people from 1pm to 5pm today" },
+  {
+    "n": 7,
+    "text": "Assign Priya Shah to Line 1 Subassembly A on Cell 2 in Line 1 from 2 until end of shift today"
+  },
+  {
+    "n": 8,
+    "text": "Assign Tom Baker to Area 2 Frame A on Cell 6 in Line 3 from 8am to 2pm today"
+  },
+  { "n": 9, "text": "end Sam Patel's block at 2pm" },
+  { "n": 10, "text": "swap Tom Baker and Sam Patel today" },
+  { "n": 11, "text": "split Sam Patel's block at 1pm" },
+  { "n": 12, "text": "extend John Kim's block by an hour" },
+  { "n": 13, "text": "make the Bracket A job on Cell 3 4 people" },
+  {
+    "n": 14,
+    "text": "Assign Lena Novak to Area 2 Frame A on Cell 5 in Line 3 from 8am to 1pm today"
+  },
+  { "n": 15, "text": "swap Lena Novak and John Kim today" },
+  { "n": 16, "text": "copy today to tomorrow for Cell 3" },
+  {
+    "n": 17,
+    "text": "Assign Lena Novak to Bracket A on Cell 4 in Line 2 every weekday this week from 8am to 12pm"
+  },
+  {
+    "n": 18,
+    "text": "Assign Tom Baker to Housing A on Cell 1 in Line 1 from 3pm to 5pm today"
+  },
+  {
+    "n": 19,
+    "text": "Assign Maria Lopez to Bracket A on Cell 3 in Line 2 from 8am to 12pm on September twenty-eighth"
+  },
+  {
+    "n": 20,
+    "text": "Assign Maria Lopez to Bracket A on Cell 3 in Line 2 from 8am to 12pm"
+  },
+  { "n": 21, "text": "clear Area 1 today" },
+  { "n": 22, "text": "clear Area 2 today" }
+]

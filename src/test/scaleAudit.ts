@@ -122,6 +122,31 @@ export const REM_SURFACES: readonly string[] = [
   // did not predict, so it is listed here AND in R10's copy in
   // `scaleAudit.test.ts` — the two-place edit `missingRemSurfaces` forces.
   "src/features/admin/components/CycleTimesPanel.module.css",
+  // The Activity section (the audit log, 0007 / 0029 §6). Read-only, and the
+  // §19.62 pre-seat did not predict it either — so it is listed here AND in
+  // R10's copy in `scaleAudit.test.ts`, the two-place edit `missingRemSurfaces`
+  // exists to force.
+  "src/features/admin/components/AuditPanel.module.css",
+  // R-357 / 0066, the Absences section. A new admin surface the §19.62 pre-seat
+  // did not predict, so it is listed here AND in R10's copy in
+  // `scaleAudit.test.ts` — the two-place edit `missingRemSurfaces` exists to
+  // force (CLAUDE.md section 4).
+  "src/features/admin/components/AbsencesPanel.module.css",
+  // R-356 / 0067, the Templates section. A new admin surface, so it is listed
+  // here AND in R10's copy in `scaleAudit.test.ts` — the two-place edit
+  // `missingRemSurfaces` exists to force (CLAUDE.md section 4).
+  "src/features/admin/components/TemplatesPanel.module.css",
+  // R-360 / 0069, the Operators tab's own absences block. A new admin
+  // surface, so it is listed here AND in R10's copy in `scaleAudit.test.ts`
+  // — the two-place edit `missingRemSurfaces` exists to force (CLAUDE.md
+  // section 4).
+  "src/features/admin/components/OperatorAbsences.module.css",
+  // S70-a / R-360 amended, R-449: the one absence form extracted out of
+  // AbsencesPanel.tsx and OperatorAbsences.tsx. A new admin surface, so it
+  // is listed here AND in R10's copy in `scaleAudit.test.ts` — the
+  // two-place edit `missingRemSurfaces` exists to force (CLAUDE.md
+  // section 4).
+  "src/features/admin/components/AbsenceForm.module.css",
 ];
 
 /**
@@ -206,23 +231,123 @@ export function auditAdminSections(root: string, file: string = ADMIN_PAGE): str
 
 export const REM_SURFACE_DIR = "src/features/admin";
 
+/**
+ * Every `*.module.css` under `${base}/${rel}`, walked recursively. Shared by
+ * `missingRemSurfaces` (D89, admin) and `missingBoardSurfaces` (DEF-0036, board)
+ * so the directory walk is written once — the two completeness guards differ
+ * only in which directory and which list(s) they check the result against.
+ */
+function moduleCssUnder(base: string, rel: string): string[] {
+  const found: string[] = [];
+  const walk = (r: string): void => {
+    for (const entry of fs.readdirSync(`${base}/${r}`, { withFileTypes: true })) {
+      const child = `${r}/${entry.name}`;
+      if (entry.isDirectory()) walk(child);
+      else if (entry.name.endsWith(".module.css")) found.push(child);
+    }
+  };
+  walk(rel);
+  return found;
+}
+
 export function missingRemSurfaces(
   root: string,
   dir: string = REM_SURFACE_DIR,
   known: readonly string[] = REM_SURFACES,
 ): string[] {
   const base = root.endsWith("/") ? root.slice(0, -1) : root;
-  const found: string[] = [];
-  const walk = (rel: string): void => {
-    for (const entry of fs.readdirSync(`${base}/${rel}`, { withFileTypes: true })) {
-      const child = `${rel}/${entry.name}`;
-      if (entry.isDirectory()) walk(child);
-      else if (entry.name.endsWith(".module.css")) found.push(child);
-    }
-  };
-  walk(dir);
+  const found = moduleCssUnder(base, dir);
   const knownSet = new Set(known);
   return found.filter((f) => !knownSet.has(f)).sort();
+}
+
+/*
+ * DEF-0036 — THE BOARD HAS THE SAME HOLE D89 CLOSED FOR ADMIN.
+ *
+ * D89's `missingRemSurfaces` walks `src/features/admin` because that is where
+ * the rem-sized D84 surfaces live; it never looked at the board, because the
+ * board's own R-D84 rule is different (`calc(px * var(--ui-scale))`, not
+ * rem) and had no completeness walk of its own at all. So `OperatorPanel.
+ * module.css` (S65) and `ShiftLayer.module.css` (S66-c) shipped in neither
+ * `CHROME_FILES` nor any board list, and nothing failed (DEF-0036, tester
+ * session 181t).
+ *
+ * The board's own classification is two lists, not one: `CHROME_FILES`
+ * (unscaled — chrome outside the fitted container) already exists and is
+ * reused as-is; `BOARD_SCALED_SURFACES` below names every board module that
+ * lives INSIDE the fitted geometry and scales through `calc(Npx *
+ * var(--ui-scale))`. A board `*.module.css` must be in EXACTLY ONE of the
+ * two — `missingBoardSurfaces` reports a file in neither (unaudited) and a
+ * file in both (which cannot be chrome AND scaled at once).
+ */
+
+export const BOARD_SURFACE_DIR = "src/features/board";
+
+/**
+ * Every board `*.module.css` that is not chrome (`CHROME_FILES`) — i.e. every
+ * one that sits INSIDE the fitted scroll geometry and scales its pixel
+ * dimensions through `calc(Npx * var(--ui-scale))` rather than through the
+ * scaled root font-size (`rem`) admin surfaces use. Listed by walking
+ * `src/features/board` once by hand, sorted.
+ *
+ * `OperatorPanel.module.css` — the operator rail sits BESIDE the grid, not
+ * above it; its width never feeds `computeFitScale` (which reads heights
+ * only), but it is still board content inside the fitted layout, so its own
+ * pixel dimensions scale the same way the grid's do.
+ * `ShiftLayer.module.css` — painted directly onto the grid's cells.
+ */
+export const BOARD_SCALED_SURFACES: readonly string[] = [
+  "src/features/board/components/AssignmentChip.module.css",
+  "src/features/board/components/AssignmentPopover.module.css",
+  "src/features/board/components/BoardGrid.module.css",
+  "src/features/board/components/BoardHeader.module.css",
+  "src/features/board/components/CommandBar.module.css",
+  "src/features/board/components/CommandLauncher.module.css",
+  "src/features/board/components/ConfirmPopover.module.css",
+  "src/features/board/components/CopyWeekDialog.module.css",
+  "src/features/board/components/CreatePopover.module.css",
+  "src/features/board/components/DirectBlock.module.css",
+  "src/features/board/components/DragGhost.module.css",
+  "src/features/board/components/GroupRow.module.css",
+  // DEF-0036: the operator rail (S65). Was in neither list.
+  "src/features/board/components/OperatorPanel.module.css",
+  "src/features/board/components/RunBand.module.css",
+  "src/features/board/components/RunPopover.module.css",
+  "src/features/board/components/SaveTemplateDialog.module.css",
+  // DEF-0036: the shift band painted on cells (S66-c). Was in neither list.
+  "src/features/board/components/ShiftLayer.module.css",
+  "src/features/board/components/SplitCoveragePopover.module.css",
+  "src/features/board/components/TargetField.module.css",
+  "src/features/board/components/Toasts.module.css",
+  "src/features/board/components/TrackRow.module.css",
+];
+
+/**
+ * Board `*.module.css` files that `CHROME_FILES` and `BOARD_SCALED_SURFACES`
+ * together do not account for correctly: one in NEITHER list (unaudited, the
+ * DEF-0036 hole itself) or one in BOTH (a file cannot be chrome — unscaled —
+ * and a scaled surface at the same time). Same shape as `missingRemSurfaces`,
+ * sharing its directory walk via `moduleCssUnder`.
+ */
+export function missingBoardSurfaces(
+  root: string,
+  dir: string = BOARD_SURFACE_DIR,
+  chrome: readonly string[] = CHROME_FILES,
+  scaled: readonly string[] = BOARD_SCALED_SURFACES,
+): string[] {
+  const base = root.endsWith("/") ? root.slice(0, -1) : root;
+  const found = moduleCssUnder(base, dir);
+  const chromeSet = new Set(chrome);
+  const scaledSet = new Set(scaled);
+  const out: string[] = [];
+  for (const f of found) {
+    const inChrome = chromeSet.has(f);
+    const inScaled = scaledSet.has(f);
+    if (!inChrome && !inScaled) out.push(f);
+    else if (inChrome && inScaled)
+      out.push(`${f} (in both CHROME_FILES and BOARD_SCALED_SURFACES)`);
+  }
+  return out.sort();
 }
 
 /**
@@ -274,25 +399,37 @@ export function missingControlFontReset(globalCss: string): string[] {
  * `1.35px`, and a matcher that reads comments flags the very file documenting
  * the rule. That mistake has now been made twice on this project.
  */
-export function unscaledPxLengths(css: string): string[] {
+/**
+ * Every CSS declaration (and selector prelude — the split does not
+ * distinguish them, and neither caller needs it to) in `css`, comments
+ * stripped and trimmed. Shared by `unscaledPxLengths` (D84, rem surfaces) and
+ * `unscaledBoardPx` (R-D84, board `calc(px * var(--ui-scale))` surfaces) so
+ * the split-and-comment-strip is written once; each caller still runs its own
+ * match loop over the result, because their exemptions differ.
+ *
+ * Split on `;` and braces ONLY — the boundaries of a CSS declaration. Not on
+ * newlines: a declaration's VALUE may span lines, and Prettier wraps a
+ * multi-value one as soon as it is long enough.
+ *
+ * Both halves of that were learned the hard way. An earlier LINE-oriented
+ * version reported ZERO offenders the moment a selector and a declaration
+ * shared a line, and zero offenders reads exactly like a pass. Splitting on
+ * `;{}` fixes that. But this function then kept `\n` in the split as well,
+ * which claimed in a comment to make the matcher independent of Prettier and
+ * did the opposite: on 28 Aug a repo-wide `prettier --write` wrapped three
+ * `box-shadow` values in ProductsPanel.module.css onto three lines each, the
+ * continuation lines no longer carried the `box-shadow:` property that
+ * exempts them, and R1 failed on CSS whose meaning had not changed.
+ * R5b pins it. A declaration ends at `;` or a brace — never at a newline.
+ */
+function declarationLines(css: string): string[] {
   const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  return withoutComments.split(/[;{}]/).map((rawLine) => rawLine.trim());
+}
+
+export function unscaledPxLengths(css: string): string[] {
   const out: string[] = [];
-  // Split on `;` and braces ONLY — the boundaries of a CSS declaration. Not on
-  // newlines: a declaration's VALUE may span lines, and Prettier wraps a
-  // multi-value one as soon as it is long enough.
-  //
-  // Both halves of that were learned the hard way. An earlier LINE-oriented
-  // version reported ZERO offenders the moment a selector and a declaration
-  // shared a line, and zero offenders reads exactly like a pass. Splitting on
-  // `;{}` fixes that. But this function then kept `\n` in the split as well,
-  // which claimed in a comment to make the matcher independent of Prettier and
-  // did the opposite: on 28 Aug a repo-wide `prettier --write` wrapped three
-  // `box-shadow` values in ProductsPanel.module.css onto three lines each, the
-  // continuation lines no longer carried the `box-shadow:` property that
-  // exempts them, and R1 failed on CSS whose meaning had not changed.
-  // R5b pins it. A declaration ends at `;` or a brace — never at a newline.
-  for (const rawLine of withoutComments.split(/[;{}]/)) {
-    const line = rawLine.trim();
+  for (const line of declarationLines(css)) {
     if (line.startsWith("@media")) continue;
     const prop = line.split(":")[0].trim().toLowerCase();
     if (prop === "box-shadow") continue;
@@ -320,6 +457,95 @@ export function auditRemSurfaces(
     offenders: unscaledPxLengths(fs.readFileSync(`${root}/${f}`, "utf8")),
   }));
 }
+
+/**
+ * R-D84 — the board's OWN scaled-surface rule. "The board keeps
+ * `calc(px * scale)` because its geometry is computed in pixels" (R-D84):
+ * unlike the admin `rem` surfaces, a board module's pixel length is correct
+ * exactly when the SAME declaration multiplies it by `var(--ui-scale…)`
+ * inside a `calc(` — so that one pattern is the extra exemption on top of
+ * `unscaledPxLengths`'s existing ones (hairline border/outline widths <=2px,
+ * `box-shadow`, `@media`, `0px`; comments stripped first, split on `;{}`
+ * only, both shared via `declarationLines`).
+ *
+ * The exemption is scoped to the SPECIFIC `calc(...)` that multiplies by
+ * `--ui-scale`, not to the whole declaration — `padding: 6px calc(8px *
+ * var(--ui-scale, 1))` still flags the bare `6px`, because that number is not
+ * itself inside a scaling `calc(`.
+ */
+const UI_SCALE_CALC = /calc\(\s*\d+(?:\.\d+)?px\s*\*\s*var\(\s*--ui-scale\b[^)]*\)\s*\)/g;
+
+export function unscaledBoardPx(css: string): string[] {
+  const out: string[] = [];
+  for (const line of declarationLines(css)) {
+    if (line.startsWith("@media")) continue;
+    const prop = line.split(":")[0].trim().toLowerCase();
+    if (prop === "box-shadow") continue;
+    const isHairlineContext = /^(border|outline)/.test(prop) && !prop.includes("radius");
+    // Strip every px*ui-scale calc() before matching, so a scaled px length
+    // is never seen by the offender regex below at all.
+    const withoutScaledCalcs = line.replace(UI_SCALE_CALC, "");
+    for (const m of withoutScaledCalcs.matchAll(/\b(\d+(?:\.\d+)?)px\b/g)) {
+      const v = parseFloat(m[1]);
+      if (v === 0) continue;
+      if (isHairlineContext && v <= 2) continue;
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+export function auditBoardSurfaces(
+  root: string,
+  files: readonly string[] = BOARD_SCALED_SURFACES,
+): Array<{ file: string; offenders: string[] }> {
+  return files.map((f) => ({
+    file: f,
+    offenders: unscaledBoardPx(fs.readFileSync(`${root}/${f}`, "utf8")),
+  }));
+}
+
+/**
+ * DEF-0036 fix, step 4 — the board's own version of `fieldStandard.test.ts`'s
+ * `FIELD_LEGACY` (read its header there): `unscaledBoardPx` audits every
+ * board surface honestly, and eighteen of the twenty pre-existed this fix
+ * with their own bare px. Migrating them is separate work, so they are NAMED
+ * here rather than silently exempted or left to fail the suite — a file on
+ * this list may keep its offenders; a file NOT on it that has any is a build
+ * failure. ⚠️ THE LIST MAY ONLY SHRINK: a file leaving it must be clean, and a
+ * file not on it must be clean (B5). The two NEW surfaces this fix enrolled,
+ * `OperatorPanel.module.css` and `ShiftLayer.module.css`, are NOT on it —
+ * they came out clean instead (see the report for the fixed declarations).
+ *
+ * Counts are the offender count `auditBoardSurfaces` reported on 21 Sept, the
+ * day this list was written — a comment, not something the audit itself
+ * checks; what the audit checks is that every one of these still has AT
+ * LEAST ONE offender (a clean entry is stale) and that no file off the list
+ * has any.
+ */
+export const BOARD_PX_LEGACY: readonly string[] = [
+  "src/features/board/components/AssignmentChip.module.css", // 11
+  "src/features/board/components/AssignmentPopover.module.css", // 27
+  "src/features/board/components/BoardHeader.module.css", // 14
+  "src/features/board/components/CommandBar.module.css", // 25
+  "src/features/board/components/CommandLauncher.module.css", // 22
+  "src/features/board/components/ConfirmPopover.module.css", // 7
+  "src/features/board/components/CreatePopover.module.css", // 38
+  "src/features/board/components/DirectBlock.module.css", // 11
+  "src/features/board/components/DragGhost.module.css", // 1
+  "src/features/board/components/GroupRow.module.css", // 5
+  "src/features/board/components/RunBand.module.css", // 8
+  "src/features/board/components/RunPopover.module.css", // 13
+  "src/features/board/components/SplitCoveragePopover.module.css", // 19
+  "src/features/board/components/TargetField.module.css", // 4
+  "src/features/board/components/Toasts.module.css", // 7
+  "src/features/board/components/TrackRow.module.css", // 12
+  // NOT on this list, and clean on 21 Sept: BoardGrid.module.css,
+  // CopyWeekDialog.module.css, SaveTemplateDialog.module.css (0 offenders
+  // each — never had a bare board px to begin with), and the two DEF-0036
+  // surfaces this fix enrolled clean, OperatorPanel.module.css and
+  // ShiftLayer.module.css.
+];
 
 /* ---------------------------------------------------------------------------
    D100 — THE DRAG AUDIT. "MATCH THE COLOURS" MADE INTO A PROPERTY OF THE FILES.
@@ -440,6 +666,107 @@ export function undefinedDragTokens(tokensCss: string, sheets: readonly string[]
     }
   }
   return [...used].filter((t) => !defined.has(t)).sort();
+}
+
+/**
+ * F-130 — the general undefined-token sweep.
+ *
+ * `undefinedDragTokens` above only ever looked at `--drag-*`/`--drop-*`, which
+ * is why six `var(--ink-1)` reads sat unnoticed in four module stylesheets:
+ * `--ink-1` was never defined anywhere (`tokens.css` has `--ink` and `--ink-2`,
+ * not `--ink-1`), so `color` silently fell back to the inherited value —
+ * invisible on a light page, wrong everywhere else. This is the same shape of
+ * bug as `undefinedDragTokens` catches, widened to every module stylesheet and
+ * every token, not just the drag vocabulary.
+ *
+ * A READ is `var(--name)` with NO fallback — `var(--name, <fallback>)` is
+ * never an offence, that is what the fallback is for (`--chrome-scale` is read
+ * that way throughout `BoardToolbar.module.css` on purpose, and must stay
+ * clean).
+ *
+ * A DEFINITION is any of:
+ *   1. `--name:` at the start of a declaration in `tokens.css`;
+ *   2. `--name:` at the start of a declaration in ANY module stylesheet
+ *      passed in, not only the one doing the reading — this is what makes
+ *      `--row-pad-y` (declared once in `dragSurface.module.css` and reached
+ *      by `NodeTreeEditor.module.css` only through `composes:`) a real
+ *      definition rather than a false positive;
+ *   3. the quoted string `"--name"` / `'--name'` in a `.ts`/`.tsx` source
+ *      outside `src/test/` — an inline `style={{ "--pc": … } as
+ *      React.CSSProperties}` prop sets a custom property with no CSS
+ *      declaration anywhere, and three tokens in this repo (`--pc`,
+ *      `--tick-rails`, `--caret-rails`, `--hour-px`) are set exactly that
+ *      way, on purpose, already.
+ *
+ * Comments are stripped from both CSS and scripts before either reads or
+ * definitions are looked for, for the usual reason: `CommandBar.module.css`
+ * names `--ink-1` in a comment explaining that it is never used, and a script
+ * comment can just as easily quote a token's name without setting it — a
+ * matcher that reads comments would call either a definition and go quiet
+ * over the very case it exists to catch.
+ */
+
+/**
+ * Every `--name:` declared at the start of a declaration in `css` (comments
+ * already assumed stripped by the caller). Split on `;{}` only, never on a
+ * newline — the same reason `unscaledPxLengths` does: a declaration's value
+ * may wrap across lines and a newline-oriented split would cut a definition
+ * in half and report it as absent.
+ */
+function declaredTokens(css: string): Set<string> {
+  const defined = new Set<string>();
+  for (const raw of css.split(/[;{}]/)) {
+    const line = raw.trim();
+    const m = /^(--[a-z0-9-]+)\s*:/i.exec(line);
+    if (m !== null) defined.add(m[1]);
+  }
+  return defined;
+}
+
+/**
+ * Every `--name` quoted as a string literal in `source` — a script's way of
+ * definining a custom property through an inline `style` prop
+ * (`style={{ "--pc": value }}`). Comments are stripped first (reusing
+ * `stripTsComments`, the same stripper `sectionsWithoutPanels` uses on
+ * `AdminPage.tsx`) so a token name that only appears in a comment is NOT
+ * counted as a definition.
+ */
+function quotedTokens(source: string): Set<string> {
+  const clean = stripTsComments(source);
+  const found = new Set<string>();
+  for (const m of clean.matchAll(/(["'])(--[a-z0-9-]+)\1/gi)) found.add(m[2]);
+  return found;
+}
+
+/**
+ * Every `var(--token)` read with no fallback, across `sheets`, that no
+ * definition covers — see the rule above. `scripts` are raw `.ts`/`.tsx`
+ * source strings (outside `src/test/`); passing none is a no-op, so callers
+ * that only care about the CSS-only rule still work. Returns
+ * `"<path>: --name"` per offence, sorted and de-duplicated (the same token
+ * read twice in one sheet is reported once).
+ */
+export function undefinedTokens(
+  tokensCss: string,
+  sheets: ReadonlyArray<{ path: string; css: string }>,
+  scripts: ReadonlyArray<string> = [],
+): string[] {
+  const defined = declaredTokens(withoutComments(tokensCss));
+  for (const { css } of sheets) {
+    for (const t of declaredTokens(withoutComments(css))) defined.add(t);
+  }
+  for (const source of scripts) {
+    for (const t of quotedTokens(source)) defined.add(t);
+  }
+  const out = new Set<string>();
+  for (const { path, css } of sheets) {
+    const clean = withoutComments(css);
+    for (const m of clean.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi)) {
+      const token = m[1];
+      if (!defined.has(token)) out.add(`${path}: ${token}`);
+    }
+  }
+  return [...out].sort();
 }
 
 /* ===========================================================================

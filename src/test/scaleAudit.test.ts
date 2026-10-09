@@ -2,7 +2,7 @@
 // See the note in scaleAudit.ts: node types are referenced per-file rather
 // than added to the app tsconfig, because this is a browser app.
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import {
   CHROME_FILES,
   countUiScaleUses,
@@ -11,6 +11,11 @@ import {
   unscaledPxLengths,
   auditRemSurfaces,
   missingRemSurfaces,
+  BOARD_SCALED_SURFACES,
+  BOARD_PX_LEGACY,
+  unscaledBoardPx,
+  auditBoardSurfaces,
+  missingBoardSurfaces,
   missingControlFontReset,
   RESET_CONTROLS,
   DRAG_SHARED_SURFACE,
@@ -21,6 +26,7 @@ import {
   unsharedDragRules,
   rawDragColours,
   undefinedDragTokens,
+  undefinedTokens,
   ADMIN_PAGE,
   parseSectionIds,
   sectionsWithoutPanels,
@@ -217,7 +223,7 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
   // this literal AND nothing else: `missingRemSurfaces` (below) now walks the
   // directory, so it catches a surface that exists on disk and is not listed,
   // while this case catches the list drifting for any other reason.
-  it("R10: REM_SURFACES is exactly the sixteen admin stylesheets", () => {
+  it("R10: REM_SURFACES is exactly the twenty-two admin stylesheets", () => {
     // Brief P1-6a §7: updated per this describe block's own comment above --
     // "Adding a sixth admin surface means updating this literal AND nothing
     // else" -- when `SiteAccessPanel.module.css` was added to REM_SURFACES.
@@ -259,6 +265,129 @@ describe("D84: rem surfaces contain no unscaled pixel dimensions", () => {
         // 0040 / R-315: the Cycle times section. Seventeenth surface, same
         // two-place edit.
         "src/features/admin/components/CycleTimesPanel.module.css",
+        // The Activity section (the audit log, 0007 / 0029 §6). Eighteenth
+        // surface, same two-place edit.
+        "src/features/admin/components/AuditPanel.module.css",
+        // R-357 / 0066: the Absences section. Nineteenth surface, same two-place
+        // edit.
+        "src/features/admin/components/AbsencesPanel.module.css",
+        // R-356 / 0067: the Templates section. Twentieth surface, same two-place
+        // edit.
+        "src/features/admin/components/TemplatesPanel.module.css",
+        // R-360 / 0069: the Operators tab's own absences block. Twenty-first
+        // surface, same two-place edit.
+        "src/features/admin/components/OperatorAbsences.module.css",
+        // S70-a / R-360 amended, R-449: the one absence form extracted out of
+        // AbsencesPanel.tsx and OperatorAbsences.tsx. Twenty-second surface,
+        // same two-place edit.
+        "src/features/admin/components/AbsenceForm.module.css",
+      ].sort(),
+    );
+  });
+});
+
+/**
+ * DEF-0036 (R-D84, D89) — group B. `missingRemSurfaces`'s completeness walk
+ * covered `src/features/admin` only, so a new BOARD stylesheet was audited by
+ * nothing unless someone remembered to list it — nobody did for
+ * `OperatorPanel.module.css` (S65) and `ShiftLayer.module.css` (S66-c). This
+ * group is the board's own version of the D84/D89 groups above: a
+ * completeness walk (`missingBoardSurfaces`) over the board directory, a
+ * pixel-exemption matcher (`unscaledBoardPx`) whose extra rule is "exempt
+ * when the SAME declaration multiplies by `var(--ui-scale…)` inside a
+ * `calc(`", and a legacy list (`BOARD_PX_LEGACY`, the board's own
+ * `FIELD_LEGACY`) naming the pre-existing surfaces this fix did not migrate.
+ *
+ * Half the cases run against synthetic CSS or a trimmed copy of the real
+ * lists, on purpose — the same reason every other group in this file does:
+ * a case that only ever reads the clean repo passes for as long as the repo
+ * is clean and says nothing about whether the matcher can fail at all.
+ */
+describe("DEF-0036: the board's own scale audit (R-D84)", () => {
+  it("B1: no unaudited *.module.css under the board", () => {
+    expect(missingBoardSurfaces(repoRoot)).toEqual([]);
+  });
+
+  it("B2: the walk can fail — dropping one scaled surface reports it, same as the D89 ShapePicker case", () => {
+    const short = BOARD_SCALED_SURFACES.filter(
+      (f) => f !== "src/features/board/components/TrackRow.module.css",
+    );
+    expect(missingBoardSurfaces(repoRoot, undefined, CHROME_FILES, short)).toEqual([
+      "src/features/board/components/TrackRow.module.css",
+    ]);
+  });
+
+  it("B3: a file listed as BOTH chrome and scaled is reported — it cannot be both", () => {
+    const chromeWithOverlap = [
+      ...CHROME_FILES,
+      "src/features/board/components/TrackRow.module.css",
+    ];
+    expect(missingBoardSurfaces(repoRoot, undefined, chromeWithOverlap)).toEqual([
+      "src/features/board/components/TrackRow.module.css (in both CHROME_FILES and BOARD_SCALED_SURFACES)",
+    ]);
+  });
+
+  it("B4: every scaled surface NOT on the legacy list is clean", () => {
+    const current = BOARD_SCALED_SURFACES.filter((f) => !BOARD_PX_LEGACY.includes(f));
+    const offenders = auditBoardSurfaces(repoRoot, current).filter((r) => r.offenders.length > 0);
+    expect(offenders).toEqual([]);
+  });
+
+  it("B5: every legacy file still has offenders — the list may only shrink, a clean entry is stale", () => {
+    const stale = auditBoardSurfaces(repoRoot, BOARD_PX_LEGACY).filter(
+      (r) => r.offenders.length === 0,
+    );
+    expect(
+      stale.map((r) => `${r.file} has no offenders left — remove it from BOARD_PX_LEGACY`),
+    ).toEqual([]);
+  });
+
+  it("B6: the matcher exempts a px length the SAME declaration multiplies by var(--ui-scale) inside calc()", () => {
+    expect(unscaledBoardPx(".a { width: calc(6px * var(--ui-scale, 1)); }")).toEqual([]);
+  });
+
+  it("B7: a bare (unscaled) px length is flagged", () => {
+    expect(unscaledBoardPx(".a { gap: 6px; }").length).toBe(1);
+  });
+
+  it("B7b: a bare px length ALONGSIDE a scaled one in the same declaration is still flagged — the exemption is per-occurrence, not per-declaration", () => {
+    expect(unscaledBoardPx(".a { padding: 6px calc(8px * var(--ui-scale, 1)); }").length).toBe(1);
+  });
+
+  it("B8: a hairline border stays exempt, the same as the rem audit", () => {
+    expect(unscaledBoardPx(".a { border: 1px solid red; }")).toEqual([]);
+  });
+
+  it("B9: BOARD_SCALED_SURFACES is exactly the twenty board stylesheets that are not chrome", () => {
+    // The list that drives B1/B4/B5 is itself untested unless something
+    // asserts it — same hole R10/G12/J2 each exist to close one level up. A
+    // new board file forces the two-place edit: this literal, and the file
+    // itself classified as chrome or scaled.
+    expect([...BOARD_SCALED_SURFACES].sort()).toEqual(
+      [
+        "src/features/board/components/AssignmentChip.module.css",
+        "src/features/board/components/AssignmentPopover.module.css",
+        "src/features/board/components/BoardGrid.module.css",
+        "src/features/board/components/BoardHeader.module.css",
+        "src/features/board/components/CommandBar.module.css",
+        "src/features/board/components/CommandLauncher.module.css",
+        "src/features/board/components/ConfirmPopover.module.css",
+        "src/features/board/components/CopyWeekDialog.module.css",
+        "src/features/board/components/CreatePopover.module.css",
+        "src/features/board/components/DirectBlock.module.css",
+        "src/features/board/components/DragGhost.module.css",
+        "src/features/board/components/GroupRow.module.css",
+        // DEF-0036: the operator rail (S65). Was in neither list.
+        "src/features/board/components/OperatorPanel.module.css",
+        "src/features/board/components/RunBand.module.css",
+        "src/features/board/components/RunPopover.module.css",
+        "src/features/board/components/SaveTemplateDialog.module.css",
+        // DEF-0036: the shift band on cells (S66-c). Was in neither list.
+        "src/features/board/components/ShiftLayer.module.css",
+        "src/features/board/components/SplitCoveragePopover.module.css",
+        "src/features/board/components/TargetField.module.css",
+        "src/features/board/components/Toasts.module.css",
+        "src/features/board/components/TrackRow.module.css",
       ].sort(),
     );
   });
@@ -448,6 +577,149 @@ describe("scaleAudit.ts: the drag audit (D100)", () => {
 });
 
 /**
+ * F-130 — the general undefined-token sweep, widened past `--drag-*`/`--drop-*`
+ * to every module stylesheet and every token.
+ *
+ * Six `var(--ink-1)` reads sat unnoticed in four module stylesheets: `--ink-1`
+ * is defined nowhere (`tokens.css` has `--ink` and `--ink-2`, not `--ink-1`),
+ * so `color` silently fell back to the inherited value. G10 only ever walked
+ * the two drag surfaces plus their shared file; G13 walks every
+ * `*.module.css` under `src/`, the same recursive `fs`/`path` walk
+ * `missingRemSurfaces` uses (not a hand-kept list), so a new module is
+ * audited the day it appears.
+ *
+ * A first pass at G13 (built to the letter of the original brief — a
+ * definition is `--name:` in `tokens.css` or the SAME sheet, nothing else)
+ * came up red for five tokens that are not bugs: `--row-pad-y` is declared in
+ * `dragSurface.module.css` and reached by `NodeTreeEditor.module.css` only
+ * through `composes:`, and `--pc` / `--tick-rails` / `--caret-rails` /
+ * `--hour-px` are set from an inline `style` prop in `.tsx`, never in any
+ * stylesheet at all. Both are real, working, already-documented patterns —
+ * so the DEFINITION side of the rule was widened (scaleAudit.ts) rather than
+ * carrying an allowlist of "expected" false positives here.
+ */
+describe("F-130: every var(--token) read by a module stylesheet is defined (G13/G14)", () => {
+  const root = repoRoot;
+
+  /** Every `*.module.css` under `dir`, walked recursively — no hand-kept list. */
+  function walkModuleCssFiles(dir: string): string[] {
+    const found: string[] = [];
+    const walk = (rel: string): void => {
+      for (const entry of readdirSync(`${root}/${rel}`, { withFileTypes: true })) {
+        const child = `${rel}/${entry.name}`;
+        if (entry.isDirectory()) walk(child);
+        else if (entry.name.endsWith(".module.css")) found.push(child);
+      }
+    };
+    walk(dir);
+    return found.sort();
+  }
+
+  /**
+   * Every `.ts`/`.tsx` under `dir`, walked recursively, EXCLUDING `src/test/`
+   * — the test suite itself quotes token names in synthetic fixtures (this
+   * very file, for one) and is not a source of real definitions.
+   */
+  function walkScriptFiles(dir: string): string[] {
+    const found: string[] = [];
+    const walk = (rel: string): void => {
+      if (rel === "src/test" || rel.startsWith("src/test/")) return;
+      for (const entry of readdirSync(`${root}/${rel}`, { withFileTypes: true })) {
+        const child = `${rel}/${entry.name}`;
+        if (entry.isDirectory()) walk(child);
+        else if (/\.tsx?$/.test(entry.name)) found.push(child);
+      }
+    };
+    walk(dir);
+    return found.sort();
+  }
+
+  it("G13: every var(--token) read without a fallback by any module stylesheet is defined in tokens.css, any module sheet, or a script", () => {
+    const cssFiles = walkModuleCssFiles("src");
+    const sheets = cssFiles.map((path) => ({
+      path,
+      css: readFileSync(`${root}/${path}`, "utf8"),
+    }));
+    const tokensCss = readFileSync(`${root}/src/styles/tokens.css`, "utf8");
+    const scriptFiles = walkScriptFiles("src");
+    const scripts = scriptFiles.map((path) => readFileSync(`${root}/${path}`, "utf8"));
+    expect(undefinedTokens(tokensCss, sheets, scripts)).toEqual([]);
+  });
+
+  it("G14: the matcher's self-tests — undefined, fallback, local definition, comment-only, de-duplication", () => {
+    // a read of an undefined token is reported with its path
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        { path: "a.module.css", css: ".x { color: var(--ink-1); }" },
+      ]),
+    ).toEqual(["a.module.css: --ink-1"]);
+
+    // a read WITH a fallback is never an offence
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        { path: "a.module.css", css: ".x { color: var(--ink-1, #000); }" },
+      ]),
+    ).toEqual([]);
+
+    // a token defined locally in the same sheet is not reported
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        { path: "a.module.css", css: ".x { --local: red; } .y { color: var(--local); }" },
+      ]),
+    ).toEqual([]);
+
+    // a token that appears only inside a comment is not a read
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        {
+          path: "a.module.css",
+          css: "/* still uses var(--ink-1) in prose only */\n.x { color: var(--ink); }",
+        },
+      ]),
+    ).toEqual([]);
+
+    // the same undefined token read twice in one sheet is reported once
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        {
+          path: "a.module.css",
+          css: ".x { color: var(--ink-1); }\n.y { color: var(--ink-1); }",
+        },
+      ]),
+    ).toEqual(["a.module.css: --ink-1"]);
+
+    // a token defined only in a DIFFERENT module sheet (a `composes:` chain,
+    // e.g. --row-pad-y from dragSurface.module.css) is not reported
+    expect(
+      undefinedTokens(":root { --ink: #000; }", [
+        { path: "shared.module.css", css: ".row { --row-pad-y: 0.25rem; }" },
+        { path: "reader.module.css", css: ".x { top: calc(-1 * var(--row-pad-y)); }" },
+      ]),
+    ).toEqual([]);
+
+    // a token whose only definition is a "--name" string in a script is not
+    // reported (an inline style={{ "--pc": … }} prop)
+    expect(
+      undefinedTokens(
+        ":root { --ink: #000; }",
+        [{ path: "a.module.css", css: ".x { border-left: 3px solid var(--pc); }" }],
+        [`style={{ "--pc": productColorVar }}`],
+      ),
+    ).toEqual([]);
+
+    // a "--name" that appears only inside a comment in the script does NOT
+    // count as a definition, and is still reported
+    expect(
+      undefinedTokens(
+        ":root { --ink: #000; }",
+        [{ path: "a.module.css", css: ".x { border-left: 3px solid var(--pc); }" }],
+        [`// style={{ "--pc": productColorVar }}\nconst x = 1;`],
+      ),
+    ).toEqual(["a.module.css: --pc"]);
+  });
+});
+
+/**
  * Group H (§19.62) — a rail button with nothing behind it.
  *
  * `AdminPage.tsx` holds two lists that must agree and never referred to each
@@ -465,7 +737,7 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
     expect(auditAdminSections(repoRoot)).toEqual([]);
   });
 
-  it("H2: the nine ids are exactly these, in rail order", () => {
+  it("H2: the twelve ids are exactly these, in rail order", () => {
     // The list that drives H1 is itself untested unless something asserts it —
     // deleting an entry from SECTIONS makes H1 *greener*, which is the shape
     // R10 and G12 both exist to close.
@@ -480,6 +752,9 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
       "access",
       "shifts",
       "operators",
+      // R-357 / 0066: Absences, beside Operators — a person, a date range and a
+      // reason, offered to the same supervisors Operators is.
+      "absences",
       "trainings",
       // The Operator Training Matrix — a third view of the same operators-and-
       // trainings data, so it sits beside the two screens it draws from.
@@ -489,9 +764,19 @@ describe("scaleAudit — every section in the rail has a panel (§19.62)", () =>
       // because a cycle time is a fact about a part at a place.
       "cycletimes",
       "import",
-      // 0037: org-wide Settings (date format). System-admin only, filtered on
-      // `profile.role` in AdminPage — the id is still in SECTIONS, so it is
-      // still here and still has a render branch (which is what H2 guards).
+      // R-356 / 0067: named week templates for the chosen plant, admins only.
+      // The id is in SECTIONS and has a render branch, which is what H2 guards.
+      "templates",
+      // ⭐ R-369: Activity now sits ABOVE Settings — the maintainer's "swap the
+      // settings and activity tab". The audit log, company-admin ONLY, a
+      // stricter gate than any other section's because `audit_log_select`
+      // (0008) hands a SITE admin zero rows rather than a refusal.
+      "audit",
+      // Settings. 0037 shipped it org-wide (the date format) and it was
+      // system-admin only; 0050 and 0052 made every setting on it PER-PLANT, so
+      // DEF-0007 took `companyAdminOnly` off it and a plant admin is offered it
+      // like any other tab. The id is in SECTIONS and has a render branch, which
+      // is what H2 guards.
       "settings",
     ]);
   });

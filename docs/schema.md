@@ -33,7 +33,7 @@
 
 ## Known deferrals
 
-- **Timezone (D10).** Seed data anchors day 0 to the Monday of the current week in UTC. Per-site timezone is not yet a design decision; UTC is the honest placeholder until it is.
+- **Timezone (D10, R-450).** The plant's zone is a setting (0063: `node_settings.timezone`, company fallback `orgs.settings.timezone`, default UTC). The demo company is America/Chicago (dev_demo.sql sets it and writes its seeded hours in it, 22 Sept); `seed.sql`'s own world stays UTC.
 - **Not built in Phase 1** (per design-plan §17): `assignments_archive` + retention job, partitioning, `integration_connections`, Copy Week / templates.
 - **`src/lib/database.types.ts`** is left as the P1-1 placeholder — `npm run db:types` needs a running local Supabase (Docker), unavailable in this container. Run `npm run db:start && npm run db:reset && npm run db:types` on a machine with Docker to generate real types.
 

@@ -37,6 +37,27 @@ export interface ExpiringSkillRef extends SkillRef {
   expiresAt: string;
 }
 
+/** One person named in an `absent` refusal (R-357). `from`/`to` are inclusive
+ *  `YYYY-MM-DD`, each null when the raise carried no dated absence.
+ *
+ *  ⭐ `startsAt`/`endsAt` ARE THE HOURS, AND THEY WERE ALREADY IN THE PAYLOAD.
+ *  `absence_overlap` has emitted them since migration 0069 (R-359) as ADDITIVE
+ *  keys, present together exactly when the matched row is a PART-DAY absence
+ *  and absent on a whole-day one. This interface simply did not lift them, so a
+ *  placement refused against a 09:00–13:00 absence was refused CORRECTLY — the
+ *  server decides by the hours — and then explained in a sentence that said
+ *  "10 Jun – 10 Jun", which reads as the whole day being gone when the
+ *  afternoon is free. Same optionality as `AbsenceHit`, so the two are shaped
+ *  alike and `leaveLine` can phrase either. */
+export interface AbsentOperator {
+  operatorId: string;
+  from: string | null;
+  to: string | null;
+  reason: string | null;
+  startsAt?: string;
+  endsAt?: string;
+}
+
 /** The closed set of machine error codes P1-3a/P1-5b can raise (docs/api.md §1). */
 export type SchedulerErrorCode =
   | "capacity_exceeded"
@@ -51,9 +72,25 @@ export type SchedulerErrorCode =
   | "level_in_use"
   | "node_in_use"
   | "schedulable_level_locked"
-  // Migration 0028 / D109. The closed set is fourteen now, not twelve.
+  // Migration 0028 / D109. The closed set is sixteen now, not twelve (0066/R-357
+  // added `absent` and 0079/F-131 added `outside_run` after this comment was
+  // last updated at fourteen — both are counted here now).
   | "not_offered_here"
-  | "owner_change_blocked";
+  | "owner_change_blocked"
+  // Migration 0066 / R-357. A person placed onto a window they are on leave for,
+  // under a plant whose policy is `block`. The warn-path carries the same absence
+  // as a payload key, not this code — see `AbsenceInfo` in shapes.ts.
+  | "absent"
+  // Migration 0079 / F-131. A run-attached create_assignment (p_run_id set) whose
+  // timerange does not lie inside the run's own timerange (`@>`, inclusive of
+  // equality). A direct (p_product_id) block is never checked against this.
+  | "outside_run"
+  // Migration 0069 / R-357 (`set_absence`). Recording an absence for a person
+  // who already has one over some of those days or hours. Raised on the
+  // Absences tab, never on a placement -- a placement's leave refusal is
+  // `absent` above. Unparsed until 21 Sept (F-185), so the tab said
+  // "Something went wrong" for a refusal the server had worded.
+  | "absence_overlap";
 
 export type SchedulerError =
   | {
@@ -62,6 +99,15 @@ export type SchedulerError =
       peak: number;
       cap: number;
       timerange: string;
+      /**
+       * R-465 (S195-D): set by the CLIENT, never parsed from the server --
+       * the one plain sentence "<person> is already on <place> <day> from
+       * <hours>." when a follow-up `capacity_probe` found that the block
+       * making this person busy sits on a place the caller cannot read. The
+       * place and the hours, never the product or the job. Every reader of a
+       * capacity refusal that has it says it instead of the numbers.
+       */
+      elsewhere?: string;
     }
   | {
       kind: "NotEligible";
@@ -216,6 +262,56 @@ export type SchedulerError =
    * should refetch and retry once (see useMoveRun).
    */
   | { kind: "RaceLost" }
+  /**
+   * Migration 0066 / R-357: a placement refused because the person is on leave
+   * for the window, under a plant whose eligibility policy is `block`.
+   *
+   * ⚠️ TWO RAISE SHAPES, ONE KIND. `create_assignment`/`reassign_assignment`
+   * raise it for ONE person (`operator_id` + an `absence` object); `move_run`
+   * raises it for the whole crew it could not move (`operators: [{operator_id,
+   * absence}]`), so the refusal names every absent member exactly as its
+   * eligibility pre-check names every ineligible one. `operators` below is the
+   * common shape: a single-person refusal is a one-entry list. `from`/`to` are
+   * the inclusive `YYYY-MM-DD` bounds `absence_overlap` already stepped in for,
+   * each null when the server sent a bare answer.
+   */
+  | {
+      kind: "Absent";
+      nodeId: string;
+      policy: "warn" | "block";
+      operators: AbsentOperator[];
+    }
+  /**
+   * Migration 0079 / F-131: a run-attached create_assignment (`p_run_id` set)
+   * whose `timerange` does not lie inside the run's own timerange. The client
+   * already decides "join" by the same containment (`assignmentFitsRun`); this
+   * is the server holding the identical test, so a refetch race or a shift
+   * chip moved after the join question cannot land a block outside the job it
+   * names. `jsonb_build_object('run_id', ..., 'node_id', ..., 'run_timerange',
+   * ..., 'timerange', ...)` — both timeranges are the server's raw `tstzrange`
+   * text, same shape as `RunOverlap.timerange`.
+   */
+  | {
+      kind: "OutsideRun";
+      runId: string;
+      nodeId: string;
+      runTimerange: string;
+      timerange: string;
+    }
+  /**
+   * Migration 0069 / R-357 (F-185): `set_absence` refused because this person
+   * already has an absence over some of those days (whole-day) or hours
+   * (part-day). `jsonb_build_object('operator_id', ..., 'from', ..., 'to', ...,
+   * 'reason', 'overlaps')` -- `from`/`to` are the REQUESTED inclusive
+   * `YYYY-MM-DD` bounds, not the existing row's, so the sentence names the
+   * days the person asked for.
+   */
+  | {
+      kind: "AbsenceOverlap";
+      operatorId: string;
+      from: string | null;
+      to: string | null;
+    }
   /*
    * ⭐ §19.63 — THE FIVE BELOW EXIST BECAUSE NOT EVERY WRITE IS AN RPC.
    *
@@ -238,7 +334,7 @@ export type SchedulerError =
    * `requireWritten`. A policy's `USING` clause FILTERS rather than raising,
    * so a refused UPDATE or DELETE succeeds with zero rows and no error at all.
    */
-  | { kind: "WriteRefused" }
+  | { kind: "WriteRefused"; gone?: "block" | "job" }
   /** SQLSTATE 23505. `constraint` is the constraint name, when the message carries one. */
   | { kind: "DuplicateValue"; constraint?: string }
   /**
@@ -280,6 +376,9 @@ const SCHEDULER_ERROR_KINDS: ReadonlySet<SchedulerError["kind"]> = new Set([
   "SchedulableLevelLocked",
   "NotOfferedHere",
   "OwnerChangeBlocked",
+  "Absent",
+  "OutsideRun",
+  "AbsenceOverlap",
   "RaceLost",
   "WriteRefused",
   "DuplicateValue",
@@ -546,11 +645,91 @@ function parseDetail(detail: Record<string, unknown>): SchedulerError | undefine
       }
       return undefined;
     }
+    case "absent": {
+      // R-357. Two raise shapes (see the `Absent` variant): one `operator_id`
+      // with an `absence` object (create/reassign), or an `operators` array of
+      // `{operator_id, absence}` (move_run). `node_id` and a `warn`/`block`
+      // `policy` are on both; anything else is a malformed payload -> Unknown.
+      const policy =
+        detail.policy === "block" ? "block" : detail.policy === "warn" ? "warn" : undefined;
+      if (!hasStringProp(detail, "node_id") || policy === undefined) return undefined;
+      if (hasStringProp(detail, "operator_id")) {
+        return {
+          kind: "Absent",
+          nodeId: detail.node_id,
+          policy,
+          operators: [absentOperatorFrom(detail.operator_id, detail.absence)],
+        };
+      }
+      if (Array.isArray(detail.operators)) {
+        const operators: AbsentOperator[] = [];
+        for (const o of detail.operators) {
+          if (isPlainObject(o) && hasStringProp(o, "operator_id")) {
+            operators.push(absentOperatorFrom(o.operator_id, o.absence));
+          }
+        }
+        return { kind: "Absent", nodeId: detail.node_id, policy, operators };
+      }
+      return undefined;
+    }
+    case "absence_overlap": {
+      // F-185 / migration 0069. `operator_id` is on every raise; `from`/`to`
+      // are the requested days, taken when present, null otherwise.
+      if (!hasStringProp(detail, "operator_id")) return undefined;
+      return {
+        kind: "AbsenceOverlap",
+        operatorId: detail.operator_id,
+        from: typeof detail.from === "string" ? detail.from : null,
+        to: typeof detail.to === "string" ? detail.to : null,
+      };
+    }
+    case "outside_run": {
+      // F-131. All four keys are on every raise site (create_assignment's own
+      // guard, migration 0079) — no optional shape here, unlike `absent`.
+      if (
+        hasStringProp(detail, "run_id") &&
+        hasStringProp(detail, "node_id") &&
+        hasStringProp(detail, "run_timerange") &&
+        hasStringProp(detail, "timerange")
+      ) {
+        return {
+          kind: "OutsideRun",
+          runId: detail.run_id,
+          nodeId: detail.node_id,
+          runTimerange: detail.run_timerange,
+          timerange: detail.timerange,
+        };
+      }
+      return undefined;
+    }
     default:
       // Unrecognised `error` value in an otherwise well-formed DETAIL —
       // falls through to Unknown in the caller.
       return undefined;
   }
+}
+
+/** Lifts `{from, to, reason}` off an `absence_overlap` answer, tolerating a
+ *  bare or absent object (each field then null). R-357.
+ *
+ *  ⚠️ `starts_at`/`ends_at` ARE TAKEN ONLY AS A PAIR (R-359). The server emits
+ *  them together or not at all, and half a pair cannot be phrased — an
+ *  `endsAt` with no `startsAt` would print a range with one end missing. So a
+ *  malformed answer carrying exactly one of them degrades to the whole-day
+ *  sentence, which is still TRUE (the day is right; only the hours are
+ *  unavailable) rather than half a sentence. */
+function absentOperatorFrom(operatorId: string, absence: unknown): AbsentOperator {
+  const a = isPlainObject(absence) ? absence : {};
+  const startsAt = typeof a.starts_at === "string" ? a.starts_at : undefined;
+  const endsAt = typeof a.ends_at === "string" ? a.ends_at : undefined;
+  const hours = startsAt !== undefined && endsAt !== undefined ? { startsAt, endsAt } : {};
+  return {
+    operatorId,
+    from: typeof a.from === "string" ? a.from : null,
+    to: typeof a.to === "string" ? a.to : null,
+    reason: typeof a.reason === "string" ? a.reason : null,
+    ...hours,
+  };
 }
 
 /**
@@ -754,6 +933,8 @@ export function shapeMismatch(rpc: string, detail: string): SchedulerError {
 export function describeSchedulerError(e: SchedulerError): string {
   switch (e.kind) {
     case "CapacityExceeded": {
+      // R-465: the sentence a probe found, when there is one.
+      if (e.elsewhere !== undefined) return e.elsewhere;
       const peakPct = Math.round(e.peak * 100);
       const capPct = Math.round(e.cap * 100);
       return `Operator ${e.operatorId} would reach ${peakPct}% of capacity (limit ${capPct}%).`;
@@ -836,10 +1017,42 @@ export function describeSchedulerError(e: SchedulerError): string {
         many ? "them" : "it"
       } first.`;
     }
+    case "Absent": {
+      // R-357. Names the person and the leave, the way NotEligible names the
+      // person and the missing ticket. The contract carries ids, not names, so
+      // a caller holding the operator list (a pop-up, `buildSchedulerErrorToast`)
+      // builds a nicer sentence itself; this is the fallback that still says the
+      // true thing. Dates are the server's raw `YYYY-MM-DD` — a surface with the
+      // org's date format reformats them.
+      if (e.operators.length === 1) {
+        const o = e.operators[0];
+        const range = o.from !== null && o.to !== null ? ` ${o.from} – ${o.to}` : "";
+        const reason = o.reason !== null ? `: ${o.reason}` : "";
+        return `Operator ${o.operatorId} is on leave${range}${reason}.`;
+      }
+      const n = e.operators.length;
+      return `${n} crew members are on leave for this window.`;
+    }
+    case "OutsideRun":
+      return "That block would fall outside the job it is joining.";
+    case "AbsenceOverlap": {
+      // F-185. The server's own words, with the requested days when it sent
+      // them -- raw `YYYY-MM-DD`, like `Absent`; a surface with the org's date
+      // format reformats them.
+      const range = e.from !== null && e.to !== null ? ` (${e.from} – ${e.to})` : "";
+      return `This person already has an absence over some of those days${range}.`;
+    }
     case "RaceLost":
       return "Someone else changed this run first — refetching and retrying.";
     case "WriteRefused":
-      return "You don't have permission to change that.";
+      // DEF-0052 (30 Sept): a row that is GONE and a row that is FORBIDDEN
+      // are different facts. `gone` is set only by a writer that read the
+      // row back as the caller after a write that changed nothing and found
+      // nothing (`deleteAssignment`, `deleteRun`); every other refusal keeps
+      // the permission sentence.
+      return e.gone === undefined
+        ? "You don't have permission to change that."
+        : `That ${e.gone} is no longer on the board.`;
     case "DuplicateValue":
       return "Something here already uses that name or code.";
     case "StillInUse":

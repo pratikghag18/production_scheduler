@@ -54,7 +54,20 @@ const h = vi.hoisted(() => {
     parentId,
     path,
   });
-  const template = (id: string, name: string, siteNodeId: string) => ({ id, name, siteNodeId });
+  /**
+   * ⚠️ `active` IS SUPPLIED ON EVERY TEMPLATE, and it defaults to `true` here
+   * rather than being omitted. `parseShiftTemplateRow` REJECTS a row without a
+   * boolean `active` (the column is `not null default true` since 0029), so a
+   * fixture that left it out would not fail — it would be counted into
+   * `view.skipped` and vanish from the list, which is the "a stand-in that
+   * omits a field silently picks a branch" trap this file's header is about.
+   */
+  const template = (id: string, name: string, siteNodeId: string, active = true) => ({
+    id,
+    name,
+    siteNodeId,
+    active,
+  });
 
   /**
    * ⭐ FACTORIES, NOT LITERALS, and `beforeEach` rebuilds from them — the
@@ -85,8 +98,12 @@ const h = vi.hoisted(() => {
     basePayload,
     createMutate: vi.fn(),
     renameMutate: vi.fn(),
+    activeMutate: vi.fn(),
     attachMutate: vi.fn(),
     detachMutate: vi.fn(),
+    updateBreakMutate: vi.fn(),
+    createBreakMutate: vi.fn(),
+    deleteBreakMutate: vi.fn(),
     state: {
       profile: {
         id: "u1",
@@ -124,12 +141,13 @@ vi.mock("@/features/admin/hooks/useShifts", () => ({
   }),
   useCreatePattern: () => ({ mutate: h.createMutate, isPending: false }),
   useRenamePattern: () => ({ mutate: h.renameMutate, isPending: false }),
+  useSetPatternActive: () => ({ mutate: h.activeMutate, isPending: false }),
   useCreateShift: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateShift: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteShift: () => ({ mutate: vi.fn(), isPending: false }),
-  useCreateBreak: () => ({ mutate: vi.fn(), isPending: false }),
-  useUpdateBreak: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeleteBreak: () => ({ mutate: vi.fn(), isPending: false }),
+  useCreateBreak: () => ({ mutate: h.createBreakMutate, isPending: false }),
+  useUpdateBreak: () => ({ mutate: h.updateBreakMutate, isPending: false }),
+  useDeleteBreak: () => ({ mutate: h.deleteBreakMutate, isPending: false }),
   useAttachPattern: () => ({ mutate: h.attachMutate, isPending: false }),
   useDetachPattern: () => ({ mutate: h.detachMutate, isPending: false }),
 }));
@@ -137,6 +155,18 @@ vi.mock("@/features/admin/hooks/useShifts", () => ({
 vi.mock("@/lib/api", () => ({
   describeSchedulerError: (e: unknown) => String(e),
   isSchedulerError: () => false,
+}));
+
+/**
+ * R-443 (S66-b): the retire warning's own read and write, neither of which
+ * this file exercised before — an empty holder list is enough for every
+ * existing case here (none of them is about a band or pattern anybody
+ * points at); `shiftsPanelRetire.test.tsx` is where a non-empty list, and the
+ * warning it triggers, is pinned.
+ */
+vi.mock("@/features/admin/hooks/useOperators", () => ({
+  useHomeShiftHolders: () => ({ data: [], isLoading: false, isError: false, error: null }),
+  useUpdateOperator: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/features/auth/useSession", () => ({
@@ -271,6 +301,40 @@ function withTwoPlants() {
   };
 }
 
+/**
+ * "Evenings" put away — retired, and STILL ATTACHED to Assembly.
+ *
+ * ⭐⭐ THE ATTACHMENT IS THE POINT OF THE FIXTURE, not decoration.
+ * `shift_templates.active` is ADVISORY: migration 0029 says in the column's own
+ * comment *"nodes already attached keep resolving to it"*, and
+ * `resolve_shift_template` never looks at the flag. So retiring a pattern in
+ * use must change NOTHING about what Assembly runs — a fixture with only
+ * unattached retired patterns could not tell the honest screen from the one
+ * that claims retiring takes a place off it.
+ */
+function withRetiredEvenings() {
+  h.state.payload = {
+    ...h.basePayload(),
+    templates: [h.template(T_DAYS, "Days", PLANT1), h.template(T_EVE, "Evenings", ASM, false)],
+    attachments: [
+      { nodeId: PLANT1, templateId: T_DAYS },
+      { nodeId: ASM, templateId: T_EVE },
+    ],
+  };
+}
+
+/**
+ * "Days" (Plant 1, shift "Morning" 06:00-14:00) gets one break: "Lunch",
+ * 10:00-10:30 (600-630 min). R-250's own claim is a table AND edit-in-place,
+ * so the fixture needs an EXISTING break to open, not just an empty shift.
+ */
+function withBreak() {
+  h.state.payload = {
+    ...h.basePayload(),
+    breaks: [{ id: "b-lunch", shiftId: "s-morning", name: "Lunch", startMin: 600, endMin: 630 }],
+  };
+}
+
 /** Choose a plant the way `AdminPage`'s one control does, and re-render on it. */
 function showPlant(choice: string | null) {
   act(() => useAdminViewStore.setState({ plantChoice: choice }));
@@ -279,8 +343,12 @@ function showPlant(choice: string | null) {
 beforeEach(() => {
   h.createMutate.mockClear();
   h.renameMutate.mockClear();
+  h.activeMutate.mockClear();
   h.attachMutate.mockClear();
   h.detachMutate.mockClear();
+  h.updateBreakMutate.mockClear();
+  h.createBreakMutate.mockClear();
+  h.deleteBreakMutate.mockClear();
   h.state.payload = h.basePayload();
   // ⚠️ THE STORE IS A MODULE SINGLETON AND OUTLIVES A RENDER. Left set, one
   // case's chosen plant filters the next case's screen — the cross-section leak
@@ -667,5 +735,147 @@ describe("ShiftsPanel — uniqueness reads the UNTRIMMED list", () => {
     fireEvent.click(within(patternRow("Days")).getByRole("button", { name: "Save" }));
     expect(screen.getByText(TAKEN)).toBeTruthy();
     expect(h.renameMutate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ⭐⭐ S21 — PUTTING A PATTERN AWAY. `shift_templates.active` has existed since
+ * migration 0029 and nothing on any screen read or wrote it, so a pattern could
+ * be created and destroyed and never retired: old patterns piled up in the list
+ * for ever, and the only way out of the list was a DELETE.
+ *
+ * Modelled on the Trainings screen (`skills.active`, session 18) deliberately
+ * rather than inventing a second vocabulary: Retire / Bring back, a dimmed row
+ * carrying the word "Retired", and a separate list underneath the live one so
+ * what was put away can still be found and brought back.
+ *
+ * ⚠️⚠️ AND RETIRING IS ADVISORY, WHICH IS THE HALF A SCREEN CAN GET WRONG.
+ * 0029's comment on the column: *"False = retired: not offered when attaching a
+ * pattern to a node. ADVISORY, exactly as skills.active — nodes already
+ * attached keep resolving to it."* `resolve_shift_template` does not read the
+ * flag. So retiring detaches nothing, changes no board, and the places already
+ * on the pattern go on running it — and the screen has to say so rather than
+ * imply that putting a pattern away took anybody off it.
+ */
+describe("ShiftsPanel — a pattern can be put away, not only destroyed (S21)", () => {
+  it("S18: a pattern in use offers Retire, named for its row, and the write says active:false", () => {
+    render(<ShiftsPanel />);
+    // ⚠️ NAMED FOR ITS ROW, as on the Trainings screen: a list of "Retire"
+    // buttons leaves a screen-reader user choosing between identical controls.
+    const retire = within(patternRow("Days")).getByRole("button", { name: "Retire Days" });
+    fireEvent.click(retire);
+    expect(h.activeMutate).toHaveBeenCalledTimes(1);
+    expect(h.activeMutate.mock.calls[0][0]).toEqual({ templateId: T_DAYS, active: false });
+    // ⭐ AND IT IS NOT THE DELETE. Both controls stay on the row; retiring is
+    // reversible and deleting is not, which is exactly why the screen must
+    // never spell one of them with the other's button.
+    expect(
+      within(patternRow("Days")).getByRole("button", { name: "Delete this pattern" }),
+    ).toBeTruthy();
+  });
+
+  it("S19: a retired pattern sits under Retired, says so, and its button brings it back", () => {
+    withRetiredEvenings();
+    render(<ShiftsPanel />);
+    // The list it left, and the list it is in.
+    expect(screen.getByRole("heading", { name: "Retired" })).toBeTruthy();
+    const row = patternRow("Evenings");
+    expect(within(row).getByText("Retired")).toBeTruthy();
+    // ⚠️ THE WORD ON THE BUTTON IS THE WAY BACK, not the state it is in — a
+    // control named "Retired" would read as a label and do nothing findable.
+    fireEvent.click(within(row).getByRole("button", { name: "Bring back Evenings" }));
+    expect(h.activeMutate).toHaveBeenCalledTimes(1);
+    expect(h.activeMutate.mock.calls[0][0]).toEqual({ templateId: T_EVE, active: true });
+    // The live pattern is untouched by any of it.
+    expect(within(patternRow("Days")).getByRole("button", { name: "Retire Days" })).toBeTruthy();
+  });
+
+  it("S20 ⭐ a retired pattern is NOT offered when pointing a place at something new", () => {
+    // This is what retiring MEANS here — 0029's column comment, verbatim: "not
+    // offered when attaching a pattern to a node". Plant 1 runs Days and has
+    // never touched Evenings, so Evenings must be gone from its picker.
+    withRetiredEvenings();
+    render(<ShiftsPanel />);
+    expect(optionTexts(attachSelect("Plant 1"))).toEqual(["Inherit from above", "Days"]);
+  });
+
+  it("S21 ⭐ a place already running a retired pattern still shows it — retiring detaches nothing", () => {
+    // The other half of S20, and the one that catches the tempting wrong fix
+    // (drop every retired pattern from every picker). Assembly RUNS Evenings
+    // and goes on running it: `resolve_shift_template` never reads `active`. A
+    // row that dropped it would render "Inherit from above" — a positive claim
+    // about this place that is false, and one click from becoming true. Same
+    // failure S11 pins for the plant filter, arriving down a second road.
+    withRetiredEvenings();
+    render(<ShiftsPanel />);
+    const row = attachSelect("Assembly");
+    expect(optionTexts(row)).toEqual(["Inherit from above", "Days", "Evenings"]);
+    expect(shownOption(row)).toBe("Evenings");
+    expect(h.detachMutate).not.toHaveBeenCalled();
+  });
+
+  it("S22 ⭐ a retired pattern that places still run SAYS so, and counts them", () => {
+    // The screen's own words have to match the advisory flag. "Retired" beside
+    // a pattern one cell still runs, with nothing else said, reads as "nobody
+    // runs this any more" — which is the one thing retiring did not do.
+    withRetiredEvenings();
+    render(<ShiftsPanel />);
+    expect(
+      within(patternRow("Evenings")).getByText(/1 place still runs it|still runs it/),
+    ).toBeTruthy();
+  });
+});
+
+describe("ShiftsPanel — breaks are a table, and an existing one is edited in place (R-250)", () => {
+  it("S23 ⭐ the breaks table draws a header once per shift, then Break/Clock/Length per break", () => {
+    withBreak();
+    render(<ShiftsPanel />);
+    fireEvent.click(within(patternRow("Days")).getByRole("button", { name: "Edit" }));
+    const list = screen.getByText("Lunch").closest("ul");
+    if (list === null) throw new Error("no break list found");
+    // The header row is drawn once, ahead of the break rows it labels.
+    expect(within(list).getByText("Break")).toBeTruthy();
+    expect(within(list).getByText("Clock")).toBeTruthy();
+    expect(within(list).getByText("Length")).toBeTruthy();
+    const breakRow = screen.getByText("Lunch").closest("li");
+    if (breakRow === null) throw new Error("no break row found");
+    expect(within(breakRow).getByText("10:00–10:30")).toBeTruthy();
+    expect(within(breakRow).getByText("30m")).toBeTruthy();
+  });
+
+  it("S24 ⭐ Edit opens the break PRE-FILLED with its own name and times — not a blank add form", () => {
+    withBreak();
+    render(<ShiftsPanel />);
+    fireEvent.click(within(patternRow("Days")).getByRole("button", { name: "Edit" }));
+    const breakRow = screen.getByText("Lunch").closest("li");
+    if (breakRow === null) throw new Error("no break row found");
+    fireEvent.click(within(breakRow).getByRole("button", { name: "Edit" }));
+    expect((screen.getByLabelText("Break name") as HTMLInputElement).value).toBe("Lunch");
+    expect((within(breakRow).getByLabelText("Starts") as HTMLInputElement).value).toBe("10:00");
+    expect((within(breakRow).getByLabelText("Ends") as HTMLInputElement).value).toBe("10:30");
+  });
+
+  it("S25 ⭐ Save writes the move through updateBreak alone — no delete, no re-create", () => {
+    // The claim this row makes: "an existing break can be edited without
+    // deleting and retyping it." Before this screen had an edit path the only
+    // way to move a break was delete-then-recreate, losing its name. Proving
+    // the in-place claim means proving the OTHER two writers stay silent.
+    withBreak();
+    render(<ShiftsPanel />);
+    fireEvent.click(within(patternRow("Days")).getByRole("button", { name: "Edit" }));
+    const breakRow = screen.getByText("Lunch").closest("li");
+    if (breakRow === null) throw new Error("no break row found");
+    fireEvent.click(within(breakRow).getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Break name"), { target: { value: "Lunch (long)" } });
+    fireEvent.click(within(breakRow).getByRole("button", { name: "Save" }));
+    expect(h.updateBreakMutate).toHaveBeenCalledTimes(1);
+    expect(h.updateBreakMutate.mock.calls[0][0]).toEqual({
+      breakId: "b-lunch",
+      name: "Lunch (long)",
+      startMin: 600,
+      endMin: 630,
+    });
+    expect(h.deleteBreakMutate).not.toHaveBeenCalled();
+    expect(h.createBreakMutate).not.toHaveBeenCalled();
   });
 });

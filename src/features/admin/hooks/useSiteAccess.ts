@@ -15,10 +15,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchSitePeople,
   removeSiteMember,
+  setProfileActive,
   setSiteMember,
+  setSystemAdmin,
   type RemoveSiteMemberInput,
   type SchedulerError,
+  type SetProfileActiveInput,
   type SetSiteMemberInput,
+  type SetSystemAdminInput,
 } from "@/lib/api";
 
 export const siteAccessKeys = {
@@ -66,6 +70,38 @@ export function useRemoveSiteMember() {
 
   return useMutation<void, SchedulerError, RemoveSiteMemberInput>({
     mutationFn: (input) => removeSiteMember(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: siteAccessKeys.all });
+    },
+  });
+}
+
+/**
+ * `set_profile_active`. Deactivates or reactivates a person org-wide, keeping
+ * their grants. Invalidates the same key so the row re-renders in its new
+ * state (no optimistic update, for the reason this file's header gives).
+ */
+export function useSetProfileActive() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, SchedulerError, SetProfileActiveInput>({
+    mutationFn: (input) => setProfileActive(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: siteAccessKeys.all });
+    },
+  });
+}
+
+/**
+ * `set_system_admin`. Promotes or demotes a person's org-wide system-admin
+ * status. Invalidates the same key so the row re-renders with the new
+ * `companyAdmin` state.
+ */
+export function useSetSystemAdmin() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, SchedulerError, SetSystemAdminInput>({
+    mutationFn: (input) => setSystemAdmin(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: siteAccessKeys.all });
     },

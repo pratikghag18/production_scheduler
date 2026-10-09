@@ -12,9 +12,18 @@
   gap: 0.75rem;
 }
 
-/* Which entity to import — Products / People. */
+/* Which entity to import — Products / People / Trainings / Certifications /
+   Absences. R-447 (the maintainer, 18 Sept): every button in one group is
+   the same size -- a `role="tablist"` is exactly the segmented-control shape
+   the standard names first. A grid whose columns share one track size
+   (`BoardToolbar.module.css`'s `.zoom`/`.daynav`, the same fix) makes every
+   tab as wide as "Certifications", the longest label, instead of each
+   sizing to its own word -- `flex` did that before, so "People" and
+   "Certifications" were two different widths in the same row. */
 .entityTabs {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 0.25rem;
 }
 .entityTab {
@@ -24,6 +33,7 @@
   background: var(--surface);
   color: var(--ink-2);
   cursor: pointer;
+  text-align: center;
 }
 .entityTabOn {
   border-color: var(--ink-2);
@@ -201,6 +211,13 @@
   font-size: 0.75rem;
 }
 
+/* R-447 data exception, written down rather than forced: `ImportWizard.tsx`
+   pairs this `.primary` with `.quiet` ("Start over") as the apply footer,
+   but the primary button's own label is generated from the parsed file
+   ("Apply — add 4, update 1") -- a count, not a name, exactly the shape the
+   standard's own exception names for the bar's candidate strip. Giving it a
+   fixed width would either clip a big import's numbers or waste space on a
+   small one, so only the two-button SHAPE is shared here, not a width. */
 .primary,
 .quiet {
   border-radius: 0.375rem;

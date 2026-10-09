@@ -21,13 +21,14 @@ import styles from "./RequireAuth.module.css";
  * is where the open-redirect guard belongs.
  */
 export function RequireAuth() {
-  const { session, profile, loading } = useSession();
+  const { session, profile, loading, recovery } = useSession();
   const location = useLocation();
 
   const screen = decideAuthScreen({
     loading,
     hasSession: session !== null,
     hasProfile: profile !== null,
+    recovery,
   });
 
   if (screen === "loading") {
@@ -42,6 +43,14 @@ export function RequireAuth() {
     // still re-sanitises it before using it.
     const from = `${location.pathname}${location.search}`;
     return <Navigate to={`/sign-in?redirect=${encodeURIComponent(from)}`} replace />;
+  }
+
+  if (screen === "recovery") {
+    // F-106: the reset link's tokens landed here rather than on the reset
+    // screen (GoTrue strips the path when the app's origin is not site_url).
+    // The person owes a password before anything else; `/reset-password` sits
+    // outside this gate, so this cannot loop.
+    return <Navigate to="/reset-password" replace />;
   }
 
   if (screen === "no-access") {

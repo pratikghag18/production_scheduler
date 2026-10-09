@@ -8947,3 +8947,997 @@ stays free-text and trimmed, a training owned elsewhere is named but not offered
 trainings gained the `active` field they always should have carried — without it the applicability
 filter drops every column, the omitted-field trap this suite is written against. Suite: 1582 tests in
 44 files (the 6 `buildOperatorMatrix` cases retired with the function).
+
+## §19.88 — D117: a typed command opens the create popover; it never writes (P1-7a, stage S40)
+
+> *"Assign operator 1 to work on Product A/Housing A on Cell 1 in Line 1 from 10AM to 2PM"* — the
+> maintainer, 3 Sept, on what they want to be able to say to the board. And on 11 Sept, asked
+> whether a sentence that lands inside a booked job should always make a direct block or ask:
+> *ask*.
+
+The plan this comes from is `docs/voice-commands-plan.md` (speech → text → a small local model → a
+form → the app matches names → confirmation → `create_assignment`). This section records the two
+decisions that make the typed half safe and the one that widened it.
+
+### D117 — one door. The bar fills in the form the pop-up already has
+
+Every assignment on the board goes through `createAssignment` → `create_assignment`, and on the
+screen the only caller for a NEW block is `submitCreateDirect`, called only by `CreatePopover`.
+The command bar adds nothing to that chain. Its whole job ends when it opens `CreatePopover` in
+direct mode with the operator, the part (or the run) and the times preset — the same way D65's
+panel drop opens it with the operator preset. So the training box, the area box, the leave line,
+the capacity probe, the split pop-up and the server's refusal are reached by typing exactly as by
+dragging, because they are the same code. `src/test/commandPurity.test.ts` turns this from a
+convention into a build failure: no runtime import under `src/lib/command/`, and no API client in
+the bar. There is no ESLint import boundary in this repo; this audit is that boundary for this
+stage.
+
+### The split: parse, then resolve, and both are pure
+
+`parse.ts` turns one fixed sentence shape into a form of WORDS (`operator: "Sam"`, never an id);
+`resolve.ts` turns words into records against a context `BoardPage` hands it. The split is the
+point: the later local model replaces `parse.ts` and nothing else moves, and one model serves
+every site because it never learns a name. The resolver holds no rule of its own — product scope
+(`productsOfferedAtNode`), run containment (`assignmentFitsRun`), the plant-local day axis
+(`dayAxis.wallToOffset`, `days`, `todayIndex` — D88a/D88b, so a DST changeover day is not 1440
+minutes and "today" is the plant's, not UTC's), the minimum duration — all are passed in, so the
+bar and the pop-up cannot disagree. Two candidates is a question with buttons, never the better
+guess.
+
+### The widening: join the job, or a separate block (R-383)
+
+No screen had ever created a run-attached block. The API's `AssignmentTarget` and the server's
+`p_run_id` both existed, but the pop-up only sent `{ kind: "direct", productId }`, and a chip joined
+a run only by being MOVED into one (D66/R-365). The maintainer's "ask" means the pop-up's submit
+learns the target the API already defines — the smallest change that keeps one door — and the
+resolver asks when the span is contained by a run of the same part on the same cell, using the
+same containment rule a drag uses. The server's run branch is read before the stage is called
+done, since the client has never exercised it.
+
+Brief: `docs/agent-briefs/p1-7a-typed-command-bar-brief.md` (4 Sept draft, refreshed 11 Sept
+against the tree; its §15 says what the refresh re-verified and what it did not run).
+
+## §19.89 — D118: the bar sees a person's own block, and asks before it changes it (F-132, R-385)
+
+> *"I asked the app to assign someone on a product on a level from 10 to 2 which it did, but when
+> I put the same info again but instead of 10 to 2, it was 10 to 3, it did not recognize that it
+> is the same group with different timing ... and gave me the option to adjust the efficiency. I
+> would say this is a bug which is not safeguarded by a requirement."* — the maintainer, 11 Sept,
+> after using the bar twice.
+
+### What went wrong, and why it looked like an efficiency question
+
+The resolver (D117) was handed the window's runs, so it could ask R-383's join question, and
+nothing else about what was already on the board. A person's own block was invisible to it, so
+every sentence resolved as a new direct block. The pop-up then did its own job correctly: the
+capacity probe saw the person already at 100% for those hours and offered the efficiency box,
+which is the right answer to "put a second person-hour on top of this one" and the wrong answer
+to "make this one longer". The symptom was in the pop-up; the cause was in what the resolver
+could see. R-383 guarded a span inside a JOB on the cell; no requirement guarded a BLOCK the same
+person already had.
+
+### D118 — same person, same part, same cell, overlapping hours: it is that block
+
+The rule is the maintainer's "same group with different timing". The resolver now receives the
+window's blocks as it receives its runs (a list built in `BoardPage` from the same index, with a
+run-attached block carrying its run's product as its effective part), and one more passed-in
+predicate, half-open overlap. When the sentence's person, part and cell match a block and the
+hours overlap on that day, the bar asks in R-383's shape — the block as a button, "Separate
+block" beside it — rather than deciding. Asking rather than changing silently is the choice made
+here, for the same reason as R-383: the sentence is ambiguous between "extend it" and "add
+another", and two candidates are a question, never the better guess. The identical sentence
+typed again has nothing to change and offers only the separate block.
+
+### The change goes through the drag's door, not a third one
+
+"Change it" is a re-time of an existing block, and the board already has exactly one path that
+does that: the assignment branch of the drag's commit, which decides attachment by containment
+(stay in the run, move to another, or detach with the run's product), asks R-365's attachment
+prompt and R-031's keep-or-scale prompt, runs R-361's warn mirrors, and writes one PATCH that
+migration 0070's resize guard re-checks on the server. That branch becomes a named function the
+drag and the bar both call. The bar's new callback carries an assignment id and a range and
+nothing else; `CommandBar.tsx` still imports nothing from the API, and the purity audit still
+enforces it. The MOVE command the maintainer ordered after assign (session 139) will widen this
+same function with a cell, not add a path beside it.
+
+Brief: `docs/agent-briefs/f-132-the-bar-sees-your-own-block-brief.md`.
+
+## §19.90 — D119: the next three sentences — book a job, unassign, move (stage S41)
+
+> *"Commands after assign: book a job, unassign, move; 'who is free' is read-only and goes to the
+> chatbot's lookup menu."* — the maintainer's order, 11 Sept (session 139). And on the queue's
+> order, 11 Sept (session 143): *"Keep that order."*
+
+### Why the sentences come before the model
+
+The voice plan's Stage 7 ("widen") sits after the model stages, but the rule parser can read a
+second and third fixed sentence with no training at all, each new sentence is most of its own
+value, and the training set (Stage 3) should be generated once for every command rather than
+re-made per command. So the three sentences are built first, each the same shape as S40: the
+parser learns one more form, the resolver matches words to records and never guesses, and the
+bar opens or drives the EXISTING path. The first word decides the intent — `book`/`run` is a
+job, `unassign`/`remove`/`clear` is a removal, anything else is the assign sentence — because
+the assign grammar has no verb requirement and cannot be told apart by its middle.
+
+### D119a — a job goes through the run-mode pop-up, and Enter books it
+
+A track drag books a job by opening the "New" pop-up in Product run mode; the sentence opens
+the same pop-up with the part, hours and headcount preset and the mode forced, and R-384's
+rule extends to it: when the pop-up would show nothing to decide (a part is selected on a cell
+that offers it), Enter creates the job with exactly the arguments the Create button sends,
+through one shared `submitRun()`. A cell runs one job at a time, so an overlapping job is
+answered before anything opens: the SAME part is F-132's lesson again — same group, different
+timing is a change of hours, asked and then done through the drag's own run-resize branch
+(its overlap check, its "crew fall outside" confirmation, its one write) extracted into a
+function both call; ANOTHER part is named in the words a drag's refusal uses, with nothing
+offered, because there is nothing the sentence could do that the server would accept.
+
+### D119b — a removal is one press, never Enter
+
+The block's own Delete button removes immediately, and the unassign sentence reaches that same
+action and nothing else. But R-384's "Enter does it when there is nothing to decide" belongs
+to creating, where the pop-up's own verdicts say what is left to decide; a removal cannot be
+undone, and a misheard sentence must not sit one keypress from deleting the wrong block. So
+the bar names the block it found and removes it on one press of that button; several matching
+blocks are several buttons, one press each. The developer session's call, recorded in R-388
+for the maintainer to overrule.
+
+Briefs: `docs/agent-briefs/s41-a-book-a-job-brief.md`, `docs/agent-briefs/s41-b-unassign-brief.md`.
+
+## §19.91 — D120: moving a block to another cell needs one server writer, not two client writes
+
+> The maintainer's third command after assign (session 139): *move*.
+
+### The gap
+
+A chip drag on the board is same-row only (D66); the only thing that crosses cells is a whole
+job, through `move_run`. "Move Sam on Cell 1 to Cell 2" therefore has no path today. The two
+ways to give it one: two client writes (create on the new cell, then delete the old), or one
+server function. Two writes is exactly hazard #4 ("never several calls"): a refusal on the
+second leaves a duplicate, a refusal on the first leaves nothing changed but a toast, and
+neither state is one the person asked for.
+
+### D120 — `move_assignment`, in the family of `reassign_assignment` and `move_run`
+
+One writer takes the row, the target cell and the target hours and changes the row in place.
+It is `reassign_assignment`'s body with the placement questions asked about the TARGET —
+edit rights on both cells (`move_run`'s rule), training, absence and the area rule under the
+target's policy, the capacity trigger refusing over-booking — and one thing a reassign never
+does: it detaches the block from its run, because a run lives on one cell, and carries the
+run's part as the block's own, exactly as a detach drag does. The same row moves, so nothing
+is duplicated and nothing is left behind, and the audit trigger logs one update.
+
+On the screen the move is the create pop-up's one door pointed at a different writer: the
+pop-up opens on the target cell preset with the person, the part and the hours, shows the same
+training, area and leave boxes about that cell, and its Create — or Enter when the pop-up
+would show nothing to decide (R-384) — sends `move_assignment` instead of `create_assignment`.
+The move in time on the same cell is R-385's path, reached by a sentence that says so.
+
+Brief: `docs/agent-briefs/s41-c-move-brief.md`.
+
+## §19.92 — D121: the model is served by llama.cpp's server, and the bar reads through it with the rules behind (S44)
+
+> *"Go ahead and do what you think is the best option."* — the maintainer, 13 Sept, on which
+> runtime serves the fine-tuned model, after the developer recommended llama.cpp's server over
+> Ollama.
+
+### D121 — the runtime, and the shape of the reader
+
+The S43 model passed (clean 100%, perturbed 93.5%). Serving it means one small process that
+holds the quantised file and answers a sentence with a form. Two candidates fit the "run it
+yourself" spirit: Ollama, and llama.cpp's own `llama-server`. Ollama is the friendlier install,
+but it wraps the same engine, wants its own model registry and its own file format around the
+GGUF, and puts one more moving part between the bar and the model. `llama-server` reads the
+GGUF directly, has an OpenAI-shaped chat endpoint, caches the prompt prefix between calls (the
+450-token system prompt is paid once, not per sentence), runs the chat template with thinking
+off from the request, and can later constrain decoding with a grammar so an invented key is
+impossible rather than merely unlikely. It ships as a multi-architecture container, so it runs
+on this machine's ARM processor next to the Supabase containers with no build step. That is the
+choice; the grammar is a follow-up, not part of this stage, because the third run answered with
+no invented key in 400 rows and the app checks the shape anyway.
+
+**The reader is a second way to obtain a `Command`, never a second door.** `parse.ts` stays
+what it is: pure, the rules, the fixed sentences. The model reader lives in `src/lib/voice/`,
+outside `src/lib/command/`, because the purity audit (U1) walks that folder and forbids every
+runtime import, and the reader must import the training prompt and call `fetch`. The bar takes
+the reader as a prop, so tests hand it a fake and the board hands it the real one. Whatever
+answers — the model or the rules — produces the same `Command`, and everything after it is the
+code S40 and S41 already have: `resolveCommand`, the questions, the pop-up, and the pop-up's one
+writer. `commandPurity.test.ts`'s U2 needles still apply to the bar unchanged.
+
+**The answer is checked, not trusted.** A decoder turns the service's JSON into a `Command` or
+refuses: the four intents, every required field present with the right shape, an extra key
+ignored (F-140's lesson, applied at the door), anything else refused. A refused answer is a
+fallback, not an error the person has to read.
+
+**The fallback announces itself.** The plan's own sentence is "falls back to the rule parser
+and says so". Three reasons fall back: the service is off (the request fails), the service is
+slow (a timeout, generous because the first call on a cold cache pays the prompt), or the
+answer is not a form. In each case the rules read the sentence and the status line names the
+reader and the reason in plain words, so a person who typed a free phrasing and got "I don't
+understand" from the rules knows the model was not consulted, and goes to look at the
+container rather than at their sentence. When the model answers, the readout line says so
+too, briefly, so the maintainer can see at a glance which reader is on.
+
+**No address, no request.** The service address comes from `VITE_VOICE_URL`. Unset, the bar
+makes no request and is byte for byte the S41 bar; the tester's role walk and every existing
+bar test run that way. In development the address is `/voice`, a Vite proxy to the container's
+port, so the browser talks to its own origin and no CORS setting is needed on the service.
+
+**One prompt.** The app sends `scripts/voice/train/system_prompt.txt` itself, imported as text,
+so the sentence the model reads in the app is the sentence it was trained on. A test compares
+the two byte for byte; a copy would drift.
+
+Briefs: `docs/agent-briefs/s44-a-serve-brief.md` and `docs/agent-briefs/s44-b-read-by-model-brief.md`.
+
+## §19.93 — D122: the service refuses a wrong key by grammar (S45)
+
+> *"Do it and don't stop unless you need me to intervene."* — the maintainer, 13 Sept, on Stage 5b
+> and Stage 6 together.
+
+### D122 — one schema, sent by the app and by the probe, in the model's own key order
+
+The served four-bit file scored clean 98% where the full-precision file scored 100% (session
+157). Three of the four misses were the same thing: the answer carried `type` where `intent`
+belonged, and the decoder rightly refused it. That is not a reading error; it is a spelling
+error at the last step of a compressed model, and llama.cpp's server has the tool for exactly
+this: a JSON schema in the request, converted to a grammar, so that a token which would break
+the schema has zero probability. A wrong key becomes impossible.
+
+Two rules make the schema safe rather than harmful. **Key order follows the model, not the
+type.** The model was trained on canonical forms with keys sorted alphabetically and writes
+them that way; a grammar that demanded another order would drag every answer off the path the
+model learned. So the schema lists properties alphabetically, all required, no additional
+properties, and the four forms as alternatives on `intent`. **One file, two senders.** The
+schema is a JSON file beside the serving scripts; the app's reader imports it and the probe
+reads it, so the app and the measurement send the same constraint and a drift between them is
+impossible. The probe keeps a switch to send no schema, so the held-out set can be run both
+ways and the two tables compared on the card; the switch is for measuring, not for serving.
+
+The grammar constrains which tokens may come next; it does not tell the model what to say.
+The system prompt still does that, and the decoder still checks every field, because a schema
+cannot say that an hour is 13 and not 23. The eight-bit file is the other half of the gap and
+is not built here: it needs the full-precision file from Drive and the quantiser, and only if
+the grammar leaves misses worth the doubled file size and the slower answer.
+
+Brief: `docs/agent-briefs/s45-a-grammar-brief.md`.
+
+## §19.94 — D123: the microphone is the browser's recogniser feeding the same input (S46)
+
+### D123 — a button that types, not a second way in
+
+The plan's Stage 6 says: a button next to the bar, the browser's built-in recogniser first.
+The design follows the rule every voice stage has followed: nothing new after the sentence
+exists. The recogniser's job ends when a sentence is in the input, and from there the bar does
+what it does for a typed one — the model reader when a service is configured, the rules
+otherwise, the resolver, the questions, the pop-up, and the pop-up's one writer. The
+microphone cannot create a block that typing could not.
+
+**Where it lives.** Inside the bar, as a button beside the input, because the maintainer's
+standing preference is to fold a capability into the existing control rather than add a
+parallel one. The bar takes the recogniser as a prop, the way it takes the reader, so tests
+hand it a fake and the board hands it the browser's, and a browser without one renders no
+button at all: absent, not disabled, since a disabled control is a promise the browser cannot
+keep.
+
+**What the person sees.** Press: the button says it is listening and the input shows what has
+been heard so far, updated as the recogniser revises it. A final result lands in the input and
+is submitted through the same path as Enter. Press again or Escape: listening stops and the
+words heard so far stay in the input, editable, because a half-heard sentence is worth
+correcting rather than losing. A refused microphone, silence, and any other recogniser error
+each become one plain sentence in the status line; none of them throws.
+
+**What leaves the machine.** This version sends the audio to the browser maker's service,
+Chrome to Google and Edge to Microsoft, as `docs/voice-commands-plan.md` says of it; the
+button's tooltip says so in one line, so a site that will not accept that knows before pressing.
+The local Whisper version, through the same service as the model, is the plan's second step
+and is not part of this stage.
+
+Brief: `docs/agent-briefs/s46-a-microphone-brief.md`.
+
+## §19.95 — D124: the bar behind a launcher in the corner (S48)
+
+> *"I feel the command line should be like a chatbot icon on the lower right corner of the
+> screen, you click on it to start writing … that icon is no dice, we need a fancy one which is
+> more recognisable."* — the maintainer, 13 Sept, after an evening of using the bar and the
+> microphone. And, on the mock: *"Go ahead and build it."*
+
+### D124 — one door, moved; one icon, not two
+
+The command bar has sat at the top of the board since S40. It is now the way most things get
+done by voice, and the board underneath it is what the outline stage (S47) draws on. A launcher
+in the lower right, the pattern every chat widget has taught people, gives the board the whole
+screen until a person wants to talk to it, and puts the words beside the outline they refer to
+rather than a screen-height away from it. It is also where the chat panel of Stage 10 will
+live, so the panel built here is not thrown away.
+
+**The bar does not change; its frame does.** The panel contains the `CommandBar` component as
+it is, with every prop it has today. Nothing about how a sentence is read, resolved, confirmed
+or written moves. The launcher is a new component around the bar, the board renders the
+launcher where it rendered the bar, and the same server flag that hid the bar from a viewer
+hides the launcher.
+
+**One icon.** The maintainer asked whether voice should have its own icon beside the launcher.
+No: two floating buttons are two doors to one place, and the voice door would need the panel
+anyway to show what it heard and to ask its questions. The microphone stays inside the panel
+beside the input, and the maintainer's standing preference — fold a capability into the
+existing control — holds. The launcher's glyph is a speech bubble, "tell the board"; the
+microphone is the outline everyone knows from a phone. Both are drawn inline in the app's own
+icon file, because the app has no icon library and gains none.
+
+**Open and closed are the bar's states, not new ones.** Escape closes the panel only when the
+bar has nothing left to clear, so the bar's own Escape rules (clear the status, then the
+input, stop listening) run first and closing is the last thing Escape does. A click outside
+closes at any time, and closing unmounts the bar, which is what clears a standing question, its
+outline, and any reading or listening in flight — the same cleanup the bar already does on
+unmount. The panel never closes itself while a question stands or a reading is in flight,
+because a panel that vanishes mid-answer would leave an outline with no words. The slash key
+opens it for people who type, as in every tool that has a command palette.
+
+Brief: `docs/agent-briefs/s48-a-launcher-brief.md`. Mock: the artifact the maintainer approved,
+two frames of the board in the app's own tokens.
+
+## §19.96 — D125: the board knows where the person is; the sentence need not (S49)
+
+> *"change operator a3s timing to 8:00 p.m. to 11:00 p.m."* — read by the model as a move of A3's
+> block on Cell 1, a cell the sentence never named (F-144, 13 Sept). And the maintainer, session
+> 160: *"Start stage 7."*
+
+### D125 — a wrong cell is a question, not a refusal
+
+The resolver's removal and move paths (D119) find the block by three things the sentence gives:
+the person, the cell, the day (and, for a removal, the hours). When the cell is right this is
+exact and never guesses. When the cell is wrong — the model filled a gap with the most common
+answer, or the person misremembered — the answer today is *"A3 has no block on Cell 1 today"*, and
+the sentence is dead. That is a refusal for something the board already knows: where A3's blocks
+are.
+
+**Look past the named cell, and say so.** When the named cell has none of the person's blocks
+for the sentence's day and hours, the resolver gathers the person's blocks that day on every cell
+the board shows. One block becomes the block question (`remove_which` / `move_which`) with one
+candidate, so the board outlines it (S47) and a yes acts on it; the message names both cells —
+*"A3 has no block on Cell 1 today, but has one on Cell 2: Product X 19:00–23:00. Remove that
+one?"* — because the sentence was wrong about something and the person must see what the board
+is about to do instead. Several blocks are buttons, each named by its cell. None is still the old
+refusal, unchanged.
+
+**A move with one block elsewhere asks.** A move whose cell is right takes its one block without
+asking (D119: a move never asks for one). A move whose cell is wrong asks even for one, and the
+question spells out the destination in the sentence's own words — *"Move that one to Cell 2 ·
+20:00–23:00?"* — because the same model that invents a source cell invents a destination too
+(the second screenshot in F-144 had both), and the destination is the thing a yes would write.
+The person reads the invented cell and says no. That is the whole safety of this stage: the
+resolver never acts on a guess of its own or the model's without the words on the screen first.
+
+**An empty place means "wherever they are".** The same code path, entered without a cell step.
+Nothing writes an empty place today — the rule grammar refuses a sentence without one, and the
+grammar-constrained model cannot emit an empty list — but Stage 7's second half retrains the
+model on sentences that name no place, and its form needs somewhere to land. The resolver and the
+decoder accept it now, tested, so the retrain is a data change and nothing else. The one-block
+removal asks, as every removal does; a move with exactly one block that day takes it, as every
+move with one block does. The rule grammar is not widened here: the "change X's timing" phrasings
+are the second half's, with the retrain.
+
+**The answer may point elsewhere.** A candidate the person picks is accepted from the named
+cell or from the elsewhere set; the readout and a re-time use the block's own cell, never the
+sentence's. A stale answer re-asks with whatever the board holds now.
+
+Brief: `docs/agent-briefs/s49-a-elsewhere-brief.md`. The bar and the launcher are untouched:
+their block-question branches outline whatever candidates the resolver names.
+
+## §19.97 — D126: the sentences widen once, and the model learns them once (S50)
+
+> The maintainer, 13 Sept: *"Can I say something like I want to assign Operator A2 and operator
+> A3 to working on Product XYZ on cell 1 and cell 2 on line 1 today from 3 to 5?"* and, on the
+> place-less sentence the model got wrong (F-144): *"lets wait till we reach that point."* Then,
+> session 160: *"Start stage 7."*
+
+### D126 — the rule grammar leads, the data follows, the model is taught last
+
+Three gaps met on one evening: a sentence that names no place, the "change X's timing"
+phrasing, and several people or places in one sentence. Each is a data gap — the generator
+never wrote such a sentence, so the model never saw one — but the generator cannot write a
+sentence its oracle refuses: every clean row is checked against the rule parser (S42), and that
+check is the one thing that keeps the training set honest. So the order is fixed: **the rule
+grammar widens first, with tests; the templates follow, checked by the oracle; the prompt and
+the schema say the new shapes; the model is taught once.** The board side (S49) is already
+there: a place-less form resolves as "wherever they are".
+
+**A place-less removal or move.** `unassign <op> [day] [from <time> to <time>]` and
+`move <op> [day] to <time> to <time>` with no place parse to `place: []`. The parser today
+answers `no_place`; that failure stays for an assign and a booking, which need a place to mean
+anything, and `no_move` stays for a move that names neither a new cell nor new hours.
+
+**"Change X's timing".** R-391 kept "shift" and "change" out of every verb list on purpose:
+"shift" is a noun everywhere in the app, "change" is too broad as a first word. The
+maintainer's own spoken sentence began with "change". The developer session's proposal is a
+*pattern*, not a verb — `change <op>['s] (timing|hours|time) to <time> to <time>` is a move in
+time, recognised whole, so a bare "change" still opens nothing — but R-391 was the
+maintainer's decision and this waits on their word. Not in the first brief.
+
+**Several in one sentence.** `assign A2 and A3 to Product XYZ on Cell 1 and Cell 2 in Line 1
+today from 3 to 5`. Two lists, one sentence, and one reading: the same count pairs them in
+order (A2 on Cell 1, A3 on Cell 2); one place and several people puts them all there; one
+person and several places is that person on each; two lists of different lengths above one is
+a failure that names both counts, never a guess (R-379). Only the operator segment and the
+FIRST place segment list; a qualifier after the list ("in Line 1"), the day and the hours apply
+to every command. The form is `{"intent":"several","commands":[...]}` — an object with an
+intent like every other form, so the decoder, the scorer and the grammar treat it as a fifth
+branch, and each inner command is a complete form of its own, `attach` and `existing`
+included. The bar today resolves one command; resolving each in turn, outlining every block a
+removal or a move would touch, one readout per command and one yes for the lot is its own
+stage after this one, buildable on the rule parser before the model has learnt the sentence.
+
+**One retrain.** Generate, prepare, the notebook on Colab (the maintainer's afternoon), the
+probe here, the held-out score above the bar. The held-out set is regenerated — a new
+reference set, versioned by its commit, because the old one cannot contain sentences its
+grammar could not parse — and the rule parser's own baseline is measured again on it.
+
+Briefs: `docs/agent-briefs/s50-a-grammar-brief.md` (the parser), then the data brief.
+
+## §19.98 — D127: several commands, one at a time, one yes (S51)
+
+> The maintainer, 13 Sept: *"I want to assign Operator A2 and operator A3 to working on Product
+> XYZ on cell 1 and cell 2 on line 1 today from 3 to 5."*
+
+### D127 — a lot is a queue of single commands, not a new kind of command
+
+The grammar (D126) turns that sentence into two complete single commands. Nothing downstream
+should have to learn a new shape: the resolver already answers one command with one question
+or one readout, the bar already asks one question at a time and outlines the blocks it is
+asking about, the board already has one writer per thing a sentence can do. So the bar runs a
+several as a queue: resolve command one; if it asks, ask it, numbered *"1 of 2"*, with the
+same buttons and outline; when it resolves, keep the result and move to command two. The
+person answers the same questions they would have answered typing the sentences one by one,
+in the same words, and never two at once (R-379 — one question at a time — holds for a lot).
+
+**One yes, at the end, with everything visible.** When every command has resolved, the bar
+shows every readout numbered, outlines every block a removal or a move in the lot would touch
+(each in its own colour; the highlight becomes a list), and asks once. Only the universal
+confirm words confirm a lot — "remove it" and "move it" name one thing, and a lot may hold
+both — and are answered in place as they are for a mismatched single question (S50 lane one).
+A typed edit, no, or Escape drops the whole lot: a half-answered lot is nothing, never a
+partial write.
+
+**The writers are the pop-ups' own.** On yes the board writes the commands in order. A removal
+goes through the removal the assignment pop-up's Delete calls; a re-time through the drag's
+own re-time (D119, no second path); a create and a move to another cell through the same
+mutation the create pop-up's clean Enter (R-384) and the move pop-up's confirm call — the
+board gains a direct call into that submit path, not a second copy of it (CLAUDE.md §4:
+whatever a client offers is decided by the same test the server runs; the resolver already
+ran the pop-up's own rules — `offeredAt`, `fitsRun`, `findRunOverlap` — before the yes). The
+lot stops at the first failure and says how many were done, because the writes are not one
+transaction and pretending otherwise would hide a half-done board.
+
+**A step that would ask again stops the lot.** The reviewer found two things in the first
+build: a removal inside a lot was fired and counted done before the server answered, so
+"Done: 2 commands" could stand beside a toast saying the first was refused; and a re-time
+inside a lot could open the drag's own confirm pop-up (an attachment change, keep-or-scale,
+crew left outside a resized run) with nothing linking it back to the lot. The rule that
+follows from "never write before the yes": every step awaits the same mutation the pop-up
+awaits, and a step that would have asked a further question refuses instead — the yes covered
+the readouts on the screen, and a question after it means a readout was incomplete. The lot
+reports that step as its failure and says how many were done; the person does that one on
+its own. The same holds for a lot that names one block twice: refused before the yes, not
+discovered after.
+
+**Built before the model knows the sentence.** The rule parser reads the sentence today, so
+the bar can be built and tested on it while the data lane and the maintainer's retrain give
+the model the same sentence; when the model's several form arrives through the decoder it
+enters the same queue.
+
+Brief: `docs/agent-briefs/s51-a-lot-brief.md`.
+
+## §19.99 — D128: a shift's name is hours the board already knows (S52)
+
+> The maintainer, 13 Sept, session 163: *"Yes, do add them to the verb list."* And: *"the user can
+> use the sentence like 'Assign operator to work for shift X on cell Y, line Z for product A', will
+> this be handled by the retraining model?"*
+
+### D128 — two more shapes before the one retrain, and why the grammar still leads
+
+**The verbs.** R-391 kept "change" and "shift" out on the developer's reasoning — "shift" is a
+noun everywhere in the app, "change" too broad as a first word. The maintainer's own sentences
+begin with "change", and the first-word rule already keeps a noun "shift" mid-sentence out of the
+verb's way. Both join the move list at the maintainer's word; the lists stay disjoint. The
+possessive tail — "A3's timing", "A3s timing" as the recogniser writes it, "A3's hours" — is read
+as the person, because that is what the sentence means and the resolver has no timing to find.
+
+**The shift.** A scheduler thinks in shifts more than in clock times, and the board already
+knows what "Shift 2" means on Cell 1 today: the shift pattern attached to the cell's line or
+plant, resolved on the server as a definer (D116, DEF-0016) and drawn as the board's bands and
+the pop-up's shift chips. So the form carries the shift's *name*, not hours the model would have
+to guess, and the resolver turns the name into that cell's band for that day from the same
+pattern the chips come from — one source, no copy (CLAUDE.md §4). An overnight band ends past
+midnight exactly as the board's blocks do. A name the cell does not have is a question that
+lists the ones it has; a cell with no pattern says so and asks for the hours; two matches ask
+which (R-379). The model never invents hours for a shift it has only heard the name of.
+
+**A shift with no place.** "Remove Sam for shift 2" names no cell, and a band is a cell's,
+not the plant's. The resolver finds Sam's blocks that day wherever they are (S49) and tries
+each block's cell in board order until the name resolves to exactly one band; a cell with no
+pattern or no such band is skipped, a cell that answers with two bands is the question. Only
+when no cell resolves is the answer the refusal, naming the first cell that has a pattern and
+its bands. The first build took the first block's cell alone, and the reviewer showed the same
+sentence succeeding or failing on the order the blocks happened to arrive in; a rule that
+depends on that order is a guess (R-379). A place-less move takes the band from the cell the
+block ends up on, as a placed move does.
+
+**Why now.** A Colab run is the maintainer's afternoon. The data for R-399 is generated but not
+yet trained on; adding both shapes first means one run, not two. The order is D126's: grammar
+first, because the generator refuses any sentence its oracle cannot parse; then the resolver and
+the board's context in one lane and the data in another; then the run.
+
+**The maintainer's word order.** "Assign operator to work for shift X on cell Y, line Z for
+product A" puts the product last. The rule grammar reads a trailing "for <product>" when nothing
+before the places named one, so the generator can write that order and the model learn it; the
+canonical sentence the bar prints back stays product-first.
+
+Briefs: `docs/agent-briefs/s52-a-shift-grammar-brief.md`, then the resolver and data briefs.
+
+## §19.100 — D129: the command bar is a plant setting, resolved where the authority is (S54)
+
+> The maintainer, 14 Sept, session 164: *"Is there a way we can enable and disable the chatbot
+> from the settings? I'm thinking if I want to limit the feature during the initial getting used
+> to period."* Shown three values: *"Yes, go."*
+
+### D129 — a switch with three positions, the plant's, not the machine's
+
+**Why a setting and not a flag.** What exists today is coarse: an environment variable on the
+machine decides whether the model service is used at all, and the launcher shows to whoever may
+place, which is a permission, not a choice. A plant getting used to the board wants to say "typed
+only for now" or "not yet", and a company with three plants wants to say it per plant. That is
+exactly what the eligibility rule, the date format and the time zone already are: a company
+value, a per-place override, one resolver. A fourth key, `command_bar`, with three values:
+`off`, `typed`, `voice`. The default, when nothing is set anywhere, is `voice` — the board today.
+
+**Resolved for the board's root, on the server.** DEF-0017 taught this: a line supervisor's
+board is rooted at a line inside a plant, and the plant's override row sits above what she may
+read, so a client-side walk falls through to the company default and the plant's choice is
+silently lost for exactly the people it was made for. `board_window` therefore carries the
+value resolved by `app_resolve_node_setting`, the definer, for the board's own root — the same
+line the date format travels on. The board never resolves anything; it reads an answer.
+
+**What the board does with it.** `off`: no launcher, the viewer's view, for everyone on that
+board. `typed`: the launcher and the bar, no microphone — the bar already hides the microphone
+when it is given no recogniser, so the board simply withholds it. `voice`: as today. An
+unrecognised value hides the button: a switch that limits a feature fails closed, and the board
+still renders. Nothing about reading, resolving, confirming or writing a sentence moves.
+
+**The migration.** Append-only, as always: the two CHECK constraints on `node_settings` are
+dropped and re-added with the new key and its three values (0063 did the same for the time
+zone); `set_node_setting` gains one `WHEN`; a company-wide writer `set_org_command_bar` mirrors
+`set_org_eligibility_policy`; and `board_window` is re-emitted from 0063's text by a script
+that asserts every guard it expects before writing, adding one key beside `date_format` — the
+lesson of DEF-0011, never retyped.
+
+Brief: `docs/agent-briefs/s54-a-command-bar-switch-brief.md`.
+
+## §19.101 — D130: the board answers by expanding a sentence into a lot, and a span may be said by its edges (S55, S56)
+
+> The maintainer, 14 Sept, session 168, on the S53 catalogue: *"Unpark group 1 and group 3
+> together, one retrain, also can something else be done in parallel?"*
+
+### D130 — the two groups are one stage because they share one mechanism
+
+The catalogue (S53) sorted what a scheduler says by what each costs. Group 1 was "the same form,
+only new sentences"; group 3 was "the board answers, not the sentence". Read together they
+collapse into one design decision and one small widening of the form:
+
+**1. A board-answered sentence is a several the board writes.** "Clear Cell 1", "cover Sam with
+Ana", "swap Sam and Ana", "same as yesterday for Cell 1", "Ana is on leave till Friday" all name
+blocks the sentence does not spell out. Rather than a new kind of resolution for each, the resolver
+gains one pure step, `expandCommand`, that turns such a sentence into an ordinary `several` of
+`SingleCommand`s -- one removal, move, assign or booking per block the board finds, in board order,
+with `existing` and `attach` already filled in from the blocks themselves -- and hands it to the
+lot machinery D127 built (one numbered question per step if any, one "N commands ready", one yes).
+Nothing new executes; the lot does what it already does. The bar calls the expansion once, before
+its several intercept, so the rules path and the model path expand the same way.
+
+**2. The form grows by exactly what the sentence cannot avoid.** Three new intents whose fields
+are only the words said -- `replace` (who, with whom), `swap` (who, with whom), `copy` (which place,
+from which day or week, to which) -- and one new field, `until` on a removal, for "off till Friday".
+`everyone` is not a field: it is a reserved operator word on a removal or a move, which is what
+"clear Cell 1" and "move everyone on Line 1" already are. A `several` never holds one of these three
+(the model says two or three plain commands, or one of these; the board makes the many).
+
+**3. A span may be said by one edge, or by its length, or by a boundary the board knows.** "From 8
+for 4 hours" is arithmetic the grammar does. "After 2 pm" on a removal is 14:00 to the day's end;
+"before 2" is the day's start to 14:00 (the grammar writes the day's end as 23:59, the one value the
+clock type can hold, and the resolver reads that as midnight). "All day", "until end of shift" and
+"for the rest of the day" are boundaries only the cell's shift pattern knows, so they travel the way
+a shift's name already does (D128): as three reserved shift names the resolver answers from the
+pattern, never from the clock -- all day is the first band's start to the last band's end; end of
+shift, with a start, is the end of the band that start falls in; end of day is the last band's end,
+or midnight when the cell has no pattern. The one amendment to R-402's invariant: the two "end of"
+names may carry a start, because they name only the other edge. With no start and today on the
+board, the start is now, rounded up to the quarter hour -- the first time the resolver reads the
+clock, fed by the board (`nowMinuteOfDay`), never by this module.
+
+**4. What a copy is.** A day copies to a day, a week to a week (Monday onto Monday), for the named
+place or every cell the board shows. Each job becomes a booking with the same hours and headcount;
+each person's block becomes a direct block with the same hours and part; a block already there with
+the same person, part and hours is skipped, so a copy said twice does nothing the second time. A
+copied block is NOT attached to a copied job: the job does not exist until the lot runs, and the lot
+resolves everything before the yes. Named as a limit on S55's card; attaching after the fact is a
+later piece.
+
+**5. Two refusals that keep a lot honest.** An expansion above a ceiling (100 commands) is a
+question naming the count and asking for a smaller span, never a silent truncation. A block that
+sits across BOTH edges of a removal span ("clear Cell 1 from 10 to 12" against an 8-to-4 block)
+would need a split the app does not have; the expansion asks for a span that reaches one end of
+the block rather than removing the whole thing or inventing a hole.
+
+**6. Undo stays out.** "Undo that" needs a log of what the bar did, which is its own piece and not a
+sentence; it goes to the queue as parked, beside the catalogue.
+
+**7. The morning is a shift's name.** "This afternoon", "tonight", "the night" are read as the
+shift called afternoon or night and resolved by D128's matcher against the cell's own bands; a
+plant whose bands are called 1, 2, 3 gets the same "no shift called afternoon" question a wrong
+name gets. No clock arithmetic decides what an afternoon is.
+
+**Why one retrain.** Every one of these shapes changes what the model must say (three intents, one
+field, four day words, the reserved words) and the maintainer asked for one run. S55 lands the
+grammar, resolver, decoder and bar first, with the rule parser covering every sentence in tests;
+S56 regenerates the data, the held-out set and the prompt and the maintainer runs Colab once (the
+fifth run). While that run trains, the queue's next model-free piece (Whisper, Stage 6's second
+half) can proceed -- the maintainer's parallel question, answered.
+
+## §19.102 — D131: the microphone's second half — Whisper beside the model, audio stays in the building (S57)
+
+> The maintainer, 14 Sept, session 168: *"also can something else be done in parallel?"* — asked
+> while the fifth run's data was being built. The queue's next model-free piece is the voice plan's
+> Stage 6, second half.
+
+### D131 — a second recogniser with the same shape, chosen by configuration, falling back once
+
+**1. The bar does not change.** S46 gave the bar one contract, `Recognizer`: start a session, get
+interim text, get one final text, an error or an end. Whisper is a second function of that exact
+shape, `localRecognizer(baseUrl)`, in its own module beside `browserRecognizer`. The bar keeps its
+microphone button, its listening state, its generation counter and its error wording; nothing in
+`CommandBar.tsx` learns which engine is behind the button.
+
+**2. Whisper is batch, so the session is record-then-transcribe.** The browser's recogniser streams
+words as they are heard; Whisper hears a clip. The local session records from the microphone,
+reports "Listening…" through `onInterim` once (so the input shows something is happening), ends the
+clip on a stop click, on a second and a half of silence after speech was heard, or at twelve
+seconds, then reports "Transcribing…" through `onInterim`, posts the clip and reports the text
+through `onFinal`. Silence is decided by the clip's own loudness (an analyser's RMS against a
+floor), never by the service. The clip is converted in the browser to what whisper.cpp reads
+without ffmpeg — 16 kHz mono 16-bit WAV — by the audio API's own resampler; the encoder is a pure
+function with tests.
+
+**3. Chosen by configuration, the way the model service is.** `VITE_VOICE_URL` says where the
+model is; `VITE_WHISPER_URL` says where the recogniser is, and the dev server proxies `/whisper` to
+it exactly as `/voice` is proxied to the model. Unset means "no local recogniser": the browser's is
+used, as today. Set, the local one is used first; if the service does not answer (a network
+failure, not a bad clip), the bar says so once and that session falls back to the browser's
+recogniser when the window has one — one fallback, then the person decides. The S54 setting (off,
+typed, voice) is untouched: it says whether there is a microphone, not which engine hears it.
+
+**4. Served beside the model, started by the same command.** `npm run voice:serve` starts a second
+container, `scheduler-whisper`, running whisper.cpp's server on 127.0.0.1:8090 with the `base.en`
+model from `data/voice/whisper/` (gitignored, fetched once by `npm run voice:whisper:fetch`);
+`--stop` stops both. The `small.en` model is a one-flag upgrade for a loud floor. Nothing is sent
+anywhere but that port.
+
+**5. What is not decided here.** Streaming (partial words while speaking) needs a different
+server and is not worth it for four-second sentences. Noise suppression beyond what the browser's
+`getUserMedia` constraints offer is the site's microphone's job. The 6b packaging will run the
+same two containers from one file; this stage only adds the second one to the developer's command.
+
+## §19.103 — D132: the form grows a little — group 2 of the catalogue, before the same run (S58)
+
+> The maintainer, 14 Sept, session 168: *"If we did group 2 as well, does it save colab run?"* —
+> *"group 2 too."*
+
+### D132 — five sentences, each the smallest change to the form that carries it
+
+Group 2 of the catalogue (S53) was "the form grows a little". With D130's expansion in place, most
+of it grows the form by one field and lets the board write the rest.
+
+**1. A re-time by one edge is a move with an `adjust`.** "Extend Sam's block by an hour", "shorten
+Sam by 30 minutes", "end Sam early at 3", "finish Sam an hour earlier", "move Sam's start to 9",
+"shift Sam's end an hour later" all name one edge and either a new time or a distance. The move
+form gains `adjust: { edge: "start" | "end"; by: minutes } | { edge; at: ClockTime } | null`, and
+when it is set the span, the shift and the destination are null: the block is the move's own
+("wherever the person is", the which-block question when several), and the resolver computes the
+new hours from the block's own. "Start" stays a booking verb (R-391: every verb in one list), so
+"start Sam an hour later" is not a sentence; "move Sam's start an hour later" is, and the
+possessive edge tail is the same device as S52's timing tail.
+
+**2. A split is a shorten plus an assign, written by the board.** "Split Sam's block at noon" is a
+new intent with four fields (person, place, day, `at`). The expansion finds the block, writes a move
+in time to its first part and an assign of the same person, part, cell and attachment for the
+second, and the lot does both with one yes. An `at` outside the block is a question.
+
+**3. "The job's hours" is one more reserved shift name.** "Add Sam to the Housing A job on Cell 1"
+names a part and a place but no hours: the block takes the job's. The assign form already carries a
+part and a shift; `shift: "the job"` (reserved, D128's road) tells the resolver to find that part's
+run on that cell that day, take its hours and attach the block to it. No run is a question; two
+runs is a question naming their hours.
+
+**4. A job's headcount is a small intent of its own.** "Make the Housing A job on Cell 1 4 people"
+resolves to a run and to one existing write, the run's planned headcount, through the same field
+edit the job's own panel uses. "Make it 4 people" has nothing to hold "it" — the bar keeps no
+memory of the last thing it did — so the grammar asks for the job's name rather than guess. Never
+part of a lot.
+
+**5. "Every weekday this week" is one sentence, five commands.** Two more day words, on an assign
+or a booking only: `weekdays` and `every_day`, each with `this_week` or `next_week`. The
+expansion writes one command per day, in order, and a day off the board names its date. The
+served model's schema and the decoder allow these two kinds only where the grammar produces them,
+as D130 did for the week words.
+
+**What stays out.** "Make it N people" with a remembered "it" (a bar memory is its own decision);
+a split into more than two; repeating on named days ("Mondays and Wednesdays"). Each is a sentence
+away once wanted.
+
+**One run.** S58 lands before the fifth run's data is regenerated, so S56's data lane runs once
+more over both S55 and S58 and the maintainer trains once — the reason the maintainer chose it.
+
+## §19.104 — D133: what the first spoken walk through the catalogue taught (S59)
+
+> The maintainer, 15 Sept, session 174, after nineteen sentences by voice and by keyboard: a
+> near-miss on a part's name should offer the closest names to pick; "yeah" should be a yes; a day
+> off the board should be one click away; the recogniser mishears "cell", "A" and "4".
+
+### D133 — four small rules, each from one thing that went wrong on the floor
+
+**1. A name that matches nothing is a question with the nearest names as buttons.** The model
+copies the words it hears ("Housing Pay", "Common Fasteners"), as it should; the resolver's
+answer to a word that matches no part, person or place was a dead end. It becomes the same
+kind of question an ambiguous word already gets: up to four candidates, ranked by closeness
+(shared letters and a common prefix, the plural stripped first), each a button that substitutes
+the real name and re-runs. A word that is close to nothing stays a dead end, in the same words as
+today. The person picks; the board never guesses.
+
+**2. A confirm word is what people say.** "Yeah", "yep", "yup", "sure", "okay", "go ahead", "go
+on", "correct", "right" join yes; "nope", "nah", "never mind", "forget it" join no. A transcript is
+compared after trimming, lower-casing and dropping punctuation, so a recogniser's "Yes." is a
+yes. Nothing else about confirmation changes: the words that name one kind ("remove it") are
+still matched against the question's own kind.
+
+**3. A day off the board is one button away.** "Same as yesterday" on a window that starts today,
+"till Friday" on a three-day window: the day-off-board question gains a button, "Show that day",
+that moves the window to include it and runs the same sentence again. The window move is the
+board's own (`shiftWindowByDays`/`setWindowStartDate`), never a second axis.
+
+**4. The recogniser is told the board's own words.** whisper.cpp takes an initial prompt that
+biases what it hears. The bar hands it the names on the board (cells, lines, parts, people) and
+the bar's own vocabulary (cell, shift, job, the digits), built once per board window, capped in
+length. It does not fix a quiet microphone; it fixes "cell" heard as "sell" and "A" as "pay".
+
+**Not a rule yet.** "Until end of shift" landing on a different end than expected could not be
+reproduced from the board's rows (the block on the board came from a different transcript); the
+maintainer types the sentence and reads the hours back before it is called a defect. The model
+writing a name made of punctuation is a decoder gap, closed as F-149.
+
+## §19.105 — D134: what the second walk taught before its first sentence was through (S61)
+
+> The maintainer, 16 Sept, session 176, after thirteen sentences: "People not trained are being
+> assigned and not everything the board says is being recorded in the file. It is just not working
+> as it should." And: "clear the board, make sure you have the tests figured out properly before
+> you hand me the testing."
+
+### D134 — five rules, and one change in how a walk is handed over
+
+**1. The bar keeps its conversation for the session (R-424).** The board's query key carries the
+window's dates, so a window move or the refetch after any write made the board's data go back to
+"nothing yet" for a moment, and the bar, mounted only while there is data, unmounted with it:
+its status, its open question, its lot and its unflushed trace entry gone. The query now keeps
+the previous window's data across a refetch, and the bar is gated off only before the board has
+ever loaded. The bar also keeps its last context in a ref so a stray empty context cannot empty
+it.
+
+**2. Training is asked about before the yes, by the server's own rule (R-425).** The create
+pop-up already asks through `certificateGaps`, the transcript of `check_eligibility`; the bar
+never did, so a person without the cell's training got a plain readout and then a pop-up, and a
+swap wrote three of four before the server refused the fourth. The resolver now asks
+`not_certified` first, for every builder that puts a person on a cell. Under the plant's warn
+policy a single sentence takes the reason as its next answer and writes with the override; a
+lot is refused before its yes, naming the person and the missing training, because a lot never
+asks a reason and never writes half of itself. Under block, refused.
+
+**3. A lot's failure says what stood.** `runLot` stops at the first refused step and has no
+undo; the message borrowed the drag's "reverted" wording. The toast helper no longer bakes that
+suffix into every message; a lot's failure lists the steps that stayed. An undo for a lot is a
+later decision, not a word.
+
+**4. A date is formatted from its parts, never from a UTC midnight read in a zone.** Every day
+label the bar printed was a day early west of UTC. The same rule `src/lib/format/dates.ts` was
+written for, applied to the bar.
+
+**5. No day means today, and today off the board is a question.** After "Show that day" moved
+the window, a day-less "split Tom Baker at 10" fell to the window's first day and looked on the
+wrong date. `resolveDay(null)` now asks the same day-off-board question a spoken "today" gets.
+
+**The trace records everything the bar showed.** A single's readout and its automatic run, a
+parse failure's "Say it like" message, and an entry still open at unmount (flushed with a
+beacon) — F-157. A walk is read from disk, and what the file lacks is itself a finding.
+
+**How a walk is handed over from now on.** The typed half of a walk is a Playwright spec that
+drives the real bar on the real board, prepares and clears its own rows through the database,
+asserts each answer AND each write, and reads the trace file back. The maintainer is handed
+only the voice sentences, from the same data file, after that spec has passed twice in a row.
+Two hand-written lists in two days met a board the writer had not checked: a person without
+the cell's training, a date that rolled overnight, a grammar form that does not exist. The list
+is now a test, and its expectations are computed by the same code that will answer.
+
+**What the spec found on its first day (F-158).** A repeat day ("every weekday this week") could
+never run from the board's own three-day window: the resolver wants the week on the board, its
+question named a date, and the Show-that-day handler widens the window only for a week word. The
+question now carries the week word, so one press widens to seven days on that Monday and the five
+commands list. Two hand-written walks had never said a repeat on a short window; the spec did on
+its first run, twice, byte-identical. That is the point of the spec.
+
+**What the evening found (F-159).** At 19:09 Chicago the voice walk's first sentence said today
+was not on the board. The board's hours are drawn in the plant's zone and were right; the DAY the
+board opens on was the UTC date, chosen at page load before the zone is known and never corrected,
+so from 19:00 to midnight Chicago the board opened on tomorrow. Before F-156 the bar had fallen
+back to the window's first day and would have written onto tomorrow without a word. Every walk and
+the typed spec had run in the afternoon, when the two dates agree. The marker is now the plant's
+date, re-anchored once the zone arrives if nobody has moved the window, and pinned with a frozen
+clock at 19:30 Chicago. The typed walk spec is clock-blind; a frozen page clock is its next step.
+
+## §19.106 — D135: standards, and the audit a new one triggers (S62)
+
+> The maintainer, 17 Sept, session 177: "can we make sure the time set by the settings for the
+> plant is the standard the whole board should use for any further development happening here on
+> after? And any kind of development we do going forward will also check if a standard exists or a
+> prior code should change based on new standard?"
+
+### D135 — a standard is a requirement with an audit attached
+
+**1. The plant's zone is the one clock (R-426).** Not a new intention — the timezone migration of
+September and D88a already put the axis, the fetch bounds, the blocks and the readouts in the
+plant's zone — but the intention had no fence, and two places had stayed outside it: the board's
+own "today" (F-159, the UTC date) and the audit view (F-161, the browser machine's zone). The rule
+is now one sentence with three verbs: a calendar day comes from an instant only through
+`partsInZone`; an instant comes from a calendar day only through `zonedTimeToInstant`; day
+arithmetic on a `YYYY-MM-DD` string goes through the helper that says it is arithmetic. The
+date-seam audit enforces it, and a clock-dependent rule gets a frozen-clock pin in both directions.
+
+**2. What "standard" means from now on.** A standard lives in three places: CLAUDE.md §7, so it
+loads into every session before any code is read; a `requirements` row, so it has a test; and the
+finding that prompted it, so the reason is kept. When the maintainer states one, the same session
+greps the code for what already violates it and fixes or queues every hit — the standard is not
+declared and left for the next person to trip over. The board's today was a UTC date for months
+because nobody had written the sentence down.
+
+**3. The bar is a thread (R-427).** Emptying the answer box (F-162) only works if the sentence and
+the question stay readable, and the maintainer named the larger thing: a conversation history, so
+what was offered and what was chosen can be checked afterwards. The trace entry the bar already
+writes for the developer IS that history; it is now kept in a store outside the bar (the same store
+that lets a click outside close the panel without losing anything, F-163), rendered as a thread —
+You said / Board asked, with the buttons offered and the one chosen / Written or Refused — and
+persisted in the browser per person and plant for the last day. Nothing in a past turn is live. A
+server-side thread shared across devices is a later decision; the writes themselves are already in
+the audit log.
+
+**4. What the swap's fourth step was (F-165).** The server's area rule, working as designed: a
+person is owned by `operators.site_node_id`, and Sam Patel is the one Plant A person owned by Line 1,
+so Cell 3 under Line 2 refuses him without an area override. The lot got the refusal after three
+writes; a single sentence left a create pop-up behind the bar with the override box unchecked while
+the bar printed the readout as done. Two silences, one rule. The resolver now asks `outside_area`
+before the yes through the same helper the create pop-up already marks people with — R-425's shape
+applied to the area rule — and the writers answer honestly, so the trace and the thread say
+Written, Refused or Waiting rather than assuming. The lesson is the same one CLAUDE.md §4 already
+carries: a screen that promises what the server will refuse; the new part is that the promise was
+made in words, by the bar, and words need the same predicate as buttons.
+
+**5. The thread, in the shape people know (R-428, R-429).** The maintainer on the first thread
+screenshot: "This does look like a conversation" — then the two things every chat has and this one
+did not: bubbles, the person's on the right and the board's on the left in two colours; and a panel
+that stays open while the board is scrolled and clicked, closed only on purpose, resizable. The
+conversation store already made the state survive a close; S63 removes the close-on-outside-click
+itself and gives the panel its edge. Wording is unchanged: the bubbles carry the same sentences
+the thread already says. Two wording items ride along — a bar refusal still borrowing the drag's
+"try the split again", and the lot's "Do all N" inside a bubble.
+
+## §19.107 — D136: six standards answered, and what "clear" and Enter mean (S63)
+
+> The maintainer, 17 Sept, session 178, answering the seven candidates put in session 177: "1. Yes
+> 2. Yes 3. Yes 4. Yes 5. Yes 6. Need more information to understand this, use examples. 7. Yes,
+> definitely ask, always ask when in doubt. 8. Unless specified clear means clearing everything, we
+> can program an undo option since we have the activity data, it should be easy. Another parallel
+> thing, when I hit enter after typing the sentence, the bar should clear out as well, it should not
+> retain previous sentence."
+
+### D136 — a yes is a standard, an audit and a queue card, in that order
+
+**1. Five standards at once (R-430 to R-434), and the sixth (R-435).** Each was a choice the
+developer had made two or three times in the bar without a rule: offer the nearest names but not
+the nearest places; ask about a certificate and the area rule before the yes but let capacity refuse
+after it; write three steps of a swap and refuse the fourth; run the walk as a spec because session
+176 hurt, not because anyone said so; trace most things. D135 said a standard is written into
+CLAUDE.md §7, into `requirements`, and then audited. The audit is the part that costs: each yes
+became a queue card naming its grep, and the first pass of that grep ran while S63 was being built
+(the hits are in session 178's summary). "When in doubt, ask" is the never-guess rule (R-425,
+F-134's afternoon rule) generalised to the whole grammar; its first case is the bare pair of hours.
+
+**2. The one candidate that needed examples.** "A floor-worded message with a banned-word list" was
+put back to the maintainer with three real lines from the code ("try the split again" arriving in
+the bar from the drag's toast; "An adjust cannot also carry a new cell, span or shift"; the lot's
+"Do all N") beside what a person on the floor would understand. It stays a queue card until the
+maintainer answers; the rule as drafted is the icon audit's shape (`iconStandard.test.ts`) over
+every user-facing string.
+
+**3. "Clear" means everything (R-436).** The grammar's `clear` removes people and leaves the job;
+the maintainer expected the job gone, and said the word means everything unless the sentence names
+a part. The safety the old reading gave — a job is harder to put back than a person — is to be
+provided the other way round: an undo, read from the activity log, which already holds every write
+of a turn. Queued as one card: the grammar, the readout that names both, and the undo. The model's
+training data needs the new shape in its sixth run.
+
+**4. Enter empties the box (R-437).** F-162 made the box an answer box while a question stood and
+deliberately left the sentence in it otherwise, so a sentence the bar could not read could be edited
+rather than retyped. With the thread on screen (R-427) that reasoning is gone: the sentence is
+readable in its bubble, and the maintainer's words were that clearing by hand is "not value add".
+Enter always empties the box; Escape no longer puts the sentence back. Rides on S63 because it is
+the same render tree.
+
+**5. S63 itself (R-428, R-429).** Bubbles are a shape over the thread the store already holds:
+the person's words on the right in the launcher button's own colour pair, the board's on the left
+with the offered buttons inside its bubble. The panel becomes a layer that only its own controls
+close: the close-on-outside-mousedown that S48-a wrote, and the `[role="dialog"]` exemption and
+focus rules that existed only to serve it, go. The size is remembered per person in the browser,
+next to the thread. Nothing in the bar's grammar, readers or writers changes.
+
+## §19.108 — D137: a person belongs to a shift (R-441) — the scope
+
+> The maintainer, 17 Sept, session 178: "an operator can be part of a particular shift in the
+> company, I don't think we have made it as a requirement while writing the code so far ... They can
+> be part of a specific shift as a normal work hours and with overtime can extend into different
+> shifts. Same thing with supervisors, they could belong to one shift or plan for the whole day."
+
+### D137 — what exists, the one decision, the five pieces
+
+**What exists.** Shift patterns belong to PLACES: one pattern per node, inherited down the tree,
+resolved by a definer (DEF-0016), with bands such as Shift 1 06:00–14:00 and an overnight band
+expressed as an end past 1440. People have a home place, skills, certificates and absences; nothing
+ties a person to a band (`operators` has no shift column; a grant is person, node, role). Nothing
+limits a person's hours in a day; the off-shift wash is drawn but no rule refuses a booking there;
+the word overtime appears nowhere. The rail's "free" is measured over the whole loaded window, and
+the bar's "from 2 until end of shift" reads the CELL's band, never the person's.
+
+**The one decision that is not a line of code: what "Ana's shift" points at.** A band is named
+inside a pattern, and a pattern belongs to a place, so a person's shift is only well-defined against
+a place. Three shapes: (A) a band NAME on the person ("Shift 2"), resolved against the pattern of
+the place they are being put on, with the home place's pattern as the anchor for display; (B) a
+band id, which pins the person to one pattern and has no answer on a cell with a different one;
+(C) a clock window on the person, independent of patterns, a second source of truth. The developer
+recommends A: it survives a pattern edit, works across cells whose patterns share names, and reads
+in plain words; a plant whose patterns disagree on names is asked to align them (the admin screen
+can say so).
+
+**Overtime.** A block outside the person's band is overtime. Allowed, never silent: named on the
+block, in the create pop-up before the save, in the bar before the yes (R-431's shape), in the rail
+as hours ("booked, +2h overtime"), and in the write's envelope so the trace and the thread say it.
+Whether a plant may set overtime to block, like eligibility, is a later switch; today it is warn
+always, because the maintainer's words were "can extend".
+
+**Supervisors.** A grant gains a shift or "whole day". The first effect is what the board OPENS ON
+(the shift's hours, the rail's "free" over that slice); it does not change what the grant permits,
+which stays the path rule. Whether a shift-bound supervisor should be refused a write outside their
+shift is the maintainer's to say; the developer's default is no.
+
+**The five pieces, sized in lanes.** (1) The model and the server, a day: two nullable columns
+(operators.home_shift, profile_grants.shift or 'day'), the board payload emitting each person's
+band, a `shift_fit` verdict beside eligibility that the five writers and the resize guard forward,
+the SQL cases. (2) The admin screens, half a day: the Operators tab field, a fifth CSV column, the
+Access tab's shift choice. (3) The board, a day: the rail measuring free and booked against the
+person's band with overtime in hours, the pop-ups' chips marking the person's own band, the mark on
+an overtime block. (4) The bar, half a day plus a retrain: "on overtime" and "into shift 2" in the
+grammar, the question before the yes, the shape in the sixth run's data. (5) The demo and the walks,
+half a day: people spread over the three bands with one overtime block, the role walk's parity,
+the typed walk. Order: (1) before S65's rail, so R-438's "free 11:30" is measured against the
+person's own shift and the root's pattern is only the fallback for a person with none.
+
+**D137, corrected the same hour (R-443).** The maintainer asked what a rename does to a band NAME
+stored on the person: it orphans everyone. Right. The person points at the band by id; the
+Operators tab's options are the pattern's own bands, so the names go hand in hand; a rename or a
+change of hours carries everyone along; retiring a band or its pattern warns with the count, offers
+the other bands, says to create the new shift first, and leaves anyone retired anyway visibly
+without a shift until given one. Only on a cell whose pattern is not the home's is the band matched
+by name, ignoring case.

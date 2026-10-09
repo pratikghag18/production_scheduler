@@ -23,6 +23,9 @@
 import { create } from "zustand";
 import type { SchedulerError } from "@/lib/api";
 import { describeSchedulerError } from "@/lib/api";
+import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
+import { leaveLine } from "../lib/leave";
+import { BOARD_ZONE } from "../lib/time";
 
 export type ToastKind = "" | "warn" | "crit";
 
@@ -77,6 +80,14 @@ export interface ToastResolveCtx {
   /** Needed only to format a RunOverlap/CapacityExceeded timerange as a
    *  clock range; omit to fall back to the raw ISO text. */
   formatRange?: (startMin: number, endMin: number) => string;
+  /** R-359: how to phrase an `Absent` refusal's DAYS and HOURS. Both optional
+   *  and both defaulted, so a caller holding neither still gets a true
+   *  sentence -- the org's date format, and the zone the hours are read in,
+   *  which must be the board's own (the absence is judged against this
+   *  board's window). Without them the days show in the default format and
+   *  the hours in UTC, which is what every caller got before they existed. */
+  dateFormat?: DateFormat;
+  zone?: string;
 }
 
 function resolveOperatorName(ctx: ToastResolveCtx, operatorId: string): string {
@@ -90,6 +101,23 @@ function resolveNodeName(ctx: ToastResolveCtx, nodeId: string): string {
 /**
  * §7's message-shape table, pure (exported for testing). `kind` picks the
  * toast's CSS treatment — the mockup's `""`/`"warn"`/`"crit"` classes.
+ *
+ * F-154 review fix (S61-a, the several-lot's own trace read, 16 Sept): this
+ * used to bake " — reverted." straight into the CapacityExceeded/
+ * NotEligible/RunOverlap/Absent messages below -- true for a REAL drag,
+ * which really does roll back its own optimistic move, but not for
+ * `runLot`'s catch (`useDragGesture.ts`'s own doc on that function), which
+ * writes each step for REAL and simply stops at the first failure -- there
+ * is nothing to revert, and "swap Lena Novak and Tom Baker today" wrote
+ * three of four and still said "reverted", reading as the whole lot undone
+ * when nothing was. This function no longer decides that -- it hands back
+ * the plain fact, and the CALLER says whether anything was actually rolled
+ * back: a genuine drag/retime failure goes through `toast.reverted(message,
+ * kind)` (`useDragGesture.ts`'s own `failWith` and `openMoveFromCommand`'s
+ * override branch), which appends the suffix itself; `runLot`'s own catch
+ * reads `.message` directly and never sees it, no strip required on the
+ * bar's own side any more either (`CommandBar.tsx`'s F-154 fix, now just
+ * "The N done stayed: …" appended to the message as-is).
  */
 export function buildSchedulerErrorToast(
   err: SchedulerError,
@@ -97,6 +125,9 @@ export function buildSchedulerErrorToast(
 ): { message: string; kind: ToastKind } {
   switch (err.kind) {
     case "CapacityExceeded": {
+      // R-465 (S195-D): busy on a place the caller cannot read -- the place
+      // and the hours, in the words the bar says them in.
+      if (err.elsewhere !== undefined) return { message: err.elsewhere, kind: "crit" };
       // P1-4e D61: the split popover now opens PROACTIVELY from a
       // `capacity_probe` before the write is even sent, so this path is
       // the race-only fallback — the probe said "fits" and the write
@@ -108,7 +139,7 @@ export function buildSchedulerErrorToast(
       const peakPct = Math.round(err.peak * 100);
       const capPct = Math.round(err.cap * 100);
       return {
-        message: `${name} would reach ${peakPct}% (cap ${capPct}%) — reverted. Someone else changed their load — try the split again.`,
+        message: `${name} would reach ${peakPct}% (cap ${capPct}%). Someone else changed their load — try the split again.`,
         kind: "crit",
       };
     }
@@ -118,7 +149,7 @@ export function buildSchedulerErrorToast(
       const missing = err.missingSkills.map((s) => s.name);
       const missingText = missing.length > 0 ? missing.join(", ") : "a required skill";
       return {
-        message: `${name} is not certified for ${cell}: missing ${missingText} — reverted.`,
+        message: `${name} is not certified for ${cell}: missing ${missingText}.`,
         kind: "warn",
       };
     }
@@ -148,15 +179,59 @@ export function buildSchedulerErrorToast(
             ? "another product"
             : (ctx.productById?.get(conflict.productId)?.name ?? "another product");
         const range = ctx.formatRange?.(conflict.startMin, conflict.endMin) ?? err.timerange;
-        return { message: `${cell} already runs ${product} ${range} — reverted.`, kind: "crit" };
+        return { message: `${cell} already runs ${product} ${range}.`, kind: "crit" };
       }
-      return { message: `${cell} already has an overlapping run — reverted.`, kind: "crit" };
+      return { message: `${cell} already has an overlapping run.`, kind: "crit" };
     }
     case "RaceLost":
       return { message: "Someone else changed this — refreshed, try again.", kind: "warn" };
     case "NotPermitted": {
       const cell = resolveNodeName(ctx, err.nodeId);
       return { message: `You don't have permission to edit ${cell}.`, kind: "crit" };
+    }
+    /*
+     * R-357/R-359. This used to fall through to `describeSchedulerError`, and
+     * that fallback is deliberately raw: the contract layer has no operator
+     * list, no date format and no zone, so it prints a UUID and the server's
+     * bare `YYYY-MM-DD`. On a toast that read
+     * "Operator 4f3c...-9a21 is on leave 10 Jun - 10 Jun." for a person who is
+     * only away 09:00-13:00 -- an id nobody can look up, and a day that is not
+     * the whole story. This branch has all three things the fallback lacks.
+     *
+     * The hours reach here because `AbsentOperator` now lifts the server's own
+     * `starts_at`/`ends_at`, and they are phrased by `leaveLine`, the one place
+     * a board surface says "on leave", so this toast and both pop-ups cannot
+     * drift into three wordings of the same fact.
+     */
+    case "Absent": {
+      if (err.operators.length === 1) {
+        const o = err.operators[0];
+        const name = resolveOperatorName(ctx, o.operatorId);
+        if (o.from === null || o.to === null) {
+          const reason = o.reason !== null ? `: ${o.reason}` : "";
+          return { message: `${name} is on leave${reason}.`, kind: "warn" };
+        }
+        const line = leaveLine(
+          {
+            from: o.from,
+            to: o.to,
+            reason: o.reason ?? "",
+            startsAt: o.startsAt,
+            endsAt: o.endsAt,
+          },
+          ctx.dateFormat ?? DEFAULT_DATE_FORMAT,
+          ctx.zone ?? BOARD_ZONE,
+        );
+        return {
+          message: `${name} is ${line.charAt(0).toLowerCase()}${line.slice(1)}.`,
+          kind: "warn",
+        };
+      }
+      const names = err.operators.map((o) => resolveOperatorName(ctx, o.operatorId));
+      return {
+        message: `${names.join(", ")} ${names.length === 1 ? "is" : "are"} on leave for this window.`,
+        kind: "warn",
+      };
     }
     case "InvalidArgument":
     case "RunNodeMismatch":
@@ -176,8 +251,16 @@ export function useSchedulerToast() {
      *  since closed — call this instead of `schedulerError` when the
      *  caller wants to control the exact "<Block> ... — reverted" wording
      *  itself (e.g. §7's RunOverlap-caught-client-side path, which already
-     *  has the full conflicting run in hand and doesn't need `runById`). */
-    reverted: (message: string) => push(`${message} — reverted.`, "crit"),
+     *  has the full conflicting run in hand and doesn't need `runById`).
+     *  F-154 review fix (S61-a): `kind` defaults to "crit" (every pre-
+     *  existing caller's own class, unchanged) -- a caller that wants
+     *  `buildSchedulerErrorToast`'s OWN kind (NotEligible/Absent are
+     *  "warn", not "crit") passes it through explicitly rather than losing
+     *  it now that this function, not that one, appends the suffix. */
+    reverted: (message: string, kind: ToastKind = "crit") => push(`${message} — reverted.`, kind),
+    /** S195-D (R-465): a refusal that is a plain fact, with no rollback to
+     *  report -- the message exactly as said, no " — reverted." after it. */
+    refused: (message: string, kind: ToastKind = "crit") => push(message, kind),
     /** D37's one true path: a rejected edit's typed error -> a sentence,
      *  built by `buildSchedulerErrorToast` above. */
     schedulerError: (err: SchedulerError, ctx?: ToastResolveCtx) => {

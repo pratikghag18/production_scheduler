@@ -10,9 +10,9 @@
 -- brief, since those rows may pre-exist a signup flow in a real project.
 --
 -- D10 (design-plan §17 / brief §6): day 0 is anchored to the Monday of the
--- current week, in UTC — not the mockup's hardcoded Aug 17-19. Per-site
--- timezone is undecided; UTC is the honest placeholder (flagged again in
--- docs/schema.md).
+-- current week, in UTC — not the mockup's hardcoded Aug 17-19. This file's
+-- own world is UTC; the demo world that replaces it (dev_demo.sql, R-450) is
+-- a Chicago company and writes its hours in that zone.
 -- ============================================================================
 
 SET timezone = 'UTC';

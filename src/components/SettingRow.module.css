@@ -1,0 +1,154 @@
+/* THE ONE PLACE A SETTINGS ROW IS DEFINED (R-332).
+
+   The maintainer, on the Settings tab: *"the drop down options are not aligned
+   in different options. It does not look professional. Please create a standard
+   for it."* They were right, and — as with R-318 — the cause was structural
+   rather than careless.
+
+   A setting was a flex row: `justify-content: space-between`, a text column of
+   `flex: 1 1 16rem`, and a control column of `flex: 0 0 auto`. A `flex: 0 0
+   auto` column is sized by ITS OWN CONTENT, so the eligibility picker (longest
+   option: "Allow it, with a reason on record") and the date picker (longest
+   option: a format name plus today's sample) computed two different widths and
+   the two pickers could line up only by coincidence. They did not, and every
+   setting added afterwards would have been a third width.
+
+   ⭐ A GRID, NOT A FLEX BOX, AND THE REASON IS THE WHOLE FIX. Flex sizes a
+   column by negotiating with the content in that row; grid sizes it by a track
+   list written once. `grid-template-columns: minmax(0, 1fr) var(--setting-
+   control-w)` makes the control column a CONSTANT that every row using this
+   class shares, so alignment is by construction rather than by two rows
+   happening to hold text of similar length. Nothing has to be measured and
+   nothing has to be kept in step.
+
+   ⛔ SUBGRID WOULD NOT HAVE DONE IT. `subgrid` aligns children against a shared
+   parent grid, which would line up the rows inside ONE card — and the two
+   settings the maintainer was comparing sit in two separate `<section>` cards
+   ("Display" and "Scheduling"). A named width is shared by every row anywhere
+   in the pane, which is what the complaint was actually about. It is also why
+   the width is a custom property rather than a literal: it is a constant with a
+   name, and `src/test/settingRowStandard.test.ts` counts its declarations so a
+   screen cannot quietly fork it.
+
+   ⚠️ WHY HERE AND NOT IN `Field.module.css`. That module owns the BOX — the
+   border, radius, padding and font of one control. This owns the ROW — the
+   relationship between two columns across sibling settings. They are different
+   scales of thing, and merging them would mean every screen that imports a
+   field also imports a grid it never asked for, and would blur the one rule
+   `fieldStandard.test.ts` enforces ("this file is the box"). A row composes a
+   field; it does not define one. So: a second shared module beside it.
+
+   Sized in `rem` (D84): the root font-size scales with `--chrome-scale`, so the
+   control column follows the viewport with nothing to remember. The BREAKPOINT
+   below is in `px` on purpose, and `AdminPage.module.css` records why — a `rem`
+   media query resolves against the root font-size, which now scales, so the
+   breakpoint itself would move and fire at ~1215px on a 4K display. A breakpoint
+   is about the DEVICE; only content sizes are rem. */
+
+/* ONE SETTING IS ONE ROW (R-320): name and hint on the left, one control on the
+   right, on the same column as every other setting's.
+
+   `minmax(0, 1fr)` on the text track, not `1fr`: a grid track's automatic
+   minimum is its content's min-content size, so a long unbroken hint would push
+   the track past its share and shove the control column off the shared edge —
+   the same failure in a different unit.
+
+   `align-items: start` so a control area two elements tall (the eligibility
+   row's consequence paragraph) does not stretch the label beside it, and the
+   label does not stretch to meet it. */
+.row {
+  --setting-control-w: 20rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--setting-control-w);
+  align-items: start;
+  column-gap: 1.5rem;
+  row-gap: 0.5rem;
+}
+
+/* The rhythm between two settings in the same card, carried by the rows
+   themselves rather than by a wrapper. A container would work too and would
+   read more conventionally, but it would mean every card that ever holds a
+   second setting has to remember to add one -- and the whole point of this file
+   is that the next setting has nothing to decide. `+` costs the caller nothing
+   and cannot be forgotten. */
+.row + .row {
+  margin-top: 0.875rem;
+}
+
+/* The label and hint. `max-width` is a READING MEASURE, not a layout: the text
+   track is `1fr`, so on a wide admin pane a hint would otherwise run eighty
+   characters or more to the line. 34rem is the cap this section already used
+   (and `AdminPage.module.css` uses for its own prose); it belongs on the cell
+   rather than on the paragraph, so a two-line label is bounded by the same
+   number as the sentence under it. */
+.text {
+  min-width: 0;
+  max-width: 34rem;
+}
+
+.name {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 0.1875rem;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* THE CONTROL CELL. A column, because a control can be followed by a
+   consequence line, a "saving…" note or a refusal — the eligibility setting is
+   already two elements tall and the date setting is one.
+
+   ⚠️ `max-width: var(--setting-control-w)` IS LOAD-BEARING, NOT BELT AND
+   BRACES. In the two-column layout the track already fixes the width and this
+   is a no-op; when the row collapses to ONE column below the breakpoint the
+   track is gone, and without this the picker would run the full width of the
+   pane on a tablet. It also means the cap on that consequence paragraph is the
+   SAME NUMBER as the column, instead of the hand-tuned `max-width: 20rem` it
+   used to carry in the panel's own stylesheet — a second copy of the column
+   width, kept in step by hand, which is the "column list that appears twice"
+   CLAUDE.md §4 warns about. */
+.control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  max-width: var(--setting-control-w);
+}
+
+/* A control FILLS its cell rather than sizing itself. Without this the standard
+   only fixes the column and each `<select>` still shrink-wraps its longest
+   option inside it — the visible half of the complaint. Sits alongside
+   `Field.module.css`'s `.select`, which still owns the skin. */
+.controlField {
+  width: 100%;
+  min-width: 0;
+}
+
+/* A note under the control: the consequence of the current choice, a "saving…"
+   line, or a refusal. Bounded by the cell above, so no width is set here. */
+.note {
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin: 0.5rem 0 0;
+}
+
+/* NARROW: the row becomes one column and the control sits under its own label.
+
+   A fixed track that never yields overflows a phone, so the two-column rule has
+   to end somewhere. 900px is deliberately the SAME threshold
+   `AdminPage.module.css` already uses to drop its hierarchy grid to one column:
+   this pane sits inside that page's left rail, so the content area is narrower
+   than the viewport by the rail's width, and giving the page two different ideas
+   of "narrow" is how a row ends up half-collapsed. px, not rem — see the header. */
+@media (max-width: 900px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

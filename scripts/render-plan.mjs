@@ -83,6 +83,14 @@ grid-template-columns:34px 1fr auto;gap:4px 15px;align-items:start;border-left:3
 .chip.next{background:var(--accent-soft);color:var(--accent)}
 .chip.q{background:var(--surface-2);color:var(--ink-3)}
 .chip.bad{background:var(--red-soft);color:var(--red)}
+table.idx{width:100%;border-collapse:collapse;margin:12px 0 20px;font-size:13px}
+table.idx th{text-align:left;font-family:Archivo,sans-serif;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding:6px 8px;border-bottom:1px solid var(--line)}
+table.idx td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.idx tr.closed td{color:var(--ink-3)}
+table.idx a{text-decoration:none}
+details.find>summary{cursor:pointer;list-style:none}
+details.find>summary h3{display:inline;margin-left:8px}
+a.stat{text-decoration:none;color:inherit}
 .chip.mine{background:transparent;color:var(--ink-3);border:1px solid var(--line)}
 .chip.yours{background:transparent;color:var(--amber);border:1px solid var(--amber)}
 .band{background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);display:grid;
@@ -101,6 +109,13 @@ grid-template-columns:repeat(auto-fit,minmax(160px,1fr));overflow:hidden}
 .measure{background:var(--ground);border:1px solid var(--line-soft);border-radius:5px;padding:10px 13px;font-family:"IBM Plex Mono",monospace;
 font-size:12.5px;line-height:1.75;overflow-x:auto;white-space:pre;color:var(--ink-2)}
 .fine{font-size:13.5px;color:var(--ink-3)}
+/* A labelled aside on a card: a finding's lead or fix, a session's numbers_note.
+   Each of these was written into plan.yaml and rendered as NOTHING until F-123
+   (9 Sept) -- the label matters as much as the text, because a "lead" is the
+   suspicion at the time and a "fix" is what was actually done, and a reader who
+   cannot tell them from the story cannot tell a guess from a fact. */
+.aside{margin:10px 0 0;padding:2px 0 2px 13px;border-left:2px solid var(--line-soft)}
+.aside>.k{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-bottom:3px}
 .lead{font-size:18px;color:var(--ink-2);max-width:64ch}
 div.lead{display:flex;flex-direction:column;gap:8px}
 footer{margin-top:42px;padding-top:16px;border-top:1px solid var(--line-soft);font-size:13.5px;color:var(--ink-3)}
@@ -158,6 +173,89 @@ const inEnum = (where, obj, key, list) => {
   if (!list.includes(obj[key])) fail(where, `\`${key}\` must be one of ${list.join(" | ")}`);
 };
 
+/**
+ * ⭐⭐ EVERY KEY MUST BE ONE THE RENDERER READS. F-123, 9 Sept.
+ *
+ * Until this existed the validator only asked whether REQUIRED keys were
+ * PRESENT. Nothing asked the other question --- will a key that IS present ever
+ * be read? --- so an invented or misspelt key was accepted in silence and
+ * dropped in silence, and both ends looked fine: the writer saw "plan.yaml ok",
+ * the reader saw a card that simply did not mention the thing. Three keys were
+ * in that state when this was written, and one of them was a correction to a
+ * `confirmed: true` test count.
+ *
+ * ⛔ SO THE LISTS BELOW ARE NOT DOCUMENTATION, THEY ARE THE CONTRACT. Adding a
+ * key here without teaching the renderer to emit it recreates the exact bug
+ * this check exists to stop. Add the render first, then the name.
+ */
+const onlyKeys = (where, obj, allowed) => {
+  for (const k of Object.keys(obj)) {
+    if (!allowed.includes(k)) {
+      fail(
+        where,
+        `unknown key \`${k}\`. Nothing renders it, so it would be dropped in silence. ` +
+          `Either it is a typo, or the renderer needs to learn it FIRST and then be listed here. ` +
+          `Known: ${allowed.join(", ")}`,
+      );
+    }
+  }
+};
+
+const KEYS = {
+  track: ["id", "title", "heading", "lead"],
+  stage: [
+    "id",
+    "track",
+    "num",
+    "title",
+    "status",
+    "owner",
+    "refs",
+    "delivers",
+    "what",
+    "state",
+    "measure",
+    "measure_note",
+  ],
+  requirement: [
+    "id",
+    "title",
+    "source",
+    "stated_by",
+    "claim",
+    "verified_by",
+    "status",
+    "note",
+    "superseded_by",
+  ],
+  verifiedBy: ["kind", "file", "cases", "steps"],
+  finding: [
+    "id",
+    "title",
+    "tag",
+    "status",
+    "found_by",
+    "story",
+    "lead",
+    "fix",
+    "refs",
+    "stage",
+    "violates",
+  ],
+  session: [
+    "id",
+    "date",
+    "title",
+    "commits",
+    "numbers",
+    "numbers_note",
+    "confirmed",
+    "summary",
+    "shipped",
+  ],
+  next: ["kind", "text", "why", "decided", "requirement", "stage"],
+};
+
 for (const key of ["meta", "tracks", "stages", "requirements", "findings", "sessions", "next"]) {
   if (!(key in plan)) fail("plan.yaml", `top-level \`${key}\` is missing`);
 }
@@ -175,17 +273,18 @@ const claim = (id, where) => {
 };
 const trackIds = new Set();
 for (const t of plan.tracks) {
+  onlyKeys(`tracks[${t.id}]`, t, KEYS.track);
   need(`tracks[${t.id}]`, t, "id");
   need(`tracks[${t.id}]`, t, "title");
   trackIds.add(t.id);
 }
 const stageIds = new Set(plan.stages.map((s) => s.id));
 const reqIds = new Set(plan.requirements.map((r) => r.id));
-const findIds = new Set(plan.findings.map((f) => f.id));
 
 for (const s of plan.stages) {
   const w = `stage ${s.id}`;
   claim(s.id, w);
+  onlyKeys(w, s, KEYS.stage);
   need(w, s, "title");
   need(w, s, "what");
   need(w, s, "num", (v) => Number.isInteger(v));
@@ -199,6 +298,7 @@ for (const s of plan.stages) {
 for (const r of plan.requirements) {
   const w = `requirement ${r.id}`;
   claim(r.id, w);
+  onlyKeys(w, r, KEYS.requirement);
   need(w, r, "title");
   need(w, r, "claim");
   need(w, r, "source", (v) => isList(v) && v.length > 0);
@@ -206,6 +306,7 @@ for (const r of plan.requirements) {
   inEnum(w, r, "status", ENUMS.reqStatus);
   if (!isList(r.verified_by)) fail(w, "`verified_by` must be a list (empty means uncovered)");
   for (const v of r.verified_by ?? []) {
+    onlyKeys(`${w} verified_by`, v, KEYS.verifiedBy);
     inEnum(`${w} verified_by`, v, "kind", ENUMS.verifyKind);
     if (v.kind === "manual" || v.kind === "screen") need(`${w} verified_by`, v, "steps");
     else need(`${w} verified_by`, v, "file");
@@ -228,6 +329,7 @@ for (const r of plan.requirements) {
 for (const f of plan.findings) {
   const w = `finding ${f.id}`;
   claim(f.id, w);
+  onlyKeys(w, f, KEYS.finding);
   need(w, f, "title");
   need(w, f, "story");
   inEnum(w, f, "status", ENUMS.findingStatus);
@@ -241,6 +343,7 @@ let confirmedSeen = false;
 for (const s of plan.sessions) {
   const w = `session ${s.id}`;
   claim(`session:${s.id}`, w);
+  onlyKeys(w, s, KEYS.session);
   need(w, s, "title");
   need(w, s, "summary");
   need(w, s, "date", isDate);
@@ -261,8 +364,14 @@ for (const s of plan.sessions) {
 if (!confirmedSeen)
   fail("sessions", "no session has `confirmed: true`; the numbers band has no source");
 
+const NEXT_KINDS = ["task", "parked", "note"];
 for (const [i, n] of (plan.next ?? []).entries()) {
-  const w = `next[${i}]`;
+  // Name the offending entry by its text/stage, not just its index, so a bad `kind`
+  // points a reader straight at the line to fix.
+  const label = n.text ?? n.stage ?? n.requirement ?? `#${i}`;
+  const w = `next[${i}] (${label})`;
+  onlyKeys(w, n, KEYS.next);
+  if (!NEXT_KINDS.includes(n.kind)) fail(w, `\`kind\` must be one of ${NEXT_KINDS.join(" | ")}`);
   if (n.stage && !stageIds.has(n.stage)) fail(w, `stage ${n.stage} does not exist`);
   if (n.requirement && !reqIds.has(n.requirement))
     fail(w, `requirement ${n.requirement} does not exist`);
@@ -401,13 +510,6 @@ const STAGE_CHIP = {
   parked: ["q", "Parked"],
 };
 const REQ_CHIP = { covered: "done", uncovered: "q", contradicted: "bad", superseded: "mine" };
-const DEF_CHIP = {
-  open: "bad",
-  reopened: "bad",
-  "fix-claimed": "now",
-  verified: "done",
-  wontfix: "mine",
-};
 
 function stageCard(s) {
   const [cls, label] = STAGE_CHIP[s.status];
@@ -434,6 +536,22 @@ function stageCard(s) {
 </div>`;
 }
 
+/**
+ * A labelled aside, or nothing at all when the key is absent.
+ *
+ * ⛔ THIS EXISTS BECAUSE THREE KEYS WERE BEING SILENTLY DROPPED (F-123, 9 Sept).
+ * `findingCard` emitted `story` and nothing else, so a finding's `lead` (F-121,
+ * F-122) and `fix` (F-121) rendered as nothing; `sessionEntry` did the same to
+ * session 62's `numbers_note`, which is a CORRECTION to a `confirmed: true`
+ * count --- the single most load-bearing kind of note in this file. All three
+ * validated as "ok" the whole time, because the validator checks that required
+ * keys are PRESENT and never that a present key will be READ. The unknown-key
+ * check added below is the half that stops the next one; this is the half that
+ * repairs the three already written.
+ */
+const aside = (label, text) =>
+  nonEmpty(text) ? `<div class="aside"><span class="k">${esc(label)}</span>${md(text)}</div>` : "";
+
 function findingCard(f) {
   const stage = f.stage ? ` · <a href="#${f.stage}">${esc(f.stage)}</a>` : "";
   const who = {
@@ -449,17 +567,57 @@ function findingCard(f) {
   <span class="tag">${esc(f.tag || f.id)} · ${esc(status)} · ${esc(who)}${stage}</span>
   <h3>${esc(f.title)}</h3>
   ${md(f.story)}
+  ${aside("Lead — the suspicion at the time", f.lead)}
+  ${aside("Fix", f.fix)}
   ${(f.refs ?? []).length ? `<p class="fine">${esc(f.refs.join(" · "))}</p>` : ""}
 </div>`;
 }
 
+const DEFECT_OPEN = (d) => ["open", "reopened", "fix-claimed"].includes(d.status);
+
+/**
+ * The index the maintainer asked for (session 83): one row per defect, open
+ * ones first, each a link to its card below and to its file. The page is read
+ * by a person deciding what to do next; a wall of closed defects in full was
+ * making it hard to follow, so a verified or wontfix card is folded and opens
+ * on click, while an open one stays open.
+ */
+function defectIndex() {
+  const order = (d) => (DEFECT_OPEN(d) ? 0 : 1);
+  const rows = [...defects]
+    .sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id))
+    .map(
+      (d) => `<tr class="${DEFECT_OPEN(d) ? "open" : "closed"}">
+    <td><a href="#${esc(d.id)}"><code>${esc(d.id)}</code></a></td>
+    <td>${chip(DEFECT_OPEN(d) ? (d.status === "fix-claimed" ? "now" : "bad") : "done", d.status)}</td>
+    <td>${esc(d.severity)}</td>
+    <td>${esc(d.title)}</td>
+    <td>${d.violates.map((r) => `<a href="#${r}">${esc(r)}</a>`).join(", ")}</td>
+    <td class="fine">${esc(iso(d.filed))}${d.fix_commit ? ` · fix ${esc(d.fix_commit)}` : ""} · <a href="defects/${esc(d._file)}">file</a></td>
+  </tr>`,
+    )
+    .join("\n");
+  return `<table class="idx"><thead><tr><th>Defect</th><th>Status</th><th>Severity</th><th>What a person sees</th><th>Rule</th><th>Filed</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 function defectCard(d) {
-  return `<div class="find ${d.status === "verified" ? "fix" : ""}" id="${esc(d.id)}">
-  <span class="tag">${esc(d.id)} · ${esc(d.severity)} · ${esc(d.class)} · ${esc(d.status)}</span>
-  <h3>${esc(d.title)}</h3>
-  <p class="fine">Violates ${d.violates.map((r) => `<a href="#${r}">${esc(r)}</a>`).join(", ")} · filed ${esc(iso(d.filed))} by ${esc(d.filed_by)}${d.fix_commit ? ` · fix ${esc(d.fix_commit)}` : ""}${d.pin ? ` · pinned by <code>${esc(d.pin)}</code>` : ""}</p>
-  ${md(d.body.replace(/^## (.*)$/gm, "**$1**"))}
+  const open = DEFECT_OPEN(d);
+  const head = `<span class="tag">${esc(d.id)} · ${esc(d.severity)} · ${esc(d.class)} · ${esc(d.status)}</span>
+  <h3>${esc(d.title)}</h3>`;
+  const meta = `<p class="fine">Violates ${d.violates.map((r) => `<a href="#${r}">${esc(r)}</a>`).join(", ")} · filed ${esc(iso(d.filed))} by ${esc(d.filed_by)}${d.fix_commit ? ` · fix ${esc(d.fix_commit)}` : ""}${d.pin ? ` · pinned by <code>${esc(d.pin)}</code>` : ""} · <a href="defects/${esc(d._file)}">open the file</a> · <a href="#defects">back to the index</a></p>`;
+  const body = md(d.body.replace(/^## (.*)$/gm, "**$1**"));
+  if (open) {
+    return `<div class="find" id="${esc(d.id)}">
+  ${head}
+  ${meta}
+  ${body}
 </div>`;
+  }
+  return `<details class="find fix" id="${esc(d.id)}">
+  <summary>${head}</summary>
+  ${meta}
+  ${body}
+</details>`;
 }
 
 function requirementRow(r) {
@@ -496,6 +654,7 @@ function sessionEntry(s, open) {
   <summary><b>Session ${esc(s.id)}</b> · ${esc(iso(s.date))} · ${esc(s.title)} ${s.confirmed ? chip("done", "counts confirmed") : chip("q", "counts not confirmed")}</summary>
   <div class="inner">
     ${md(s.summary)}
+    ${aside("A note on these numbers", s.numbers_note)}
     <p class="fine">${esc(nums)}${(s.commits ?? []).length ? ` · commits ${esc(s.commits.join(", "))}` : ""}${(s.shipped ?? []).length ? ` · shipped ${s.shipped.map((x) => `<a href="#${x}">${esc(x)}</a>`).join(", ")}` : ""}</p>
   </div>
 </details>`;
@@ -508,22 +667,44 @@ const band = `<div class="band">
   ${bl.mutations ? `<div class="stat ok"><span class="n">${esc(bl.mutations)}</span><span class="l">deliberate breakages caught</span></div>` : ""}
   ${bl.db_checks != null ? `<div class="stat ok"><span class="n">${esc(bl.db_checks)}</span><span class="l">database checks</span></div>` : ""}
   ${bl.migrations != null ? `<div class="stat"><span class="n">${esc(bl.migrations)}</span><span class="l">database changes (migrations)</span></div>` : ""}
-  <div class="stat ${openDefects.length ? "act" : "ok"}"><span class="n">${openDefects.length}</span><span class="l">open defects</span></div>
+  <a class="stat ${openDefects.length ? "act" : "ok"}" href="#defects"><span class="n">${openDefects.length}</span><span class="l">open defects — index</span></a>
   <div class="stat ${counts.reqs.contradicted ? "act" : ""}"><span class="n">${counts.reqs.covered ?? 0} / ${plan.requirements.length}</span><span class="l">requirements covered by a test${counts.reqs.contradicted ? ` · ${counts.reqs.contradicted} contradicted` : ""}</span></div>
 </div>`;
 
-const nextRows = (plan.next ?? [])
-  .map((n, i) => {
-    const s = n.stage ? plan.stages.find((x) => x.id === n.stage) : null;
-    const link = s
-      ? `<a href="#${s.id}">${esc(s.id)}</a> `
-      : n.requirement
-        ? `<a href="#${n.requirement}">${esc(n.requirement)}</a> `
-        : "";
-    const label = link + esc(n.text ?? (s ? s.title : ""));
-    return `<tr class="${i === 0 ? "g-now" : "g-next"}"><td class="g-n">${i + 1}</td><td>${label}<br><span class="fine">${esc(n.why)}</span>${n.decided ? " " + chip("mine", "decided — do not re-ask") : ""}</td></tr>`;
-  })
+// The queue is split by `kind`: only `task` entries are live work and get numbered, so
+// the count on the page means open work. `parked` (tabled or decided by the maintainer)
+// and `note` (a standing note, never a task) are shown for the record, unnumbered. The
+// `# ---- PARKED ----` comment in the YAML is a reading aid; the grouping is by `kind`.
+const nextByKind = { task: [], parked: [], note: [] };
+for (const n of plan.next ?? []) (nextByKind[n.kind] ?? []).push(n);
+
+const nextLabel = (n) => {
+  const s = n.stage ? plan.stages.find((x) => x.id === n.stage) : null;
+  const link = s
+    ? `<a href="#${s.id}">${esc(s.id)}</a> `
+    : n.requirement
+      ? `<a href="#${n.requirement}">${esc(n.requirement)}</a> `
+      : "";
+  return link + esc(n.text ?? (s ? s.title : ""));
+};
+const nextRow = (n, cls, num) =>
+  `<tr class="${cls}"><td class="g-n">${num}</td><td>${nextLabel(n)}<br><span class="fine">${esc(n.why)}</span>${n.decided ? " " + chip("mine", "decided — do not re-ask") : ""}</td></tr>`;
+
+const taskCount = nextByKind.task.length;
+const taskRows = nextByKind.task
+  .map((n, i) => nextRow(n, i === 0 ? "g-now" : "g-next", i + 1))
   .join("\n");
+const parkedRows = nextByKind.parked.map((n) => nextRow(n, "", "")).join("\n");
+const noteRows = nextByKind.note.map((n) => nextRow(n, "", "")).join("\n");
+const nextGroups =
+  `<h3 class="grouphead">Next, in order</h3>` +
+  `<div class="glance"><table><tbody>${taskRows || `<tr><td class="g-n"></td><td class="fine">Nothing queued.</td></tr>`}</tbody></table></div>` +
+  (parkedRows
+    ? `<h3 class="grouphead">Parked, by decision</h3><div class="glance"><table><tbody>${parkedRows}</tbody></table></div>`
+    : "") +
+  (noteRows
+    ? `<h3 class="grouphead">Standing notes</h3><div class="glance"><table><tbody>${noteRows}</tbody></table></div>`
+    : "");
 
 const backlogRows = (plan.backlog ?? [])
   .filter((b) => b.status !== "done")
@@ -580,9 +761,9 @@ const html = `<!doctype html>
 
 <section>
   <span class="eyebrow">Next</span>
-  <h2>What comes next, in order</h2>
-  <p class="fine">The order is a guess about priority, not a fact. If it has drifted from what the maintainer wants, ask rather than working down the list.</p>
-  <div class="glance"><table><tbody>${nextRows}</tbody></table></div>
+  <h2>What comes next: ${taskCount} task${taskCount === 1 ? "" : "s"}</h2>
+  <p class="fine">The order is a guess about priority, not a fact. If it has drifted from what the maintainer wants, ask rather than working down the list. Only the numbered items are live work; the rest are parked by the maintainer's decision or are standing notes.</p>
+  ${nextGroups}
 </section>
 
 ${backlogSection}
@@ -594,7 +775,8 @@ ${trackSections}
 <section id="defects">
   <span class="eyebrow">Defects</span>
   <h2>${openDefects.length ? `${openDefects.length} open defect${openDefects.length === 1 ? "" : "s"}` : "No open defects"}</h2>
-  <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>.</p>
+  <p class="lead">Filed by the tester against a named requirement, each with a reproduction. The developer marks a fix <em>fix-claimed</em>; only the tester marks it <em>verified</em>. Click a defect to jump to it; a closed one is folded and opens on click.</p>
+  ${defects.length ? defectIndex() : ""}
   ${defects.length ? defects.map(defectCard).join("\n") : `<p class="fine">None filed yet.</p>`}
 </section>
 

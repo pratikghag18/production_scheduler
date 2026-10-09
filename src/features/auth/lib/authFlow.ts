@@ -75,7 +75,7 @@ export function sanitizeRedirect(raw: string | null | undefined): string {
  * 2. WHICH SCREEN TO SHOW.
  * ======================================================================== */
 
-export type AuthScreen = "loading" | "sign-in" | "no-access" | "app";
+export type AuthScreen = "loading" | "sign-in" | "recovery" | "no-access" | "app";
 
 export interface AuthState {
   /** `useSession`'s `loading`. Starts true with no identity resolved yet. */
@@ -84,6 +84,12 @@ export interface AuthState {
   hasSession: boolean;
   /** Did `useSession` find a `user_profiles` row for that session? */
   hasProfile: boolean;
+  /**
+   * Is the session a password-recovery one that has not set its password yet
+   * (`useSession().recovery`)? Optional so the three-field callers and cases
+   * that predate F-106 read as "no".
+   */
+  recovery?: boolean;
 }
 
 /**
@@ -95,6 +101,16 @@ export interface AuthState {
  *                             bounces a real user or flashes a screen).
  *   no session -> "sign-in"   The production door. RequireAuth turns this into
  *                             a redirect that remembers where they were going.
+ *   session, recovery -> "recovery"
+ *                             ⭐ F-106. A reset-email link makes a FULL session
+ *                             the moment its tokens are read, and GoTrue drops
+ *                             those tokens on `/` whenever the app's origin is
+ *                             not the project's site_url. Without this line the
+ *                             person lands on the board with a password they
+ *                             never chose, and the reset form never appears.
+ *                             The gate sends them to /reset-password instead,
+ *                             BEFORE the no-profile check, because a person
+ *                             with no profile still owes the password first.
  *   session, no profile -> "no-access"
  *                             ⭐ THE DEAD-END, AND IT IS REAL, NOT HYPOTHETICAL.
  *                             `user_profiles` is UNIQUE ON (org_id, user_id),
@@ -110,6 +126,7 @@ export interface AuthState {
 export function decideAuthScreen(state: AuthState): AuthScreen {
   if (state.loading) return "loading";
   if (!state.hasSession) return "sign-in";
+  if (state.recovery === true) return "recovery";
   if (!state.hasProfile) return "no-access";
   return "app";
 }

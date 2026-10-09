@@ -37,6 +37,7 @@
 import type { BoardNode, HierarchyLevel } from "@/lib/api/shapes";
 import type { OperatorRecord, OperatorSkillRecord, SkillRecord } from "@/lib/api/operators";
 import { isAtOrBelow } from "./scope";
+import { isoPlusDays } from "@/lib/format/dates";
 
 /* ===========================================================================
  * 1. CELL STATE.
@@ -44,14 +45,13 @@ import { isAtOrBelow } from "./scope";
 
 export type CellState = "trained" | "expiring" | "expired" | "missing" | "na";
 
-/** Add `days` to a `YYYY-MM-DD` string, returning `YYYY-MM-DD`. UTC so a DST
- *  boundary can never shift the date. */
-export function addDays(iso: string, days: number): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + days);
-  return dt.toISOString().slice(0, 10);
-}
+/** Add `days` to a `YYYY-MM-DD` string, returning `YYYY-MM-DD`.
+ *
+ *  R-426 (S62-a): the arithmetic is the seam's (`@/lib/format/dates`), which
+ *  says once why adding days to a NAMED calendar day needs no zone and no DST
+ *  reasoning. Kept under this name because `buildMatrix` and its tests read by
+ *  it. */
+export const addDays = isoPlusDays;
 
 /**
  * The state of one operator×training cell.

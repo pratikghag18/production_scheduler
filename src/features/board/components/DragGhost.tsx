@@ -12,12 +12,14 @@ export function DragGhost({
   candidate,
   density,
   windowStart,
+  zone,
   pxPerHour,
 }: {
   candidate: { startMin: number; endMin: number } | null;
   /** P1-4c D44/D49: `density.bandTop` replaces the removed `BAND_TOP` constant. */
   density: Density;
   windowStart: Date;
+  zone?: string;
   pxPerHour: number;
 }) {
   if (!candidate) return null;
@@ -28,7 +30,7 @@ export function DragGhost({
   return (
     <div className={styles.ghost} style={{ left, width, top: density.bandTop }}>
       {hasRange
-        ? `${formatClock(addMinutes(windowStart, candidate.startMin))}–${formatClock(addMinutes(windowStart, candidate.endMin))}`
+        ? `${formatClock(addMinutes(windowStart, candidate.startMin), zone)}–${formatClock(addMinutes(windowStart, candidate.endMin), zone)}`
         : ""}
     </div>
   );

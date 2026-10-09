@@ -15,6 +15,11 @@ import {
   type RunFieldEdit,
 } from "@/lib/api";
 import { boardKeys } from "./useBoardWindow";
+import {
+  makePlaceholderId,
+  endPendingCreate,
+  withPendingCreateCounting,
+} from "../lib/optimisticId";
 
 type BoardKey = ReturnType<typeof boardKeys.window>;
 
@@ -38,7 +43,7 @@ export function useCreateRun(rootPath: string, from: Date, to: Date) {
   const queryClient = useQueryClient();
   const key = boardKeys.window(rootPath, from, to);
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: (input: CreateRunInput) => createRun(input),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: key });
@@ -47,7 +52,9 @@ export function useCreateRun(rootPath: string, from: Date, to: Date) {
         // Best-effort optimistic row: a temp id stands in for the
         // server-generated one until onSettled's invalidate replaces it.
         const optimisticRun: Run = {
-          id: `optimistic-${crypto.randomUUID()}`,
+          // F-233: the one place this id is built -- `isPlaceholderId`
+          // (optimisticId.ts) is the one place it is checked.
+          id: makePlaceholderId(),
           orgId: previous.org.id,
           nodeId: input.nodeId,
           productId: input.productId,
@@ -59,7 +66,6 @@ export function useCreateRun(rootPath: string, from: Date, to: Date) {
           timerange: toTstzRange(input.start, input.end),
           plannedHeadcount: input.plannedHeadcount ?? null,
           notes: input.notes ?? null,
-          status: "planned",
           createdBy: null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -74,10 +80,17 @@ export function useCreateRun(rootPath: string, from: Date, to: Date) {
     onError: (_err, _input, context) => {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
+    // F-233, third pass (S194-G3): RETURNED, not merely awaited internally
+    // -- see `useCreateAssignment`'s own identical comment
+    // (useAssignmentMutations.ts) for why this matters, the same reasoning
+    // for a job.
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      return queryClient.invalidateQueries({ queryKey: key }).finally(() => {
+        endPendingCreate();
+      });
     },
   });
+  return withPendingCreateCounting(mutation);
 }
 
 export function useMoveRun(rootPath: string, from: Date, to: Date) {
@@ -120,7 +133,9 @@ export function useMoveRun(rootPath: string, from: Date, to: Date) {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }
@@ -167,7 +182,9 @@ export function useDeleteRun(rootPath: string, from: Date, to: Date) {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }
@@ -207,7 +224,9 @@ export function useUpdateRunFields(rootPath: string, from: Date, to: Date) {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      // F-233: returned, never fired and forgotten, so the mutation's promise
+      // does not settle before the board's data holds the result.
+      return queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }

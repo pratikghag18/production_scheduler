@@ -10,6 +10,10 @@ import {
   resizeRange,
   findRunOverlap,
   classifyCrewAgainstRun,
+  assignmentFitsRun,
+  attachmentChangeMessage,
+  formatMinutes,
+  targetResizeMessage,
 } from "@/features/board/lib/interaction";
 
 /**
@@ -102,9 +106,18 @@ describe("interaction.ts — create", () => {
     expect(createRange(600, 360, 4320)).toEqual({ startMin: 360, endMin: 600 });
   });
 
-  it("case6: a drag shorter than MIN_DURATION_MINUTES returns null", () => {
-    expect(MIN_DURATION_MINUTES).toBe(15);
-    expect(createRange(360, 370, 4320)).toBe(null);
+  // CONTRACT CHANGED (R-463, 29 Sept): the floor is 1 minute, not 15 --
+  // `createRange`'s own null branch is now reached only when both drag
+  // instants land on the SAME already-snapped point (a click with no real
+  // move); two DIFFERENT snap points are always further apart than 1
+  // minute, so a drag can no longer make a sub-minimum sliver this way.
+  it("case6: a click with no real move (anchor and current the same snapped instant) returns null", () => {
+    expect(MIN_DURATION_MINUTES).toBe(1);
+    expect(createRange(370, 370, 4320)).toBe(null);
+  });
+
+  it("case6b (R-463): a drag of exactly one minute between two adjacent snapped instants now succeeds", () => {
+    expect(createRange(369, 370, 4320)).toEqual({ startMin: 369, endMin: 370 });
   });
 
   it("case7: createRange clamps both edges to windowMinutes", () => {
@@ -134,17 +147,23 @@ describe("interaction.ts — move: clamp, not squash", () => {
 });
 
 describe("interaction.ts — resize", () => {
-  it("case11: resizing the start edge pins at endMin - MIN_DURATION_MINUTES", () => {
+  // CONTRACT CHANGED (R-463, 29 Sept): the DEFAULT floor (the 5th argument
+  // omitted, as every one of these calls does) is now 1 minute, not 15 --
+  // this is the typed/spoken floor (`resolve.ts` never calls this function
+  // at all, but a bare call with no explicit floor exercises the same
+  // number `MIN_DURATION_MINUTES` gives those paths). The drag path's own
+  // floor is a 6th case below, passed explicitly.
+  it("case11: resizing the start edge pins at endMin - MIN_DURATION_MINUTES (default floor)", () => {
     expect(resizeRange({ startMin: 100, endMin: 200 }, "start", 200, 4320)).toEqual({
-      startMin: 185,
+      startMin: 199,
       endMin: 200,
     });
   });
 
-  it("case12: resizing the end edge pins at startMin + MIN_DURATION_MINUTES", () => {
+  it("case12: resizing the end edge pins at startMin + MIN_DURATION_MINUTES (default floor)", () => {
     expect(resizeRange({ startMin: 100, endMin: 200 }, "end", -200, 4320)).toEqual({
       startMin: 100,
-      endMin: 115,
+      endMin: 101,
     });
   });
 
@@ -161,6 +180,27 @@ describe("interaction.ts — resize", () => {
 
   it("case14b: resizing the end edge never moves startMin", () => {
     expect(resizeRange({ startMin: 100, endMin: 200 }, "end", 10, 4320).startMin).toBe(100);
+  });
+
+  // R-463: `useDragGesture.ts`'s POINTER resize passes an explicit 5th
+  // argument -- the zoom's own snap step -- instead of relying on this
+  // function's bare 1-minute default, so a drag can never land the moving
+  // edge closer than one grid step to the fixed one (see `resizeRange`'s own
+  // comment for why: the fixed edge need not itself be on the grid). These
+  // two cases prove the parameter, not the wiring -- `dragGesture.test.ts`
+  // covers the wiring itself.
+  it("case11b (R-463): an explicit floor clamps the start edge to that floor, not the 1-minute default", () => {
+    expect(resizeRange({ startMin: 100, endMin: 200 }, "start", 200, 4320, 30)).toEqual({
+      startMin: 170,
+      endMin: 200,
+    });
+  });
+
+  it("case12b (R-463): an explicit floor clamps the end edge to that floor, not the 1-minute default", () => {
+    expect(resizeRange({ startMin: 100, endMin: 200 }, "end", -200, 4320, 30)).toEqual({
+      startMin: 100,
+      endMin: 130,
+    });
   });
 });
 
@@ -220,6 +260,26 @@ describe("interaction.ts — overlap and crew classification", () => {
     expect(clipped).toEqual([]);
     expect(stranded.map((c) => c.id)).toEqual(["a2"]);
   });
+
+  // R-463: `assignmentFitsRun`'s own doc comment says the redundant
+  // `a.startMin < run.endMin` clause is unreachable because
+  // `MIN_DURATION_MINUTES` is positive, so no zero-length assignment can
+  // exist -- true at 15, and still true at 1 (the reasoning needs the floor
+  // positive, not any particular value). These two cases exercise the plain
+  // two-clause containment check at the new floor's own edge: the smallest
+  // positive-duration assignment the board can now produce (one minute)
+  // fits when wholly inside the run, and does not when it is not.
+  it("case19c (R-463): a 1-minute assignment wholly inside its run fits, by plain containment alone", () => {
+    expect(assignmentFitsRun({ startMin: 100, endMin: 101 }, { startMin: 0, endMin: 200 })).toBe(
+      true,
+    );
+  });
+
+  it("case19d (R-463): a 1-minute assignment starting exactly at the run's own end does not fit", () => {
+    expect(assignmentFitsRun({ startMin: 200, endMin: 201 }, { startMin: 0, endMin: 200 })).toBe(
+      false,
+    );
+  });
 });
 
 /**
@@ -234,5 +294,96 @@ describe("interaction.ts — the shared drag threshold (P1-5l §4.1)", () => {
   it("case20: board and lib see the same DRAG_THRESHOLD_PX, and it is still 4", () => {
     expect(BOARD_DRAG_THRESHOLD_PX).toBe(SHARED_DRAG_THRESHOLD_PX);
     expect(SHARED_DRAG_THRESHOLD_PX).toBe(4);
+  });
+});
+
+/**
+ * R-365: the confirm prompt's message, built ahead of the write so
+ * `commitBlockDrag` can decide whether to ask at all. Four shapes: no
+ * change (same run both sides, or both null) asks nothing; a detach; a
+ * re-parent between two runs; and picking up a run from a standalone chip.
+ */
+describe("interaction.ts — R-365 attachmentChangeMessage", () => {
+  it("case21a: the same run on both sides is not a change — null", () => {
+    expect(
+      attachmentChangeMessage({
+        person: "Ana",
+        from: "Housing A 08:00–16:00",
+        to: "Housing A 08:00–16:00",
+      }),
+    ).toBe(null);
+  });
+
+  it("case21b: no run on either side (an ordinary direct-assignment nudge) is not a change — null", () => {
+    expect(attachmentChangeMessage({ person: "Ana", from: null, to: null })).toBe(null);
+  });
+
+  it("case21c: a run to no run is a detach", () => {
+    expect(
+      attachmentChangeMessage({ person: "Ana", from: "Housing A 08:00–16:00", to: null }),
+    ).toBe(
+      "This takes Ana off the Housing A 08:00–16:00 run and makes them a standalone assignment. Continue?",
+    );
+  });
+
+  it("case21d: a run to a different run is a re-parent", () => {
+    expect(
+      attachmentChangeMessage({
+        person: "Ana",
+        from: "Housing A 08:00–16:00",
+        to: "Housing B 08:00–16:00",
+      }),
+    ).toBe(
+      "This moves Ana from the Housing A 08:00–16:00 run to the Housing B 08:00–16:00 run. Continue?",
+    );
+  });
+
+  it("case21e: no run to a run is picking up an attachment", () => {
+    expect(
+      attachmentChangeMessage({ person: "Ana", from: null, to: "Housing A 08:00–16:00" }),
+    ).toBe("This puts Ana on the Housing A 08:00–16:00 run. Continue?");
+  });
+});
+
+/*
+ * R-031: the keep-or-scale question. One function, so the prompt the person
+ * reads and the sentence this file pins are the same string.
+ */
+describe("case22: the keep-or-scale prompt names everything the person needs to choose", () => {
+  it("case22a: a length reads as a person says it", () => {
+    expect(formatMinutes(240)).toBe("4h");
+    expect(formatMinutes(210)).toBe("3h 30m");
+    expect(formatMinutes(45)).toBe("45m");
+    expect(formatMinutes(0)).toBe("0m");
+  });
+
+  it("case22b: person, typed target with its unit, both lengths, and the scaled figure", () => {
+    expect(
+      targetResizeMessage({
+        person: "Elena",
+        qty: 80,
+        unit: "pieces",
+        oldMinutes: 240,
+        newMinutes: 210,
+        scaled: 70,
+      }),
+    ).toBe(
+      "Elena's block carries a target of 80 pieces for 4h. It is now 3h 30m: keep 80 pieces as the total, or scale it to 70 pieces?",
+    );
+  });
+
+  it('case22c: no unit means no unit word anywhere -- never the literal "units"', () => {
+    const msg = targetResizeMessage({
+      person: "Elena",
+      qty: 80,
+      unit: null,
+      oldMinutes: 240,
+      newMinutes: 300,
+      scaled: 100,
+    });
+    expect(msg).toBe(
+      "Elena's block carries a target of 80 for 4h. It is now 5h: keep 80 as the total, or scale it to 100?",
+    );
+    expect(msg).not.toContain("units");
   });
 });

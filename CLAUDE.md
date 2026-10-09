@@ -84,16 +84,56 @@ it into `requirements` in that turn, before the code.
 - **`tsc` cannot see a string expectation.** After deleting a concept, grep the tests for its
   words. Adding a file to a directory an audit walks means editing the audit's list in both
   places (`REM_SURFACES` in `src/test/scaleAudit.ts` and its copy in `scaleAudit.test.ts`).
-- **Extract, never retype.** `grep -n "function <name>" supabase/migrations/*.sql` and take the
-  LAST hit, or `pg_get_functiondef` from the live database.
+- **Extract, never retype.** `grep -in "function \(public\.\)\?<name>(" supabase/migrations/*.sql`
+  and take the LAST hit, or `pg_get_functiondef` from the live database. The `-i` and the optional
+  `public.` are not decoration: 0022 declares `CREATE OR REPLACE FUNCTION public.set_site_member`,
+  a case-sensitive grep for the bare name skipped it, and 0053 re-emitted the function from the
+  wrong migration and silently dropped a rule (DEF-0011). Better still, slice the body out of the
+  file with a script and assert the guards you expect on the assembled text before writing it.
+- **Anything resolved by walking UP the tree is resolved by the server as a definer, never by
+  the caller's view.** A line supervisor cannot read the plant above her grant, so an INVOKER
+  resolver (a shift pattern, a setting, a person's home) finds nothing and answers NULL for a node
+  that has an answer. DEF-0016 and DEF-0017 were both this, found by the tester after the developer's
+  reviewer had passed the feature. The definer takes a node id and guards the org boundary itself.
+  **The same holds for a permission on a node the caller cannot read.** `canEditNode` is a preview
+  that fails open when it has no path, and a supervisor has no path for a cell on another line she
+  can read the person of but not the place; a screen that filters by it offers what the server
+  refuses (DEF-0035, reopened the day it was "fixed"). When the predicate needs a node outside the
+  caller's view, ask the server for the answer as a set (`absence_recordable_people`, 0084) and
+  hold that function to the writer in the SQL suite, person by person.
+- **Before every commit, walk the changed screens as the LEAST-privileged demo person they touch**
+  (Ana on Line 1, a viewer), not only as the admin who built them. `e2e/roleWalk.spec.ts` drives
+  every demo person through the board and the rail and asserts the facts a line supervisor sees
+  match the plant admin's; run it, and read the screen, before saying done.
+- **Where an auth redirect lands is configuration, not a fact.** The auth server drops a reset
+  link's tokens on whatever URL its `site_url` and redirect allow-list permit, and strips the path
+  when the app's host is not on that list; locally that is the board, not the reset screen. The app
+  remembers the EVENT (`PASSWORD_RECOVERY`, held as `useSession().recovery`) and the route gate acts
+  on it; nothing may infer "this is a recovery" from the URL it happens to be on (F-106).
 - **Never `npm run db:reset` while the maintainer is using the app.**
 - **Do not stop to report.** Listing what is left is not progress; stop only for a decision
   only the maintainer can make, ask one question, and keep everything else moving. The queue's
   order is a guess about priority, not a fact — ask when it seems to have drifted.
 - **Plain language.** Explain in the maintainer's register; when asked for simple terms, draw
   it — a small table, or two candidate answers side by side.
+- **Ask where and how before placing anything new on a screen.** When a requirement or a brief
+  says WHAT but not WHERE a control, a column or a panel goes, or HOW it reads, ask the maintainer
+  before the lane starts, with two candidates drawn side by side. On 18 Sept 2026 three pieces were
+  built, torn down and rebuilt in one morning (the toolbar band, the shift on the Operators tab, the
+  Access tab's columns) because the brief chose the placement and the maintainer already knew what
+  was expected: "Make it a point to ask me how and where to put new stuff in if the brief is not
+  clear." A guess about placement is not a judgment call; it is a question.
 
 ## 5. Parallel agents
+
+**Every subagent runs on Sonnet, with a detailed brief** (the maintainer, 22 Sept 2026: "always have
+subagents use sonnet with detailed instructions to set it up for success"). Pass `model: sonnet` on
+every Agent call; a lane launched without it inherits the main session's model and is relaunched.
+The brief is a file under `docs/agent-briefs/` that names the standard or finding it serves, what is
+already done and must not be redone, the walk step by step, the exact files the lane owns and the
+ones it must not touch, what other lanes are editing at the same time, which tests to run and how,
+and the shape of the report. The main session briefs, reviews and keeps the plan; it does not write
+the lane's code itself when a lane can.
 
 Up to three lanes have worked cleanly. Pre-seat the shared files first, give each agent
 exclusive named files, and tell each: ignore `tsc` errors in files you do not own; do not run
@@ -105,3 +145,77 @@ break it — before it is called done.
 `docs/conventions.md` for layout and naming. Migrations are append-only. One CSS Module per
 component. Nothing committed names the maintainer or the machine. Prettier and ESLint run in
 CI over everything they are not told to ignore; `docs/` is ignored by Prettier.
+
+## 7. Standards the maintainer has set (every piece of work checks these first)
+
+A standard is a rule the maintainer stated that applies to the whole codebase, not one feature.
+Each is also a `requirements` row in `docs/plan.yaml`. Three duties come with them (R-426):
+
+1. **Before building anything, read this list** and ask whether the work touches one of them.
+2. **When the maintainer states a new one, the same session writes it here and in the plan,
+   greps the code for what already violates it, and fixes or queues every hit** before calling
+   the piece done. A standard declared and left for the next person to trip over is not set.
+3. **When the developer notices the same choice being made a second or third time** — the same
+   shape of question, the same guard, the same wording rule, the same test pattern — and no
+   standard covers it, **the developer asks the maintainer whether it should become one**, in
+   plain language with the candidate rule written out, before deciding it quietly again. The
+   maintainer decides; the answer is recorded either as a standard here or as "not a standard,
+   because…" in the session summary, so the question is not asked twice.
+
+- **The plant's zone is the one clock (R-426, F-159, F-161).** Every day and hour the app shows,
+  reads or writes is in the zone from the plant's settings (company fallback). A calendar day is
+  derived from an instant only through `partsInZone`; an instant from a calendar day only through
+  `zonedTimeToInstant`; nothing reads `getHours()`/`getDate()`/`toLocale*` (the machine's zone) or
+  takes a UTC date as "today". Pure day arithmetic on `YYYY-MM-DD` strings goes through the helper
+  in `src/lib/format/dates.ts` that says so. `src/test/dateSeam.test.ts` enforces it; a new date
+  site that fails the audit is wrong, not the audit. The board's own "today" was the UTC date until
+  16 Sept 2026 and nobody saw it until a walk ran after 7 pm in Chicago — a clock-dependent bug
+  needs a pin with a frozen clock, in both directions (west and east of UTC).
+- **Extract, never retype** (§4) and **the server's rule, transcribed** (`certificateGaps`,
+  `isAtOrBelow`) are standards of the same kind: what the client shows or offers is decided by the
+  same predicate the server runs, taken from the server's own text, never re-derived.
+- **A dead end offers the nearest choices (R-430).** When a sentence names something the board
+  cannot find (a person, a place, a product, a day off the board), the bar offers the closest
+  matches as buttons and asks which. "No such X" with no choice is a defect.
+- **Nothing offered that the server refuses (R-431).** Every button the bar offers and every readout
+  it prints as done is decided by the check the server runs: certificates, the area rule, capacity,
+  absence. A refusal that arrives after the yes is a defect. §4's screen rule, applied to words.
+- **A lot says what it did and what it did not (R-432, restated 28 Sept).** Several writes from one
+  sentence make the ones they can; on a refusal the written ones stay, and the answer names every
+  change in two groups, done and not done: the refused one with its reason in the plant's words, and
+  every one after it that was never tried. No count-only line, no raw error text. The 17 Sept form
+  (all or nothing, with a revert) was never built and is retired.
+- **A local tool listens locally (R-460).** Every server a project script starts for local work (a
+  recording page, a model container, a dev endpoint) binds the loopback interface only, and the
+  address it prints is the address it listens on.
+- **A walk is a spec first (R-433).** No sentence list is handed to the maintainer before it runs
+  green twice as an e2e spec over the same data file (`e2e/typedWalk.spec.ts` is the first).
+- **Every bar feature traces (R-434).** Anything the bar hears, asks, offers, writes or refuses is a
+  trace entry and a turn in the thread; a pin for a bar feature asserts its trace entry.
+- **When in doubt, ask (R-435).** Two honest readings of a sentence become a question with both as
+  buttons, never a quiet pick. "From 1 to 5" with no am/pm asks which half of the day. Restated
+  30 Sept, wider: whenever the bar is in any doubt or the instruction is unclear, it asks what to do
+  next rather than dropping, shrinking or reinterpreting part of what was said. A replace whose incoming
+  person cannot be placed asks whether to take the outgoing person off anyway (R-466). A lot of
+  independent steps ("put A and B on ...") asks a step's certificate question, takes the reason for that
+  step alone and carries on to its one yes (R-467, 30 Sept); only a coupled lot (replace, swap, copy)
+  keeps R-425's whole refusal.
+- **Every side panel resizes and remembers (R-446).** A panel beside the board or the admin content
+  (the command panel, the operator rail, the admin section rail, and any later one) resizes by its
+  edge within a clamp, with pointer capture, and remembers its size per person through the one size
+  module (`src/features/board/lib/panelSize.ts`); no panel gets its own storage or its own drag.
+- **Every button in one group is the same size (R-447).** A segmented control, a stack, a
+  toggle whose label changes, a dialog's footer: the buttons that belong to one system share one
+  width (a grid track, a stretched column, or a fixed min-width in em), so nothing shifts when a
+  label changes or a state flips. A strip whose labels are data (the bar's candidate answers) is
+  the one exception, and it is written down as one on R-447.
+- **A fact is changed in one place (R-449).** Any fact about a thing --- a person's shift, a
+  grant's role, a product's places --- is changed on the one screen where that thing is defined,
+  and nowhere else; a second control for the same fact is a defect, and a new capability folds
+  into the existing control rather than adding a parallel one.
+- **Every sentence the bar says is one a supervisor would say (R-459).** A readout, a question, a
+  refusal or a board move in the thread is one or two plain sentences --- "Done. John Kim is on Cell 6
+  today from 4 pm to 10 pm, making Housing A." --- never an arrow chain, a path, an ISO date, a
+  24-hour span, a grammar hint with angle brackets, or an internal word ("read by the model",
+  "ungrounded", "lot"). The facts are the board's own (R-431); the model never writes a sentence the
+  person reads. The maintainer chose this over having the model rephrase (24 Sept, session 191).

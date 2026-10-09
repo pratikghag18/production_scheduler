@@ -61,6 +61,29 @@ export function roundTarget(raw: number): number {
   return Math.max(0.1, Math.round(raw * 10) / 10);
 }
 
+/**
+ * R-031: a TYPED target, scaled to a block's new length. The target is a
+ * total for the window ("80 off this cell today"), so a block dragged from
+ * 4h to 3h that keeps 80 now asks for more per hour, and the maintainer
+ * decided the person is asked which they meant: keep the total, or scale
+ * it. This is the scale half; the prompt lives in `useDragGesture`.
+ *
+ * Rounded by `roundTarget`, the derived target's own rule, then held at the
+ * typed-target floor of 1 that `normalizeTarget` enforces, so Scale never
+ * writes a figure the person could not have typed — 80 over 4h shrunk to
+ * 3h 20m says 66, not 66.67, and a part slower than the block still shows
+ * a decimal rather than nothing, but never a decimal below one. Null when
+ * there is nothing to scale (no positive quantity, or a zero-length side),
+ * which the caller reads as "do not ask". A same-length call returns the
+ * quantity untouched so a resize that snaps back to where it began asks
+ * nothing.
+ */
+export function scaledTarget(qty: number, oldMinutes: number, newMinutes: number): number | null {
+  if (!(qty > 0) || !(oldMinutes > 0) || !(newMinutes > 0)) return null;
+  if (oldMinutes === newMinutes) return qty;
+  return Math.max(1, roundTarget((qty * newMinutes) / oldMinutes));
+}
+
 /** Minutes since the board window's start; `startMin` may be negative. */
 export interface MinuteRange {
   startMin: number;

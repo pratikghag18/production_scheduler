@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { HealthPill } from "@/components/HealthPill";
 import { SignOutButton } from "@/features/auth/SignOutButton";
 import { adminAccess } from "@/features/auth/session";
@@ -40,6 +40,10 @@ export function AppShell() {
             is the production door out that any signed-in user can reach. */}
         <div className={styles.identity}>
           {session?.user.email && <span className={styles.email}>{session.user.email}</span>}
+          {/* P1-6d (S24): change-your-own-password, next to Sign out. */}
+          <Link to="/change-password" className={styles.changePassword}>
+            Change password
+          </Link>
           <SignOutButton />
         </div>
       </header>

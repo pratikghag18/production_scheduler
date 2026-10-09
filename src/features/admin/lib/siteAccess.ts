@@ -47,6 +47,17 @@ export interface AccessGrant {
   nodeId: string;
   nodeName: string;
   role: GrantRole;
+  /**
+   * R-442, migration 0082, wired into `site_people` by 0083 (S66-b): the band
+   * this grant plans for, `null` = the whole day (the column's own default).
+   * Still read LENIENTLY on purpose: a payload that omits either key (an
+   * older cached response, or a server that predates 0083) reads as
+   * `null`/`true`, the same "unrestricted" default the columns themselves
+   * carry, rather than rejecting the whole grant.
+   */
+  plansShiftId: string | null;
+  /** R-442: may this grant place people OUTSIDE `plansShiftId`'s band? */
+  outsideShift: boolean;
 }
 
 /**
@@ -72,6 +83,23 @@ export interface AccessRow {
   hasAccess: boolean;
   /** Is this the person looking at the screen? */
   isSelf: boolean;
+  /**
+   * Is the account active? `false` = deactivated (migration 0076): the grants
+   * are kept but the person is locked out org-wide. Defaults to `true` when the
+   * payload omits it, so an older server (or a partial read) reads as active
+   * rather than silently locking everyone out.
+   */
+  active: boolean;
+  /**
+   * R-442, migration 0082: the DIRECT grant's own shift-planning restriction
+   * -- the same "this exact node's row" scope `directRole` reads, never an
+   * inherited one. `null` = unrestricted (no direct grant, or a direct grant
+   * that plans no shift).
+   */
+  plansShiftId: string | null;
+  /** R-442: the direct grant's own `outsideShift`; `true` (unrestricted) when
+   *  there is no direct grant. */
+  outsideShift: boolean;
 }
 
 export interface AccessView {
@@ -113,7 +141,14 @@ function parseGrant(v: unknown): AccessGrant | null {
   const nodeName = asString(v.nodeName);
   const role = asRole(v.role);
   if (nodeId === null || nodeName === null || role === null) return null;
-  return { nodeId, nodeName, role };
+  // R-442 / 0082: lenient, not rejected on absence -- see the interface
+  // comment. `plansShiftId` absent or not a string-or-null reads as `null`;
+  // `outsideShift` absent or not a boolean reads as `true`. Both are the
+  // columns' own defaults, so a payload that predates this key (every one
+  // today) reads as "unrestricted", changing nothing for anyone.
+  const plansShiftId = typeof v.plansShiftId === "string" ? v.plansShiftId : null;
+  const outsideShift = typeof v.outsideShift === "boolean" ? v.outsideShift : true;
+  return { nodeId, nodeName, role, plansShiftId, outsideShift };
 }
 
 /**
@@ -173,6 +208,14 @@ export function buildAccessRows(payload: unknown, viewerProfileId: string | null
       inheritedGrants: grants.filter((g) => g !== direct),
       hasAccess: companyAdmin || grants.length > 0,
       isSelf: viewerProfileId !== null && profileId === viewerProfileId,
+      // Deactivated ONLY when the payload says so explicitly. A missing flag
+      // (older server, partial read) reads as active — the safe direction: the
+      // screen never invents a lock-out nobody asked for.
+      active: entry.active !== false,
+      // R-442: the direct grant's own restriction, unrestricted when there
+      // is none — the same "no direct grant" default `directRole: null` uses.
+      plansShiftId: direct ? direct.plansShiftId : null,
+      outsideShift: direct ? direct.outsideShift : true,
     });
   }
   return { nodeId, nodeName, rows, skipped };
@@ -227,6 +270,9 @@ export function canSetRole(row: AccessRow, viewerIsCompanyAdmin: boolean): boole
   return !protectedRow(row, viewerIsCompanyAdmin);
 }
 
+/** Every role that may be given anywhere BELOW a plant root (0053). */
+export const ROLES_BELOW_ROOT: readonly GrantRole[] = ["supervisor", "viewer"];
+
 /**
  * Which roles this screen may offer for this person, in `GRANT_ROLES` order.
  *
@@ -234,9 +280,47 @@ export function canSetRole(row: AccessRow, viewerIsCompanyAdmin: boolean): boole
  * list would leave the control with nothing selected while the person is, in
  * fact, an admin here; the honest rendering is a control showing `admin` with
  * no other option.
+ *
+ * ⭐⭐ `admin` IS OFFERED ONLY AT A PLANT ROOT (DEF-0010, R-340). The
+ * maintainer: *"the admin level should only be applied to the plant root. If you
+ * make someone a site admin they automatically get access to the whole site and
+ * not just to a particular hierarchy."* An admin is the person who runs a plant,
+ * so the role has no meaning on a branch inside one.
+ *
+ * ⚠️ AND THE SERVER SAYS THE SAME THING FIRST, which is what makes this a menu
+ * rather than a rule. Migration 0053 refuses `admin` where
+ * `nodes.parent_id IS NOT NULL` with `reason: admin_below_root`; this mirrors
+ * that predicate and nothing more. Hiding it here alone would have been R-239
+ * broken in the other direction — a control withheld for something the server
+ * permits — which is the shape of DEF-0005 and DEF-0007 and is why the fix
+ * started with a migration.
+ *
+ * ⚠️ THE SELF-RULE STILL WINS WHERE IT APPLIES. A locked row keeps `['admin']`
+ * even below a root: that person already HOLDS admin there (a grant made before
+ * 0053, or by hand), and offering them an empty control would be the
+ * nothing-selected state this function's first paragraph exists to avoid. 0053
+ * deliberately leaves such rows alone rather than deleting them.
+ *
+ * ⛔ AND A CONTROL NEVER SHOWS A ROLE ITS SUBJECT DOES NOT HOLD (DEF-0012).
+ * The self-rule is about the viewer's OWN row; somebody ELSE's below-root
+ * admin grant fell through to `ROLES_BELOW_ROOT`, and a `<select>` whose value
+ * is not among its options renders the FIRST option — so the screen read
+ * *supervisor* beside a sentence saying *Admin of Area 1*, and saving that row
+ * would have written the role it showed rather than the one the person held.
+ * Such a row is drawn as what it is, `admin`, with exactly the two moves the
+ * server will take from here: `set_site_member` and the table's own trigger
+ * (0054) refuse `admin` below a root, so re-selecting it is a no-op and the two
+ * demotions are the repairs an administrator makes. The list is
+ * `GRANT_ROLES` order, which puts the held role first.
  */
-export function allowedRoles(row: AccessRow, viewerIsCompanyAdmin: boolean): readonly GrantRole[] {
-  return selfLocked(row, viewerIsCompanyAdmin) ? (["admin"] as const) : GRANT_ROLES;
+export function allowedRoles(
+  row: AccessRow,
+  viewerIsCompanyAdmin: boolean,
+  isPlantRoot: boolean,
+): readonly GrantRole[] {
+  if (selfLocked(row, viewerIsCompanyAdmin)) return ["admin"] as const;
+  if (isPlantRoot) return GRANT_ROLES;
+  return row.directRole === "admin" ? GRANT_ROLES : ROLES_BELOW_ROOT;
 }
 
 /**
@@ -255,6 +339,123 @@ export function canRemoveAccess(row: AccessRow, viewerIsCompanyAdmin: boolean): 
   if (row.directRole === null) return false;
   if (protectedRow(row, viewerIsCompanyAdmin)) return false;
   return !selfLocked(row, viewerIsCompanyAdmin);
+}
+
+/**
+ * ⭐ DEACTIVATE / REACTIVATE — A COMPANY ADMIN'S POWER, MIRRORING
+ * `set_profile_active` (migration 0076).
+ *
+ * Deactivation locks a person out of the whole ORG (the identity chokepoint
+ * `app_current_profile_id` skips an inactive profile), so unlike node-scoped
+ * remove it is offered ONLY to a company admin — a site admin must not lock
+ * someone out of a plant they do not run. The two client-visible guards mirror
+ * the server: not a company admin → nothing offered; your OWN row → nothing
+ * offered (you cannot lock yourself out). The server's third guard — the last
+ * active admin cannot be deactivated — is NOT mirrored here: whether another
+ * active admin exists is a fact this row does not carry, so the screen offers
+ * the control and the server refuses it loudly (the same reasoning
+ * `canRemoveAccess` gives for not copying "you do not administer this place").
+ *
+ * The two are exclusive by the `active` flag: exactly one is ever true for a
+ * row a company admin may act on.
+ */
+export function canDeactivate(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return viewerIsCompanyAdmin && !row.isSelf && row.active;
+}
+
+export function canReactivate(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return viewerIsCompanyAdmin && !row.isSelf && !row.active;
+}
+
+/**
+ * ⭐ MAKE / REVOKE SYSTEM ADMIN — mirrors `set_system_admin` (migration 0078).
+ *
+ * The org-wide highest privilege, so it is offered ONLY to a system admin
+ * (`viewerIsCompanyAdmin`), and never on your OWN row (you cannot change your
+ * own system-admin status; the server refuses it too). Exactly one of the two
+ * is true for a row a system admin may act on, keyed by `companyAdmin` (which
+ * `site_people` reports as `up.role = 'admin'`). The server's "no last admin"
+ * case is not mirrored, for the reason `canDeactivate` gives.
+ */
+export function canGrantSystemAdmin(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return viewerIsCompanyAdmin && !row.isSelf && !row.companyAdmin;
+}
+
+export function canRevokeSystemAdmin(row: AccessRow, viewerIsCompanyAdmin: boolean): boolean {
+  return viewerIsCompanyAdmin && !row.isSelf && row.companyAdmin;
+}
+
+/* ---------------------------------------------------------------------------
+ * ⭐ ONE ACCESS-LEVEL CONTROL (R-377, the maintainer: the dropdown should read
+ * "System admin, Site admin, Supervisor, Viewer" --- one control, not a
+ * separate promote button).
+ *
+ * A person's LEVEL blends two pieces of data the screen used to edit apart:
+ *   - the ORG-WIDE flag `user_profiles.role = 'admin'` (a SYSTEM admin), and
+ *   - the NODE grant `profile_grants.role` on the node in view, where 'admin'
+ *     means a SITE admin OF THAT NODE.
+ * `AccessLevel` names all four; `levelLabel` gives the words; `currentLevel`
+ * reads which one a row holds; `levelOptions` is the menu; and the panel's
+ * change handler composes the right write(s) --- promote/demote via
+ * `set_system_admin`, a node role via `set_site_member`. `admin` as a value is
+ * still the site-admin GRANT role (so the server contract is unchanged); it is
+ * only RELABELLED "Site admin" for the reader.
+ * ------------------------------------------------------------------------- */
+export type AccessLevel = "system" | GrantRole;
+
+const LEVEL_ORDER: readonly AccessLevel[] = ["system", "admin", "supervisor", "viewer"];
+
+export function levelLabel(level: AccessLevel): string {
+  switch (level) {
+    case "system":
+      return "System admin";
+    case "admin":
+      return "Site admin";
+    case "supervisor":
+      return "Supervisor";
+    case "viewer":
+      return "Viewer";
+  }
+}
+
+/** The level a row currently holds: 'system' if the org-wide admin flag is set,
+ *  else the node grant's role, else null (no access here to show). */
+export function currentLevel(row: AccessRow, grant: RowGrant | null): AccessLevel | null {
+  if (row.companyAdmin) return "system";
+  return grant ? grant.role : null;
+}
+
+/**
+ * The dropdown menu for one row, in the fixed order System admin, Site admin,
+ * Supervisor, Viewer. The node roles come from the SAME rules the old role
+ * menu used (`rolesForGrant` / `rolesForNode` --- admin only at a plant root),
+ * so a line grant is still supervisor/viewer only. 'system' is added on top
+ * only when a system admin is offering it (`canGrantSystemAdmin`) or when the
+ * row already holds it (so the select can show the current value). Self is
+ * locked to the level it holds, in both shapes: a system admin cannot leave
+ * 'system' and a site admin cannot strip its own 'admin' (0021 §4) --- the
+ * server refuses both, and offering them would be a control that lies.
+ */
+export function levelOptions(
+  row: AccessRow,
+  viewerIsCompanyAdmin: boolean,
+  grant: RowGrant | null,
+  rootNodeId: string | null,
+  viewedNodeId: string | null,
+): readonly AccessLevel[] {
+  if (row.isSelf && row.companyAdmin) return ["system"];
+  if (row.isSelf && !viewerIsCompanyAdmin && grant?.role === "admin") return ["admin"];
+
+  const nodeRoles: readonly GrantRole[] = grant
+    ? rolesForGrant(grant, rootNodeId)
+    : rolesForNode(viewedNodeId, rootNodeId);
+
+  const set = new Set<AccessLevel>(nodeRoles);
+  if (canGrantSystemAdmin(row, viewerIsCompanyAdmin) || row.companyAdmin) set.add("system");
+  const cur = currentLevel(row, grant);
+  if (cur !== null) set.add(cur);
+
+  return LEVEL_ORDER.filter((l) => set.has(l));
 }
 
 /**
@@ -499,4 +700,270 @@ export function resolvePlace(
     return selectedId;
   }
   return places[0].nodeId;
+}
+
+// ---------------------------------------------------------------------------
+// NODE ASSIGNMENT (R-367). Which hierarchy node a grant sits on -- picked when
+// adding a person, and changed when moving one -- rather than being forced to
+// the plant root or reachable only by following an existing grant down.
+//
+// The maintainer, on the running app: *"there is currently no way to assign a
+// hierarchy level to an individual ... Ana is supervisor on Line 1 for plant A,
+// but there is no way to change or modify it. Same for any new user."* The Add
+// control granted at the plant root only, and a sub-node (a line, a cell) was
+// reachable only by clicking an existing member's grant link -- so a node with
+// nobody on it yet could not be reached at all.
+//
+// The SERVER already accepts any node the caller administers:
+// `set_site_member(p_node_id, p_profile_id, p_role)` (0021, narrowed by 0053)
+// inserts or re-roles one grant and refuses only `admin` below a plant root.
+// This is the client half -- the same one-way invariant the rest of the file
+// keeps: everything offered here, the server also permits; never the converse.
+// No migration; the picker names a node the server was always willing to take.
+// ---------------------------------------------------------------------------
+
+/**
+ * One node the picker can offer, from the hierarchy read (`BoardNode`). Only
+ * the three fields the picker needs, kept dependency-free like the rest of
+ * this module: `path` is the dot-separated materialised path (migration 0001),
+ * which is how a subtree and a relative depth are computed without walking
+ * `parentId` chains.
+ */
+export interface AccessNode {
+  nodeId: string;
+  name: string;
+  path: string;
+}
+
+/** One entry in a node picker: a node, and how deep it sits below the plant root. */
+export interface NodeOption {
+  nodeId: string;
+  name: string;
+  /** Labels below the plant root: the root itself is 0, a line under it is 1. */
+  depth: number;
+  isRoot: boolean;
+}
+
+/** Label count of a dot-path: `""` -> 0, `"a"` -> 1, `"a.b.c"` -> 3. Local so
+ *  this module stays import-free (mirrors `hierarchy.ts::pathDepth`). */
+function nodePathDepth(path: string): number {
+  return path === "" ? 0 : path.split(".").length;
+}
+
+/**
+ * The plant root plus every node beneath it, as picker options ordered so a
+ * subtree stays together and a parent precedes its children (dot-path sort),
+ * each tagged with its depth below the root for indenting.
+ *
+ * Subtree membership is by PATH PREFIX, not by re-walking `parentId`: a
+ * descendant's path is the root's path followed by `"."` and more. `nodes` is
+ * already the server's answer to "what may you read" (`nodes_select`, 0019),
+ * so this offers exactly the nodes the viewer can see AND the plant they are
+ * standing on -- never a sibling plant's branches.
+ */
+export function subtreeOptions(
+  nodes: readonly AccessNode[],
+  rootNodeId: string | null,
+): readonly NodeOption[] {
+  if (rootNodeId === null || !Array.isArray(nodes)) return [];
+  const root = nodes.find((n) => n.nodeId === rootNodeId);
+  if (root === undefined) return [];
+  const prefix = root.path + ".";
+  const rootDepth = nodePathDepth(root.path);
+  return nodes
+    .filter((n) => n.nodeId === rootNodeId || n.path.startsWith(prefix))
+    .slice()
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .map((n) => ({
+      nodeId: n.nodeId,
+      name: n.name,
+      depth: nodePathDepth(n.path) - rootDepth,
+      isRoot: n.nodeId === rootNodeId,
+    }));
+}
+
+/**
+ * The roles that may be GIVEN when granting at `nodeId`, given which node is
+ * the plant root. `admin` only at the root, supervisor/viewer anywhere below
+ * -- the same rule `allowedRoles` applies to an existing row, and the same one
+ * migration 0053 enforces (`admin` refused where `parent_id IS NOT NULL`). A
+ * null node (nothing chosen yet) offers the below-root pair, the safe subset.
+ */
+export function rolesForNode(
+  nodeId: string | null,
+  rootNodeId: string | null,
+): readonly GrantRole[] {
+  return nodeId !== null && nodeId === rootNodeId ? GRANT_ROLES : ROLES_BELOW_ROOT;
+}
+
+/**
+ * Where a grant of `role` may be MOVED, within the plant. Supervisor and
+ * viewer may sit on any node in the subtree; `admin` fits only the plant root,
+ * because an admin runs a whole plant (DEF-0010) -- so the only target offered
+ * for an admin is the root, which the panel reads as "nowhere else to move it"
+ * and hides the control. Moving an admin down would be `admin_below_root`,
+ * which the server refuses; not offering it is this file's invariant.
+ */
+export function moveTargets(
+  nodes: readonly AccessNode[],
+  rootNodeId: string | null,
+  role: GrantRole,
+): readonly NodeOption[] {
+  const all = subtreeOptions(nodes, rootNodeId);
+  return role === "admin" ? all.filter((o) => o.isRoot) : all;
+}
+
+/**
+ * May the viewer assign a person to a node, or move one, on this screen? Only
+ * a system admin (`role = 'admin'`, org-wide) or a site admin (`adminAnywhere`,
+ * `app_is_admin_anywhere()`), never a plain supervisor -- the maintainer's own
+ * boundary for the feature. In practice the panel already only opens on plants
+ * the viewer administers (`editable_shape_ids`, 0021 §2), so a supervisor lands
+ * on the "no-place" branch and never reaches these controls; this is the
+ * explicit statement of that, and the guard on the edge where `adminAccess`
+ * (D114) admits a supervisor with no grants at all.
+ */
+export function canManageAccess(
+  viewerIsCompanyAdmin: boolean,
+  viewerAdminAnywhere: boolean,
+): boolean {
+  return viewerIsCompanyAdmin || viewerAdminAnywhere;
+}
+
+// ---------------------------------------------------------------------------
+// EDITING A ROW'S GRANT IN PLACE (R-368). The maintainer, from the running app
+// as the company admin: *"I can't still see how to change it for ana and dana
+// ... There is no option to change her access level."* Ana's grant sits on a
+// LINE two levels below the plant root, so at the plant view her row had a
+// direct role of null and showed only a subtle link to open that line -- no
+// visible control. These resolve the ONE grant a member row can edit from here,
+// direct or a single one below, so the role and place controls sit on the row
+// itself, in their own columns, for Ana exactly as for Dana (admin on the root).
+// ---------------------------------------------------------------------------
+
+/** The one grant a member row edits from this screen: which node, which role. */
+export interface RowGrant {
+  nodeId: string;
+  role: GrantRole;
+  /** On the node being viewed (a re-role writes THIS node) vs a single grant below it. */
+  direct: boolean;
+  /**
+   * R-442: this grant's own shift-planning restriction, carried through so a
+   * write that changes the ROLE (or moves the grant) can resend it unchanged
+   * — `setSiteMember` has no "leave alone" for these two (0083's own header),
+   * so the caller is the one place that contract can be kept.
+   */
+  plansShiftId: string | null;
+  outsideShift: boolean;
+}
+
+/**
+ * The single grant this row can edit inline, or `null` when there is nothing to
+ * edit here (no grant at all) or too many to pick from without disambiguating
+ * (more than one grant BELOW the viewed node -- the A5 case). A grant on the
+ * viewed node wins, exactly as `describeAccess` orders "the most powerful route
+ * in"; failing that, a lone grant beneath it is unambiguous and editable too.
+ */
+export function rowGrant(row: AccessRow, activeNodeId: string | null): RowGrant | null {
+  if (row.directRole !== null && activeNodeId !== null) {
+    return {
+      nodeId: activeNodeId,
+      role: row.directRole,
+      direct: true,
+      // R-442: the row's OWN direct-grant fields — the same scope `directRole`
+      // reads, never an inherited grant's.
+      plansShiftId: row.plansShiftId,
+      outsideShift: row.outsideShift,
+    };
+  }
+  if (row.directRole === null && row.inheritedGrants.length === 1) {
+    const g = row.inheritedGrants[0];
+    return {
+      nodeId: g.nodeId,
+      role: g.role,
+      direct: false,
+      plansShiftId: g.plansShiftId,
+      outsideShift: g.outsideShift,
+    };
+  }
+  return null;
+}
+
+/**
+ * The roles offerable for an existing grant on its own node: `admin` only at a
+ * plant root, supervisor/viewer below -- but a grant already HOLDING a role the
+ * node would no longer offer (an `admin` on a branch, from before 0053, or made
+ * by hand) keeps it on the menu rather than showing a value with no option,
+ * the same rule `allowedRoles` states for its `['admin']` floor.
+ */
+export function rolesForGrant(grant: RowGrant, rootNodeId: string | null): readonly GrantRole[] {
+  const base = rolesForNode(grant.nodeId, rootNodeId);
+  return base.includes(grant.role) ? base : [grant.role, ...base];
+}
+
+/**
+ * The role menu for a row's grant, self-rule included: a person looking at
+ * their OWN admin grant (and not a company admin) is offered only `admin`, so
+ * they cannot strip their own access -- the same lock `allowedRoles` applies,
+ * carried to the resolved grant so an inherited one obeys it too.
+ */
+export function grantRoleOptions(
+  row: AccessRow,
+  viewerIsCompanyAdmin: boolean,
+  grant: RowGrant,
+  rootNodeId: string | null,
+): readonly GrantRole[] {
+  if (row.isSelf && !viewerIsCompanyAdmin && grant.role === "admin") return ["admin"] as const;
+  return rolesForGrant(grant, rootNodeId);
+}
+
+/**
+ * May this row's grant be removed from here? The two refusals `canRemoveAccess`
+ * makes, carried to the resolved grant: a company admin's row is not a site
+ * admin's to touch, and nobody drops their own admin. Unlike `canRemoveAccess`
+ * this does NOT require the grant to be on the viewed node -- a single grant
+ * below it is removable in place, which is the whole point of R-368.
+ */
+export function canRemoveGrant(
+  row: AccessRow,
+  viewerIsCompanyAdmin: boolean,
+  grant: RowGrant,
+): boolean {
+  if (protectedRow(row, viewerIsCompanyAdmin)) return false;
+  if (row.isSelf && !viewerIsCompanyAdmin && grant.role === "admin") return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// ORDERING THE MEMBER LIST (R-369). The maintainer: *"we want to display the
+// list from highest access level to lowest and then alphabetically within that
+// tier."* Highest first: a company admin outranks any grant, then admin,
+// supervisor, viewer; within a tier, by email A–Z with an address-less row
+// last (it can never be the thing you scanned the column for).
+// ---------------------------------------------------------------------------
+
+/** 0 (highest) to 4. Ranks by the MOST powerful route in, as `describeAccess` reads it. */
+export function accessRank(row: AccessRow): number {
+  if (row.companyAdmin) return 0;
+  const roles: (GrantRole | null)[] = [row.directRole, ...row.inheritedGrants.map((g) => g.role)];
+  if (roles.includes("admin")) return 1;
+  if (roles.includes("supervisor")) return 2;
+  if (roles.includes("viewer")) return 3;
+  return 4;
+}
+
+/** Access tier first, then email A–Z (case-insensitive); a row with no address sorts last. */
+export function compareMembers(a: AccessRow, b: AccessRow): number {
+  const ra = accessRank(a);
+  const rb = accessRank(b);
+  if (ra !== rb) return ra - rb;
+  if (a.email === null && b.email === null) return 0;
+  if (a.email === null) return 1;
+  if (b.email === null) return -1;
+  return a.email.localeCompare(b.email, "en", { sensitivity: "base" });
+}
+
+/** The member list in display order (R-369). A copy; never sorts in place. */
+export function sortMembers(rows: readonly AccessRow[]): AccessRow[] {
+  return rows.slice().sort(compareMembers);
 }

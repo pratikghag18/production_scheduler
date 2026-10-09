@@ -39,11 +39,15 @@
  *      an ERROR. An UPDATE row needs no plant — the site is left alone — so a
  *      blank plant on an update is fine, and its plant column is simply ignored.
  *
- * Dependency-free at runtime apart from `./csv`, so this runs under
- * `node --experimental-strip-types` and `src/test/operatorImport.test.ts` covers
- * it without a network.
+ * Dependency-free at runtime apart from `./csv` and `./shiftDraft` (S66-b adds
+ * the second: `bandsForNode` is the same pure resolver the Operators tab and
+ * the Access tab share for "which bands does this place run", extracted once
+ * rather than a third copy of the walk — CLAUDE.md §4). Both are pure, so this
+ * still runs under `node --experimental-strip-types` and
+ * `src/test/operatorImport.test.ts` covers it without a network.
  */
-import type { OperatorRecord } from "@/lib/api";
+import type { OperatorRecord, ShiftPatternsPayload } from "@/lib/api";
+import { bandsForNode } from "./shiftDraft";
 import type { CsvError, CsvTable } from "./csv";
 import type { FieldDef, ImportView } from "./importView";
 
@@ -59,6 +63,8 @@ export interface ColumnMap {
   employeeRef: string | null;
   externalId: string | null;
   plant: string | null;
+  /** R-441/R-443 (S66-b): the band this person normally works, by NAME. */
+  shift: string | null;
 }
 
 const ALIASES: Record<keyof ColumnMap, readonly string[]> = {
@@ -70,6 +76,7 @@ const ALIASES: Record<keyof ColumnMap, readonly string[]> = {
   employeeRef: ["employee ref", "employee id", "emp ref", "emp id", "badge", "payroll", "ref no"],
   externalId: ["import id", "import_id", "external_id", "external id", "id", "source id"],
   plant: ["plant", "site", "location", "facility"],
+  shift: ["shift", "shift name", "home shift", "band"],
 };
 
 /**
@@ -85,6 +92,7 @@ export function detectColumns(headerKeys: readonly string[]): ColumnMap {
     employeeRef: find(ALIASES.employeeRef),
     externalId: find(ALIASES.externalId),
     plant: find(ALIASES.plant),
+    shift: find(ALIASES.shift),
   };
 }
 
@@ -103,8 +111,8 @@ export const OPERATOR_TEMPLATE: {
   example: readonly string[];
   legend: ReadonlyArray<{ column: string; means: string }>;
 } = {
-  headers: ["Name", "Employee ref", "Import ID", "Plant"],
-  example: ["Jane Smith", "EMP-100", "EXT-100", "Plant A"],
+  headers: ["Name", "Employee ref", "Import ID", "Plant", "Shift"],
+  example: ["Jane Smith", "EMP-100", "EXT-100", "Plant A", "Shift 1"],
   legend: [
     { column: "Name", means: "the person's name (required)" },
     {
@@ -119,6 +127,11 @@ export const OPERATOR_TEMPLATE: {
     {
       column: "Plant",
       means: "which plant they belong to; required when adding a new person (optional)",
+    },
+    {
+      column: "Shift",
+      means:
+        "which shift they normally work, matched by name against their plant's own pattern; leave blank for no shift (optional)",
     },
   ],
 };
@@ -150,6 +163,13 @@ export type RowOutcome =
       externalId: string | null;
       /** Required for an insert (`site_node_id` is NOT NULL); resolved from the plant column. */
       plantNodeId: string;
+      /**
+       * R-441/R-443 (S66-b): the matched band's id, or `null` for a blank
+       * Shift column — the column's own default, exactly as the create form's
+       * own "no shift" is spelled. Never `undefined` on an insert: there is
+       * no "leave alone" for a row that does not exist yet.
+       */
+      homeShiftId: string | null;
     }
   | {
       kind: "update";
@@ -158,6 +178,15 @@ export type RowOutcome =
       employeeRef: string | null;
       /** The existing person's external_id is left as-is; name/ref are the update. */
       externalId: string | null;
+      /**
+       * R-441/R-443 (S66-b): present ONLY when the row's Shift column named a
+       * band — the same "absent key means leave it alone" contract
+       * `updateOperator` keeps for this column, mirrored here rather than
+       * re-decided. A BLANK Shift column on an update is IGNORED, exactly as
+       * a blank Plant column is (rule 1): the field is never touched by a
+       * re-upload that simply did not carry it.
+       */
+      homeShiftId?: string | null;
     }
   | { kind: "error"; messages: string[] };
 
@@ -165,7 +194,7 @@ export interface PlannedRow {
   /** 1-based source line, for the wizard to point a human at. */
   line: number;
   /** The mapped, trimmed values, for display beside the outcome. */
-  values: { name: string; employeeRef: string; externalId: string; plant: string };
+  values: { name: string; employeeRef: string; externalId: string; plant: string; shift: string };
   outcome: RowOutcome;
 }
 
@@ -185,12 +214,22 @@ export interface ImportPlan {
  * @param existing every operator the reader can see, from `fetchOperatorsAdmin`.
  * @param columns  the column map (from `detectColumns`, possibly overridden).
  * @param plants   the plants a plant name can resolve to (readable roots).
+ * @param shiftPatterns R-441/R-443 (S66-b): the same `fetchShiftPatterns`
+ *   payload `ShiftsPanel`/`OperatorsPanel` already read, so the Shift column
+ *   can be matched against the PERSON'S OWN PLANT pattern — `bandsForNode`
+ *   resolves it exactly as those two screens do (nearest ancestor-or-self
+ *   attachment). Optional so a caller that has not wired the read yet still
+ *   gets a plan back: every Shift cell then reads as unmatched. `undefined`
+ *   is never the honest state on a real screen — `OperatorsImport.tsx`
+ *   always supplies it — so pins that omit it are testing the same "no
+ *   pattern here" branch a real place with none attached would reach.
  */
 export function planOperatorImport(
   table: CsvTable,
   existing: readonly OperatorRecord[],
   columns: ColumnMap,
   plants: readonly ImportPlant[],
+  shiftPatterns?: ShiftPatternsPayload,
 ): ImportPlan {
   // ⭐ ONLY `name` IS REQUIRED-TO-MAP. The plant is NOT — it is required per
   // INSERT ROW instead (rule 5), because an update row legitimately has no
@@ -231,8 +270,9 @@ export function planOperatorImport(
     const employeeRef = cell(row, columns.employeeRef);
     const externalId = cell(row, columns.externalId);
     const plantName = cell(row, columns.plant);
+    const shiftName = cell(row, columns.shift);
     const line = idx + 2; // +1 for 0-based, +1 for the header row
-    const values = { name, employeeRef, externalId, plant: plantName };
+    const values = { name, employeeRef, externalId, plant: plantName, shift: shiftName };
 
     const messages: string[] = [];
 
@@ -268,6 +308,41 @@ export function planOperatorImport(
       }
     }
 
+    // R-441/R-443 (S66-b): the Shift column, matched by NAME (case-insensitive)
+    // against the pattern of the person's OWN PLANT — the target node is the
+    // plant just resolved for an insert, or the existing person's OWN home
+    // node for an update (never the plant column, which an update ignores
+    // entirely — rule 1's reasoning applies here too). `undefined` means "not
+    // supplied" (leave alone on an update, "no shift" on an insert); a
+    // resolved id means the row named a real band; skipped entirely when the
+    // target node is not yet known (the plant already failed above, and that
+    // error already fails the row).
+    let homeShiftId: string | null | undefined;
+    if (shiftName !== "") {
+      const targetNodeId = byExt !== null ? byExt.siteNodeId : plantNodeId;
+      if (targetNodeId !== null) {
+        const bands = bandsForNode(shiftPatterns ?? null, targetNodeId);
+        const needle = shiftName.toLowerCase();
+        const match = bands.find((b) => b.name.trim().toLowerCase() === needle);
+        if (match === undefined) {
+          messages.push(
+            bands.length === 0
+              ? `no shift pattern is set up at this person's plant, so "${shiftName}" can't be matched`
+              : `no shift named "${shiftName}" in this plant's pattern (it has: ${bands.map((b) => b.name).join(", ")})`,
+          );
+        } else {
+          homeShiftId = match.id;
+        }
+      }
+    } else if (byExt === null) {
+      // An insert with a blank Shift column: "no shift", the column's own
+      // default — never `undefined`, which on an insert would have nothing to
+      // mean "leave alone" about.
+      homeShiftId = null;
+    }
+    // A blank Shift column on an UPDATE row falls through with `homeShiftId`
+    // left `undefined` — ignored, exactly as a blank Plant column is (rule 1).
+
     if (messages.length > 0) {
       rows.push({ line, values, outcome: { kind: "error", messages } });
       error += 1;
@@ -276,7 +351,8 @@ export function planOperatorImport(
 
     if (byExt !== null) {
       // Rule 1: update the matched person. ⚠️ NO plantNodeId — the site is left
-      // alone; only display name and employee ref move.
+      // alone; only display name, employee ref and (when the row named one) the
+      // shift move.
       rows.push({
         line,
         values,
@@ -286,12 +362,14 @@ export function planOperatorImport(
           displayName: name,
           employeeRef: employeeRef === "" ? null : employeeRef,
           externalId,
+          ...(homeShiftId !== undefined ? { homeShiftId } : {}),
         },
       });
       update += 1;
     } else {
       // Rules 2 & 3: no match (a new external_id, or none at all) -> insert. The
-      // plant was required and resolved above, so plantNodeId is a real id here.
+      // plant was required and resolved above, so plantNodeId is a real id here,
+      // and `homeShiftId` is never `undefined` on this branch (see above).
       rows.push({
         line,
         values,
@@ -301,6 +379,7 @@ export function planOperatorImport(
           employeeRef: employeeRef === "" ? null : employeeRef,
           externalId: externalId === "" ? null : externalId,
           plantNodeId: plantNodeId as string,
+          homeShiftId: homeShiftId ?? null,
         },
       });
       insert += 1;
@@ -331,6 +410,10 @@ export const OPERATOR_FIELDS: FieldDef[] = [
   // ⚠️ required:false — the column mapping does not force a plant. The plan
   // enforces it per-insert-row (rule 5), because an update row needs none.
   { key: "plant", label: "Plant", required: false },
+  // R-441/R-443 (S66-b): the fifth column. Blank is always legal; the plan
+  // enforces the name match itself, row by row, the same way it enforces the
+  // plant.
+  { key: "shift", label: "Shift", required: false },
 ];
 
 export function operatorPlanToView(plan: ImportPlan): ImportView {
@@ -340,7 +423,13 @@ export function operatorPlanToView(plan: ImportPlan): ImportView {
     missingRequired: plan.missingRequired.map(() => "name"),
     rows: plan.rows.map((r) => ({
       line: r.line,
-      cells: [r.values.name, r.values.employeeRef, r.values.externalId, r.values.plant],
+      cells: [
+        r.values.name,
+        r.values.employeeRef,
+        r.values.externalId,
+        r.values.plant,
+        r.values.shift,
+      ],
       kind: r.outcome.kind,
       messages: r.outcome.kind === "error" ? r.outcome.messages : [],
     })),

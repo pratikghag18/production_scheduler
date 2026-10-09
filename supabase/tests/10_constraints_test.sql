@@ -248,16 +248,75 @@ BEGIN
   END IF;
 END $$;
 
-\echo 'Case 7c: an overlapping run with status=cancelled is accepted'
+\echo 'Case 7c (INVERTED by R-324): an overlapping run is refused, with no way to opt out'
 DO $$
-DECLARE v_new_id uuid;
+DECLARE v_new_id uuid; v_err text := 'no error';
 BEGIN
-  INSERT INTO runs (org_id, node_id, product_id, timerange, status)
-  SELECT org_id, node_id, product_id, timerange, 'cancelled'
-  FROM runs WHERE id = '80000000-0000-0000-0000-000000000001'
-  RETURNING id INTO v_new_id;
-  IF v_new_id IS NULL THEN
-    RAISE EXCEPTION 'FAIL: overlapping cancelled run should have been accepted';
+  -- ⚠️ THIS CASE ASSERTED THE OPPOSITE UNTIL MIGRATION 0044, AND IT WAS RIGHT
+  -- TO. `runs_no_overlap_on_node` carried `where (status <> 'cancelled')`, so a
+  -- run marked cancelled was exempt and an overlapping one was accepted. The
+  -- maintainer removed `runs.status` (R-324) once it was clear that nothing
+  -- ever set it and that runs are hard-deleted, so there is no longer a column
+  -- to write here, let alone a state that buys an exemption. The contract
+  -- changed; the case is inverted rather than deleted, because that change is
+  -- the deliverable and a silently missing case would hide it.
+  BEGIN
+    INSERT INTO runs (org_id, node_id, product_id, timerange)
+    SELECT org_id, node_id, product_id, timerange
+    FROM runs WHERE id = '80000000-0000-0000-0000-000000000001'
+    RETURNING id INTO v_new_id;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE; END;
+  IF v_err <> '23P01' OR v_new_id IS NOT NULL THEN
+    RAISE EXCEPTION 'FAIL: an overlapping run should be refused (sqlstate=%, id=%)', v_err, v_new_id;
+  END IF;
+END $$;
+
+\echo 'Case 8a: user_profiles.user_id is an FK to auth.users (R-D1)'
+DO $$
+DECLARE v_caught boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO user_profiles (org_id, user_id, role)
+    VALUES ('10000000-0000-0000-0000-000000000001', gen_random_uuid(), 'viewer');
+  EXCEPTION WHEN foreign_key_violation THEN
+    v_caught := true;
+  END;
+  IF NOT v_caught THEN
+    RAISE EXCEPTION 'FAIL: user_profiles.user_id accepted a uuid absent from auth.users';
+  END IF;
+END $$;
+
+\echo 'Case 8b: (org_id, user_id) is unique -- the same person cannot hold two profiles in one org (R-D1)'
+DO $$
+DECLARE v_uid uuid := gen_random_uuid(); v_caught boolean := false;
+BEGIN
+  INSERT INTO auth.users (id) VALUES (v_uid);
+  INSERT INTO user_profiles (org_id, user_id, role)
+  VALUES ('10000000-0000-0000-0000-000000000001', v_uid, 'viewer');
+  BEGIN
+    INSERT INTO user_profiles (org_id, user_id, role)
+    VALUES ('10000000-0000-0000-0000-000000000001', v_uid, 'supervisor');
+  EXCEPTION WHEN unique_violation THEN
+    v_caught := true;
+  END;
+  IF NOT v_caught THEN
+    RAISE EXCEPTION 'FAIL: a second user_profiles row for the same (org_id, user_id) was accepted';
+  END IF;
+END $$;
+
+\echo 'Case 8c: deleting the auth.users row cascades to user_profiles (R-D1)'
+DO $$
+DECLARE v_uid uuid := gen_random_uuid(); v_profile_id uuid;
+BEGIN
+  INSERT INTO auth.users (id) VALUES (v_uid);
+  INSERT INTO user_profiles (org_id, user_id, role)
+  VALUES ('10000000-0000-0000-0000-000000000001', v_uid, 'viewer')
+  RETURNING id INTO v_profile_id;
+
+  DELETE FROM auth.users WHERE id = v_uid;
+
+  IF EXISTS (SELECT 1 FROM user_profiles WHERE id = v_profile_id) THEN
+    RAISE EXCEPTION 'FAIL: user_profiles row survived its auth.users row being deleted (ON DELETE CASCADE)';
   END IF;
 END $$;
 

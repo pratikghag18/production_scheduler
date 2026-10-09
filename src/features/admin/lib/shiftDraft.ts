@@ -566,6 +566,103 @@ export function validatePatternDraft(
 }
 
 /* ===========================================================================
+ * RESOLUTION — the client mirror of `resolve_shift_template` (migration 0005),
+ * needed by S66-b's three lanes at once: the Operators tab's Shift dropdown
+ * (a person's home place may carry no attachment of its own), the CSV
+ * importer's name match against "the person's plant pattern", and the Access
+ * tab's "Plans" picker (a grant's own node, same walk). Extracted here ONCE
+ * rather than written three times (CLAUDE.md §4) — `operatorImport.ts` and
+ * `siteAccess.ts` both import the runtime functions below, not only the types,
+ * which is why their own file headers now say so.
+ *
+ * ⚠️ NEAREST ANCESTOR-OR-SELF, WALKED THROUGH `parentId` — never through
+ * `path` strings, for the same reason `operators.ts`'s `rootIdFor` gives:
+ * re-deriving ltree's `<@` from a dotted string is where `a.b` becomes a false
+ * ancestor of `a.bb`. `ShiftNodeRow.parentId` already carries the same tree
+ * `resolve_shift_template` walks server-side.
+ * =========================================================================== */
+
+/** The slice of `ShiftNodeRow` the walk needs. */
+export interface ShiftNodeLike {
+  id: string;
+  parentId: string | null;
+}
+
+/**
+ * The template id the nearest ancestor-or-self of `nodeId` is attached to, or
+ * `null` when nothing on the chain carries one (or the chain cannot be walked
+ * to the end — a missing parent, or a cycle: `null` is "no answer", never a
+ * guess).
+ */
+export function resolvedTemplateIdFor(
+  nodeId: string,
+  nodesById: ReadonlyMap<string, ShiftNodeLike>,
+  templateByNode: ReadonlyMap<string, string>,
+): string | null {
+  const seen = new Set<string>();
+  let cur = nodesById.get(nodeId);
+  while (cur !== undefined) {
+    if (seen.has(cur.id)) return null; // a cycle: nothing above it is reachable
+    seen.add(cur.id);
+    const templateId = templateByNode.get(cur.id);
+    if (templateId !== undefined) return templateId;
+    if (cur.parentId === null) return null;
+    cur = nodesById.get(cur.parentId);
+  }
+  return null; // a parent id with no node beside it
+}
+
+/** A band, stripped to what a picker or a name-match needs. */
+export interface ShiftBand {
+  id: string;
+  name: string;
+  startMin: number;
+  endMin: number;
+}
+
+/**
+ * Build `templateByNode` from a `ShiftPatternsPayload`'s raw attachments —
+ * `node_shift_templates` is keyed by `node_id` alone (one pattern per node),
+ * so this is total rather than a list.
+ */
+export function templateByNodeFrom(
+  payload: Pick<ShiftPatternsPayload, "attachments">,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const a of payload.attachments) {
+    if (a !== null) out.set(a.nodeId, a.templateId);
+  }
+  return out;
+}
+
+/**
+ * The bands of the pattern `nodeId` resolves to (nearest ancestor-or-self
+ * attachment), sorted by start time — exactly the list `resolve_shift_template`
+ * plus a plain `shifts` read by `template_id` would answer, computed from the
+ * one payload `useShiftPatterns` already holds. `[]` when the node resolves to
+ * no pattern at all (never a guess at "the whole company's shifts").
+ */
+export function bandsForNode(
+  payload: ShiftPatternsPayload | null | undefined,
+  nodeId: string | null,
+): ShiftBand[] {
+  if (payload === null || payload === undefined || nodeId === null) return [];
+  const nodesById = new Map<string, ShiftNodeLike>();
+  for (const n of payload.nodes) if (n !== null) nodesById.set(n.id, n);
+  const templateByNode = templateByNodeFrom(payload);
+  const templateId = resolvedTemplateIdFor(nodeId, nodesById, templateByNode);
+  if (templateId === null) return [];
+  const bands: ShiftBand[] = [];
+  for (const s of payload.shifts) {
+    if (s !== null && s.templateId === templateId) {
+      bands.push({ id: s.id, name: s.name, startMin: s.startMin, endMin: s.endMin });
+    }
+  }
+  bands.sort((a, b) => a.startMin - b.startMin);
+  return bands;
+}
+
+/* ===========================================================================
  * PATTERN ROWS — the read, assembled, with the unreadable rows counted
  * =========================================================================== */
 

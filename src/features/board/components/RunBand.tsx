@@ -2,6 +2,7 @@ import type { Product, ShiftTemplate } from "@/lib/api";
 import type { IndexedRun, IndexedAssignment } from "../lib/boardIndex";
 import { minutesToPx, effectiveHeadcount, isUnderstaffed, type Density } from "../lib/geometry";
 import { formatClock, formatFull, formatNumber, addMinutes } from "../lib/time";
+import type { DayAxis } from "../lib/time";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import styles from "./RunBand.module.css";
 
@@ -15,10 +16,12 @@ export function RunBand({
   product,
   productColorVar,
   windowStart,
+  zone,
   pxPerHour,
   windowMinutes,
   template,
   dayCount,
+  dayAxis,
   zoomIndex,
   runsOnNode,
   activeDrag,
@@ -36,10 +39,12 @@ export function RunBand({
   product: Product | undefined;
   productColorVar: string;
   windowStart: Date;
+  zone?: string;
   pxPerHour: number;
   windowMinutes: number;
   template: ShiftTemplate | null;
   dayCount: number;
+  dayAxis: DayAxis;
   zoomIndex: 0 | 1 | 2;
   runsOnNode: IndexedRun[];
   /** Non-null while THIS run is the one being dragged (D34: render from
@@ -64,12 +69,18 @@ export function RunBand({
   const effHc = effectiveHeadcount(assignments);
   const under = isUnderstaffed(effHc, run.plannedHeadcount);
   const left = minutesToPx(range.startMin, pxPerHour);
-  const width = minutesToPx(range.endMin, pxPerHour) - left;
+  // R-463: same floor as `DirectBlock.tsx`/`AssignmentChip.tsx` (46px,
+  // reused verbatim, not a new number) -- with the minimum length down to
+  // one minute, a job the bar books short (or a run trimmed to a small
+  // remnant) can be a fraction of a pixel wide at Compact zoom without
+  // this; every other block shape on the board already floors its own
+  // drawn width the same way.
+  const width = Math.max(46, minutesToPx(range.endMin, pxPerHour) - left);
   const productName = product?.name ?? "(unknown product)";
 
   const title =
-    `${productName} · ${formatFull(addMinutes(windowStart, range.startMin))}` +
-    `–${formatClock(addMinutes(windowStart, range.endMin))}` +
+    `${productName} · ${formatFull(addMinutes(windowStart, range.startMin), undefined, zone)}` +
+    `–${formatClock(addMinutes(windowStart, range.endMin), zone)}` +
     (run.plannedHeadcount != null
       ? ` · staffed ${formatNumber(effHc)}/${run.plannedHeadcount}${under ? " · UNDERSTAFFED" : ""}`
       : ` · staffed ${formatNumber(effHc)}`);
@@ -82,6 +93,7 @@ export function RunBand({
     windowMinutes,
     template,
     dayCount,
+    dayAxis,
     zoomIndex,
     runsOnNode,
     crew: assignments,
@@ -94,7 +106,7 @@ export function RunBand({
       title={title}
       tabIndex={0}
       role="button"
-      aria-label={`${productName} run, ${formatClock(addMinutes(windowStart, range.startMin))} to ${formatClock(addMinutes(windowStart, range.endMin))}`}
+      aria-label={`${productName} run, ${formatClock(addMinutes(windowStart, range.startMin), zone)} to ${formatClock(addMinutes(windowStart, range.endMin), zone)}`}
       onPointerDown={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
         onPointerDown(
@@ -116,8 +128,8 @@ export function RunBand({
       <span className={styles.h} style={{ left: 0, width: HANDLE_PX }} aria-hidden="true" />
       <span className={styles.pn}>{productName}</span>
       <span className={styles.tm}>
-        {formatClock(addMinutes(windowStart, range.startMin))}–
-        {formatClock(addMinutes(windowStart, range.endMin))}
+        {formatClock(addMinutes(windowStart, range.startMin), zone)}–
+        {formatClock(addMinutes(windowStart, range.endMin), zone)}
       </span>
       <span className={styles.hc}>
         {under ? "⚠ " : ""}

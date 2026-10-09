@@ -65,12 +65,13 @@
  * contract (§19.63), which was built for exactly this.
  *
  * ⚠⚠ THIS IS NOT "everything here", AND THE EXCEPTION COST A DEFECT (DEF-0002).
- * The argument above is about a map narrowed by PERMISSION. `ownedInScope` is
+ * The argument above is about a map narrowed by PERMISSION. `ownedInScope` was
  * handed the board's `index.nodeById`, which is narrowed by a VIEW CHOICE — the
- * plant the reader picked — and there "I cannot resolve it" means "it is in
- * another plant", which is knowledge, not ignorance. It fails CLOSED, says so at
- * its own definition, and the rule for telling the two apart is the one §19.79
- * states below: ask what narrowed the map.
+ * plant the reader picked — and there "I cannot resolve it" was read as "it is
+ * in another plant", knowledge rather than ignorance, so it failed CLOSED. The
+ * rule for telling the two apart is the one §19.79 states below: ask what
+ * narrowed the map. ⛔ AND THE ANSWER WAS WRONG FOR HALF THE READERS — see the
+ * block where that function used to be, further down. It is deleted (S39).
  *
  * ⚠⚠⚠ AND THAT RULE HAS A LIMIT, WHICH COST A SECOND DEFECT (DEF-0005). It can
  * only be applied by someone who knows what narrowed the map — and for a
@@ -139,29 +140,29 @@ export function offeredHere<T extends { siteNodeId: string }>(
   return items.filter((i) => offeredAt(i.siteNodeId, targetPath, nodesById));
 }
 
-/**
- * Everything in `items` OWNED by one of `scopedNodeIds` — the board's per-plant
- * assignable pool.
+/* ---------------------------------------------------------------------------
+ * ⚠️⚠️ `ownedInScope` LIVED HERE AND IS GONE (S39 / R-346), AND IT WAS NOT
+ * WRONG SO MUCH AS ASKING A QUESTION THE CLIENT SHOULD NOT HAVE BEEN ASKED.
  *
- * ⭐ MEMBERSHIP, NOT A PATH COMPARE, AND THAT IS THE WHOLE FIX. `board_window`'s
- * `nodes` are already scoped to the selected root's subtree, so the set of node
- * ids the board knows about IS this plant. An operator belongs here exactly when
- * its owner is one of them. An earlier version resolved owner PATHS and "failed
- * open" on an owner it could not find — but a different plant's owner is never in
- * the scoped set, so every out-of-plant operator was kept: the exact bug this
- * exists to fix. There is no fail-open here on purpose: an owner outside the
- * scoped set is a real "not this plant", not an "I cannot tell".
+ * It cut the board's assignable pool to the people whose owner was one of the
+ * board's own nodes -- membership, deliberately with no fail-open, because "not
+ * in the selected plant's subtree" was read as knowledge rather than ignorance.
+ * That reading is true for a reader who can see the whole plant and FALSE for
+ * everybody else: `board_window` sends the nodes at or below the READER'S ROOT,
+ * so a supervisor granted Line 1 has no node for the plant, and the five people
+ * homed at the plant were dropped from her panel entirely. She saw nothing.
  *
- * ⚠️ A POOL FILTER, NOT A DRAW FILTER. `board_window` still returns every
- * operator (S18) and `index.operatorById` keeps them all, so a chip for a
- * cross-plant assignment still renders its name; only the OFFERED pool is cut.
- */
-export function ownedInScope<T extends { siteNodeId: string }>(
-  items: readonly T[],
-  scopedNodeIds: ReadonlySet<string>,
-): T[] {
-  return items.filter((i) => scopedNodeIds.has(i.siteNodeId));
-}
+ * The fix was not a better predicate here. It was to stop deriving the pool at
+ * all: migration 0058 makes `board_window`'s people the PLANT'S people, so the
+ * server answers "who is in this plant" the way it already answers "where is
+ * this product offered" (`productsOfferedAtNode` below, DEF-0005). Same lesson,
+ * third time: when a question needs information the client was never given,
+ * move the question.
+ *
+ * The last caller went with it, so this is a deletion and not an unused export
+ * -- the same treatment `scopeOptions`' dead `canEdit` parameter got, and for
+ * the same reason: a function with a persuasive comment argues for itself.
+ * ------------------------------------------------------------------------- */
 
 /* ---------------------------------------------------------------------------
  * ⭐ D115 / migration 0034: A PRODUCT IS OFFERED FROM A LIST OF PLACES.

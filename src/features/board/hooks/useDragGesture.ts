@@ -19,13 +19,18 @@
  * ORIGIN clientX, not from a re-measured rect.
  */ import { operatorViewFor, productViewFor } from "../lib/history";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ShiftTemplate,
   BoardOperator,
+  SchedulerError,
   CreateAssignmentInput,
   AssignmentFieldEdit,
+  RunFieldEdit,
+  ReassignAssignmentInput,
+  MoveAssignmentInput,
   CapacityProbe,
+  AssignmentTarget,
 } from "@/lib/api";
 import {
   describeSchedulerError,
@@ -33,10 +38,26 @@ import {
   toSchedulerError,
   probeCapacity,
   fromEfficiency,
+  setAbsence,
+  toTstzRange,
 } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import type {
+  ResolvedCommand,
+  ResolvedLotStep,
+  ResolvedMove,
+  ResolvedRunTrim,
+} from "@/lib/command/resolve";
 import type { BoardIndex, IndexedRun, IndexedAssignment } from "../lib/boardIndex";
+import { certificateGaps, policyForNode } from "../lib/boardIndex";
 import { ZOOMS, pxToMinutes, shiftSnapPoints, type ZoomIndex } from "../lib/geometry";
+import type { DayAxis } from "../lib/time";
 import { formatClock, addMinutes } from "../lib/time";
+import { leaveLine } from "../lib/leave";
+import { isPlaceholderId } from "../lib/optimisticId";
+import { absenceGaps, type AbsenceRow } from "@/lib/absence";
+import { useAbsences, absenceKeys } from "./useAbsences";
+import type { DateFormat } from "@/lib/format/dates";
 import {
   MIN_DURATION_MINUTES,
   DRAG_THRESHOLD_PX,
@@ -48,17 +69,48 @@ import {
   findRunOverlap,
   classifyCrewAgainstRun,
   assignmentFitsRun,
+  attachmentChangeMessage,
   splitEvenly,
   splitFits,
   type DragMode,
+  targetResizeMessage,
 } from "../lib/interaction";
+import { scaledTarget } from "../lib/standardTarget";
+import {
+  precheckBeforeWrite,
+  answerForProbe,
+  explainCapacityRefusal,
+  isBusyElsewhere,
+  type CapacityAttempt,
+  type PrecheckResult,
+} from "../lib/busyElsewhere";
+import {
+  attachmentWaiting,
+  targetWaiting,
+  CREW_OUTSIDE_WAITING,
+  CREATE_WAITING,
+  splitWaiting,
+} from "../lib/popupWords";
 import { useCreateRun, useUpdateRunFields, useDeleteRun, useMoveRun } from "./useRunMutations";
 import {
   useCreateAssignment,
+  useDeleteAssignment,
+  useReassignAssignment,
+  useMoveAssignment,
   useUpdateAssignmentFields,
   useApplySplitCoverage,
 } from "./useAssignmentMutations";
-import { useSchedulerToast, type ToastResolveCtx } from "./useSchedulerToast";
+import {
+  useSchedulerToast,
+  buildSchedulerErrorToast,
+  type ToastResolveCtx,
+} from "./useSchedulerToast";
+// S51 (R-400/D127): type-only -- `LotResult` (and the bar's `ResolvedAny`,
+// a subset of the `ResolvedLotStep` `runLot` takes since DEF-0040) are declared
+// beside the bar's own resolved-shape props (`CommandBar.tsx`) since the bar
+// is what hands them to `runLot` below; this hook holds no rule of the
+// bar's, only the writers a resolved lot item ends in.
+import type { LotResult, WriteOutcome, PopupReporter } from "../components/CommandBar";
 
 export type { DragMode };
 
@@ -71,6 +123,17 @@ export type DragSubject =
   /** D65/§7 "panel-drag origin": a fresh operator picked up from
    *  `OperatorPanel`, not yet attached to anything on the board. */
   | { kind: "panel"; operator: BoardOperator };
+
+/**
+ * F-233 (S194-G): the subject's own row id, for `isPlaceholderId` -- `null`
+ * for "new"/"panel", which name no existing row at all yet (a "new" subject
+ * IS the create in flight; nothing to check an id against until it exists).
+ */
+function subjectRowId(subject: DragSubject): string | null {
+  if (subject.kind === "run") return subject.run.id;
+  if (subject.kind === "assignment") return subject.assignment.id;
+  return null;
+}
 
 /** Public shape a renderer reads to decide whether IT is the row/block
  *  currently mid-drag (D34) — a superset of brief §5.1's `ActiveDrag`. */
@@ -119,6 +182,13 @@ export interface SplitParticipant {
 export type PopoverState =
   | {
       kind: "create";
+      /** A fresh number from every opener (`createSeqRef`), never reused --
+       *  `BoardPage` keys `<CreatePopover>` on it so a second typed command
+       *  opening this popover while an earlier one is still in flight is
+       *  always a new mount, never a prop update on the same component
+       *  instance (the review lane's finding: an unkeyed re-render would
+       *  never re-arm the mount-only R-384 auto-press effect). */
+      seq: number;
       nodeId: string;
       range: Range;
       anchor: { x: number; y: number };
@@ -126,6 +196,54 @@ export type PopoverState =
       /** D65: set only when this popover was opened by a panel drop — the
        *  dropped operator, pre-selected, in forced "direct" mode. */
       presetOperatorId?: string;
+      /** P1-7a: set when a typed command resolved to a direct product target
+       *  (R-378) — preselects `CreatePopover`'s product select. */
+      presetProductId?: string;
+      /** P1-7a / R-383: set when a typed command resolved to an existing run
+       *  instead — `CreatePopover` shows a read-only "Joining <label>" line in
+       *  its place and sends this run as the target. `label` is `runLabelById`'s
+       *  own D66 format, so this and a drag's confirm prompt never disagree. */
+      presetRun?: { id: string; label: string };
+      /**
+       * S41-a: set when the typed "book a job" sentence resolved to a
+       * BRAND-NEW job — forces `CreatePopover` into Product run mode with the
+       * run/direct segment disabled, mirroring how `presetOperatorId` forces
+       * direct mode (but, unlike that preset, this one also disables the
+       * segment: there is no operator to pick for a job, so nothing on this
+       * screen may flip back to direct).
+       */
+      presetMode?: "run";
+      /** S41-a: "for 3 people" -- preselects `CreatePopover`'s planned
+       *  headcount field when the sentence said a number. */
+      presetHeadcount?: number;
+      /**
+       * S41-c: set when this popover was opened by the typed "move" sentence
+       * resolving to a `move_cell` target (`openMoveFromCommand`) -- carries
+       * the block being moved. `CreatePopover` forces direct mode (already
+       * happens via `presetOperatorId`, which `openMoveFromCommand` also
+       * sets), shows a read-only "Moving <person>'s block" line instead of
+       * the operator select, and sends `moveAssignment` on submit instead of
+       * `createAssignment` -- no second door, the SAME pop-up.
+       */
+      presetMove?: { assignmentId: string };
+      /**
+       * R-384: set ONLY by `openCreateFromCommand` — the typed command bar is
+       * the sole opener that may auto-press Create when the pop-up would show
+       * no warning. A drag or a keyboard create (`endTrackCreateDrag`,
+       * `endPanelDrag`, `handleTrackKeyDown`) never sets this, so their
+       * pop-ups always wait for a real press, as before.
+       */
+      autoCreate?: boolean;
+      /**
+       * F-167: set ONLY when the typed command bar opened this pop-up
+       * (`openCreateFromCommand`/`openCreateRunFromCommand`/
+       * `openMoveFromCommand`). `CreatePopover` calls it once -- Create
+       * succeeded, the server refused, or the pop-up was cancelled -- and the
+       * bar turns that into the sentence's trace `outcome`/`ran` and the
+       * conversation thread's own last line. A drag's or a keyboard create's
+       * pop-up never carries one, so nothing changes for them.
+       */
+      commandResult?: PopupReporter;
     }
   | {
       kind: "run";
@@ -159,6 +277,13 @@ export type PopoverState =
        *  popover's own edits are the single source of truth for it. */
       incoming: Omit<CreateAssignmentInput, "efficiencyPercent">;
       anchor: { x: number; y: number };
+      /**
+       * S62-b reviewer fix (C): carried over from the create pop-up this was
+       * opened FROM when a typed sentence opened that one -- so the sentence
+       * hears `written` or `cancelled` from whichever pop-up finally settles
+       * it, not "Waiting: the create pop-up" for ever.
+       */
+      commandResult?: PopupReporter;
     }
   | {
       /** §9 debt 2: the crew-outside-the-run-window warning, moved out of
@@ -168,22 +293,46 @@ export type PopoverState =
       message: string;
       anchor: { x: number; y: number };
       onConfirm: () => void;
+      /** R-031: when set, the prompt offers THESE buttons instead of a
+       *  single Continue, and `confirmChoose(i)` fires one of them; Cancel
+       *  is always there and always `confirmNo`. `confirmYes` does nothing
+       *  on a prompt with choices — there is no default answer to "keep or
+       *  scale?", and a stray Enter must not pick one. */
+      choices?: readonly ConfirmChoice[];
+      /** R-031: the popover's title; "Continue?" when absent. */
+      title?: string;
+      /**
+       * S195-D (DEF-0054): set ONLY when the typed command bar's sentence
+       * opened this pop-up. The SAME reporter the create and split pop-ups
+       * carry: Continue's write reports `written` or `refused`, Cancel (or
+       * closing it) reports `cancelled`, once.
+       */
+      commandResult?: PopupReporter;
     };
 
-interface SnapConfig {
+/** R-031: one button on a multi-choice confirm prompt. */
+export interface ConfirmChoice {
+  label: string;
+  onChoose: () => void;
+}
+
+export interface SnapConfig {
   useShiftSnap: boolean;
   snapMinutes: number;
   shiftPoints: number[];
 }
 
-function snapConfigFor(
+/** Exported for R-024/R-D16: proves which snap values each zoom level
+ * actually wires up (interaction.test.ts proves snapMinute's own logic
+ * with hand-supplied params; this is the zoomIndex -> params half). */
+export function snapConfigFor(
   zoomIndex: ZoomIndex,
   template: ShiftTemplate | null,
-  dayCount: number,
+  axis: DayAxis,
 ): SnapConfig {
   const zoom = ZOOMS[zoomIndex];
   const useShiftSnap = zoom.name === "Compact";
-  const shiftPoints = template ? shiftSnapPoints(template, dayCount) : [];
+  const shiftPoints = template ? shiftSnapPoints(template, axis) : [];
   return { useShiftSnap, snapMinutes: zoom.snapMinutes, shiftPoints };
 }
 
@@ -243,6 +392,22 @@ export interface UseDragGestureArgs {
    *  no mutation sent — the node the drag targeted may not even be visible
    *  to the new identity. */
   sessionUserId: string | null;
+  /**
+   * DEF-0015 / R-239 / R-346: the server's `can_place` for this person on this
+   * board (`board_window`, migration 0058). When false the person is a viewer:
+   * this hook opens no create pop-up (Enter on a track and a click-drag on a
+   * track do nothing), starts no block move/resize and no panel drag. A click
+   * or Enter on an existing block still opens its pop-up — read-only, decided
+   * in `BoardPage` — because seeing a chip is not placing anyone.
+   */
+  canPlace: boolean;
+  /**
+   * R-357: the plant's resolved date format, used to phrase the leave a
+   * warn-move went ahead over in the drag success toast (`leaveLine`) — the same
+   * seam the create/reassign pop-ups read absences through, so the drag path
+   * names the dates the way they do rather than staying silent.
+   */
+  dateFormat: DateFormat;
 }
 
 export interface BlockDragDescriptor {
@@ -253,6 +418,7 @@ export interface BlockDragDescriptor {
   windowMinutes: number;
   template: ShiftTemplate | null;
   dayCount: number;
+  dayAxis: DayAxis;
   zoomIndex: ZoomIndex;
   handlePx: number;
   blockWidthPx: number;
@@ -267,12 +433,13 @@ export interface TrackCreateDescriptor {
   windowMinutes: number;
   template: ShiftTemplate | null;
   dayCount: number;
+  dayAxis: DayAxis;
   zoomIndex: ZoomIndex;
   trackLeftPx: number;
   offsetXPx: number;
 }
 
-function toastCtx(index: BoardIndex): ToastResolveCtx {
+function toastCtx(index: BoardIndex, dateFormat: DateFormat): ToastResolveCtx {
   // P1-4e: `index.runById` (§9 debt 1) now carries exactly this shape —
   // the ad-hoc rebuild this function used to do is no longer needed.
   return {
@@ -281,29 +448,371 @@ function toastCtx(index: BoardIndex): ToastResolveCtx {
     productById: index.productById,
     runById: index.runById,
     formatRange: (s, e) =>
-      `${formatClock(addMinutes(index.windowStart, s))}–${formatClock(addMinutes(index.windowStart, e))}`,
+      `${formatClock(addMinutes(index.windowStart, s), index.zone)}–${formatClock(addMinutes(index.windowStart, e), index.zone)}`,
+    // R-359: so an `Absent` refusal's hours are read in the board's own zone
+    // rather than UTC. The days follow the caller's date format at the call site.
+    zone: index.zone,
+    dateFormat,
   };
 }
 
+/**
+ * S51 (R-400/D127): the one place `CreateAssignmentInput`'s fields are built
+ * from a node/range/operator/target, so `submitCreateDirect`'s own
+ * popover-driven Create and the several-lot's `createFromCommand` (below)
+ * can never drift into two different payload shapes for the same write.
+ * `overrides` supplies the fields only a popover's own state ever decides
+ * (efficiency, a typed target, an eligibility/area override and its
+ * reason); the lot never has any of those to give -- a resolved `assign`
+ * carries none of them -- so its defaults ARE a clean pop-up's own defaults
+ * (R-384's own `clean`: 100% efficiency, no typed target, no override).
+ */
+function buildCreateAssignmentInput(
+  windowStart: Date,
+  r: { nodeId: string; range: Range; operatorId: string; target: AssignmentTarget },
+  overrides: Partial<
+    Pick<
+      CreateAssignmentInput,
+      | "efficiencyPercent"
+      | "targetQty"
+      | "targetUnit"
+      | "eligibilityOverride"
+      | "overrideReason"
+      | "areaOverride"
+      | "areaOverrideReason"
+    >
+  > = {},
+): CreateAssignmentInput {
+  return {
+    nodeId: r.nodeId,
+    operatorId: r.operatorId,
+    target: r.target,
+    start: minuteDate(windowStart, r.range.startMin),
+    end: minuteDate(windowStart, r.range.endMin),
+    efficiencyPercent: overrides.efficiencyPercent ?? 100,
+    targetQty: overrides.targetQty,
+    targetUnit: overrides.targetUnit,
+    eligibilityOverride: overrides.eligibilityOverride ?? false,
+    overrideReason: overrides.overrideReason,
+    areaOverride: overrides.areaOverride ?? false,
+    areaOverrideReason: overrides.areaOverrideReason,
+  };
+}
+
+/**
+ * S51 review fix (blocker 2): rejects a lot step that could not be written
+ * without either a decision only a popover asks (an attachment change, a
+ * keep/scale ambiguity, crew stranded outside a resized run) or a plain
+ * refusal a drag would otherwise just toast (the block/job is gone, an
+ * overlap). D127's "never write before the yes" cuts both ways: the yes the
+ * person gave was for the READOUTS shown, so hitting a FURTHER question
+ * mid-lot must stop the lot, never pop one open silently. `message` is
+ * already the plain sentence `LotResult.error` should show verbatim --
+ * `runLot`'s catch reads this class specifically, never the
+ * `SchedulerError`/`buildSchedulerErrorToast` machinery real API errors go
+ * through, so this text is never generalised into "Something went wrong."
+ */
+class LotStepRefused extends Error {}
+
+/**
+ * S195-D (DEF-0054 item 1d, R-459, R-432): a lot step whose write would open
+ * one of the board's own questions is NOT asked and NOT counted done -- it is
+ * the lot's refused step, and the bar's "Not done" line says this. A lot never
+ * hangs on a pop-up nobody is watching (D127: the yes was for the readouts
+ * shown, never for a question raised after it).
+ */
+const NEEDS_AN_ANSWER_ON_THE_BOARD = "That one needs an answer on the board; say it on its own.";
+
+/**
+ * S195 review (DEF-0054, R-434): a question the bar's sentence opened (the
+ * Continue? / keep-or-scale / crew-outside pop-up, or the split pop-up) that is
+ * ended by anything OTHER than its own buttons -- a pop-up opened by hand
+ * (Enter on a track, a drag on an empty track, a panel drop), or the board
+ * changing root -- answers the sentence `cancelled`, once (the reporter's own
+ * latch), so no turn is left waiting for ever on a pop-up that is gone. A
+ * create pop-up is never ended this way: it may be an auto-pressed one whose
+ * write is in flight (see `supersedePopup`).
+ */
+const cancelledQuestions = new WeakSet<object>();
+function cancelStandingQuestion(p: PopoverState | null): void {
+  if (p === null || (p.kind !== "confirm" && p.kind !== "split")) return;
+  // Once per pop-up: `supersedePopup` and the replacement effect may both see
+  // the same one, and a reporter handed a plain function must hear one answer.
+  if (cancelledQuestions.has(p)) return;
+  cancelledQuestions.add(p);
+  p.commandResult?.({ kind: "cancelled" });
+}
+
+/**
+ * S51 review fix (blocker 2): the pure decision half of `retimeAssignment`'s
+ * assignment branch (attachment by containment, D66; the R-365
+ * attachment-change ask; the R-031 keep-or-scale ask), extracted so the
+ * lot-aware `retimeAssignmentForLot` (below) can ask the SAME questions
+ * without ever opening a popover for them -- it rejects instead. Pure: no
+ * `setPopover`, no mutation; `runWarnMirrors` is returned as a thunk so a
+ * caller only pays for the R-361 mirror toasts once it has actually decided
+ * to write.
+ */
+function planAssignmentRetime(
+  a: IndexedAssignment,
+  nodeId: string,
+  homeRun: IndexedRun | null,
+  candidate: Range,
+  index: BoardIndex,
+  ctx: ToastResolveCtx,
+  toast: ReturnType<typeof useSchedulerToast>,
+  dateFormat: DateFormat,
+  resizeAbsences: readonly AbsenceRow[],
+): {
+  edit: AssignmentFieldEdit;
+  /** R-365: null when no ask is needed (same run both sides, or an
+   *  already-direct chip staying direct); otherwise the message an ask
+   *  would show. */
+  attachmentMessage: string | null;
+  /** R-031: null when no ask is needed. */
+  keepOrScale: { message: string; typed: number; unit: string | null; scaledQty: number } | null;
+  /** S195-D: the ONE plain sentence the bar says while the first of those
+   *  asks stands (the target's, which opens first, else the attachment's);
+   *  null when nothing is asked. */
+  waiting: string | null;
+  /** R-361: the warn-policy mirror toasts, run once, only by a caller that
+   *  has actually decided to write. */
+  runWarnMirrors: () => void;
+} {
+  // D66: does the candidate still fit its current run? A different run on
+  // the SAME node? No run at all (detach, or stay direct)? Picking the
+  // target by CONTAINMENT (assignmentFitsRun) is what makes D66's "dropping
+  // onto a run whose time range does not contain the assignment is refused
+  // before sending" hold BY CONSTRUCTION here.
+  const stillFitsHome = homeRun !== null && assignmentFitsRun(candidate, homeRun);
+  const runsHere = index.runsByNode.get(nodeId) ?? [];
+  const otherFit = stillFitsHome
+    ? null
+    : (runsHere.find(
+        (r) => (homeRun === null || r.id !== homeRun.id) && assignmentFitsRun(candidate, r),
+      ) ?? null);
+
+  const edit: AssignmentFieldEdit = {
+    timerange: {
+      start: minuteDate(index.windowStart, candidate.startMin),
+      end: minuteDate(index.windowStart, candidate.endMin),
+    },
+  };
+  if (!stillFitsHome) {
+    if (otherFit) {
+      edit.runId = otherFit.id;
+      edit.productId = null;
+    } else if (homeRun !== null) {
+      // Detach: mirrors `delete_run`'s own detach-mode UPDATE (docs/api.md
+      // §3) — `run_id = NULL, product_id = <run's product>`, both in the
+      // same patch.
+      edit.runId = null;
+      edit.productId = homeRun.productId;
+    }
+    // else: was already direct and still fits no run — no runId/productId
+    // change, just the time move.
+  }
+
+  // R-365 / D66: the RUN the candidate ends up attached to — the same
+  // choice `edit` above already made.
+  const targetRun = stillFitsHome ? homeRun : otherFit;
+  const runLabel = (run: IndexedRun | null): string | null => {
+    if (run === null) return null;
+    const p = productViewFor(run, index.productById);
+    return `${p?.name ?? "Run"} ${ctx.formatRange?.(run.startMin, run.endMin) ?? ""}`.trim();
+  };
+  // D110: a departed person's row has `operatorId === null` — nobody to
+  // name in the prompt, so it falls back the same way the mirror toasts do.
+  const person =
+    a.operatorId !== null
+      ? (index.operatorById.get(a.operatorId)?.displayName ?? "This person")
+      : "This person";
+  const attachmentMessage =
+    (homeRun?.id ?? null) === (targetRun?.id ?? null)
+      ? null
+      : attachmentChangeMessage({ person, from: runLabel(homeRun), to: runLabel(targetRun) });
+
+  // R-031: a TYPED target is a total for the block's window, so a resize
+  // that changes the window's length changes what the number means.
+  const oldMinutes = a.endMin - a.startMin;
+  const newMinutes = candidate.endMin - candidate.startMin;
+  const scaled =
+    a.targetQty !== null && newMinutes !== oldMinutes
+      ? scaledTarget(a.targetQty, oldMinutes, newMinutes)
+      : null;
+  const keepOrScale =
+    a.targetQty !== null && scaled !== null && scaled !== a.targetQty
+      ? {
+          message: targetResizeMessage({
+            person,
+            qty: a.targetQty,
+            unit: a.targetUnit,
+            oldMinutes,
+            newMinutes,
+            scaled,
+          }),
+          typed: a.targetQty,
+          unit: a.targetUnit,
+          scaledQty: scaled,
+        }
+      : null;
+
+  const runWarnMirrors = () => {
+    // ⭐ R-361: this PATCH sets `timerange` (a resize on the block's edge, or
+    // a same-cell nudge) — migration 0070's `assignments_resize_guard` asks
+    // `check_eligibility`/`absence_overlap` on it. Under `warn` the client
+    // runs the SAME two mirrors the create/reassign pop-ups already run. A
+    // departed person's row (`a.operatorId === null`, D110) has nobody to
+    // ask about and is skipped, matching the trigger's own guard.
+    if (a.operatorId !== null && policyForNode(index, nodeId) === "warn") {
+      const operatorId = a.operatorId;
+      const windowEnd = minuteDate(index.windowStart, candidate.endMin);
+      const operatorRecord = index.operatorById.get(operatorId);
+      const nodeName = index.nodeById.get(nodeId)?.name ?? nodeId;
+      const operatorName = operatorRecord?.displayName ?? operatorId;
+
+      if (operatorRecord) {
+        const requiredSkills = index.skillsForNode.get(nodeId) ?? [];
+        const gaps = certificateGaps(operatorRecord, requiredSkills, windowEnd);
+        if (gaps.length > 0) {
+          toast.info(
+            `1 of the crew (${operatorName}) not certified for ${nodeName} — override recorded.`,
+          );
+        }
+      }
+
+      const absenceHit = absenceGaps(resizeAbsences, operatorId, {
+        start: minuteDate(index.windowStart, candidate.startMin),
+        end: windowEnd,
+      });
+      if (absenceHit !== null) {
+        const when = leaveLine(absenceHit, dateFormat, index.zone);
+        toast.info(`1 of the crew moved over leave — ${operatorName}: ${when}. Override recorded.`);
+      }
+    }
+  };
+
+  // A departed person's row keeps the name it was remembered under (D110).
+  const personName = operatorViewFor(a, index.operatorById)?.displayName ?? null;
+  const jobName = (run: IndexedRun | null): string | null =>
+    run === null ? null : (productViewFor(run, index.productById)?.name ?? "Run");
+  const waiting =
+    keepOrScale !== null
+      ? targetWaiting(personName)
+      : attachmentMessage !== null
+        ? attachmentWaiting({ person: personName, from: jobName(homeRun), to: jobName(targetRun) })
+        : null;
+
+  return { edit, attachmentMessage, keepOrScale, waiting, runWarnMirrors };
+}
+
+/**
+ * S51 review fix (blocker 2): the pure decision half of `retimeRun`'s
+ * resize branch (the overlap refusal, the "N crew fall outside" ask),
+ * extracted the same way `planAssignmentRetime` is, for `retimeRunForLot`
+ * (below).
+ */
+function planRunRetime(
+  run: IndexedRun,
+  nodeId: string,
+  candidate: Range,
+  index: BoardIndex,
+  ctx: ToastResolveCtx,
+): {
+  edit: RunFieldEdit;
+  /** Not a question — an outright refusal (an overlap): nothing to ask,
+   *  nothing written, just why. */
+  overlapMessage: string | null;
+  /** The R-361-style "N crew fall outside the new run window. Continue?" ask. */
+  crewMessage: string | null;
+} {
+  const currentRunsOnNode = index.runsByNode.get(nodeId) ?? [];
+  const currentCrew = index.assignmentsByRun.get(run.id) ?? [];
+
+  const overlap = findRunOverlap(candidate, currentRunsOnNode, run.id);
+  const overlapMessage = overlap
+    ? `${index.nodeById.get(nodeId)?.name ?? nodeId} already runs ${productViewFor(overlap, index.productById)?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`
+    : null;
+
+  let crewMessage: string | null = null;
+  if (!overlap && currentCrew.length > 0) {
+    const { clipped, stranded } = classifyCrewAgainstRun(candidate, currentCrew);
+    const affected = clipped.length + stranded.length;
+    if (affected > 0) {
+      crewMessage = `${affected} crew assignment${affected === 1 ? "" : "s"} fall outside the new run window. Continue?`;
+    }
+  }
+
+  const edit: RunFieldEdit = {
+    timerange: {
+      start: minuteDate(index.windowStart, candidate.startMin),
+      end: minuteDate(index.windowStart, candidate.endMin),
+    },
+  };
+
+  return { edit, overlapMessage, crewMessage };
+}
+
 export function useDragGesture(args: UseDragGestureArgs) {
-  const { rootPath, from, to, index, zoomIndex } = args;
+  const { rootPath, from, to, index, zoomIndex, dateFormat } = args;
 
   const createRun = useCreateRun(rootPath, from, to);
   const updateRunFields = useUpdateRunFields(rootPath, from, to);
   const deleteRun = useDeleteRun(rootPath, from, to);
   const moveRun = useMoveRun(rootPath, from, to); // D57 — first caller (brief §1 item 3)
+  // DEF-0048: the lot's absence record refreshes the absences reads after.
+  const queryClient = useQueryClient();
   const createAssignment = useCreateAssignment(rootPath, from, to);
   const updateAssignmentFields = useUpdateAssignmentFields(rootPath, from, to);
+  const reassign = useReassignAssignment(rootPath, from, to); // R-343, first caller
+  const move = useMoveAssignment(rootPath, from, to); // S41-c, first caller
+  const deleteAssignment = useDeleteAssignment(rootPath, from, to);
   const applySplitCoverage = useApplySplitCoverage(rootPath, from, to); // D61/D62 — first caller
+
+  // R-361: the same absences list `BoardPage` already reads beside the board
+  // (`useAbsences`, R-357) — a SECOND subscription to the identical query key
+  // (`absenceKeys.all()`), not a new prop threaded down from `BoardPage`
+  // (outside this lane's owned files). React Query dedupes by key: this
+  // shares BoardPage's own cache entry and fetch rather than doubling the
+  // network read. Gated the same shape `BoardPage` gates its own read with
+  // (a resolved identity and a real root), close enough that an unauthenticated
+  // or not-yet-placed board never fires it — the mirror is best-effort for the
+  // toast under `warn` only, never the authority (the server's silent trigger
+  // is), so a slightly different readiness window changes nothing about
+  // correctness.
+  const resizeAbsencesQuery = useAbsences(args.sessionUserId !== null && rootPath !== "");
+  const resizeAbsences = useMemo(() => resizeAbsencesQuery.data ?? [], [resizeAbsencesQuery.data]);
   const toast = useSchedulerToast();
 
   const [activeDrag, setActiveDrag] = useState<InternalDragState | null>(null);
   const [popover, setPopover] = useState<PopoverState | null>(null);
+  // S195-D: the pop-up standing NOW, readable from a callback that must not be
+  // rebuilt on every pop-up change (the split opener's reporter, and
+  // `supersedePopup`). Assigned every render, like `dragRef` below.
+  const popoverRef = useRef<PopoverState | null>(null);
+  popoverRef.current = popover;
+  // The race the review lane found: `<CreatePopover>` renders unkeyed at a
+  // stable position in `BoardPage.tsx`, so a second typed command opening a
+  // create popover while an earlier one is still in flight (its own write
+  // not yet settled) would previously just UPDATE that component's props in
+  // place -- the mount-only R-384 auto-press effect never re-arms, and the
+  // second command's popover silently never presses Create. Every opener
+  // that sets a `kind: "create"` popover stamps a fresh `seq` from this
+  // ref; `BoardPage` keys `<CreatePopover>` on it, so each open is a new
+  // mount with its own `autoFiredRef`, however similar its props are to the
+  // last one's.
+  const createSeqRef = useRef(0);
   // Mirrors `activeDrag` for handlers that must read the latest value
   // without depending on it (keeps the pointer handlers' identity stable
   // across renders, per §13 item 4 — one add, one matching cleanup).
   const dragRef = useRef<InternalDragState | null>(null);
   dragRef.current = activeDrag;
+
+  // DEF-0015: the viewer answer, mirrored into a ref so the pointer/keyboard
+  // handlers below can read the latest value without listing it as a
+  // dependency (same pattern as `dragRef`, keeping their identity stable).
+  const canPlaceRef = useRef(args.canPlace);
+  canPlaceRef.current = args.canPlace;
 
   // D58: the drop-target row resolver. `BoardGrid` is the one place that
   // owns the scroll container, the row offsets, and the collapse-filtered
@@ -322,7 +831,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     dropRowResolverRef.current = fn;
   }, []);
 
-  const ctx = toastCtx(index);
+  const ctx = toastCtx(index, dateFormat);
 
   // --- T13: identity change cancels any in-flight drag, no mutation. -----
   // T25: a SPLIT popover open when identity changes is closed too, with
@@ -359,6 +868,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     if (lastRootPathRef.current !== args.rootPath) {
       lastRootPathRef.current = args.rootPath;
       if (dragRef.current) setActiveDrag(null);
+      cancelStandingQuestion(popoverRef.current);
       setPopover(null);
     }
   }, [args.rootPath]);
@@ -394,8 +904,23 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const failWith = useCallback(
     (err: unknown, label: string) => {
       const se = isSchedulerError(err) ? err : toSchedulerError(err);
+      // R-465 (S195-D): busy on a place the caller cannot read -- the place and
+      // the hours, exactly as the bar says them, with nothing after it (there
+      // is no numbers to explain and no "try the split").
+      if (se.kind === "CapacityExceeded" && se.elsewhere !== undefined) {
+        toast.refused(se.elsewhere);
+        return;
+      }
       if (se.kind === "CapacityExceeded" || se.kind === "NotEligible" || se.kind === "RunOverlap") {
-        toast.schedulerError(se, ctx);
+        // F-154 review fix (S61-a): `buildSchedulerErrorToast` no longer
+        // bakes " — reverted." into its own message (that word was never
+        // true for `runLot`'s own catch, which never applies an optimistic
+        // move at all) -- THIS caller genuinely reverted one (the drag's
+        // own optimistic patch), so it appends the suffix itself, through
+        // `kind`'s own class rather than hardcoding "crit" (NotEligible is
+        // "warn").
+        const { message, kind } = buildSchedulerErrorToast(se, ctx);
+        toast.reverted(message, kind);
         return;
       }
       toast.reverted(`${label}: ${describeSchedulerError(se)}`);
@@ -403,11 +928,123 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [toast, ctx],
   );
 
+  /**
+   * R-465 (S195-D): after a `CapacityExceeded` refusal, ask `capacity_probe`
+   * the same question (the same person, hours and share, the block being moved
+   * left out) and, when a block the caller cannot read is what makes the person
+   * busy, hand the refusal back carrying the sentence -- the place and the
+   * hours -- which the toast, the bar and the pop-ups then say instead of the
+   * numbers (`busyElsewhere.ts`). Any other error, an `attempt` of null (the
+   * caller has no person or hours to ask about), a probe that fails and a probe
+   * that finds nothing outside all hand back the refusal as it was: today's
+   * words stand.
+   */
+  const explainRefusal = useCallback(
+    (err: unknown, attempt: CapacityAttempt | null): Promise<SchedulerError> => {
+      const se = isSchedulerError(err) ? err : toSchedulerError(err);
+      if (attempt === null) return Promise.resolve(se);
+      return explainCapacityRefusal(se, attempt, {
+        probe: probeCapacity,
+        personName: index.operatorById.get(attempt.operatorId)?.displayName ?? "That person",
+        zone: index.zone,
+        dateFormat,
+      });
+    },
+    [index, dateFormat],
+  );
+
+  /** The capacity attempt an EXISTING block's own write makes: its person, the
+   *  hours it is being given, its share, itself left out. `null` for a block
+   *  with nobody on it (a departed person's row has nobody to be busy). */
+  const attemptOfBlock = useCallback(
+    (
+      a: IndexedAssignment,
+      range: { start: Date; end: Date } | null,
+      efficiencyPercent: number = a.efficiencyPercent,
+    ): CapacityAttempt | null => {
+      if (a.operatorId === null) return null;
+      return {
+        operatorId: a.operatorId,
+        start: range?.start ?? minuteDate(index.windowStart, a.startMin),
+        end: range?.end ?? minuteDate(index.windowStart, a.endMin),
+        efficiencyPercent,
+        excludeAssignmentId: a.id,
+      };
+    },
+    [index],
+  );
+
+  /**
+   * S196-A (DEF-0060, F-239, R-465, R-431): the command bar's pre-check. Asked
+   * of every resolved step that places a person over a span (a create, a move
+   * to other hours or another cell, a re-time) BEFORE the bar prints the
+   * readout or asks a question whose every answer leads to that write. Answers
+   * `busy_elsewhere` with the R-465 sentence when a block the caller cannot
+   * read makes the person busy; `overlap` (S200-A, R-468) when they are busy
+   * on blocks the caller CAN read -- a single sentence ignores that answer
+   * (the split pop-up is its answer, opened after the create), a lot asks in
+   * the bar; `ok` for everything else (they fit, the probe failed, the step
+   * has nobody on it). The attempt is the one the write itself would make: a
+   * create's from `buildCreateAssignmentInput` (the writer's own builder), an
+   * existing block's from `attemptOfBlock` (itself left out), so the probe and
+   * the server are asked the same thing. Never a gate: the write still is.
+   */
+  const precheckCommandStep = useCallback(
+    (step: ResolvedCommand | ResolvedMove): Promise<PrecheckResult> => {
+      let attempt: CapacityAttempt | null = null;
+      const startEnd = {
+        start: minuteDate(index.windowStart, step.range.startMin),
+        end: minuteDate(index.windowStart, step.range.endMin),
+      };
+      if (step.intent === "assign" && step.target.kind !== "retime") {
+        const input = buildCreateAssignmentInput(index.windowStart, {
+          nodeId: step.nodeId,
+          range: step.range,
+          operatorId: step.operatorId,
+          target: step.target,
+        });
+        attempt = {
+          operatorId: step.operatorId,
+          start: input.start,
+          end: input.end,
+          efficiencyPercent: input.efficiencyPercent ?? 100,
+        };
+      } else {
+        const assignmentId =
+          step.intent === "move"
+            ? step.assignmentId
+            : step.target.kind === "retime"
+              ? step.target.assignmentId
+              : null;
+        const a = assignmentId !== null ? index.assignmentById.get(assignmentId) : undefined;
+        if (a !== undefined) attempt = attemptOfBlock(a, startEnd);
+      }
+      if (attempt === null) return Promise.resolve<PrecheckResult>({ kind: "ok" });
+      return precheckBeforeWrite(attempt, {
+        probe: probeCapacity,
+        personName: index.operatorById.get(attempt.operatorId)?.displayName ?? "That person",
+        zone: index.zone,
+        dateFormat,
+      });
+    },
+    [index, dateFormat, attemptOfBlock],
+  );
+
   // --------------------------------------------------------------------
   // Block drag (move / resize) — RunBand, AssignmentChip, DirectBlock.
   // --------------------------------------------------------------------
 
   const beginBlockDrag = useCallback((d: BlockDragDescriptor, e: React.PointerEvent) => {
+    // F-233 (S194-G): a row the server has not answered for yet (its own
+    // create still in flight, `optimisticId.ts`) is drawn at once but not
+    // yet grabbable -- no pointer capture, no drag state, no popover (the
+    // click-to-open-popover path below only runs once this has). The
+    // person sees the same chip they just placed; it simply does not move
+    // for them until the real row lands, at which point an ordinary
+    // refetch replaces this handler's own descriptor with a real id and
+    // the block becomes a normal one.
+    const rowId = subjectRowId(d.subject);
+    if (rowId !== null && isPlaceholderId(rowId)) return;
     e.stopPropagation();
     setPopover(null);
     const hit = hitTestBlock(d.offsetXPx, d.blockWidthPx, d.handlePx);
@@ -427,7 +1064,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       pointerId: e.pointerId,
       pxPerHour: d.pxPerHour,
       windowMinutes: d.windowMinutes,
-      snap: snapConfigFor(d.zoomIndex, d.template, d.dayCount),
+      snap: snapConfigFor(d.zoomIndex, d.template, d.dayAxis),
       originClientX: e.clientX,
       originClientY: e.clientY,
       altKey: e.altKey,
@@ -483,16 +1120,29 @@ export function useDragGesture(args: UseDragGestureArgs) {
         shiftPoints: d.snap.shiftPoints,
       });
       const snappedDelta = snapped - (edge === "start" ? original.startMin : original.endMin);
-      let candidate = resizeRange(original, edge, snappedDelta, d.windowMinutes);
+      // R-463: a POINTER resize's floor is the zoom's own snap step, not the
+      // bare `MIN_DURATION_MINUTES` (1) -- `snapped` above is always a real
+      // grid point, but the FIXED edge (`original.startMin`/`endMin`) is not
+      // (a block can start or end off-grid), so clamping against only the
+      // 1-minute floor could land the moving edge on a non-grid minute right
+      // at the limit, a sliver nobody actually dragged to. Holding Alt
+      // already disables snapping entirely (`snapMinute`'s own rule, "gives
+      // whole minutes") -- the same escape hatch now also drops the floor to
+      // the true minimum, since a person holding Alt is explicitly asking
+      // for finer-than-grid control. See `resizeRange`'s own comment
+      // (interaction.ts) for why this is a drag-only floor: the typed/spoken
+      // paths never call this function.
+      const dragFloorMinutes = altKey ? MIN_DURATION_MINUTES : d.snap.snapMinutes;
+      let candidate = resizeRange(original, edge, snappedDelta, d.windowMinutes, dragFloorMinutes);
       if (!(bounds.startMin === 0 && bounds.endMin === d.windowMinutes)) {
         candidate = {
           startMin: Math.max(candidate.startMin, bounds.startMin),
           endMin: Math.min(candidate.endMin, bounds.endMin),
         };
         if (edge === "start") {
-          candidate.startMin = Math.min(candidate.startMin, original.endMin - MIN_DURATION_MINUTES);
+          candidate.startMin = Math.min(candidate.startMin, original.endMin - dragFloorMinutes);
         } else {
-          candidate.endMin = Math.max(candidate.endMin, original.startMin + MIN_DURATION_MINUTES);
+          candidate.endMin = Math.max(candidate.endMin, original.startMin + dragFloorMinutes);
         }
       }
       return candidate;
@@ -504,6 +1154,10 @@ export function useDragGesture(args: UseDragGestureArgs) {
     (e: React.PointerEvent) => {
       const d = dragRef.current;
       if (!d || d.subject.kind === "new" || d.subject.kind === "panel") return;
+      // DEF-0015: a viewer's block never follows the pointer — the move/resize
+      // does not start. `moved` stays false, so the pointerup opens the block's
+      // read-only pop-up (the click fallback) rather than committing anything.
+      if (!canPlaceRef.current) return;
       const movedPx = Math.hypot(e.clientX - d.originClientX, e.clientY - d.originClientY);
       const moved = d.moved || movedPx >= DRAG_THRESHOLD_PX;
       const candidate = computeBlockCandidate(d, e.clientX, e.altKey);
@@ -563,14 +1217,349 @@ export function useDragGesture(args: UseDragGestureArgs) {
    *  `window.confirm` — a blocking browser dialog that "cannot be styled
    *  or tested through the DOM as it stands" (brief §9 item 2). */
   const askConfirm = useCallback(
-    (message: string, anchor: { x: number; y: number }, onConfirm: () => void) => {
-      setPopover({ kind: "confirm", message, anchor, onConfirm });
+    (
+      message: string,
+      anchor: { x: number; y: number },
+      onConfirm: () => void,
+      commandResult?: PopupReporter,
+    ) => {
+      setPopover({
+        kind: "confirm",
+        message,
+        anchor,
+        onConfirm,
+        ...(commandResult ? { commandResult } : {}),
+      });
     },
     [],
   );
 
+  /** R-031: the same shell with more than one way to say yes. */
+  const askChoice = useCallback(
+    (
+      title: string,
+      message: string,
+      anchor: { x: number; y: number },
+      choices: readonly ConfirmChoice[],
+      commandResult?: PopupReporter,
+    ) => {
+      setPopover({
+        kind: "confirm",
+        title,
+        message,
+        anchor,
+        onConfirm: () => {},
+        choices,
+        ...(commandResult ? { commandResult } : {}),
+      });
+    },
+    [],
+  );
+
+  /**
+   * R-385: `commitBlockDrag`'s assignment branch, EXTRACTED so an edge-resize
+   * drag and the typed command bar's re-time path (`retimeAssignmentFromCommand`
+   * below) commit through the SAME function — attachment by containment
+   * (D66), the R-365 attachment prompt, the R-031 keep-or-scale prompt, the
+   * R-361 warn mirrors and the one `updateAssignmentFields` PATCH are all the
+   * drag's own code, never a second copy. Moved verbatim from the old
+   * `else if (d.subject.kind === "assignment")` branch; the only
+   * substitutions are `d.nodeId` -> `nodeId`, `d.homeRun` -> `homeRun`,
+   * `d.subject.assignment` -> `a`, `revertLabel(d.subject)` -> `revert`
+   * (each now a parameter instead of read off the drag descriptor).
+   */
+  const retimeAssignment = useCallback(
+    (
+      a: IndexedAssignment,
+      nodeId: string,
+      homeRun: IndexedRun | null,
+      candidate: Range,
+      anchor: { x: number; y: number },
+      revert: string,
+      // S195-D (DEF-0054): the bar's reporter, set ONLY when a typed sentence
+      // is the caller -- a drag passes none and nothing below changes for it.
+      report?: PopupReporter,
+    ) => {
+      const plan = planAssignmentRetime(
+        a,
+        nodeId,
+        homeRun,
+        candidate,
+        index,
+        ctx,
+        toast,
+        dateFormat,
+        resizeAbsences,
+      );
+
+      // R-365: everything from the R-361 mirror toasts through the write
+      // itself is deferred until this runs so a prompted drop toasts and
+      // writes NOTHING until Continue — the mirrors must not run ahead of
+      // the confirm, because a toast (unlike the mutation) cannot be
+      // un-sent on Cancel.
+      const commitAssignmentMove = (edit: AssignmentFieldEdit) => {
+        // P1-4e considered, and rejected, running a `capacity_probe` +
+        // split-coverage popover ahead of an EXISTING chip's own time move
+        // (brief §5 step 1 lists "chip move" as a split-coverage trigger).
+        // `apply_split_coverage`'s `p_adjustments` shape (docs/api.md §3)
+        // only ever carries `{assignment_id, efficiency}` — no
+        // `timerange` — so an existing assignment that is both MOVING and
+        // needing its efficiency dialled down cannot be expressed as that
+        // call's `p_new_assignment` (reserved for a brand-new INSERT)
+        // either. Left as the ordinary `updateAssignmentFields` PATCH
+        // below; the `assignments_capacity` trigger still guards it
+        // exactly as before P1-4e, and a rejection surfaces through the
+        // existing `CapacityExceeded` toast path (`failWith`), unchanged.
+        plan.runWarnMirrors();
+        updateAssignmentFields.mutate(
+          { assignmentId: a.id, edit },
+          {
+            // S195-D: what became of the write, told to the sentence that
+            // asked for it (nothing to tell for a drag).
+            onSuccess: () => report?.({ kind: "written" }),
+            onError: (err) => {
+              // R-465: a refusal for a block the caller cannot see is asked
+              // about first, so the toast and the bar say the same true words.
+              void explainRefusal(err, attemptOfBlock(a, edit.timerange ?? null)).then((se) => {
+                failWith(se, revert);
+                if (report) {
+                  report({ kind: "refused", message: buildSchedulerErrorToast(se, ctx).message });
+                }
+              });
+            },
+          },
+        );
+      };
+
+      const proceed = (edit: AssignmentFieldEdit) => {
+        if (plan.attachmentMessage === null) {
+          // No attachment change (same run both sides, or an already-direct
+          // chip staying direct) — R-365 only asks when the run a chip
+          // belongs to would change, so this is the unchanged, un-prompted
+          // path.
+          commitAssignmentMove(edit);
+        } else {
+          // R-365: Cancel needs no extra code here. `endBlockDrag` (above)
+          // already cleared `activeDrag` before calling `commitBlockDrag`
+          // (T11), and `commitAssignmentMove` has not run yet, so nothing
+          // has been written or optimistically patched — the chip is
+          // already back where the (untouched) index has it. `confirmNo`
+          // just closes the popover.
+          askConfirm(plan.attachmentMessage, anchor, () => commitAssignmentMove(edit), report);
+        }
+      };
+
+      // R-031: a TYPED target is a total for the block's window, so a
+      // resize that changes the window's length changes what the number
+      // means. Ask which the person meant — keep the total, or scale it to
+      // the new length — before anything is written. Cancel writes
+      // nothing, exactly as R-365's own prompt.
+      if (plan.keepOrScale !== null) {
+        const { typed, unit, scaledQty, message } = plan.keepOrScale;
+        const unitSuffix = unit ? ` ${unit}` : "";
+        askChoice(
+          "Keep or scale?",
+          message,
+          anchor,
+          [
+            { label: `Keep ${typed}${unitSuffix}`, onChoose: () => proceed(plan.edit) },
+            {
+              label: `Scale to ${scaledQty}${unitSuffix}`,
+              onChoose: () => proceed({ ...plan.edit, targetQty: scaledQty }),
+            },
+          ],
+          report,
+        );
+        return;
+      }
+      proceed(plan.edit);
+    },
+    [
+      index,
+      ctx,
+      toast,
+      updateAssignmentFields,
+      failWith,
+      askConfirm,
+      askChoice,
+      dateFormat,
+      resizeAbsences,
+      explainRefusal,
+      attemptOfBlock,
+    ],
+  );
+
+  /**
+   * S51 review fix (blocker 2): the several-lot's lot-aware re-time writer
+   * for an `assign`/`move` resolved to `target.kind === "retime"` --
+   * `planAssignmentRetime`'s SAME decision (attachment by containment, the
+   * R-365 attachment ask, the R-031 keep-or-scale ask), but a would-be ask
+   * REJECTS instead of opening a popover (D127: the yes already given was
+   * for the readouts shown; a further question mid-lot must stop the lot),
+   * and a clean plan awaits the SAME `updateAssignmentFields` mutation
+   * `retimeAssignment` sends, via `mutateAsync` so the lot can observe it.
+   */
+  const retimeAssignmentForLot = useCallback(
+    async (r: { assignmentId: string; range: Range; readout: string }): Promise<void> => {
+      const a = index.assignmentById.get(r.assignmentId);
+      if (!a) {
+        throw new LotStepRefused(`${r.readout} is no longer on the board.`);
+      }
+      const homeRun = a.runId !== null ? (index.runById.get(a.runId) ?? null) : null;
+      const plan = planAssignmentRetime(
+        a,
+        a.nodeId,
+        homeRun,
+        r.range,
+        index,
+        ctx,
+        toast,
+        dateFormat,
+        resizeAbsences,
+      );
+      if (plan.attachmentMessage !== null || plan.keepOrScale !== null) {
+        throw new LotStepRefused(NEEDS_AN_ANSWER_ON_THE_BOARD);
+      }
+      plan.runWarnMirrors();
+      try {
+        await updateAssignmentFields.mutateAsync({ assignmentId: a.id, edit: plan.edit });
+      } catch (err) {
+        throw await explainRefusal(err, attemptOfBlock(a, plan.edit.timerange ?? null));
+      }
+    },
+    [
+      index,
+      ctx,
+      toast,
+      updateAssignmentFields,
+      dateFormat,
+      resizeAbsences,
+      explainRefusal,
+      attemptOfBlock,
+    ],
+  );
+
+  /**
+   * S41-a: `commitBlockDrag`'s run-RESIZE branch, EXTRACTED so an edge-resize
+   * drag and the typed command bar's re-time-a-job path
+   * (`retimeRunFromCommand` below) commit through the SAME function — the
+   * overlap refusal, the "N crew assignments fall outside the new run
+   * window. Continue?" prompt and the one `updateRunFields` PATCH are all the
+   * drag's own code, never a second copy. Moved verbatim from the old
+   * "// Resize: unchanged from P1-4b except the confirm step" section; the
+   * only substitutions are `d.nodeId` -> `nodeId`, `d.subject` in
+   * `revertLabel(d.subject)` -> `revert` (a parameter instead of read off the
+   * drag descriptor), and `currentRunsOnNode`/`currentCrew` recomputed here
+   * from `index` (the move branch above still keeps its own copies of those
+   * two lines — this function does not share the caller's locals).
+   */
+  const retimeRun = useCallback(
+    (
+      run: IndexedRun,
+      nodeId: string,
+      candidate: Range,
+      anchor: { x: number; y: number },
+      revert: string,
+      // S195-D (DEF-0054): the bar's reporter -- see `retimeAssignment`.
+      report?: PopupReporter,
+    ) => {
+      const plan = planRunRetime(run, nodeId, candidate, index, ctx);
+      // Resize: unchanged from P1-4b except the confirm step (§9 debt 2).
+      if (plan.overlapMessage !== null) {
+        toast.reverted(plan.overlapMessage);
+        return;
+      }
+      const commitResize = () => {
+        updateRunFields.mutate(
+          { runId: run.id, edit: plan.edit },
+          {
+            onSuccess: () => report?.({ kind: "written" }),
+            onError: (err) => {
+              failWith(err, revert);
+              if (report) {
+                const se = isSchedulerError(err) ? err : toSchedulerError(err);
+                report({ kind: "refused", message: buildSchedulerErrorToast(se, ctx).message });
+              }
+            },
+          },
+        );
+      };
+      if (plan.crewMessage !== null) {
+        askConfirm(plan.crewMessage, anchor, commitResize, report);
+        return;
+      }
+      commitResize();
+    },
+    [index, ctx, toast, updateRunFields, failWith, askConfirm],
+  );
+
+  /**
+   * S51 review fix (blocker 2): the several-lot's lot-aware re-time writer
+   * for a `book` resolved to `retime_run` -- `planRunRetime`'s SAME
+   * decision (the overlap refusal, the "N crew fall outside" ask), but
+   * EITHER one rejects instead of toasting/asking, and a clean plan awaits
+   * the SAME `updateRunFields` mutation `retimeRun` sends.
+   */
+  const retimeRunForLot = useCallback(
+    async (r: { runId: string; range: Range; readout: string }): Promise<void> => {
+      const run = index.runById.get(r.runId);
+      if (!run) {
+        throw new LotStepRefused(`${r.readout} is no longer on the board.`);
+      }
+      const plan = planRunRetime(run, run.nodeId, r.range, index, ctx);
+      if (plan.overlapMessage !== null) {
+        throw new LotStepRefused(plan.overlapMessage);
+      }
+      if (plan.crewMessage !== null) {
+        throw new LotStepRefused(NEEDS_AN_ANSWER_ON_THE_BOARD);
+      }
+      await updateRunFields.mutateAsync({ runId: run.id, edit: plan.edit });
+    },
+    [index, ctx, updateRunFields],
+  );
+
+  /**
+   * DEF-0040 / R-461: a clear's job trim -- the job keeps the OTHER day's
+   * part of a shift across midnight. The SAME run PATCH `retimeRunForLot`
+   * sends (`updateRunFields`, `planRunRetime`'s own edit and overlap refusal),
+   * with one difference, on purpose: the "N crew fall outside" ask is NOT
+   * raised. By the time this step runs, the lot has already trimmed or
+   * removed every crew block the clear touched (people first, `planClear` in
+   * `resolve.ts`), but this callback's `index` is the board as it was when
+   * the yes was given, so `planRunRetime` would still count the untrimmed
+   * crew as stranded and refuse a lot that is right. The server has no rule
+   * that crew lie inside their run (migration 0079: "a run can legitimately
+   * be shrunk with its crew left outside it"; only the node must match,
+   * 0003's `assignments_check_run_consistency`), so nothing it would refuse
+   * is let through here; the ask it skips is the drag's courtesy.
+   */
+  const trimRunForLot = useCallback(
+    async (r: ResolvedRunTrim): Promise<void> => {
+      const run = index.runById.get(r.runId);
+      if (!run) {
+        throw new LotStepRefused(`${r.readout} is no longer on the board.`);
+      }
+      const plan = planRunRetime(run, run.nodeId, r.range, index, ctx);
+      if (plan.overlapMessage !== null) {
+        throw new LotStepRefused(plan.overlapMessage);
+      }
+      await updateRunFields.mutateAsync({ runId: run.id, edit: plan.edit });
+    },
+    [index, ctx, updateRunFields],
+  );
+
   const commitBlockDrag = useCallback(
     (d: InternalDragState, anchor: { x: number; y: number }) => {
+      // DEF-0015: a viewer never commits a move/resize. In practice `moved`
+      // can never become true for them (updateBlockDrag/handleBlockKeyDown are
+      // both gated), so this is defence-in-depth on the one write path.
+      if (!canPlaceRef.current) return;
+      // F-233 (S194-G): same defence-in-depth, for a placeholder subject --
+      // `beginBlockDrag`/`handleBlockKeyDown` already refuse to start a
+      // drag or nudge on one, so `moved` cannot become true for it either
+      // in practice; this is the one write path's own belt and braces.
+      const guardRowId = subjectRowId(d.subject);
+      if (guardRowId !== null && isPlaceholderId(guardRowId)) return;
       const candidate = d.candidate!;
       if (d.subject.kind === "run") {
         const run = d.subject.run;
@@ -634,8 +1623,73 @@ export function useDragGesture(args: UseDragGestureArgs) {
                       `${result.eligibilityWarnings.length} of the crew (${names}) not certified for ${destName} — override recorded.`,
                     );
                   }
+                  // R-357: the TWIN of the eligibility warning above, and the one
+                  // place the drag path used to swallow it. A warn-move carries
+                  // `absence_warnings` for every crew member moved onto a window
+                  // they are away for (D60: informational — the move already
+                  // succeeded). Named the way the create/reassign pop-ups name it:
+                  // the person, then `leaveLine`'s "On leave <dates>: reason" in
+                  // the plant's own date format. An entry in `absence_warnings` is
+                  // `absent:true` by construction (the server only emits away
+                  // crew), so `from`/`to` are non-null — guarded anyway, a mirror
+                  // never throws.
+                  //
+                  // R-359: `a.startsAt`/`a.endsAt` (present together on a
+                  // part-day hit) must ride along into `leaveLine`'s argument —
+                  // dropping them here is what silently turned a part-day
+                  // absence into a whole-day one. `index.zone` is the same
+                  // board zone `formatRange` above (line ~308) already reads;
+                  // an absent hit's hours must never print in UTC just because
+                  // this call site forgot to pass the zone it already has.
+                  if (result.absenceWarnings.length > 0) {
+                    const lines = result.absenceWarnings
+                      .map((w) => {
+                        const name =
+                          index.operatorById.get(w.operatorId)?.displayName ?? w.operatorId;
+                        const a = w.absence;
+                        const when =
+                          a.from !== null && a.to !== null
+                            ? leaveLine(
+                                {
+                                  from: a.from,
+                                  to: a.to,
+                                  reason: a.reason ?? "",
+                                  startsAt: a.startsAt,
+                                  endsAt: a.endsAt,
+                                },
+                                dateFormat,
+                                index.zone,
+                              )
+                            : "on leave";
+                        return `${name}: ${when}`;
+                      })
+                      .join("; ");
+                    toast.info(
+                      `${result.absenceWarnings.length} of the crew moved over leave — ${lines}. Override recorded.`,
+                    );
+                  }
                 },
-                onError: (err) => failWith(err, revertLabel(d.subject)),
+                onError: (err) => {
+                  // R-465: the crew member the server names is asked about
+                  // over the hours the move gives them -- the run's own shift
+                  // applied to their own block -- their block left out.
+                  const se0 = isSchedulerError(err) ? err : toSchedulerError(err);
+                  const member =
+                    se0.kind === "CapacityExceeded"
+                      ? currentCrew.find((c) => c.operatorId === se0.operatorId)
+                      : undefined;
+                  const shift = candidate.startMin - run.startMin;
+                  const attempt =
+                    member !== undefined
+                      ? attemptOfBlock(member, {
+                          start: minuteDate(index.windowStart, member.startMin + shift),
+                          end: minuteDate(index.windowStart, member.endMin + shift),
+                        })
+                      : null;
+                  void explainRefusal(se0, attempt).then((se) =>
+                    failWith(se, revertLabel(d.subject)),
+                  );
+                },
               },
             );
             return;
@@ -658,105 +1712,17 @@ export function useDragGesture(args: UseDragGestureArgs) {
           return;
         }
 
-        // Resize: unchanged from P1-4b except the confirm step (§9 debt 2).
-        const overlap = findRunOverlap(candidate, currentRunsOnNode, run.id);
-        if (overlap) {
-          const p = productViewFor(overlap, index.productById);
-          toast.reverted(
-            `${index.nodeById.get(d.nodeId)?.name ?? d.nodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`,
-          );
-          return;
-        }
-        const commitResize = () => {
-          updateRunFields.mutate(
-            {
-              runId: run.id,
-              edit: {
-                timerange: {
-                  start: minuteDate(index.windowStart, candidate.startMin),
-                  end: minuteDate(index.windowStart, candidate.endMin),
-                },
-              },
-            },
-            { onError: (err) => failWith(err, revertLabel(d.subject)) },
-          );
-        };
-        if (currentCrew.length > 0) {
-          const { clipped, stranded } = classifyCrewAgainstRun(candidate, currentCrew);
-          const affected = clipped.length + stranded.length;
-          if (affected > 0) {
-            askConfirm(
-              `${affected} crew assignment${affected === 1 ? "" : "s"} fall outside the new run window. Continue?`,
-              anchor,
-              commitResize,
-            );
-            return;
-          }
-        }
-        commitResize();
+        // S41-a: the resize path itself is `retimeRun` (extracted above) —
+        // the drag's run branch calls it for every mode but "move".
+        retimeRun(run, d.nodeId, candidate, anchor, revertLabel(d.subject));
       } else if (d.subject.kind === "assignment") {
-        const a = d.subject.assignment;
-        const nodeId = d.nodeId; // D66 is same-row only — a chip never crosses cells.
-        const homeRun = d.homeRun;
-
-        // D66: does the candidate still fit its current run? A different
-        // run on the SAME node? No run at all (detach, or stay direct)?
-        // Picking the target by CONTAINMENT (assignmentFitsRun) is what
-        // makes D66's "dropping onto a run whose time range does not
-        // contain the assignment is refused before sending" hold BY
-        // CONSTRUCTION here — we only ever select a run that already
-        // contains the candidate, so there is no separate rejection branch
-        // to write (see the agent report's assumptions section for the
-        // fuller reasoning, including the direct-assignment-onto-a-run
-        // direction this generalizes to, which the mockup's `startDirectDrag`
-        // does not attempt but which reuses the identical mechanism).
-        const stillFitsHome = homeRun !== null && assignmentFitsRun(candidate, homeRun);
-        const runsHere = index.runsByNode.get(nodeId) ?? [];
-        const otherFit = stillFitsHome
-          ? null
-          : (runsHere.find(
-              (r) => (homeRun === null || r.id !== homeRun.id) && assignmentFitsRun(candidate, r),
-            ) ?? null);
-
-        const edit: AssignmentFieldEdit = {
-          timerange: {
-            start: minuteDate(index.windowStart, candidate.startMin),
-            end: minuteDate(index.windowStart, candidate.endMin),
-          },
-        };
-        if (!stillFitsHome) {
-          if (otherFit) {
-            edit.runId = otherFit.id;
-            edit.productId = null;
-          } else if (homeRun !== null) {
-            // Detach: mirrors `delete_run`'s own detach-mode UPDATE
-            // (docs/api.md §3) — `run_id = NULL, product_id = <run's
-            // product>`, both in the same patch.
-            edit.runId = null;
-            edit.productId = homeRun.productId;
-          }
-          // else: was already direct and still fits no run — no
-          // runId/productId change, just the time move.
-        }
-
-        // P1-4e considered, and rejected, running a `capacity_probe` +
-        // split-coverage popover ahead of an EXISTING chip's own time
-        // move (brief §5 step 1 lists "chip move" as a split-coverage
-        // trigger). `apply_split_coverage`'s `p_adjustments` shape
-        // (docs/api.md §3) only ever carries `{assignment_id, efficiency}`
-        // — no `timerange` — so an existing assignment that is both
-        // MOVING and needing its efficiency dialled down cannot be
-        // expressed as that call's `p_new_assignment` (reserved for a
-        // brand-new INSERT) either. Making this case go through the split
-        // flow would need a second write after `apply_split_coverage`,
-        // which hazard #4 forbids ("never several calls"). Left as the
-        // ordinary `updateAssignmentFields` PATCH below; the
-        // `assignments_capacity` trigger still guards it exactly as
-        // before P1-4e, and a rejection surfaces through the existing
-        // `CapacityExceeded` toast path (`failWith`), unchanged.
-        updateAssignmentFields.mutate(
-          { assignmentId: a.id, edit },
-          { onError: (err) => failWith(err, revertLabel(d.subject)) },
+        retimeAssignment(
+          d.subject.assignment,
+          d.nodeId,
+          d.homeRun,
+          candidate,
+          anchor,
+          revertLabel(d.subject),
         );
       }
     },
@@ -766,10 +1732,13 @@ export function useDragGesture(args: UseDragGestureArgs) {
       toast,
       moveRun,
       updateRunFields,
-      updateAssignmentFields,
       failWith,
       revertLabel,
-      askConfirm,
+      dateFormat,
+      retimeRun,
+      retimeAssignment,
+      explainRefusal,
+      attemptOfBlock,
     ],
   );
 
@@ -819,9 +1788,14 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
   const beginTrackCreateDrag = useCallback(
     (d: TrackCreateDescriptor, e: React.PointerEvent) => {
+      // DEF-0015: a viewer cannot create — a click-drag on an empty track does
+      // nothing (the quiet choice: no drag begins, no status toast). Guarded
+      // here, before pointer capture, so nothing on the track ever starts.
+      if (!canPlaceRef.current) return;
+      cancelStandingQuestion(popoverRef.current);
       setPopover(null);
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
-      const snap = snapConfigFor(d.zoomIndex, d.template, d.dayCount);
+      const snap = snapConfigFor(d.zoomIndex, d.template, d.dayAxis);
       const rawAnchor = pxToMinutes(e.clientX - d.trackLeftPx, d.pxPerHour);
       const anchorMin = Math.max(
         0,
@@ -905,6 +1879,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const chips = shiftChipsFor(template, range.startMin, windowMinutes);
       setPopover({
         kind: "create",
+        seq: (createSeqRef.current += 1),
         nodeId,
         range,
         anchor: { x: e.clientX, y: e.clientY },
@@ -926,6 +1901,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
       e: React.KeyboardEvent,
       ctxDescriptor: Omit<BlockDragDescriptor, "handlePx" | "blockWidthPx" | "offsetXPx">,
     ) => {
+      // F-233 (S194-G): same door as `beginBlockDrag`'s own guard, for the
+      // keyboard path -- Enter/Space would otherwise open a popover on a
+      // row with no real id, and an arrow key would nudge it.
+      const rowId = subjectRowId(ctxDescriptor.subject);
+      if (rowId !== null && isPlaceholderId(rowId)) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -949,11 +1929,15 @@ export function useDragGesture(args: UseDragGestureArgs) {
         return;
       }
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      // DEF-0015: Enter/Space above still opens the block's pop-up (read-only
+      // for a viewer, decided in BoardPage) — but a viewer cannot nudge a block
+      // with the arrow keys, so the move/resize path stops here.
+      if (!canPlaceRef.current) return;
       e.preventDefault();
       const snap = snapConfigFor(
         ctxDescriptor.zoomIndex,
         ctxDescriptor.template,
-        ctxDescriptor.dayCount,
+        ctxDescriptor.dayAxis,
       );
       const step = snap.snapMinutes * (e.key === "ArrowLeft" ? -1 : 1);
       const existing = dragRef.current;
@@ -992,7 +1976,12 @@ export function useDragGesture(args: UseDragGestureArgs) {
       if (mode === "move") {
         candidate = moveWithinTrack(cur, step, base.windowMinutes);
       } else {
-        candidate = resizeRange(cur, "end", step, base.windowMinutes);
+        // R-463: same reasoning as the pointer resize's own `dragFloorMinutes`
+        // (above, `computeBlockCandidate`) -- a keyboard nudge moves by one
+        // whole snap step at a time, so its floor is that same step, never
+        // the bare 1-minute floor (which would let one keystroke shrink a
+        // block to a sliver when it starts close to its own fixed edge).
+        candidate = resizeRange(cur, "end", step, base.windowMinutes, base.snap.snapMinutes);
       }
       setActiveDrag({ ...base, candidate, moved: true });
     },
@@ -1017,12 +2006,17 @@ export function useDragGesture(args: UseDragGestureArgs) {
       d: { nodeId: string; template: ShiftTemplate | null; windowMinutes: number },
     ) => {
       if (e.key !== "Enter" && e.key !== " ") return;
+      // DEF-0015: Enter on an empty track opens the create pop-up, which a
+      // viewer may not do — nothing happens (the quiet choice, matching the
+      // click-drag path in beginTrackCreateDrag).
+      if (!canPlaceRef.current) return;
       e.preventDefault();
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const defaultRange = defaultShiftRange(d.template, d.windowMinutes);
       const chips = shiftChipsFor(d.template, defaultRange.startMin, d.windowMinutes);
       setPopover({
         kind: "create",
+        seq: (createSeqRef.current += 1),
         nodeId: d.nodeId,
         range: defaultRange,
         anchor: { x: rect.left + 8, y: rect.top + 8 },
@@ -1050,6 +2044,11 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
   const beginPanelDrag = useCallback(
     (operator: BoardOperator, e: React.PointerEvent) => {
+      // DEF-0015: a viewer has no panel to drag from (BoardPage hides it when
+      // !canPlace), but the gesture layer refuses the drag too, so the answer
+      // is decided in one place rather than resting on the panel being hidden.
+      if (!canPlaceRef.current) return;
+      cancelStandingQuestion(popoverRef.current);
       setPopover(null);
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
       const next: InternalDragState = {
@@ -1120,7 +2119,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
 
       const template = index.templateForNode.get(hit.nodeId) ?? null;
       const windowMinutes = index.windowMinutes;
-      const snap = snapConfigFor(zoomIndex, template, index.dayCount);
+      const snap = snapConfigFor(zoomIndex, template, index.dayAxis);
       const rawStart = Math.max(0, Math.min(windowMinutes, hit.minute));
       const startMin = Math.max(
         0,
@@ -1143,6 +2142,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
       const chips = shiftChipsFor(template, startMin, windowMinutes);
       setPopover({
         kind: "create",
+        seq: (createSeqRef.current += 1),
         nodeId: hit.nodeId,
         range: { startMin, endMin },
         anchor: { x: e.clientX, y: e.clientY },
@@ -1158,6 +2158,35 @@ export function useDragGesture(args: UseDragGestureArgs) {
   // --------------------------------------------------------------------
 
   const closePopover = useCallback(() => setPopover(null), []);
+
+  /**
+   * S195-D (DEF-0054, item 1e): a new typed sentence that opens its own
+   * question ends the one it finds standing -- the same rule a standing
+   * question of the bar's follows (F-162: a new sentence ends whatever
+   * stood). The earlier pop-up is answered as cancelled (once, through its own
+   * reporter) before the new one replaces it, so no turn is left waiting on a
+   * pop-up that is no longer there. Only a pop-up that is certainly on screen
+   * is ended this way: a create pop-up may be an auto-pressed one whose write
+   * is in flight, and that must never be reported cancelled.
+   */
+  const supersedePopup = useCallback((): void => {
+    cancelStandingQuestion(popoverRef.current);
+  }, []);
+
+  // S195 review: a question of a sentence's that is REPLACED by another pop-up
+  // (one opened by hand) is answered cancelled. Replaced by the same sentence's
+  // own next pop-up (keep-or-scale, then the attachment; a create, then its
+  // split) carries the same reporter and is left alone; a pop-up that simply
+  // closes (Continue, Cancel) is the answer's own business.
+  const lastPopoverRef = useRef<PopoverState | null>(null);
+  useEffect(() => {
+    const prev = lastPopoverRef.current;
+    lastPopoverRef.current = popover;
+    if (prev === null || popover === null || prev === popover) return;
+    const next = "commandResult" in popover ? popover.commandResult : undefined;
+    const before = "commandResult" in prev ? prev.commandResult : undefined;
+    if (before !== undefined && before !== next) cancelStandingQuestion(prev);
+  }, [popover]);
 
   // §9 debt 1: `saveRunFields`/`deleteRunWithMode`/`saveAssignmentFields`/
   // `removeAssignment` only ever receive an id — these two resolve a
@@ -1184,33 +2213,459 @@ export function useDragGesture(args: UseDragGestureArgs) {
     [index, ctx],
   );
 
+  /**
+   * R-385: the typed command bar's re-time path — the SAME function an edge-resize
+   * drag commits through (`retimeAssignment`), so attachment, the R-365 prompt, the
+   * R-031 keep-or-scale prompt, the R-361 warn mirrors and the one PATCH are all the
+   * drag's own.
+   *
+   * F-168 (R-421/R-427/R-434): answers the bar with `WriteOutcome` instead of
+   * `void` — `settleWrite` no longer has an `undefined` case to read as
+   * "written". The DIRECT plan (no attachment change, no keep-or-scale ask)
+   * is computed with the SAME pure `planAssignmentRetime` `retimeAssignmentForLot`
+   * already calls for its own lot-aware caller, and commits through the SAME
+   * `updateAssignmentFields` mutation, via `mutateAsync` so a refusal (an
+   * RLS-filtered PATCH, a race) is a `refused` outcome, never a readout the
+   * database never wrote (CLAUDE.md §4). A plan that NEEDS a decision (R-365's
+   * attachment ask, R-031's keep-or-scale ask) still opens through
+   * `retimeAssignment` below, UNCHANGED — that confirm/choice pop-up has no
+   * way back to the bar today (unlike `CreatePopover`'s own F-167 reporter),
+   * so this answers `popup` and the trace entry is left open exactly as every
+   * other popup case is; wiring that pop-up's own eventual answer back into
+   * the trace is a follow-up this lane does not attempt (F-168's brief scopes
+   * it to the four writers answering, not to every pop-up gaining a reporter).
+   */
+  const retimeAssignmentFromCommand = useCallback(
+    (r: {
+      assignmentId: string;
+      range: Range;
+      anchor: { x: number; y: number };
+      /** S195-D (DEF-0054): the bar's own way back, handed to the confirm
+       *  pop-up this may open -- Continue reports the write, Cancel reports
+       *  the cancel. */
+      onResult?: PopupReporter;
+    }): WriteOutcome | Promise<WriteOutcome> => {
+      if (!canPlaceRef.current) {
+        // DEF-0015, as commitBlockDrag.
+        return Promise.resolve({
+          kind: "refused",
+          message: "You cannot place anyone on this board.",
+        });
+      }
+      const a = index.assignmentById.get(r.assignmentId);
+      if (!a) {
+        const message = "That block is no longer on the board.";
+        toast.reverted(message);
+        return Promise.resolve({ kind: "refused", message });
+      }
+      const homeRun = a.runId !== null ? (index.runById.get(a.runId) ?? null) : null;
+      const plan = planAssignmentRetime(
+        a,
+        a.nodeId,
+        homeRun,
+        r.range,
+        index,
+        ctx,
+        toast,
+        dateFormat,
+        resizeAbsences,
+      );
+      if (plan.attachmentMessage !== null || plan.keepOrScale !== null) {
+        supersedePopup();
+        retimeAssignment(
+          a,
+          a.nodeId,
+          homeRun,
+          r.range,
+          r.anchor,
+          assignmentLabelById(a.id),
+          r.onResult,
+        );
+        // S195-D (DEF-0054): answered NOW, not through a promise, so the bar
+        // never prints the done-form readout for a write that is only asked
+        // about; the sentence is the board's own facts (`popupWords.ts`).
+        return { kind: "popup", waitingFor: plan.waiting ?? CREATE_WAITING };
+      }
+      plan.runWarnMirrors();
+      return updateAssignmentFields
+        .mutateAsync({ assignmentId: a.id, edit: plan.edit })
+        .then((): WriteOutcome => ({ kind: "written" }))
+        .catch(async (err: unknown): Promise<WriteOutcome> => {
+          // R-465: busy on a place the caller cannot read, in the place's words.
+          const se = await explainRefusal(err, attemptOfBlock(a, plan.edit.timerange ?? null));
+          failWith(se, assignmentLabelById(a.id));
+          return { kind: "refused", message: buildSchedulerErrorToast(se, ctx).message };
+        });
+    },
+    [
+      index,
+      ctx,
+      toast,
+      dateFormat,
+      resizeAbsences,
+      retimeAssignment,
+      assignmentLabelById,
+      updateAssignmentFields,
+      failWith,
+      supersedePopup,
+      explainRefusal,
+      attemptOfBlock,
+    ],
+  );
+
+  /**
+   * S51 (R-400/D127): the several-lot's writer for an `assign` resolved to
+   * `direct` or `run` (never `retime` -- that target writes through
+   * `retimeAssignmentFromCommand` instead, same as the single-sentence bar's
+   * own `onRetime`). Sends the SAME `createAssignment` mutation
+   * `submitCreateDirect` sends -- via `mutateAsync` so the lot can await
+   * success or failure, and WITHOUT the capacity probe / split-coverage
+   * popover `submitCreateDirect` opens on a tight fit: a lot write must
+   * never open a SECOND piece of UI mid-sequence (CLAUDE.md §4 -- a stranded
+   * split popover mid-lot would be exactly the hidden partial write the rule
+   * forbids). The probe there is a courtesy too (its own comment: "never a
+   * gate"); skipping it here skips only the fast guess, never the rule -- an
+   * authoritative `CapacityExceeded` refusal, if this write earns one, still
+   * comes back from this SAME mutation and is exactly what the lot reports.
+   *
+   * S61-a review fix (R-425, F-155): also `openCreateFromCommand`'s own
+   * override branch below now calls this directly (declared here, ABOVE
+   * that function, so its own dependency array never reaches for a `const`
+   * before this one has initialised -- the same TDZ reasoning
+   * `openMoveFromCommand`'s own move-below-`submitMove` comment explains).
+   */
+  const createFromCommand = useCallback(
+    (r: {
+      nodeId: string;
+      range: Range;
+      operatorId: string;
+      target: AssignmentTarget;
+      /** S61-a (R-425, F-155): `ResolvedCommand.override`, set ONLY when a
+       *  `not_certified` "warn" question was suppressed by a reason the bar
+       *  collected -- folded into the SAME `eligibilityOverride: true,
+       *  overrideReason` pair `buildCreateAssignmentInput`'s own `overrides`
+       *  parameter already carries for the pop-up's own override checkbox
+       *  (no second shape). `undefined` (`openCreateFromCommand`'s own
+       *  non-override branch, and every lot step until S198-A) is
+       *  byte-identical to before this field existed. S198-A (R-467): a
+       *  several's step that answered its own reason question carries one
+       *  too, and `runLot` passes it through -- a coupled lot (a replace, a
+       *  swap, a copy) still never does (R-425). */
+      override?: { reason: string };
+      /** F-165 (S62-b): `ResolvedCommand.areaOverride` -- set ONLY when an
+       *  `outside_area` question was answered with a reason the bar
+       *  collected. Folded into the SAME `areaOverride: true,
+       *  areaOverrideReason` pair the pop-up's own "not from this area"
+       *  checkbox already sends (migration 0072's second door), never the
+       *  eligibility pair: they are two different rules and the server keeps
+       *  two different columns for them. */
+      areaOverride?: { reason: string };
+      // F-233, third pass (S194-G3): the real id of the row `create_assignment`
+      // made -- `openCreateFromCommand`'s own override branch answers the
+      // bar's `WriteOutcome` with it so `CommandBar.tsx` can wait for that
+      // exact row, never a count.
+    }): Promise<{ id: string }> => {
+      const input = buildCreateAssignmentInput(index.windowStart, r, {
+        ...(r.override ? { eligibilityOverride: true, overrideReason: r.override.reason } : {}),
+        ...(r.areaOverride
+          ? { areaOverride: true, areaOverrideReason: r.areaOverride.reason }
+          : {}),
+      });
+      return createAssignment.mutateAsync(input).then(
+        (result) => ({ id: result.assignment.id }),
+        // R-465: a refusal for a block the caller cannot see says so, in the
+        // place's words -- for the bar's override branch and a lot's step alike.
+        async (err: unknown): Promise<never> => {
+          throw await explainRefusal(err, {
+            operatorId: r.operatorId,
+            start: input.start,
+            end: input.end,
+            efficiencyPercent: input.efficiencyPercent ?? 100,
+          });
+        },
+      );
+    },
+    [index, createAssignment, explainRefusal],
+  );
+
+  /**
+   * P1-7a: `CommandBar`'s whole write path — opens the SAME create popover a
+   * drag opens, direct mode forced (`presetOperatorId`, exactly as D65's panel
+   * drop already forces it), with the resolved product or run as a preset.
+   * This is the tail of `endPanelDrag` (brief §6/§8) with the snapping removed
+   * — the resolver's minutes are already exact, never a drag pixel to round —
+   * and the target threaded through instead of always being the operator
+   * alone. `endPanelDrag` itself is untouched; see its own comment for why the
+   * five lines are deliberately duplicated rather than shared.
+   *
+   * S61-a review fix (R-425, F-155): the reviewer's own live walk --
+   * "assign Tom Baker to Housing A on Cell 1 from 8 to 4" -> the
+   * not_certified question -> "covering for Sam" -> the bar's own readout
+   * said "· override: covering for Sam" but NOTHING was written, because
+   * this function used to ALWAYS open the popover, unchecked, ignoring
+   * `resolved.override` entirely (`BoardPage.tsx`'s `onOpen` never even
+   * had it to pass). `r.override`, when set, now skips the popover
+   * ENTIRELY and writes DIRECTLY through `createFromCommand` above (the
+   * SAME fix `openMoveFromCommand`'s own override branch already applies)
+   * -- the reason was already given once, in the bar's own conversation; a
+   * second popover (unchecked, since nothing here ever told it about the
+   * override) asking again is not a fix, it is the bug.
+   */
+  const openCreateFromCommand = useCallback(
+    (r: {
+      nodeId: string;
+      range: Range;
+      operatorId: string;
+      target: AssignmentTarget;
+      anchor: { x: number; y: number };
+      override?: { reason: string };
+      areaOverride?: { reason: string };
+      /** F-167: the bar's own way back -- handed to the pop-up this opens. */
+      onResult?: PopupReporter;
+    }): WriteOutcome | Promise<WriteOutcome> => {
+      // F-164: this function now ANSWERS the bar -- `written`, `refused` or
+      // `popup` -- so the trace can stop recording a readout as `ran` for a
+      // write that never landed (F-165's own first symptom).
+      if (r.override || r.areaOverride) {
+        if (!canPlaceRef.current) {
+          // DEF-0015, as every other direct writer.
+          return { kind: "refused", message: "You cannot place anyone on this board." };
+        }
+        return createFromCommand({
+          nodeId: r.nodeId,
+          range: r.range,
+          operatorId: r.operatorId,
+          target: r.target,
+          override: r.override,
+          areaOverride: r.areaOverride,
+        })
+          .then((result): WriteOutcome => ({ kind: "written", id: result.id }))
+          .catch((err: unknown): WriteOutcome => {
+            const se = isSchedulerError(err) ? err : toSchedulerError(err);
+            const { message, kind } = buildSchedulerErrorToast(se, ctx);
+            if (se.kind === "CapacityExceeded" && se.elsewhere !== undefined) {
+              toast.refused(message, kind);
+            } else {
+              toast.reverted(message, kind);
+            }
+            return { kind: "refused", message };
+          });
+      }
+      supersedePopup();
+      const template = index.templateForNode.get(r.nodeId) ?? null;
+      const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
+      setPopover({
+        kind: "create",
+        seq: (createSeqRef.current += 1),
+        nodeId: r.nodeId,
+        range: r.range,
+        anchor: r.anchor,
+        shiftChips: chips,
+        presetOperatorId: r.operatorId,
+        // R-384: the only opener that may auto-press Create.
+        autoCreate: true,
+        commandResult: r.onResult,
+        ...(r.target.kind === "direct"
+          ? { presetProductId: r.target.productId }
+          : { presetRun: { id: r.target.runId, label: runLabelById(r.target.runId) } }),
+      });
+      // F-164: nothing is written yet. R-384's auto-press may fire the
+      // moment this pop-up mounts (it does whenever the pop-up would show
+      // no warning), but THIS function's honest answer is that it handed the
+      // write to a pop-up -- and when the pop-up would show a warning, that
+      // is exactly where the write stops until a person answers it. The
+      // maintainer's fourth step sat here, behind the bar, for want of an
+      // area reason (F-165) while the bar printed the readout as done.
+      // S195-D: `standing: false` -- an auto-pressed create is never on screen
+      // (F-205); the pop-up itself says when it does stand.
+      return { kind: "popup", waitingFor: CREATE_WAITING, standing: false };
+    },
+    [index, runLabelById, createFromCommand, toast, ctx, supersedePopup],
+  );
+
+  /**
+   * S41-c: the typed command bar's "move to another cell" write path --
+   * opens the SAME create popover a drag/command-bar assign opens, direct
+   * mode forced by `presetOperatorId` (exactly as `openCreateFromCommand`
+   * already forces it), with `presetMove: { assignmentId }` marking this as
+   * a MOVE rather than a create: `CreatePopover`'s `submitDirect()` then
+   * sends `moveAssignment` instead of `createAssignment` (brief §2 -- no
+   * second door, the SAME pop-up, a different door out of it).
+   */
+  // R-425 (S61-a): `openMoveFromCommand` is declared BELOW `submitMove` now
+  // (moved from here) -- its own override branch calls `submitMove`
+  // directly, and a `const` referenced in a `useCallback` dependency array
+  // is a TDZ error if that array is built before the referenced `const`'s
+  // own declaration has run, which this position (before `submitMove`
+  // below) would have been.
+
+  /**
+   * S41-a: the typed command bar's "book a job" write path for a BRAND-NEW
+   * job — opens the SAME create popover a track drag opens, forced into
+   * Product run mode (`presetMode: "run"`) with the resolved product and
+   * headcount preset, exactly as `openCreateFromCommand` forces direct mode
+   * for an assignment. Create still goes through `submitCreateRun` ->
+   * `createRun` -> `create_run`, the one door.
+   */
+  const openCreateRunFromCommand = useCallback(
+    (r: {
+      nodeId: string;
+      range: Range;
+      productId: string;
+      headcount: number | null;
+      anchor: { x: number; y: number };
+      /** F-167: see `openCreateFromCommand`'s own note. */
+      onResult?: PopupReporter;
+    }): WriteOutcome => {
+      supersedePopup();
+      const template = index.templateForNode.get(r.nodeId) ?? null;
+      const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
+      setPopover({
+        kind: "create",
+        seq: (createSeqRef.current += 1),
+        nodeId: r.nodeId,
+        range: r.range,
+        anchor: r.anchor,
+        shiftChips: chips,
+        presetMode: "run",
+        presetProductId: r.productId,
+        commandResult: r.onResult,
+        ...(r.headcount !== null ? { presetHeadcount: r.headcount } : {}),
+        // R-384: the only opener that may auto-press Create.
+        autoCreate: true,
+      });
+      // F-164: see `openCreateFromCommand`'s own note -- nothing is written
+      // here either.
+      return { kind: "popup", waitingFor: CREATE_WAITING, standing: false };
+    },
+    [index, supersedePopup],
+  );
+
+  /**
+   * S51 (R-400/D127): the several-lot's writer for a `book` resolved to
+   * `run_create` -- the SAME `createRun` mutation the run pop-up's clean
+   * submit sends (`submitCreateRun`), via `mutateAsync` so the lot can await
+   * it. Skips `submitCreateRun`'s own client-side overlap re-check on
+   * purpose: the resolver (`resolveBookCommand`'s own `findRunOverlap` call)
+   * already refused this exact overlap before ever returning a `run_create`
+   * target, so re-checking it here would be a second copy of the same
+   * guard, not a second guard -- and the authoritative `RunOverlap`
+   * refusal, if the write still earns one (a race), comes back from this
+   * SAME mutation either way. `headcount` defaults to 2, the SAME default
+   * `CreatePopover`'s own `plannedHeadcount` field opens with when the
+   * sentence gave no number.
+   */
+  const createRunFromCommand = useCallback(
+    (r: {
+      nodeId: string;
+      range: Range;
+      productId: string;
+      headcount: number | null;
+    }): Promise<void> => {
+      return createRun
+        .mutateAsync({
+          nodeId: r.nodeId,
+          productId: r.productId,
+          start: minuteDate(index.windowStart, r.range.startMin),
+          end: minuteDate(index.windowStart, r.range.endMin),
+          plannedHeadcount: r.headcount ?? 2,
+        })
+        .then(() => undefined);
+    },
+    [index, createRun],
+  );
+
+  /**
+   * S41-a: R-387's "change that job's hours?" answer -- the SAME function an
+   * edge-resize drag commits through (`retimeRun`), so the overlap refusal,
+   * the "N crew assignments fall outside..." prompt and the one
+   * `updateRunFields` PATCH are all the drag's own.
+   *
+   * F-168 (R-421/R-427/R-434): answers the bar with `WriteOutcome` instead of
+   * `void`, the same shape `retimeAssignmentFromCommand` above now answers
+   * with. The overlap refusal (`planRunRetime`'s `overlapMessage`) is an
+   * outright refusal, never a decision — `refused` straight away, same toast
+   * as before. The crew-outside-window ask still opens through `retimeRun`
+   * below, UNCHANGED, and answers `popup` for the same reason
+   * `retimeAssignmentFromCommand`'s own note gives (no reporter wired to that
+   * pop-up yet). This function never checked `canPlaceRef` before F-168 and
+   * still does not — unlike the assignment path, nothing here added a new
+   * guard that was not already there.
+   */
+  const retimeRunFromCommand = useCallback(
+    (r: {
+      runId: string;
+      range: Range;
+      anchor: { x: number; y: number };
+      /** S195-D (DEF-0054): see `retimeAssignmentFromCommand`. */
+      onResult?: PopupReporter;
+    }): WriteOutcome | Promise<WriteOutcome> => {
+      const run = index.runById.get(r.runId);
+      if (!run) {
+        const message = "That job is no longer on the board.";
+        toast.reverted(message);
+        return Promise.resolve({ kind: "refused", message });
+      }
+      const plan = planRunRetime(run, run.nodeId, r.range, index, ctx);
+      if (plan.overlapMessage !== null) {
+        toast.reverted(plan.overlapMessage);
+        return Promise.resolve({ kind: "refused", message: plan.overlapMessage });
+      }
+      if (plan.crewMessage !== null) {
+        supersedePopup();
+        retimeRun(run, run.nodeId, r.range, r.anchor, runLabelById(run.id), r.onResult);
+        return { kind: "popup", waitingFor: CREW_OUTSIDE_WAITING };
+      }
+      return updateRunFields
+        .mutateAsync({ runId: run.id, edit: plan.edit })
+        .then((): WriteOutcome => ({ kind: "written" }))
+        .catch((err: unknown): WriteOutcome => {
+          failWith(err, runLabelById(run.id));
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          return { kind: "refused", message: buildSchedulerErrorToast(se, ctx).message };
+        });
+    },
+    [index, ctx, toast, retimeRun, runLabelById, updateRunFields, failWith, supersedePopup],
+  );
+
   const submitCreateRun = useCallback(
-    (nodeId: string, range: Range, productId: string, plannedHeadcount: number | undefined) => {
+    (
+      nodeId: string,
+      range: Range,
+      productId: string,
+      plannedHeadcount: number | undefined,
+      // F-167: same contract as `submitCreateDirect`'s -- the pop-up awaits
+      // this so a sentence's trace can say what became of the write.
+      // F-233, third pass (S194-G3): carries the run's own real id now --
+      // `CreatePopover.tsx`'s `submitRun` relays it into
+      // `report({kind:"written", id})`.
+    ): Promise<{ kind: "written"; id: string }> => {
       const overlap = findRunOverlap(range, index.runsByNode.get(nodeId) ?? [], null);
       if (overlap) {
         const p = productViewFor(overlap, index.productById);
-        toast.reverted(
-          `${index.nodeById.get(nodeId)?.name ?? nodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`,
-        );
-        return;
+        const message = `${index.nodeById.get(nodeId)?.name ?? nodeId} already runs ${p?.name ?? "another product"} ${ctx.formatRange?.(overlap.startMin, overlap.endMin) ?? ""}`;
+        toast.reverted(message);
+        return Promise.reject(new LotStepRefused(message));
       }
-      createRun.mutate(
-        {
+      const sent = createRun
+        .mutateAsync({
           nodeId,
           productId,
           start: minuteDate(index.windowStart, range.startMin),
           end: minuteDate(index.windowStart, range.endMin),
           plannedHeadcount,
-        },
-        {
-          onSuccess: () => toast.info("Run created — drag operators onto the band to staff it"),
-          onError: (err) => {
-            const se = isSchedulerError(err) ? err : toSchedulerError(err);
-            toast.schedulerError(se, ctx);
-          },
-        },
-      );
+        })
+        .then((result): { kind: "written"; id: string } => {
+          toast.info("Run created — drag operators onto the band to staff it");
+          return { kind: "written", id: result.run.id };
+        })
+        .catch((err: unknown) => {
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          toast.schedulerError(se, ctx);
+          throw se;
+        });
       setPopover(null);
+      return sent;
     },
     [index, ctx, toast, createRun],
   );
@@ -1224,6 +2679,18 @@ export function useDragGesture(args: UseDragGestureArgs) {
   const openSplitPopover = useCallback(
     (probe: CapacityProbe, incoming: CreateAssignmentInput, anchor: { x: number; y: number }) => {
       const operator = index.operatorById.get(incoming.operatorId);
+      // S195-D: the reporter of the pop-up a sentence opened, read from the
+      // pop-up standing NOW (this runs inside that pop-up's own submit) -- a
+      // ref written by the openers used to be read here, and a drag-opened
+      // pop-up after a sentence would have answered the OLD sentence.
+      const standing = popoverRef.current;
+      const commandResult = standing?.kind === "create" ? standing.commandResult : undefined;
+      // R-465: this pop-up is only ever opened when EVERY block making the
+      // person busy is one the caller can read (`submitCreateDirect` refuses
+      // otherwise), so no row here is an outside one (it has no id to adjust).
+      // Nothing is filtered on purpose: dropping such a row would draw a split
+      // that hides load the server still counts, which is worse than the pop-up
+      // failing to draw -- the one gate is `isBusyElsewhere`, above.
       const participants: SplitParticipant[] = probe.overlapping.map((o) => ({
         assignmentId: o.assignmentId,
         label: `${o.nodeName} · ${fromEfficiency(o.efficiency)}%`,
@@ -1236,12 +2703,19 @@ export function useDragGesture(args: UseDragGestureArgs) {
       });
       setPopover({
         kind: "split",
+        commandResult,
         operatorId: incoming.operatorId,
         operatorName: operator?.displayName ?? incoming.operatorId,
         capPercent: Math.round(probe.cap * 100),
         participants,
         incoming,
         anchor,
+      });
+      // S195-D (DEF-0054): what the sentence is waiting on now -- the ONE
+      // plain sentence, in this pop-up's own person's name.
+      commandResult?.({
+        kind: "handed_off",
+        what: splitWaiting(operator?.displayName ?? null),
       });
     },
     [index],
@@ -1260,7 +2734,14 @@ export function useDragGesture(args: UseDragGestureArgs) {
       nodeId: string,
       range: Range,
       operatorId: string,
-      productId: string,
+      // P1-7a: was `productId: string`. `CreatePopover` now sends whichever
+      // target the person actually chose — the product select's own choice
+      // (D64, unchanged) or, when the popover opened with `presetRun`
+      // (R-383), the run that was joined — and this passes it straight
+      // through to `CreateAssignmentInput.target` instead of rebuilding a
+      // `{ kind: "direct", … }` here, so the popover stays the ONE door and a
+      // run target does not need a second submit path beside it.
+      target: AssignmentTarget,
       efficiencyPercent: number,
       targetQty: number | undefined,
       targetUnit: string | undefined,
@@ -1272,54 +2753,116 @@ export function useDragGesture(args: UseDragGestureArgs) {
       areaOverride: boolean,
       areaOverrideReason: string | undefined,
       anchor: { x: number; y: number },
-    ) => {
-      const start = minuteDate(index.windowStart, range.startMin);
-      const end = minuteDate(index.windowStart, range.endMin);
-      const input: CreateAssignmentInput = {
-        nodeId,
-        operatorId,
-        target: { kind: "direct", productId },
-        start,
-        end,
-        efficiencyPercent,
-        targetQty,
-        targetUnit,
-        eligibilityOverride,
-        overrideReason,
-        areaOverride,
-        areaOverrideReason,
-      };
-      const sendCreate = () => {
-        createAssignment.mutate(input, {
-          onError: (err) => {
-            const se = isSchedulerError(err) ? err : toSchedulerError(err);
+      // F-167: the pop-up awaits this. `"written"` means the row is in;
+      // `"handed-off"` means this Create opened ANOTHER pop-up (D61's split
+      // coverage) and nothing has been written yet, so the sentence's entry
+      // must stay open rather than be told either story; a rejection carries
+      // the server's own refusal.
+      // F-233, third pass (S194-G3): `"written"` carries the row's own real
+      // id now -- `CreatePopover.tsx`'s `submitDirect` relays it into
+      // `report({kind:"written", id})`, which is what lets
+      // `CommandBar.tsx` wait for THIS exact row, never a count.
+    ): Promise<{ kind: "written"; id: string } | "handed-off"> => {
+      // S51: built through the one shared helper (`buildCreateAssignmentInput`,
+      // above `useDragGesture`) so this popover-driven Create and the
+      // several-lot's `createFromCommand` can never send two different
+      // shapes for the same write.
+      const input = buildCreateAssignmentInput(
+        index.windowStart,
+        { nodeId, range, operatorId, target },
+        {
+          efficiencyPercent,
+          targetQty,
+          targetUnit,
+          eligibilityOverride,
+          overrideReason,
+          areaOverride,
+          areaOverrideReason,
+        },
+      );
+      // F-167: `mutateAsync`, not `mutate` -- the SAME mutation, the SAME
+      // failure toast, but the caller (and through it the command bar) can
+      // now hear whether the row actually landed.
+      const sendCreate = (): Promise<{ kind: "written"; id: string }> =>
+        createAssignment
+          .mutateAsync(input)
+          .then((result): { kind: "written"; id: string } => {
+            setPopover(null);
+            return { kind: "written", id: result.assignment.id };
+          })
+          .catch(async (err: unknown) => {
+            // R-465: a refusal for a block the caller cannot see is asked about
+            // first, so the toast, the pop-up and the bar say the same words.
+            const se = await explainRefusal(err, {
+              operatorId,
+              start: input.start,
+              end: input.end,
+              efficiencyPercent,
+            });
             // §7: CapacityExceeded on create is not auto-retried, and the
             // brief explicitly wants this path exercised for real (§7).
             // With D61's proactive probe this is now the RACE fallback
             // (the probe said "fits", the write disagreed) rather than
             // the common path.
             toast.schedulerError(se, ctx);
-          },
-        });
-        setPopover(null);
-      };
-      probeCapacity({ operatorId, start, end, efficiencyPercent })
-        .then((probe) => {
-          if (probe.fits) {
-            sendCreate();
-          } else {
-            openSplitPopover(probe, input, anchor);
+            setPopover(null);
+            throw se;
+          });
+      return probeCapacity({ operatorId, start: input.start, end: input.end, efficiencyPercent })
+        .then((probe): Promise<{ kind: "written"; id: string } | "handed-off"> => {
+          if (probe.fits) return sendCreate();
+          // R-465 (S195-D): a block that makes this person busy sits on a
+          // place the caller cannot read. She cannot change it, so the server
+          // would refuse any split of it -- the pop-up is NOT offered (R-431)
+          // and nothing is sent. The refusal says the place and the hours, on
+          // the board and (through the pop-up's own report) in the bar.
+          //
+          // S204-A (DEF-0068, R-470): and so would the split of a block she can READ but
+          // not CHANGE (`editable` false) -- refused here, before the pop-up opens, in
+          // the same words the bar's own pre-check says (`answerForProbe`, the ONE gate
+          // both call). Only when she can change every overlapping block does it open.
+          const gate = answerForProbe(probe, {
+            person: index.operatorById.get(operatorId)?.displayName ?? "That person",
+            rows: probe.overlapping,
+            zone: index.zone,
+            dateFormat,
+            now: new Date(),
+          });
+          if (
+            gate.kind === "busy_elsewhere" ||
+            gate.kind === "overlap_locked" ||
+            isBusyElsewhere(probe)
+          ) {
+            const sentence =
+              gate.kind === "busy_elsewhere" || gate.kind === "overlap_locked"
+                ? gate.sentence
+                : "That person is already booked then.";
+            toast.refused(sentence);
+            setPopover(null);
+            const refusal: SchedulerError = {
+              kind: "CapacityExceeded",
+              operatorId,
+              peak: probe.peak,
+              cap: probe.cap,
+              timerange: toTstzRange(input.start, input.end),
+              elsewhere: sentence,
+            };
+            return Promise.reject(refusal);
           }
+          openSplitPopover(probe, input, anchor);
+          return Promise.resolve("handed-off" as const);
         })
-        .catch(() => {
+        .catch((err: unknown): Promise<{ kind: "written"; id: string } | "handed-off"> => {
           // The probe is a convenience, never a gate (docs/api.md §2: it
           // "raises nothing"; a thrown error here is a network blip, not a
-          // capacity answer). Fall back to the authoritative write — its
-          // own CapacityExceeded handling is still the backstop.
-          sendCreate();
+          // capacity answer). Fall back to the authoritative write -- its
+          // own CapacityExceeded handling is still the backstop. A refusal
+          // from `sendCreate` itself is re-thrown, never swallowed here.
+          if (isSchedulerError(err)) throw err;
+          return sendCreate();
         });
     },
-    [index, ctx, toast, createAssignment, openSplitPopover],
+    [index, ctx, toast, createAssignment, openSplitPopover, explainRefusal, dateFormat],
   );
 
   /** D62's "Split evenly" / live edits / confirm / cancel. */
@@ -1345,69 +2888,129 @@ export function useDragGesture(args: UseDragGestureArgs) {
     });
   }, []);
 
+  /**
+   * ⛔ F-128 AGAIN (S62-b re-check fix 3). This whole body used to run INSIDE
+   * the `setPopover` updater, which `<StrictMode>` invokes TWICE on purpose
+   * to catch exactly that -- so the write went twice and, once S62-b added
+   * one, the command bar's reporter was called twice too. `confirmYes` above
+   * was fixed for this long ago and this is the same shape: the updater only
+   * ever clears, and every side effect (the mutation, the toasts, the
+   * reporter) runs once, outside it, off the `popover` this callback closes
+   * over.
+   */
   const confirmSplit = useCallback(() => {
-    setPopover((p) => {
-      if (!p || p.kind !== "split") return p;
-      const percents = p.participants.map((row) => row.efficiencyPercent);
-      if (!splitFits(percents, p.capPercent)) return p; // Confirm stays disabled while over cap (D62)
+    if (popover === null || popover.kind !== "split") return;
+    const p = popover;
+    const percents = p.participants.map((row) => row.efficiencyPercent);
+    if (!splitFits(percents, p.capPercent)) return; // Confirm stays disabled while over cap (D62)
 
-      const adjustments = p.participants
-        .filter(
-          (row): row is SplitParticipant & { assignmentId: string } => row.assignmentId !== null,
-        )
-        .map((row) => ({
-          assignmentId: row.assignmentId,
-          efficiencyPercent: row.efficiencyPercent,
-        }));
-      const incomingParticipant = p.participants.find((row) => row.assignmentId === null);
+    const adjustments = p.participants
+      .filter(
+        (row): row is SplitParticipant & { assignmentId: string } => row.assignmentId !== null,
+      )
+      .map((row) => ({
+        assignmentId: row.assignmentId,
+        efficiencyPercent: row.efficiencyPercent,
+      }));
+    const incomingParticipant = p.participants.find((row) => row.assignmentId === null);
 
-      // D63: NOT peak load — this is exactly the arithmetic `splitFits`
-      // above already validated (the sum of what the user edited). The
-      // authoritative peak re-check happens server-side inside
-      // `apply_split_coverage` itself (`operator_peak_load()`), and T21
-      // covers what happens when THAT disagrees with this client-side sum.
-      applySplitCoverage.mutate(
-        {
-          adjustments,
-          newAssignment: {
-            ...p.incoming,
-            efficiencyPercent: incomingParticipant?.efficiencyPercent ?? 100,
-          },
+    setPopover(null); // optimistic close; re-opened below on a CapacityExceeded race
+
+    // D63: NOT peak load — this is exactly the arithmetic `splitFits`
+    // above already validated (the sum of what the user edited). The
+    // authoritative peak re-check happens server-side inside
+    // `apply_split_coverage` itself (`operator_peak_load()`), and T21
+    // covers what happens when THAT disagrees with this client-side sum.
+    applySplitCoverage.mutate(
+      {
+        adjustments,
+        newAssignment: {
+          ...p.incoming,
+          efficiencyPercent: incomingParticipant?.efficiencyPercent ?? 100,
         },
-        {
-          onError: (err) => {
-            // T21: the probe was stale by the time the user confirmed.
-            // `apply_split_coverage` is authoritative; a `CapacityExceeded`
-            // here is normal, not exceptional — shown IN the popover
-            // (re-open it with the user's edits intact) rather than
-            // closing it and toasting, because re-editing is the natural
-            // next step.
-            const se = isSchedulerError(err) ? err : toSchedulerError(err);
-            if (se.kind === "CapacityExceeded") {
-              toast.info(
-                `${p.operatorName} would still exceed capacity (peak ${Math.round(se.peak * 100)}%, cap ${Math.round(se.cap * 100)}%) — adjust and try again.`,
-              );
-              setPopover(p); // keep it open with the user's edits
-              return;
-            }
-            toast.schedulerError(se, ctx);
-          },
+      },
+      {
+        onError: (err) => {
+          // T21: the probe was stale by the time the user confirmed.
+          // `apply_split_coverage` is authoritative; a `CapacityExceeded`
+          // here is normal, not exceptional — shown IN the popover
+          // (re-open it with the user's edits intact) rather than
+          // closing it and toasting, because re-editing is the natural
+          // next step. Nothing is reported to the bar then: the pop-up is
+          // back on screen and the sentence is still waiting on it.
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          if (se.kind === "CapacityExceeded") {
+            toast.info(
+              `${p.operatorName} would still exceed capacity (peak ${Math.round(se.peak * 100)}%, cap ${Math.round(se.cap * 100)}%) — adjust and try again.`,
+            );
+            setPopover(p); // keep it open with the user's edits
+            return;
+          }
+          toast.schedulerError(se, ctx);
+          // S62-b reviewer fix (C): and the sentence that reached here
+          // hears it, rather than waiting for ever.
+          p.commandResult?.({
+            kind: "refused",
+            message: buildSchedulerErrorToast(se, ctx).message,
+          });
         },
-      );
-      return null; // optimistic close; re-opened above on a CapacityExceeded race
-    });
-  }, [applySplitCoverage, toast, ctx]);
+        onSuccess: () => {
+          p.commandResult?.({ kind: "written" });
+        },
+      },
+    );
+  }, [popover, applySplitCoverage, toast, ctx]);
 
-  const cancelSplit = useCallback(() => setPopover(null), []); // D62: Cancel reverts, sends nothing.
+  // D62: Cancel reverts, sends nothing. S62-b reviewer fix (C): a sentence
+  // that reached this pop-up is told its write was cancelled -- nothing else
+  // was ever going to tell it. S62-b re-check fix (3): the report runs
+  // OUTSIDE the updater, same F-128 reasoning as `confirmSplit` above -- a
+  // reporter called from inside one fires twice under StrictMode, and
+  // "fires once" must not depend on a latch further down the chain.
+  const cancelSplit = useCallback(() => {
+    const p = popover;
+    setPopover(null);
+    if (p?.kind === "split") p.commandResult?.({ kind: "cancelled" });
+  }, [popover]);
 
+  /* ⛔ F-128: `onConfirm()` used to run INSIDE the `setPopover` updater, and
+   * `src/main.tsx` mounts the app in <StrictMode>, which invokes state
+   * updaters TWICE in development to flush out exactly that -- so every
+   * Continue sent its write twice. Seen as "2 PATCH to assignments" in
+   * `loadSanity.spec.ts`'s own print line the first time R-365 put a prompt
+   * in front of a real write; the run-resize confirm had the same shape from
+   * the day it replaced `window.confirm`, and nothing counted its requests.
+   * The updater now only clears; the side effect runs once, outside it, off
+   * the rendered `popover` this callback closes over. */
   const confirmYes = useCallback(() => {
-    setPopover((p) => {
-      if (!p || p.kind !== "confirm") return p;
-      p.onConfirm();
-      return null;
-    });
-  }, []);
-  const confirmNo = useCallback(() => setPopover(null), []);
+    if (popover === null || popover.kind !== "confirm") return;
+    // R-031: a prompt with choices has no default answer.
+    if (popover.choices !== undefined) return;
+    const { onConfirm } = popover;
+    setPopover(null);
+    onConfirm();
+  }, [popover]);
+  // S195-D (DEF-0054): Cancel, and the shell's own close (Escape, the
+  // backdrop), tell the sentence that opened this pop-up nothing was
+  // written -- outside the updater (F-128), once (the reporter's own latch).
+  const confirmNo = useCallback(() => {
+    const p = popover;
+    setPopover(null);
+    if (p?.kind === "confirm") p.commandResult?.({ kind: "cancelled" });
+  }, [popover]);
+  /** R-031: pick one of a multi-choice prompt's answers. Same shape as
+   *  `confirmYes` (F-128): the updater only clears, the side effect runs
+   *  once, outside it. */
+  const confirmChoose = useCallback(
+    (index: number) => {
+      if (popover === null || popover.kind !== "confirm" || popover.choices === undefined) return;
+      const choice = popover.choices[index];
+      if (!choice) return;
+      setPopover(null);
+      choice.onChoose();
+    },
+    [popover],
+  );
 
   const saveRunFields = useCallback(
     (runId: string, notes: string | null, plannedHeadcount: number | null) => {
@@ -1418,6 +3021,53 @@ export function useDragGesture(args: UseDragGestureArgs) {
       setPopover(null);
     },
     [updateRunFields, failWith, runLabelById],
+  );
+
+  /**
+   * S58 (R-415, D132 item 4): `CommandBar`'s own headcount write -- "make the
+   * Housing A job on Cell 1 4 people" -- through the SAME `updateRunFields`
+   * mutation `saveRunFields` above sends (no second door), never a popover:
+   * there is nothing here to close, since a headcount sentence never opens
+   * one.
+   *
+   * `edit` requires BOTH fields (`RunFieldEdit`'s own shape, `saveRunFields`'
+   * own call above), so this reads the run's CURRENT `notes` off `index.
+   * runById` first and sends them back unchanged -- a headcount change must
+   * never blank the notes (brief §5). A failure reports through the same
+   * `failWith` toast every other write here uses.
+   *
+   * Reviewer fix (S58-d lane review, 14 Sept): a stale board -- the run in
+   * the resolved command is no longer in `index.runById` -- used to fall
+   * through to `run?.notes ?? null` and send the write ANYWAY with
+   * `notes: null`, which would silently blank a real run's real notes the
+   * moment the runId happened to still exist server-side (the exact shape
+   * CLAUDE.md §4 warns about: a write that reports success can have changed
+   * the wrong thing). `retimeRunFromCommand` above already has the correct
+   * guard for exactly this case (`if (!run) { toast.reverted(...); return; }`,
+   * never reaching its own mutation) -- this mirrors it rather than guessing.
+   */
+  const setHeadcountFromCommand = useCallback(
+    (runId: string, headcount: number): Promise<WriteOutcome> => {
+      const run = index.runById.get(runId);
+      if (!run) {
+        const message = "That job is no longer on the board.";
+        toast.reverted(message);
+        return Promise.resolve({ kind: "refused", message });
+      }
+      // F-164: `mutateAsync`, not `mutate` -- the SAME mutation and the SAME
+      // failure toast (`failWith`), but the bar can now hear whether the
+      // write actually landed rather than recording its readout as `ran`
+      // the instant it asked for it.
+      return updateRunFields
+        .mutateAsync({ runId, edit: { notes: run.notes, plannedHeadcount: headcount } })
+        .then((): WriteOutcome => ({ kind: "written" }))
+        .catch((err: unknown): WriteOutcome => {
+          failWith(err, runLabelById(runId));
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          return { kind: "refused", message: buildSchedulerErrorToast(se, ctx).message };
+        });
+    },
+    [index, toast, updateRunFields, failWith, runLabelById, ctx],
   );
 
   const deleteRunWithMode = useCallback(
@@ -1434,32 +3084,445 @@ export function useDragGesture(args: UseDragGestureArgs) {
       efficiencyPercent: number,
       targetQty: number | null,
       targetUnit: string | null,
-      status: string,
     ) => {
+      // R-322: no `status` here any more. The picker that set it is gone, and
+      // `cancelled` never came through this path — Delete is what writes it.
       updateAssignmentFields.mutate(
-        { assignmentId, edit: { efficiencyPercent, targetQty, targetUnit, status } },
-        { onError: (err) => failWith(err, assignmentLabelById(assignmentId)) },
+        { assignmentId, edit: { efficiencyPercent, targetQty, targetUnit } },
+        {
+          onError: (err) => {
+            // R-465: a new share can put the person over the cap against a
+            // block the caller cannot see.
+            const a = index.assignmentById.get(assignmentId);
+            const attempt = a !== undefined ? attemptOfBlock(a, null, efficiencyPercent) : null;
+            void explainRefusal(err, attempt).then((se) =>
+              failWith(se, assignmentLabelById(assignmentId)),
+            );
+          },
+        },
       );
       setPopover(null);
     },
-    [updateAssignmentFields, failWith, assignmentLabelById],
+    [updateAssignmentFields, failWith, assignmentLabelById, index, attemptOfBlock, explainRefusal],
   );
 
-  /** §5.4/§5.3: there is no delete_assignment RPC and no `useDeleteAssignment`
-   *  hook anywhere in P1-3b (see the agent report — flagged as a gap, not
-   *  silently worked around). `status = "cancelled"` is the one existing,
-   *  D36-compliant path: `useUpdateAssignmentFields` already accepts
-   *  `status`, and `boardIndex.ts`'s rule 17 already drops every row whose
-   *  `status === "cancelled"` from every map. */
-  const removeAssignment = useCallback(
-    (assignmentId: string) => {
-      updateAssignmentFields.mutate(
-        { assignmentId, edit: { status: "cancelled" } },
-        { onError: (err) => failWith(err, assignmentLabelById(assignmentId)) },
-      );
-      setPopover(null);
+  /**
+   * ⭐ R-343: CHANGE WHO IS ON THE ROW. The maintainer, session 76: *"once you
+   * assign someone say Operator 1, there is no way to modify that assignment to
+   * operator 2 unless you delete existing assignment, this is not practical."*
+   *
+   * Shaped like `saveAssignmentFields` above — the same revert label, the same
+   * `failWith` (D37's one true path, T12) — with two differences the pop-up
+   * depends on:
+   *
+   * ⭐ IT RETURNS A PROMISE AND RE-THROWS. `mutateAsync`, not `mutate`, because
+   * the assignment pop-up has to know whether the write landed: it applies the
+   * field edits only AFTER the person has actually changed, and it turns a
+   * `not_eligible` answer into the override tick and reason box that
+   * `CreatePopover` shows before it ever asks (D64/F-087). The pop-up has no
+   * `requiredSkills` of its own to predict that answer from, so the server's
+   * refusal IS the question — and its `policy` field is what says whether an
+   * override may be offered at all, which is R-331's rule arriving by post
+   * rather than by prop.
+   *
+   * ⭐ IT DOES NOT TOAST A `NotEligible`. Everything else goes through
+   * `failWith` exactly as an edit does, because the pop-up closing or not, the
+   * person deserves the sentence. But a `not_eligible` under `warn` is not a
+   * failure, it is the screen asking for a reason — and the pop-up is still
+   * open, holding the control that caused it. Toasting there is the dead-end
+   * shape F-087 was filed for: a message about an override against a screen
+   * with no box to supply one, except in reverse.
+   *
+   * ⭐ AND THE POP-UP STAYS OPEN ON A REFUSAL. `setPopover(null)` runs on
+   * success only; a refused reassignment leaves the person picker up with the
+   * choice still in it, which is the natural next step (the same reasoning
+   * `confirmSplit` uses when the capacity probe turns out to have been stale).
+   */
+  const reassignAssignment = useCallback(
+    async (input: ReassignAssignmentInput): Promise<void> => {
+      try {
+        await reassign.mutateAsync(input);
+        setPopover(null);
+      } catch (err) {
+        // No toast here, on purpose. The pop-up is open and prints every
+        // refusal itself (a capacity or area refusal as a sentence, not_eligible
+        // as the override question), so a toast on top was the same refusal
+        // twice, in the split feature's words -- measured on the live app,
+        // session 76. reassignAssignment (mutations.ts) only ever throws a
+        // SchedulerError, so there is no untyped failure to toast either.
+        throw isSchedulerError(err) ? err : toSchedulerError(err);
+      }
     },
-    [updateAssignmentFields, failWith, assignmentLabelById],
+    [reassign],
+  );
+
+  /**
+   * S41-c: the create pop-up's move door -- shaped exactly like
+   * `reassignAssignment` above (`mutateAsync`, re-thrown `SchedulerError`, no
+   * toast: the pop-up prints every refusal itself through the SAME
+   * training/area/leave boxes a create shows, resolved for the TARGET node).
+   * Positional arguments, not an object: this is the literal shape
+   * `CreatePopover`'s `onSubmitMove` prop calls, built here from `index.
+   * windowStart` (which the pop-up does not have) rather than pushed onto
+   * every caller.
+   */
+  const submitMove = useCallback(
+    async (
+      nodeId: string,
+      range: Range,
+      assignmentId: string,
+      eligibilityOverride: boolean,
+      overrideReason: string | undefined,
+      areaOverride: boolean,
+      areaOverrideReason: string | undefined,
+    ): Promise<void> => {
+      const input: MoveAssignmentInput = {
+        assignmentId,
+        nodeId,
+        start: minuteDate(index.windowStart, range.startMin),
+        end: minuteDate(index.windowStart, range.endMin),
+        eligibilityOverride,
+        overrideReason,
+        areaOverride,
+        areaOverrideReason,
+      };
+      try {
+        await move.mutateAsync(input);
+        setPopover(null);
+      } catch (err) {
+        // No toast, on the same reasoning as reassignAssignment above: the
+        // pop-up is open and prints every refusal itself. R-465: a capacity
+        // refusal for a block the caller cannot see is asked about first, so
+        // the pop-up, the bar and a lot's step all carry the place's words.
+        const moved = index.assignmentById.get(assignmentId);
+        throw await explainRefusal(
+          err,
+          moved !== undefined
+            ? attemptOfBlock(moved, { start: input.start, end: input.end })
+            : null,
+        );
+      }
+    },
+    [index, move, explainRefusal, attemptOfBlock],
+  );
+
+  /**
+   * S41-c: the typed command bar's "move to another cell" write path --
+   * opens the SAME create popover a drag/command-bar assign opens, direct
+   * mode forced by `presetOperatorId` (exactly as `openCreateFromCommand`
+   * already forces it), with `presetMove: { assignmentId }` marking this as
+   * a MOVE rather than a create: `CreatePopover`'s `submitDirect()` then
+   * sends `moveAssignment` instead of `createAssignment` (brief §2 -- no
+   * second door, the SAME pop-up, a different door out of it).
+   *
+   * S61-a (R-425, F-155): `r.override` -- set ONLY when a `not_certified`
+   * "warn" question was suppressed by a reason the bar already collected --
+   * skips the popover ENTIRELY and writes DIRECTLY through `submitMove`
+   * above (`ResolvedMove.override`'s own doc: "the writer's own input is
+   * `submitMove`'s 4th/5th positional arguments"). The reason was already
+   * given once, in the bar's own conversation; a second popover asking for
+   * it again would be a second door. `undefined` (every caller before this
+   * field existed, and a `retime` target, which never asks at all -- same
+   * cell, same person) opens the popover exactly as before.
+   */
+  const openMoveFromCommand = useCallback(
+    (r: {
+      assignmentId: string;
+      nodeId: string;
+      range: Range;
+      operatorId: string;
+      productId: string;
+      anchor: { x: number; y: number };
+      override?: { reason: string };
+      areaOverride?: { reason: string };
+      /** F-167: see `openCreateFromCommand`'s own note. */
+      onResult?: PopupReporter;
+    }): WriteOutcome | Promise<WriteOutcome> => {
+      if (r.override || r.areaOverride) {
+        if (!canPlaceRef.current) {
+          // DEF-0015, as every other direct writer.
+          return { kind: "refused", message: "You cannot place anyone on this board." };
+        }
+        return submitMove(
+          r.nodeId,
+          r.range,
+          r.assignmentId,
+          r.override !== undefined,
+          r.override?.reason,
+          r.areaOverride !== undefined,
+          r.areaOverride?.reason,
+        )
+          .then((): WriteOutcome => ({ kind: "written" }))
+          .catch((err: unknown): WriteOutcome => {
+            // F-154 review fix (S61-a): a genuine revert (submitMove's own
+            // `move` mutation applies an optimistic patch, same as any other
+            // drag) -- `toast.reverted`, not `schedulerError`, same reasoning
+            // as `failWith` above.
+            const se = isSchedulerError(err) ? err : toSchedulerError(err);
+            const { message, kind } = buildSchedulerErrorToast(se, ctx);
+            if (se.kind === "CapacityExceeded" && se.elsewhere !== undefined) {
+              toast.refused(message, kind);
+            } else {
+              toast.reverted(message, kind);
+            }
+            return { kind: "refused", message };
+          });
+      }
+      supersedePopup();
+      const template = index.templateForNode.get(r.nodeId) ?? null;
+      const chips = shiftChipsFor(template, r.range.startMin, index.windowMinutes);
+      setPopover({
+        kind: "create",
+        seq: (createSeqRef.current += 1),
+        nodeId: r.nodeId,
+        range: r.range,
+        anchor: r.anchor,
+        shiftChips: chips,
+        presetOperatorId: r.operatorId,
+        presetProductId: r.productId,
+        presetMove: { assignmentId: r.assignmentId },
+        commandResult: r.onResult,
+        // R-384: the only opener that may auto-press Create.
+        autoCreate: true,
+      });
+      // F-164: see `openCreateFromCommand`'s own note.
+      return { kind: "popup", waitingFor: CREATE_WAITING, standing: false };
+    },
+    [index, submitMove, toast, ctx, supersedePopup],
+  );
+
+  /** ⭐ R-323: THIS DELETES THE ROW. The comment that stood here said there was
+   *  "no delete_assignment RPC and no `useDeleteAssignment` hook", and that
+   *  `status = "cancelled"` was "the one existing, D36-compliant path" — a gap
+   *  flagged rather than worked around, and then lived with for months. The
+   *  maintainer closed it by asking what the column was for: with the progress
+   *  picker gone there was one bit left, and the same table already deleted
+   *  outright whenever a RUN was deleted. So the soft delete is gone, the
+   *  column with it, and this is a real delete under the `assignments_delete`
+   *  policy that was there all along. */
+  /**
+   * F-168 (R-421/R-427/R-434): the command bar's `onUnassign` answers with
+   * `WriteOutcome` now, the same `mutateAsync`/`failWith` shape
+   * `setHeadcountFromCommand` already uses -- so an RLS-filtered delete (a
+   * refused unassign) is a `refused` outcome the bar's trace and thread show,
+   * never a `Written` line for a row that stayed on the board (F-168's own
+   * story). The block's own Delete button (`BoardPage.tsx`'s `onDelete`)
+   * still calls this directly and simply ignores the returned promise, byte
+   * for byte its pre-F-168 behaviour.
+   */
+  const removeAssignment = useCallback(
+    (assignmentId: string): Promise<WriteOutcome> => {
+      setPopover(null);
+      return deleteAssignment
+        .mutateAsync(assignmentId)
+        .then((): WriteOutcome => ({ kind: "written" }))
+        .catch((err: unknown): WriteOutcome => {
+          failWith(err, assignmentLabelById(assignmentId));
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          return { kind: "refused", message: buildSchedulerErrorToast(se, ctx).message };
+        });
+    },
+    [deleteAssignment, failWith, assignmentLabelById, ctx],
+  );
+
+  /**
+   * S51 (R-400, design §19.98/D127): the several-lot's one writer, called
+   * once on the bar's single "yes" for the whole lot -- writes the resolved
+   * commands IN ORDER, through the SAME doors the single-sentence bar and
+   * the pop-ups already write through (never a second copy, never a new
+   * RPC), and stops at the first failure -- the writes are not one
+   * transaction, and pretending otherwise would hide a half-done board
+   * (CLAUDE.md §4).
+   *
+   * S51 review fix (blocker 1): `unassign` awaits `deleteAssignment`'s OWN
+   * `mutateAsync` directly (the same mutation object `removeAssignment`
+   * calls, no second door) rather than `removeAssignment`'s fire-and-forget
+   * `.mutate` -- a removal an RLS policy refuses (`requireWritten` throwing
+   * on a zero-row delete) is now the lot's own caught failure, never a
+   * step silently counted "done" while a toast alone said otherwise.
+   *
+   * S51 review fix (blocker 2): a `retime` target (an assign's own-block
+   * change, a move-in-time, or a job's re-time) goes through the LOT-AWARE
+   * `retimeAssignmentForLot`/`retimeRunForLot` (above) instead of
+   * `retimeAssignmentFromCommand`/`retimeRunFromCommand` -- those can open
+   * their OWN confirm popover (an attachment change, a keep/scale
+   * ambiguity, crew stranded outside a resized run) or toast an outright
+   * refusal (a run overlap) with no promise to await either way; the
+   * lot-aware versions run the SAME pre-checks and reject instead, so a
+   * step that would have needed a further decision is the lot's own
+   * caught failure too (D127: the yes already given was for the readouts
+   * shown, never for a question raised after it).
+   *
+   * Every other target -- a create, a job, a move to another cell -- goes
+   * through a `mutateAsync` call this function can actually await, so
+   * THOSE failures (and blocker 1/2's) are what `LotResult.error` reports,
+   * worded through the SAME `buildSchedulerErrorToast` helper the toasts on
+   * those other paths already use -- except a `LotStepRefused`, whose own
+   * plain message is used verbatim (see its own doc comment above).
+   */
+  const runLot = useCallback(
+    // DEF-0040 / DEF-0048: `ResolvedLotStep` (resolve.ts) is `ResolvedAny`
+    // plus the two new already-resolved kinds, a job's trim and an absence's
+    // record -- a caller holding only `ResolvedAny[]` still fits.
+    async (resolved: ResolvedLotStep[]): Promise<LotResult> => {
+      let done = 0;
+      for (const r of resolved) {
+        try {
+          if (r.intent === "unassign") {
+            await deleteAssignment.mutateAsync(r.assignmentId);
+          } else if (r.intent === "move") {
+            if (r.target.kind === "retime") {
+              await retimeAssignmentForLot({
+                assignmentId: r.assignmentId,
+                range: r.range,
+                readout: r.readout,
+              });
+            } else {
+              // S198-A (DEF-0061, R-467): a lot step that was asked its
+              // certificate or area question carries the reason it was given
+              // (`r.override`/`r.areaOverride`, set ONLY by that answer) --
+              // the same pair the single sentence's own override branch sends.
+              // Without it the server refused the very step the person had
+              // just answered for, after the yes.
+              await submitMove(
+                r.nodeId,
+                r.range,
+                r.assignmentId,
+                r.override !== undefined,
+                r.override?.reason,
+                r.areaOverride !== undefined,
+                r.areaOverride?.reason,
+              );
+            }
+          } else if (r.intent === "assign") {
+            if (r.target.kind === "retime") {
+              await retimeAssignmentForLot({
+                assignmentId: r.target.assignmentId,
+                range: r.range,
+                readout: r.readout,
+              });
+            } else {
+              // S200-A (R-468): a step the person chose to "Split evenly" is
+              // written through the SAME call the board's split pop-up's Confirm
+              // makes (`apply_split_coverage`: the existing blocks' new shares
+              // and this assignment, in one transaction), with the shares the bar
+              // worked out through `splitEvenly`.
+              if (r.split) {
+                const input = buildCreateAssignmentInput(
+                  index.windowStart,
+                  {
+                    nodeId: r.nodeId,
+                    range: r.range,
+                    operatorId: r.operatorId,
+                    target: r.target,
+                  },
+                  {
+                    ...(r.override
+                      ? { eligibilityOverride: true, overrideReason: r.override.reason }
+                      : {}),
+                    ...(r.areaOverride
+                      ? { areaOverride: true, areaOverrideReason: r.areaOverride.reason }
+                      : {}),
+                  },
+                );
+                await applySplitCoverage.mutateAsync({
+                  adjustments: r.split.adjustments,
+                  newAssignment: { ...input, efficiencyPercent: r.split.efficiencyPercent },
+                });
+                done++;
+                continue;
+              }
+              // S198-A (DEF-0061, R-467): the step's own reasons, when it was
+              // asked for them (see the move branch above).
+              await createFromCommand({
+                nodeId: r.nodeId,
+                range: r.range,
+                operatorId: r.operatorId,
+                target: r.target,
+                ...(r.override ? { override: r.override } : {}),
+                ...(r.areaOverride ? { areaOverride: r.areaOverride } : {}),
+              });
+            }
+          } else if (r.intent === "book") {
+            if (r.target.kind === "run_create") {
+              await createRunFromCommand({
+                nodeId: r.nodeId,
+                range: r.range,
+                productId: r.target.productId,
+                headcount: r.target.headcount,
+              });
+            } else {
+              await retimeRunForLot({
+                runId: r.target.runId,
+                range: r.range,
+                readout: r.readout,
+              });
+            }
+          } else if (r.intent === "remove_run") {
+            // S70-d (R-436): an `everyone` clear's own job removal --
+            // `expandEveryoneUnassign` already found the exact run, so this
+            // is the SAME `deleteRun` mutation `deleteRunWithMode`'s own
+            // button calls, `cascade` mode (the run's own remaining
+            // assignments, if any are still attached by the time this step
+            // runs, go with it) -- `mutateAsync`, not `mutate`, so a refusal
+            // (the run already gone, a permission change mid-lot) is this
+            // lot step's own caught failure, the same as every other write
+            // here, never a background toast the lot's own "Done: N" text
+            // contradicts.
+            await deleteRun.mutateAsync({ runId: r.runId, mode: "cascade" });
+          } else if (r.intent === "trim_run") {
+            // DEF-0040 / R-461: the job keeps the other day's part.
+            await trimRunForLot(r);
+          } else if (r.intent === "record_absence") {
+            // DEF-0048 / R-409 amended: the absence, through the Absences
+            // form's own call (`setAbsence`, whole-day: no times) -- the one
+            // way this fact is written (R-449). Awaited, so a refusal (not
+            // permitted, already absent) is this step's own caught failure.
+            // The absences reads (the board's and the admin screen's, both
+            // under the "absences" key) are refreshed after.
+            await setAbsence({
+              operatorId: r.operatorId,
+              from: r.from,
+              to: r.to,
+              reason: r.reason,
+            });
+            void queryClient.invalidateQueries({ queryKey: [absenceKeys.all()[0]] });
+          } else {
+            // S58 (R-415, D132 item 4): `r` narrows to `never` here -- every
+            // member of `ResolvedAny` is handled above, and `ResolvedHeadcount`
+            // is not one of them (a headcount is never wrapped in a `several`,
+            // so it can never reach `onRunLot` by type). This branch is the
+            // pin: if a future caller ever widens `ResolvedAny` to include a
+            // headcount anyway, this refuses it explicitly rather than
+            // silently falling into the "book" branch above and reading
+            // fields (`target.kind`) it does not have.
+            throw new LotStepRefused("A headcount change cannot be part of a lot.");
+          }
+          done++;
+        } catch (err) {
+          if (err instanceof LotStepRefused) {
+            return { done, error: err.message };
+          }
+          const se = isSchedulerError(err) ? err : toSchedulerError(err);
+          return { done, error: buildSchedulerErrorToast(se, ctx).message };
+        }
+      }
+      return { done, error: null };
+    },
+    [
+      ctx,
+      deleteAssignment,
+      deleteRun,
+      retimeAssignmentForLot,
+      retimeRunForLot,
+      trimRunForLot,
+      queryClient,
+      createFromCommand,
+      createRunFromCommand,
+      submitMove,
+      applySplitCoverage,
+      index,
+    ],
   );
 
   return {
@@ -1482,9 +3545,23 @@ export function useDragGesture(args: UseDragGestureArgs) {
     handleTrackKeyDown,
     submitCreateRun,
     submitCreateDirect,
+    precheckCommandStep,
+    openCreateFromCommand,
+    createFromCommand,
+    retimeAssignmentFromCommand,
+    retimeAssignmentForLot,
+    openCreateRunFromCommand,
+    createRunFromCommand,
+    retimeRunFromCommand,
+    retimeRunForLot,
+    openMoveFromCommand,
+    submitMove,
+    runLot,
     saveRunFields,
+    setHeadcountFromCommand,
     deleteRunWithMode,
     saveAssignmentFields,
+    reassignAssignment,
     removeAssignment,
     updateSplitParticipant,
     splitEvenlyAction,
@@ -1492,6 +3569,7 @@ export function useDragGesture(args: UseDragGestureArgs) {
     cancelSplit,
     confirmYes,
     confirmNo,
+    confirmChoose,
   };
 }
 

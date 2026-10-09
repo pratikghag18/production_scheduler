@@ -70,6 +70,14 @@ ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS raw_user_meta_data          json
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_super_admin              boolean;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS created_at                  timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS updated_at                  timestamptz;
+-- Wave 3 lane A (0064): site_people now reads `last_sign_in_at` to mark a
+-- person "invited, not yet signed in". A real Supabase project's auth.users
+-- has had this GoTrue column all along; this shim did not, so every suite that
+-- calls the re-emitted site_people (48, 83, 86) would error at execution
+-- without it. Added here for the same reason P1-3b added the ~20 columns above:
+-- the shim is the thing that drifted out from under a real column, never the
+-- seed.
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS last_sign_in_at             timestamptz;
 
 CREATE TABLE IF NOT EXISTS auth.identities (
   provider_id     text NOT NULL,

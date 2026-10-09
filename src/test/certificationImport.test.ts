@@ -30,6 +30,10 @@ const op = (id: string, employeeRef: string | null, siteNodeId: string) => ({
   siteNodeId,
   source: "manual",
   externalId: null,
+  homeShiftId: null,
+  // DEF-0035: OPERATOR_COLUMNS/OperatorRecord grew home_node_id after this
+  // fixture was written.
+  homeNodeId: null,
 });
 const skill = (id: string, name: string, siteNodeId: string, externalId: string | null = null) => ({
   id,

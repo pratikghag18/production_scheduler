@@ -22,6 +22,14 @@
   background: var(--surface);
   border-bottom: 1px solid var(--grid);
   flex-wrap: wrap;
+  /* S67 (R-445): the positioning context for `.moreBand`, which is
+     `position: absolute` so opening and closing it never changes THIS
+     element's own box height (see `.moreBand`'s own comment). `position:
+     relative` with no `z-index` here does not itself open a new stacking
+     context, so `.moreBand`'s z-index still compares against `Popover`'s at
+     the document root, the same as `CommandLauncher`'s fixed-position chrome
+     does today. */
+  position: relative;
 }
 
 .title {
@@ -30,17 +38,12 @@
   font-weight: 650;
 }
 
-.date {
-  color: var(--ink-2);
-  font-size: calc(13px * var(--chrome-scale, 1));
-}
-
 /* Which place the board is showing. Sits beside the title because it is part
    of the answer to "what am I looking at", not a filter. Both forms use the
    same size and weight so switching between one plant and several does not
    move the rest of the header. */
 .rootName {
-  color: var(--ink-1);
+  color: var(--ink);
   font-size: calc(13px * var(--chrome-scale, 1));
   font-weight: 600;
 }
@@ -49,7 +52,7 @@
   font: inherit;
   font-size: calc(13px * var(--chrome-scale, 1));
   font-weight: 600;
-  color: var(--ink-1);
+  color: var(--ink);
   background: var(--surface);
   border: 1px solid var(--grid);
   border-radius: 6px;
@@ -57,10 +60,54 @@
   max-width: calc(200px * var(--chrome-scale, 1));
 }
 
-.range {
+/* S67-b (R-445 CORRECTED 18 Sept): the date range as ONE dropdown control.
+   `.rangeGroup` is the positioning context for `.rangePopover` (`position:
+   relative`/`position: absolute`, the same pairing `.header`/`.moreBand`
+   already use), so the pop-over opens directly under the button rather
+   than under the whole row. */
+.rangeGroup {
+  position: relative;
+  display: flex;
+}
+
+.rangeButton {
   display: flex;
   align-items: center;
   gap: 6px;
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: calc(5px * var(--chrome-scale, 1)) calc(11px * var(--chrome-scale, 1));
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+}
+
+.rangeButton:hover {
+  background: var(--page);
+}
+
+/* Same layer tier as `.moreBand` (z-index 80) so it always reads above
+   ordinary board content; one step higher (85) so the range pop-over
+   still sits above the "Show more" band on the rare chance both are open
+   at once, and still below the shared `Popover` shell's 90 (`Popover.tsx`'s
+   own comment), since `CopyWeekDialog`/`SaveTemplateDialog` open from
+   inside that band and must stay on top of everything else in the header. */
+.rangePopover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 85;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: calc(10px * var(--chrome-scale, 1)) calc(12px * var(--chrome-scale, 1));
+  background: var(--surface);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(11, 11, 11, 0.16);
+  white-space: nowrap;
 }
 
 .rangeLabel {
@@ -97,12 +144,29 @@
   font-style: italic;
 }
 
-.legend {
-  display: flex;
-  gap: 12px;
-  margin-left: auto;
-  align-items: center;
-  flex-wrap: wrap;
+/* S67 (R-445): even columns, never a ragged wrap -- `auto-fill` keeps every
+   column the same width regardless of how many products are in the shown
+   window, and the swatch + name pair inside `.key` stays aligned across rows
+   because every cell in the grid starts at the same x. Replaces the old
+   `.legend` (a flex row with `margin-left: auto` to push it to the row's own
+   right edge) now that the key lives in its own group inside the band,
+   not the row. */
+.keyGrid {
+  display: grid;
+  /* The maintainer, 18 Sept, on a 1900px screen where `auto-fill` had laid
+     thirteen products in ONE row: "The product placement should be in the
+     form of even column matrix as I shown". The mock is a four-column
+     matrix; the count of columns is fixed, not derived from the width, so
+     the key reads the same at every size. Two columns under 900px so a name
+     never wraps inside a cell. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: calc(6px * var(--chrome-scale, 1)) calc(16px * var(--chrome-scale, 1));
+}
+
+@media (max-width: 900px) {
+  .keyGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .key {
@@ -135,10 +199,21 @@
 }
 
 .zoom {
-  display: flex;
+  /* R-447 (the maintainer, 18 Sept): every button in one group is the same
+     size. A grid whose columns share one track size makes each segment as
+     wide as the widest label; `flex` sized each to its own word. */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   border: 1px solid var(--axis);
   border-radius: 7px;
   overflow: hidden;
+  /* The maintainer, 18 Sept: "The chevron button along with the
+     compact/std/fine button should be right aligned as shown". The zoom
+     group takes the row's spare width on its left, so it and everything
+     after it (the quiet notes, the Show more toggle) sit at the right edge
+     at any screen width, as in the mock. */
+  margin-left: auto;
 }
 
 .zoom button {
@@ -195,7 +270,11 @@
   color: var(--avatar-fg);
 }
 
-.snapNote,
+/* F-170: `.snapNote` (the row's old, unconditional "snap: 30 min (P1-4b)"
+   label) is gone with the JSX that rendered it -- removed, not reworded, per
+   the finding's own default. `.scrollNote` stays: the end-of-window text it
+   styles is now conditional on `atWindowEnd` (BoardToolbar.tsx), but the
+   look is unchanged. */
 .scrollNote {
   font-size: calc(11.5px * var(--chrome-scale, 1));
   color: var(--muted);
@@ -204,7 +283,10 @@
 /* Ported from the mockup's `.daynav` rules (model-hybrid.html). Same shape as
    `.zoom` — a segmented button group — but without a selected state. */
 .daynav {
-  display: flex;
+  /* R-447: one track size for the three segments (see `.zoom`). */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   border: 1px solid var(--axis);
   border-radius: 7px;
   overflow: hidden;
@@ -226,4 +308,164 @@
 
 .daynav button + button {
   border-left: 1px solid var(--grid);
+}
+
+/* S67-b (R-445 CORRECTED 18 Sept): "the three buttons in a plain row
+   beneath it (no bordered strip around them)" -- the mock's own words for
+   "Week plan". Replaces the 17 Sept build's `.copyWeek`, which drew the
+   three as one segmented strip (R-339's original shape, borrowed from
+   `.daynav` beside it in the row); that shape belonged to the row, not to
+   a labelled group inside the band, and the maintainer's correction named
+   the button positions as wrong. Each button keeps its own border/radius
+   (the app's ordinary button look, `.moreButton`'s own skin) rather than
+   losing all affordance, wrapping if the column is ever narrower than the
+   three labels. */
+.weekPlanButtons {
+  /* The maintainer, 18 Sept: "align the week plan buttons vertically as
+     well? Make sure they're equal size buttons like they fit in a column."
+     A column that stretches every button to the widest one, so the three
+     read as one control stack beside the key's matrix. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: max-content;
+  gap: calc(8px * var(--chrome-scale, 1));
+}
+
+.weekPlanButtons button {
+  text-align: center;
+}
+
+.weekPlanButtons button {
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: calc(5px * var(--chrome-scale, 1)) calc(10px * var(--chrome-scale, 1));
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+}
+
+.weekPlanButtons button:hover {
+  background: var(--page);
+}
+
+/* S67-b (R-445 CORRECTED 18 Sept): "Show more"/"Show less" -- same
+   individual-button look as `.rangeButton`/`.weekPlanButtons button`
+   (border + radius, not the filled `.zoom` look, since this toggles a layer
+   rather than picking one of several states). TR-4 (reviewer, 18 Sept): the
+   lane's plain "More" word (with the state carried only in `aria-label`) is
+   withdrawn -- the maintainer called it meaningless on the shipped band;
+   the visible text names the state again and IS the accessible name. */
+.moreButton {
+  border: 1px solid var(--axis);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: calc(5px * var(--chrome-scale, 1)) calc(11px * var(--chrome-scale, 1));
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(12px * var(--chrome-scale, 1));
+  color: var(--ink-2);
+  /* The maintainer, 18 Sept: "The show more and show less buttons have
+     different sizes I believe, it is causing the panel to move." One width
+     for both words, in the button's own em so it scales with the row, with
+     the label centred -- the row never shifts when the band opens. */
+  min-width: 8.5em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3em;
+}
+
+.moreButton:hover {
+  background: var(--page);
+}
+
+/* S67 (R-445): the band is a LAYER over the board, never a row that pushes
+   it down -- `.header` above is `position: relative` for exactly this, and
+   `position: absolute` takes THIS element out of its parent's flex flow
+   entirely, so opening and closing it never changes `.header`'s own box
+   height, which is what `computeFitScale` measures the board's available
+   height against (D76, this file's header comment).
+
+   z-index 80: the same tier `CommandLauncher.module.css` uses for its own
+   corner chrome, for the same reason spelled out there -- above ordinary
+   board content (the highest board-body z-index is `AssignmentChip`/
+   `DirectBlock`/`RunBand`'s dragging state at 50) and below the shared
+   `Popover` shell's 90, since `CopyWeekDialog`/`SaveTemplateDialog` --
+   opened from a button INSIDE this band -- must still sit over it. */
+/* TR-1 (reviewer, S67-a review): unbounded before this -- `overflow-y:
+   visible` (the initial value) and no `max-height` at all, the one thing
+   `CommandLauncher.module.css`'s own `.panel` (`max-height: calc(100% -
+   94px)`) and `OperatorPanel.module.css`'s `.list` (`overflow-y: auto`)
+   both take care to set. Measured in a real browser (jsdom cannot compute
+   box layout, so this cannot be a vitest pin): at a 1280x480 viewport the
+   band already reads `overflow-y: visible; max-height: none` on
+   `getComputedStyle`, and a "Key" long enough (many products in the shown
+   window, or several long template names wrapping in "Week plan") pushes
+   the band's bottom below the viewport with NOTHING to scroll -- `.page`'s
+   height chain is `overflow: hidden` all the way up (`global.css` D50/D48),
+   so there is no ancestor scrollbar to reveal it either. Bounded to the
+   viewport, minus room for the header above it and a margin below, with its
+   own scrollbar once content exceeds that. */
+/* S67-b (R-445 CORRECTED 18 Sept): TWO COLUMNS, not a stack -- "Week plan"
+   left, "Key" right taking the remaining width. `flex-wrap: wrap` still
+   guards a very narrow viewport (the columns stack rather than clip), and
+   `align-items: flex-start` keeps the two headings on one baseline instead
+   of the taller column stretching the shorter one's own children. */
+.moreBand {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: calc(28px * var(--chrome-scale, 1));
+  padding: calc(12px * var(--chrome-scale, 1)) calc(16px * var(--chrome-scale, 1));
+  background: var(--surface);
+  border-bottom: 1px solid var(--grid);
+  box-shadow: 0 8px 20px rgba(11, 11, 11, 0.16);
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Its own intrinsic width -- the mock's left column is only as wide as the
+   longest button label, never stretched to share the row evenly with Key. */
+.weekPlanColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* Takes the remaining width -- TB-11: with no "Week plan" column beside it
+   (a viewer), this is the band's only child and so reads as the full width
+   on its own, with nothing here needing to know that. */
+.keyColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.moreGroupTitle {
+  margin: 0;
+  font-size: calc(11px * var(--chrome-scale, 1));
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+
+/* S67-b (R-445 CORRECTED 18 Sept): "a thin divider, then the understaffed
+   and break marks" -- separates the per-product swatches (however many
+   the catalogue holds) from the two fixed status marks below them. */
+.keyDivider {
+  border-top: 1px solid var(--grid);
 }

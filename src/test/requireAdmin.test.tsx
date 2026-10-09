@@ -101,9 +101,16 @@ describe("R-079: the admin route guard refuses in place", () => {
     // screen still turned them away at the door.
     //
     // What they SEE inside is `adminSectionsFor`'s three sections, not the
-    // whole rail; that is a different question and has its own cases. This one
-    // pins the door, so that a reader who meets R-079's older sentence does not
-    // "fix" the guard back to a refusal the server would contradict.
+    // whole rail; that is a different question, owned by
+    // `adminNoGrants.test.tsx` N6/N7. This one pins the door, so that a reader
+    // who meets R-079's older sentence does not "fix" the guard back to a
+    // refusal the server would contradict.
+    //
+    // ⛔ THAT POINTER USED TO READ "and has its own cases", WHICH WAS A PLAN
+    // AND READ LIKE A RECORD (DEF-0008). There were none: the narrowed rail had
+    // no case anywhere in the suite, and this sentence is a good part of why
+    // nobody went looking. A file and a case number can be checked; "has its
+    // own cases" cannot.
     show("supervisor", false);
     expect(screen.getByRole("heading", { level: 1, name: "Hierarchy" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Not available" })).toBe(null);

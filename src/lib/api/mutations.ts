@@ -11,7 +11,7 @@
  */
 import { supabase } from "@/lib/supabase";
 import type { Json, TablesUpdate } from "@/lib/database.types";
-import { shapeMismatch, toSchedulerError } from "./errors";
+import { requireWritten, shapeMismatch, toSchedulerError, type SchedulerError } from "./errors";
 import {
   parseAssignment,
   parseCreateAssignmentResult,
@@ -165,6 +165,117 @@ export async function createAssignment(
   return parsed;
 }
 
+export interface ReassignAssignmentInput {
+  assignmentId: string;
+  /** The person who takes the row over. Never null: reassigning to nobody is a delete. */
+  operatorId: string;
+  /**
+   * D64, as `createAssignment` above — waves through a missing or lapsed
+   * certificate, and only under `warn`. ⚠️ THE SERVER REQUIRES THE REASON HERE
+   * even though `create_assignment` does not (migration 0057 asks for it in the
+   * writer rather than leaving it to the screen), so sending `true` with an
+   * empty reason comes back as `invalid_argument` naming `p_override_reason`.
+   */
+  eligibilityOverride?: boolean;
+  overrideReason?: string;
+  /** D113 — a DIFFERENT decision from the one above; see `CreateAssignmentInput`. */
+  areaOverride?: boolean;
+  areaOverrideReason?: string;
+}
+
+/**
+ * `reassign_assignment(p_assignment_id uuid, p_operator_id uuid,
+ * p_eligibility_override boolean DEFAULT false, p_override_reason text DEFAULT
+ * NULL, p_area_override boolean DEFAULT false, p_area_override_reason text
+ * DEFAULT NULL)` (migration 0057, R-343). Returns the same
+ * `{assignment, eligibility}` envelope `create_assignment` returns, so it goes
+ * through the same parser. Raises: invalid_argument (unknown row, unknown
+ * person, an override with no reason), not_permitted, not_eligible,
+ * not_offered_here (via `assignments_scope_guard`), capacity_exceeded (via
+ * `assignments_capacity`).
+ *
+ * ⭐ WHY THIS IS NOT `updateAssignmentFields` WITH ONE MORE FIELD. That
+ * function is a plain PostgREST PATCH, and the eligibility check lives in the
+ * RPC, not in a trigger — a patched `operator_id` would pass RLS, the area
+ * guard and the capacity guard and skip certification entirely. The maintainer,
+ * session 76: *"once you assign someone say Operator 1, there is no way to
+ * modify that assignment to operator 2 unless you delete existing assignment,
+ * this is not practical."* The answer to that is a writer, not a wider patch.
+ */
+export async function reassignAssignment(
+  input: ReassignAssignmentInput,
+): Promise<CreateAssignmentResult> {
+  const { data, error } = await supabase.rpc("reassign_assignment", {
+    p_assignment_id: input.assignmentId,
+    p_operator_id: input.operatorId,
+    p_eligibility_override: input.eligibilityOverride,
+    p_override_reason: input.overrideReason,
+    p_area_override: input.areaOverride,
+    p_area_override_reason: input.areaOverrideReason,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseCreateAssignmentResult(data);
+  if (parsed === null) {
+    throw shapeMismatch(
+      "reassign_assignment",
+      "expected a CreateAssignmentResult object (see shapes.ts)",
+    );
+  }
+  return parsed;
+}
+
+export interface MoveAssignmentInput {
+  assignmentId: string;
+  /** The TARGET cell — may equal the row's current node (an hours-only move). */
+  nodeId: string;
+  start: Date;
+  end: Date;
+  /** D64, as `createAssignment`/`reassignAssignment` above. */
+  eligibilityOverride?: boolean;
+  overrideReason?: string;
+  /** D113 — a DIFFERENT decision from the one above; see `CreateAssignmentInput`. */
+  areaOverride?: boolean;
+  areaOverrideReason?: string;
+}
+
+/**
+ * `move_assignment(p_assignment_id uuid, p_node_id uuid, p_timerange
+ * tstzrange, p_eligibility_override boolean DEFAULT false, p_override_reason
+ * text DEFAULT NULL, p_area_override boolean DEFAULT false,
+ * p_area_override_reason text DEFAULT NULL)` (migration 0080, S41-c / R-389).
+ * Moves ONE block to a new cell and/or new hours, against the TARGET
+ * (`p_node_id`, `p_timerange`) — never the row's current placement. Returns
+ * the same `{assignment, eligibility, absence}` envelope `reassign_assignment`
+ * returns, so it goes through the same parser. `run_id` always becomes NULL
+ * on the server (a run lives on one cell; leaving it always detaches, as a
+ * detach drag does) — the caller never sends a run target. Raises:
+ * invalid_argument (unknown row, a departed person's row, a run-attached row
+ * whose run's product is gone, an override with no reason), not_permitted
+ * (edit rights required on both source and target node), not_eligible,
+ * absent, not_offered_here (via the trigger), capacity_exceeded (via the
+ * trigger).
+ */
+export async function moveAssignment(input: MoveAssignmentInput): Promise<CreateAssignmentResult> {
+  const { data, error } = await supabase.rpc("move_assignment", {
+    p_assignment_id: input.assignmentId,
+    p_node_id: input.nodeId,
+    p_timerange: toTstzRange(input.start, input.end),
+    p_eligibility_override: input.eligibilityOverride,
+    p_override_reason: input.overrideReason,
+    p_area_override: input.areaOverride,
+    p_area_override_reason: input.areaOverrideReason,
+  });
+  if (error) throw toSchedulerError(error);
+  const parsed = parseCreateAssignmentResult(data);
+  if (parsed === null) {
+    throw shapeMismatch(
+      "move_assignment",
+      "expected a CreateAssignmentResult object (see shapes.ts)",
+    );
+  }
+  return parsed;
+}
+
 export interface MoveRunInput {
   runId: string;
   nodeId: string;
@@ -283,7 +394,17 @@ export async function deleteRun(
     p_run_id: runId,
     p_mode: mode,
   });
-  if (error) throw toSchedulerError(error);
+  if (error) {
+    const se = toSchedulerError(error);
+    // DEF-0052 (30 Sept): `delete_run` raises `invalid_argument` on p_run_id
+    // ("run not found") when the job is gone, and `not_permitted` when the
+    // caller may not edit its cell -- two facts, two sentences.
+    if (se.kind === "InvalidArgument" && se.field === "p_run_id" && se.reason === "not found") {
+      const gone: SchedulerError = { kind: "WriteRefused", gone: "job" };
+      throw gone;
+    }
+    throw se;
+  }
   const parsed = parseDeleteRunResult(data);
   if (parsed === null)
     throw shapeMismatch("delete_run", "expected a DeleteRunResult object (see shapes.ts)");
@@ -320,7 +441,11 @@ export async function updateRunFields(runId: string, edit: RunFieldEdit): Promis
     .eq("id", runId)
     .select()
     .single();
-  if (error) throw toSchedulerError(error);
+  if (error) {
+    // DEF-0052: zero rows matched -- gone, or forbidden? Read it back.
+    if ((error as { code?: string }).code === NO_ROWS_CODE) await throwIfGone("runs", runId, "job");
+    throw toSchedulerError(error);
+  }
   const parsed = parseRun(data as unknown as Json);
   if (parsed === null) throw shapeMismatch("runs.update", "expected a Run row (see shapes.ts)");
   return parsed;
@@ -331,7 +456,6 @@ export interface AssignmentFieldEdit {
   efficiencyPercent?: number;
   targetQty?: number | null;
   targetUnit?: string | null;
-  status?: string;
   /** A resize that does not change node (docs/api.md §4). */
   timerange?: { start: Date; end: Date };
   /**
@@ -360,6 +484,68 @@ export interface AssignmentFieldEdit {
   productId?: string | null;
 }
 
+/**
+ * DEF-0052 (30 Sept): a write that changed no row is either FORBIDDEN (RLS
+ * filtered it; the caller can still read the row) or GONE (someone else
+ * removed it first; the caller reads nothing). Read the row back by id AS THE
+ * CALLER and say which -- the two must never read the same ("You cannot change
+ * that from here" about a block that is not there is a sentence about
+ * permission for a fact about the board). Throws only for GONE; the caller
+ * falls through to its own forbidden refusal otherwise.
+ */
+async function throwIfGone(
+  table: "assignments" | "runs",
+  id: string,
+  what: "block" | "job",
+): Promise<void> {
+  const { data, error } = await supabase.from(table).select("id").eq("id", id).maybeSingle();
+  if (error === null && data === null) {
+    const gone: SchedulerError = { kind: "WriteRefused", gone: what };
+    throw gone;
+  }
+}
+
+/** PostgREST's "no rows" answer to a `.single()` update: zero rows matched. */
+const NO_ROWS_CODE = "PGRST116";
+
+/**
+ * Delete an assignment. R-323: the row is REMOVED, not marked.
+ *
+ * ⭐ THIS REPLACED A SOFT DELETE, and the maintainer's reason is worth keeping
+ * next to the code: with the progress picker gone (R-322) the `status` column
+ * held one bit — live or gone — spelled as a word, and the same table already
+ * deleted both ways, since `delete_run` has always removed a run's assignments
+ * outright. One concept with two behaviours depending on which button was
+ * pressed. Now there is one.
+ *
+ * ⚠️ THE `.select("id")` IS NOT DECORATION. An RLS-filtered DELETE that matches
+ * no row removes nothing and raises NOTHING — a success with no effect, which
+ * is CLAUDE.md §4's "a write that reports success can have changed nothing".
+ * `requireWritten` turns the empty result into a refusal, so a person who may
+ * not edit that cell is told, rather than watching the block reappear on the
+ * next read. Same shape as `deleteOperator`.
+ *
+ * ⚠️ NO RPC, DELIBERATELY. `assignments_delete` (0008) already grants exactly
+ * the right people the right rows — `app_can_edit_node(node_id)`, the same
+ * predicate the update path uses — so a function wrapping this would add a
+ * second place for that rule to be stated and drift.
+ *
+ * The audit trigger (0007) records the actor and the whole deleted row, which
+ * is where "who removed this and when" lives now.
+ */
+export async function deleteAssignment(assignmentId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("assignments")
+    .delete()
+    .eq("id", assignmentId)
+    .select("id");
+  if (error) throw toSchedulerError(error);
+  if (data !== null && data.length === 0) {
+    await throwIfGone("assignments", assignmentId, "block");
+  }
+  requireWritten(data as unknown[] | null);
+}
+
 export async function updateAssignmentFields(
   assignmentId: string,
   edit: AssignmentFieldEdit,
@@ -368,7 +554,6 @@ export async function updateAssignmentFields(
   if (edit.efficiencyPercent !== undefined) patch.efficiency = toEfficiency(edit.efficiencyPercent);
   if ("targetQty" in edit) patch.target_qty = edit.targetQty ?? null;
   if ("targetUnit" in edit) patch.target_unit = edit.targetUnit ?? null;
-  if (edit.status !== undefined) patch.status = edit.status;
   if (edit.timerange) patch.timerange = toTstzRange(edit.timerange.start, edit.timerange.end);
   if ("runId" in edit) patch.run_id = edit.runId ?? null;
   if ("productId" in edit) patch.product_id = edit.productId ?? null;
@@ -379,7 +564,12 @@ export async function updateAssignmentFields(
     .eq("id", assignmentId)
     .select()
     .single();
-  if (error) throw toSchedulerError(error);
+  if (error) {
+    // DEF-0052: zero rows matched -- gone, or forbidden? Read it back.
+    if ((error as { code?: string }).code === NO_ROWS_CODE)
+      await throwIfGone("assignments", assignmentId, "block");
+    throw toSchedulerError(error);
+  }
   const parsed = parseAssignment(data as unknown as Json);
   if (parsed === null)
     throw shapeMismatch("assignments.update", "expected an Assignment row (see shapes.ts)");

@@ -24,5 +24,23 @@
     "composite": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts", "eslint.config.js"]
+  // ⭐ `e2e` IS LISTED AS A DIRECTORY, NOT AS THE ONE FILE THAT FORCED IT.
+  // `playwright.config.ts` imports `e2e/env.ts`, and TS6307 refuses an imported
+  // file a composite project does not list. Naming the directory typechecks the
+  // SPECS too, which were never typechecked before — they are the only code in
+  // the repo that drives the real app, so a spec that no longer compiles against
+  // the app is worth hearing about from `tsc` rather than from a red run.
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "eslint.config.js",
+    "e2e",
+    // S59-e (R-421): `vite.config.ts`'s own dev-only trace plugin imports
+    // this Node-side handler (`src/lib/voice/traceServer.ts`) -- TS6307
+    // otherwise, the same reason `e2e` is named above.
+    "src/lib/voice/traceServer.ts",
+    // S71-f: the clip handler the same plugin mounts beside it.
+    "src/lib/voice/clipServer.ts"
+  ]
 }

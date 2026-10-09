@@ -8,6 +8,11 @@ test-results
 .env
 .env.local
 .env.*.local
+# The invite Edge Function's local secrets (service-role key etc.). The bare
+# `.env` above already matches it in any directory; named here so nobody has to
+# reason about that, and so it is obvious the file is meant to exist untracked.
+# supabase/functions/README.md says what goes in it.
+supabase/functions/.env
 
 # supabase local state
 .supabase/
@@ -32,6 +37,41 @@ checks.txt
 # already live in supabase/ -- committing one means two copies of the same
 # script drifting apart, and the copy is the one nobody edits.
 supabase/snippets/
+
+# S42-a: the voice-command training set is generated on demand
+# (`npm run voice:generate`), never committed -- only the held-out test set
+# (`data/voice/heldout.jsonl`) is, and it is generated exactly once.
+data/voice/train.jsonl
+
+# S43-a: `npm run voice:prepare`'s output for Colab, and the runs brought
+# back from it (predictions and the compressed model) -- local build
+# artifacts, never committed.
+data/voice/colab/
+data/voice/runs/
+
+# S43-a: bytecode caches from running the new scripts/voice/train/*.py files.
+__pycache__/
+
+# S44-a: the model file served by `npm run voice:serve` -- copy the S43
+# fine-tuned GGUF here; never committed (1+ GB).
+data/voice/model/
+
+# S57-a: whisper.cpp's own model file (`npm run voice:whisper:fetch`) and,
+# when this machine had to build its own arm64-compatible server image
+# (README under scripts/voice/serve/), the whisper.cpp source clone that
+# built it -- never committed.
+data/voice/whisper/
+
+# S59-e (R-421): the bar's own dev-only trace -- what it heard, what the
+# model answered, what it read and what it did -- appended locally by the
+# dev server's `/__trace` handler (`src/lib/voice/traceServer.ts`). Local
+# debugging output, never committed.
+data/voice/trace/
+
+# S71-c (R-453): the maintainer's own recorded voice, from
+# `npm run voice:clips:record` (scripts/voice/clips/README.md) -- the clips,
+# their manifest, and every scorer run under `results/`. Never committed.
+data/voice/clips/
 
 # The per-machine Claude Code resume file. It says "personal -- gitignored, not
 # shared" in its own first line, and it is written for whoever is sitting at

@@ -2,8 +2,11 @@ import type { Product, BoardOperator, ShiftTemplate } from "@/lib/api";
 import type { IndexedAssignment } from "../lib/boardIndex";
 import { minutesToPx, type Density } from "../lib/geometry";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
+import type { DayAxis } from "../lib/time";
 import { targetDisplay } from "../lib/standardTarget";
+import { resolveHomeBand, overtimeMinutes } from "../lib/railWords";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
+import { useHighlightKind } from "../lib/highlight";
 import styles from "./DirectBlock.module.css";
 
 function initials(name: string): string {
@@ -25,10 +28,12 @@ export function DirectBlock({
   product,
   productColorVar,
   windowStart,
+  zone,
   pxPerHour,
   windowMinutes,
   template,
   dayCount,
+  dayAxis,
   zoomIndex,
   activeDrag,
   onPointerDown,
@@ -46,10 +51,12 @@ export function DirectBlock({
   product: Product | undefined;
   productColorVar: string;
   windowStart: Date;
+  zone?: string;
   pxPerHour: number;
   windowMinutes: number;
   template: ShiftTemplate | null;
   dayCount: number;
+  dayAxis: DayAxis;
   zoomIndex: 0 | 1 | 2;
   activeDrag: ActiveDrag | null;
   onPointerDown: (descriptor: BlockDragDescriptor, e: React.PointerEvent) => void;
@@ -63,6 +70,11 @@ export function DirectBlock({
   onKeyUp: (e: React.KeyboardEvent) => void;
 }) {
   const dragging = activeDrag !== null;
+  // S47 / R-395: the command bar's remove/move/retime question, when this
+  // block is one of its candidates -- `null` the rest of the time (read
+  // through context, not a prop threaded down from `BoardPage` through
+  // `BoardGrid`/`TrackRow`, neither of which otherwise cares about it).
+  const highlightKind = useHighlightKind(assignment.id);
   const range =
     dragging && activeDrag.candidate
       ? activeDrag.candidate
@@ -77,9 +89,16 @@ export function DirectBlock({
   // cell's standard, else NA. See `targetDisplay` for why this is not inlined.
   const { suffix: tgtSfx, tip: tgtTip } = targetDisplay(assignment);
 
+  // S66-c (R-441/R-448): THE OT TAG. See `AssignmentChip.tsx`'s identical
+  // block for the full reasoning (extract, never retype -- the arithmetic
+  // lives once, in `railWords.ts`; this is the same call against this
+  // block's own node template, `template`).
+  const homeBand = operator ? resolveHomeBand(operator, template) : null;
+  const otMinutes = homeBand ? overtimeMinutes(range, homeBand, dayAxis) : 0;
+
   const title =
-    `${name} · ${productName} · ${formatFull(addMinutes(windowStart, range.startMin))}` +
-    `–${formatClock(addMinutes(windowStart, range.endMin))}${effSfx}${tgtTip}` +
+    `${name} · ${productName} · ${formatFull(addMinutes(windowStart, range.startMin), undefined, zone)}` +
+    `–${formatClock(addMinutes(windowStart, range.endMin), zone)}${effSfx}${tgtTip}` +
     (assignment.eligibilityOverride ? " · certification override" : "");
 
   const descriptorBase = {
@@ -90,6 +109,7 @@ export function DirectBlock({
     windowMinutes,
     template,
     dayCount,
+    dayAxis,
     zoomIndex,
     runsOnNode: [],
     crew: [],
@@ -97,7 +117,7 @@ export function DirectBlock({
 
   return (
     <div
-      className={`${styles.dblk} ${assignment.eligibilityOverride ? styles.override : ""} ${dragging ? styles.dragging : ""}`}
+      className={`${styles.dblk} ${assignment.eligibilityOverride ? styles.override : ""} ${dragging ? styles.dragging : ""} ${highlightKind === "remove" ? styles.outlineRemove : ""} ${highlightKind === "move" || highlightKind === "retime" ? styles.outlineMove : ""}`}
       style={{
         left,
         width,
@@ -107,7 +127,7 @@ export function DirectBlock({
       title={title}
       tabIndex={0}
       role="button"
-      aria-label={`${name} direct assignment on ${productName}, ${formatClock(addMinutes(windowStart, range.startMin))} to ${formatClock(addMinutes(windowStart, range.endMin))}`}
+      aria-label={`${name} direct assignment on ${productName}, ${formatClock(addMinutes(windowStart, range.startMin), zone)} to ${formatClock(addMinutes(windowStart, range.endMin), zone)}`}
       onPointerDown={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
         onPointerDown(
@@ -131,10 +151,17 @@ export function DirectBlock({
       <span className={styles.who}>
         {name}
         {tgtSfx}
+        {/* S66-c (R-441/R-448): the OT tag, beside the name, drawn only when
+            this block places the person outside their own band. */}
+        {otMinutes > 0 && (
+          <span className={styles.otTag} title={`overtime, ${otMinutes} min`}>
+            OT
+          </span>
+        )}
       </span>
       <span className={styles.what}>
-        {productName} · {formatClock(addMinutes(windowStart, range.startMin))}–
-        {formatClock(addMinutes(windowStart, range.endMin))}
+        {productName} · {formatClock(addMinutes(windowStart, range.startMin), zone)}–
+        {formatClock(addMinutes(windowStart, range.endMin), zone)}
         {effSfx}
       </span>
       <span

@@ -39,6 +39,15 @@
   margin-bottom: 0.625rem;
 }
 
+/* R-447 (the audit lane, S69-a): Add/Cancel here carried no class at all
+   (plain default buttons), same gap as this file's own `.popActions`
+   footer -- fixed the same way, a shared `min-width` in em. */
+.addRootForm button {
+  flex: none;
+  min-width: 4.5em;
+  text-align: center;
+}
+
 .addRootForm input {
   flex: 1;
   min-width: 0;
@@ -252,12 +261,20 @@
   margin-top: 0.625rem;
 }
 
+/* R-447 (the audit lane, S69-a): the rename/add-child footer (Cancel/Rename,
+   Cancel/Add) and the delete-confirm footer (Cancel/Deactivate,
+   Cancel/Delete) both used this class and both sized each button to its own
+   word. One shared `min-width` in em, the same fix
+   `LevelEditor.module.css`'s `.cancelBtn`/`.saveBtn` uses for its own
+   Cancel/Save footer, sized to the longest word here ("Deactivate"). */
 .popActions button {
   font-size: 0.75rem;
   padding: 0.3125rem 0.625rem;
   border-radius: 0.375rem;
   border: 1px solid var(--axis);
   background: var(--surface);
+  min-width: 6.5em;
+  text-align: center;
   cursor: pointer;
 }
 

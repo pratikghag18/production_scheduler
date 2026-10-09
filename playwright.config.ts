@@ -1,34 +1,23 @@
 import { defineConfig, devices } from "@playwright/test";
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import { supabaseUrl, supabaseAnonKey, e2ePort, e2eBaseUrl } from "./e2e/env";
 
-// Minimal .env.local loader (no dotenv dependency — this brief's stack doesn't
-// include one). Falls back to dummy Supabase values so the app boots without
-// a real project; HealthPill going "unreachable" against the dummy URL is
-// expected and must not fail the smoke test.
-function loadDotEnvLocal(): Record<string, string> {
-  const dir = path.dirname(fileURLToPath(import.meta.url));
-  const envPath = path.join(dir, ".env.local");
-  const parsed: Record<string, string> = {};
-  if (existsSync(envPath)) {
-    for (const line of readFileSync(envPath, "utf-8").split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq === -1) continue;
-      const key = trimmed.slice(0, eq).trim();
-      const value = trimmed.slice(eq + 1).trim();
-      parsed[key] = value;
-    }
-  }
-  return parsed;
-}
-
-const dotEnvLocal = loadDotEnvLocal();
-
-const supabaseUrl = dotEnvLocal.VITE_SUPABASE_URL ?? "https://example.supabase.co";
-const supabaseAnonKey = dotEnvLocal.VITE_SUPABASE_ANON_KEY ?? "dummy-anon-key";
+/*
+ * ⚠️ THE CREDENTIALS AND THE "IS THERE A BACKEND" VERDICT LIVE IN `e2e/env.ts`,
+ * not here. Both this file and the signed-in specs need that answer, and a
+ * second copy of it would drift — the config would hand the dev server real
+ * values while a spec still believed it was on the dummies, or the reverse.
+ * The .env.local loader that used to sit inline here moved there whole.
+ *
+ * HealthPill going "unreachable" against the dummy URL is expected and must not
+ * fail the smoke test.
+ *
+ * ⭐ THE PORT LIVES THERE TOO (R-366), same reason: `e2ePort`/`e2eBaseUrl` come
+ * from `e2e/env.ts` so this file and the specs that build a URL by hand agree
+ * on where the dev server actually is. `--strictPort` turns a taken port into
+ * an error instead of Vite silently hopping to the next free one — a silent
+ * hop is exactly how a tester run ends up talking to the wrong server, which is
+ * the failure R-366 exists to stop.
+ */
 
 export default defineConfig({
   testDir: "./e2e",
@@ -38,18 +27,38 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: "html",
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: e2eBaseUrl,
     trace: "on-first-retry",
   },
   projects: [
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // The touch acceptance pass (`touch.spec.ts`, wave 2 lane C) drives real
+      // finger input through CDP and needs a `hasTouch` tablet context, so it
+      // runs ONLY under the `touch` project below. Ignoring it here is what
+      // stops it double-running: every other spec runs under `chromium`, this
+      // one runs under `touch`, so `npx playwright test` (what `scripts/ci-e2e.sh`
+      // calls) still runs each file exactly once.
+      testIgnore: /touch\.spec\.ts/,
+    },
+    {
+      // A Chromium tablet profile: `hasTouch: true` and `isMobile: true` so
+      // `touch-action` and a pointer type of `touch` behave as on a real
+      // tablet, and Chromium so `Input.dispatchTouchEvent` (CDP, Chromium-only)
+      // can drive the drags. Landscape (1138x712) so the board keeps its
+      // desktop layout — the operator panel and the full track are on screen,
+      // which the panel-drag and create cases need.
+      name: "touch",
+      use: { ...devices["Galaxy Tab S4 landscape"] },
+      testMatch: /touch\.spec\.ts/,
     },
   ],
   webServer: {
-    command: "npm run dev",
-    url: "http://localhost:5173",
+    command: `npm run dev -- --port ${e2ePort} --strictPort`,
+    url: e2eBaseUrl,
+    // Reusing a server already on THIS run's port is still fine — including
+    // the tester's own port, once it has one of its own.
     reuseExistingServer: !process.env.CI,
     env: {
       VITE_SUPABASE_URL: supabaseUrl,

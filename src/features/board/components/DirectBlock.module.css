@@ -45,6 +45,20 @@
   font-weight: 600;
 }
 
+/* S66-c (R-441/R-448): see `AssignmentChip.module.css`'s identical rule and
+   comment -- same tokens, same reasoning, this block is the other shape a
+   staffing OT tag can sit on. */
+.otTag {
+  flex: none;
+  font-size: calc(8.5px * var(--ui-scale, 1));
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--signal-warn);
+  border-radius: 3px;
+  padding: 0 3px;
+  margin-left: 3px;
+}
+
 .what {
   color: var(--ink-2);
   font-size: calc(10.5px * var(--ui-scale, 1));
@@ -53,6 +67,24 @@
 .override {
   outline: 2px dashed var(--warn);
   outline-offset: 1px;
+}
+
+/* S47 / R-395: what the command bar's remove/move/retime question draws
+   while it stands -- an OUTLINE (never `border`), pulled inward with a
+   negative offset so it reads as INSET and never nudges this block's own
+   layout (brief §2 item 2). Reuses the two existing tokens the brief names
+   rather than inventing a colour: `--crit`, the same red every other
+   conflict/blocked signal on the board already uses (tokens.css), for a
+   removal; `--ring`, the board's own outline token, for a move or a re-time
+   (R-385's "change it" answer -- not a removal, so never red). */
+.outlineRemove {
+  outline: 2px solid var(--crit);
+  outline-offset: -2px;
+}
+
+.outlineMove {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 /* Ported from the mockup's .dblk.dragging — kept as the compound

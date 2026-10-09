@@ -1,0 +1,343 @@
+{
+  "$defs": {
+    "adjust": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "by": { "type": "integer", "not": { "const": 0 } },
+            "edge": { "enum": ["end", "start"] }
+          },
+          "required": ["by", "edge"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "at": { "$ref": "#/$defs/clock_time" },
+            "edge": { "enum": ["end", "start"] }
+          },
+          "required": ["at", "edge"]
+        }
+      ]
+    },
+    "assign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attach": { "type": "null" },
+        "day": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/day_word" },
+            { "$ref": "#/$defs/repeat_day_word" }
+          ]
+        },
+        "end": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] },
+        "existing": { "type": "null" },
+        "intent": { "const": "assign" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "product": { "type": "string" },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "start": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] }
+      },
+      "required": [
+        "attach",
+        "day",
+        "end",
+        "existing",
+        "intent",
+        "operator",
+        "place",
+        "product",
+        "shift",
+        "start"
+      ]
+    },
+    "book": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/day_word" },
+            { "$ref": "#/$defs/repeat_day_word" }
+          ]
+        },
+        "end": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] },
+        "existing": { "type": "null" },
+        "headcount": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
+        "intent": { "const": "book" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "product": { "type": "string" },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "start": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/clock_time" }] }
+      },
+      "required": [
+        "day",
+        "end",
+        "existing",
+        "headcount",
+        "intent",
+        "place",
+        "product",
+        "shift",
+        "start"
+      ]
+    },
+    "clock_time": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hour": { "type": "integer", "minimum": 0, "maximum": 23 },
+        "minute": { "type": "integer", "minimum": 0, "maximum": 59 }
+      },
+      "required": ["hour", "minute"]
+    },
+    "copy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": { "oneOf": [{ "$ref": "#/$defs/day_word" }, { "$ref": "#/$defs/week_word" }] },
+        "intent": { "const": "copy" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "to": { "oneOf": [{ "$ref": "#/$defs/day_word" }, { "$ref": "#/$defs/week_word" }] }
+      },
+      "required": ["from", "intent", "place", "to"]
+    },
+    "day_word": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "today" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "tomorrow" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "yesterday" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "day": { "type": "integer", "minimum": 0, "maximum": 6 },
+            "kind": { "const": "weekday" }
+          },
+          "required": ["day", "kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "iso": { "type": "string" },
+            "kind": { "const": "date" }
+          },
+          "required": ["iso", "kind"]
+        }
+      ]
+    },
+    "headcount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "headcount": { "type": "integer", "minimum": 1, "maximum": 99 },
+        "intent": { "const": "headcount" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "product": { "type": "string" },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+      },
+      "required": ["day", "headcount", "intent", "place", "product", "shift", "span"]
+    },
+    "move": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adjust": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/adjust" }] },
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "existing": { "type": "null" },
+        "intent": { "const": "move" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] },
+        "toPlace": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
+        }
+      },
+      "required": [
+        "adjust",
+        "day",
+        "existing",
+        "intent",
+        "operator",
+        "place",
+        "shift",
+        "span",
+        "toPlace"
+      ]
+    },
+    "repeat_day_word": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "weekdays" },
+            "week": { "enum": ["next_week", "this_week"] }
+          },
+          "required": ["kind", "week"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "every_day" },
+            "week": { "enum": ["next_week", "this_week"] }
+          },
+          "required": ["kind", "week"]
+        }
+      ]
+    },
+    "replace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "intent": { "const": "replace" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] },
+        "with": { "type": "string" }
+      },
+      "required": ["day", "intent", "operator", "place", "shift", "span", "with"]
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "end": { "$ref": "#/$defs/clock_time" },
+        "start": { "$ref": "#/$defs/clock_time" }
+      },
+      "required": ["end", "start"]
+    },
+    "split": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "at": { "$ref": "#/$defs/clock_time" },
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "intent": { "const": "split" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 }
+      },
+      "required": ["at", "day", "intent", "operator", "place"]
+    },
+    "swap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] },
+        "intent": { "const": "swap" },
+        "operator": { "type": "string" },
+        "other": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
+      },
+      "required": ["day", "intent", "operator", "other", "place", "shift", "span"]
+    },
+    "unassign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "day": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/day_word" },
+            { "$ref": "#/$defs/repeat_day_word" }
+          ]
+        },
+        "existing": { "type": "null" },
+        "intent": { "const": "unassign" },
+        "operator": { "type": "string" },
+        "place": { "type": "array", "items": { "type": "string" }, "minItems": 0 },
+        "shift": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+        "span": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] },
+        "until": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day_word" }] }
+      },
+      "required": ["day", "existing", "intent", "operator", "place", "shift", "span", "until"]
+    },
+    "week_word": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "this_week" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "next_week" } },
+          "required": ["kind"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "last_week" } },
+          "required": ["kind"]
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/assign" },
+    { "$ref": "#/$defs/book" },
+    { "$ref": "#/$defs/unassign" },
+    { "$ref": "#/$defs/move" },
+    { "$ref": "#/$defs/replace" },
+    { "$ref": "#/$defs/swap" },
+    { "$ref": "#/$defs/copy" },
+    { "$ref": "#/$defs/split" },
+    { "$ref": "#/$defs/headcount" },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/assign" },
+              { "$ref": "#/$defs/book" },
+              { "$ref": "#/$defs/unassign" },
+              { "$ref": "#/$defs/move" }
+            ]
+          }
+        },
+        "intent": { "const": "several" }
+      },
+      "required": ["commands", "intent"]
+    }
+  ]
+}

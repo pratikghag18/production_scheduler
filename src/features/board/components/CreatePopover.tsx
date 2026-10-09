@@ -1,15 +1,39 @@
-import { useMemo, useState } from "react";
-import type { Product, BoardOperator, Skill } from "@/lib/api";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import type { Product, BoardOperator, Skill, AssignmentTarget, SchedulerError } from "@/lib/api";
+import { describeSchedulerError, isSchedulerError, toSchedulerError } from "@/lib/api";
 import type { ShiftChip } from "../hooks/useDragGesture";
 import { formatClock, formatFull, addMinutes } from "../lib/time";
-import { DEFAULT_DATE_FORMAT, type DateFormat } from "@/lib/format/dates";
+import { certificateGaps, type CertificateGap } from "../lib/boardIndex";
+import { absenceGaps, type AbsenceRow, type AbsenceHit } from "@/lib/absence";
+import { leaveLine } from "../lib/leave";
+import { DEFAULT_DATE_FORMAT, formatCalendarDay, type DateFormat } from "@/lib/format/dates";
+import type { PopupReporter } from "../store/commandConversation";
+import { CREATE_WAITING } from "../lib/popupWords";
 import { BoardPopover } from "./BoardPopover";
 import { TargetField, normalizeTarget } from "./TargetField";
+import fieldStyles from "@/components/Field.module.css";
 import styles from "./CreatePopover.module.css";
 
 /** Shown in place of the product picker when nothing belongs at this cell.
  *  An empty `<select>` is a dead control that explains nothing. */
 const NO_PRODUCTS_HERE = "No product belongs at this cell, so there is nothing to schedule here.";
+
+/**
+ * F-087: what the operator picker appends to a name that has a problem at this
+ * cell. The two states get their own words in the LIST as well as in the
+ * warning, because the list is where a planner picks somebody — a person who
+ * only needs a renewal should not read the same as one who has never done the
+ * course, and before this change the second read the same as somebody with no
+ * problem at all.
+ */
+function operatorLabelSuffix(gaps: readonly CertificateGap[]): string {
+  const untrained = gaps.some((g) => g.state === "never-trained");
+  const lapsed = gaps.some((g) => g.state === "lapsed");
+  if (untrained && lapsed) return " — Never trained, and a certificate expired (override)";
+  if (untrained) return " — Never trained for this (override)";
+  if (lapsed) return " — Certificate expired (override)";
+  return "";
+}
 
 /**
  * Port of the mockup's `openCreatePop` (brief §5.4/P1-4e D64/D65). D35:
@@ -23,20 +47,33 @@ const NO_PRODUCTS_HERE = "No product belongs at this cell, so there is nothing t
  * exactly where the fence lifts, but only HALF the hint is ported. The
  * "will ask to split" half requires the mockup's client-side `peakLoad()`
  * — exactly the second implementation of `operator_peak_load()` D63/§8
- * forbids — so it is NOT ported; the eligibility half ("not certified") is
- * plain set arithmetic over `skillsForNode`/`operator.skillIds` (no peak
- * load involved) and is ported, per D65's own "hint from skillsForNode +
- * operator.skillIds" instruction.
+ * forbids — so it is NOT ported; the eligibility half is ported, per D65's
+ * own "hint from skillsForNode + operator.skillIds" instruction.
  *
- * D64: when the selected operator is missing a skill this node requires,
- * shows what is missing and — under `warn` policy — an override checkbox
- * with a required free-text reason; Create stays disabled until either the
- * operator IS eligible, or the box is ticked with a non-empty reason.
- * Under `block` policy there is no override; Create is disabled outright
- * with an explanatory line, matching `create_assignment`'s own refusal
- * (docs/api.md §3 item 2). The server is still the actual authority
- * either way — this is a same-call UI courtesy, not a second security
- * layer (§8's rule, restated for eligibility instead of peak load).
+ * ⛔ AND THAT INSTRUCTION IS EXACTLY WHERE F-087 CAME FROM. "Set arithmetic
+ * over `skillsForNode`/`operator.skillIds`" answers "was this person ever
+ * trained" — and `check_eligibility` has ALSO refused a certificate that ran
+ * out before the window ends since migration 0009. So a person whose ticket
+ * lapsed a year ago drew as eligible, warned nobody, was offered no override
+ * tick, and Create failed with "override required under warn policy" against
+ * a screen with no box to supply one: a dead end, not a warning. The board
+ * could not have done better — `board_window` sent a bare array of ids with
+ * no date on it until migration 0048. The verdict now comes from
+ * `certificateGaps` (`../lib/boardIndex`), which is the server's own rule
+ * transcribed, judged against the END OF THE WINDOW BEING CREATED.
+ *
+ * D64, extended by F-087: when the selected operator has a gap this node
+ * cares about, the popover names it, says WHICH KIND it is — never trained,
+ * or trained and lapsed, which need a course and a renewal respectively —
+ * dates the lapsed one through the app's date seam, and offers, under `warn`
+ * policy, ONE override checkbox with a required free-text reason (the server
+ * has one `p_eligibility_override` covering both). Create stays disabled
+ * until either the operator IS eligible, or the box is ticked with a
+ * non-empty reason. Under `block` policy there is no override; Create is
+ * disabled outright with an explanatory line, matching `create_assignment`'s
+ * own refusal (docs/api.md §3 item 2). The server is still the actual
+ * authority either way — this is a same-call UI courtesy, not a second
+ * security layer (§8's rule, restated for eligibility instead of peak load).
  *
  * D108/0028: `products` arrives ALREADY NARROWED to what is offered at this
  * cell (and to what is still made) — `BoardPage` resolves it from the board
@@ -54,7 +91,49 @@ const NO_PRODUCTS_HERE = "No product belongs at this cell, so there is nothing t
  * to every form in the app; `.body` reproduces the mockup's id-scoped
  * descendant shape locally instead of flattening it away (§10.1's trap).
  */
+/**
+ * S47 / R-395 item 4: what a spoken "yes" at the command bar reaches when no
+ * question stands there but a create pop-up a SENTENCE opened is showing --
+ * `BoardPage` holds the ref and calls this from `CommandBar`'s
+ * `onConfirmWord`. React 19 takes `ref` as a plain prop (no `forwardRef`
+ * needed), the smaller of the brief's two options given this component was
+ * already a plain function.
+ */
+export interface PopoverConfirmHandle {
+  /**
+   * Three outcomes (review fix: a bare boolean could not tell "nothing to
+   * do here" apart from "there IS something, but it needs a decision" --
+   * the bar has a different sentence for each):
+   *   - `"created"`: this pop-up was opened by a sentence (`autoCreate`),
+   *     read clean (R-384's own `clean`, unweakened -- the SAME verdict the
+   *     mount-only auto-press below reads) and had not already fired --
+   *     submits through the SAME `submitDirect`/`submitRun` the Create
+   *     button and the auto-press call, via `autoFiredRef` so the two can
+   *     never fire twice for one pop-up.
+   *   - `"needs-decision"`: `autoCreate` is set and this has not already
+   *     fired, but `clean` reads false -- the pop-up is showing something
+   *     to decide (a training gap, an area mark, a leave line). Nothing is
+   *     submitted; the caller says so.
+   *   - `"none"`: `autoCreate` is not set (a drag or a keyboard create
+   *     opened this pop-up) or it already fired once -- there is nothing
+   *     for a spoken yes to do here at all.
+   */
+  submitIfClean(): "created" | "needs-decision" | "none";
+  /**
+   * S62-b reviewer fix (C): the CANCEL twin of `submitIfClean`, for a spoken
+   * or typed "no" while this pop-up is the thing standing. `BoardPage`'s
+   * `onCancelWord` used to call `dragApi.closePopover()` directly, which
+   * unmounts this component without ever going through its own `cancel` --
+   * so the sentence that opened it was never told it had been cancelled and
+   * its turn said "Waiting: the create pop-up" for ever. This is the same
+   * `cancel` the Cancel button and the shell's own close call, so the report
+   * happens exactly once however the pop-up goes away.
+   */
+  cancel(): void;
+}
+
 export function CreatePopover({
+  ref,
   nodeId,
   anchor,
   initialRange,
@@ -62,26 +141,81 @@ export function CreatePopover({
   defaultCreateMode,
   products,
   operators,
+  hereOperatorIds,
   windowStart,
   dateFormat = DEFAULT_DATE_FORMAT,
+  zone,
   requiredSkills,
   outsideAreaOperatorIds,
   eligibilityPolicy,
+  absences = [],
   presetOperatorId,
+  presetProductId,
+  presetRun,
+  presetMode,
+  presetHeadcount,
+  presetMove,
+  autoCreate,
   onCancel,
+  onResult,
   onSubmitRun,
   onSubmitDirect,
+  onSubmitMove,
   defaultTargetFor,
 }: {
+  ref?: React.Ref<PopoverConfirmHandle>;
   nodeId: string;
   anchor: { x: number; y: number };
   initialRange: { startMin: number; endMin: number };
   shiftChips: ShiftChip[];
   defaultCreateMode: "run" | "direct";
   products: Product[];
+  /**
+   * ⭐ R-342: THE LEFT PANEL'S OWN LIST — this plant's people (`operatorPool` in
+   * `BoardPage`). The maintainer, 6 Sept: *"Operators from other plants should
+   * not be shown in the list, period, it is the same as the operators shown on
+   * the left panel."*
+   *
+   * ⚠️ IT USED TO BE `boardQuery.data.operators`, WHICH WAS EVERY PERSON IN THE
+   * COMPANY — `board_window` returned them all so that a chip for a cross-plant
+   * assignment could still be DRAWN (S18), and drawing a name and offering it
+   * are different questions. That is settled at the source now: migration 0058
+   * sends the PLANT'S people and R-345's table guard refuses a placement across
+   * plants outright, so no such assignment can be made and none is left to draw.
+   * `src/test/pickerPool.test.ts` is what stops this list and the panel's
+   * drifting apart again.
+   *
+   * ⚠️ ONLY THE DIRECT-ASSIGNMENT TAB CHOOSES A PERSON. The Product run tab
+   * writes a run with a planned headcount and no operator at all, so there is
+   * nothing there to narrow, mark, or ask a reason for; the crew is attached
+   * afterwards, through the assignment pop-up.
+   */
   operators: BoardOperator[];
+  /**
+   * ⭐⭐ R-346: of `operators`, the ones offered at THIS CELL by default —
+   * home covers the cell, or sits inside it. The select opens on exactly these;
+   * the rest of the plant is added by the "Show other people in this plant"
+   * control under it, marked, and taken through the D113 reason below.
+   *
+   * The maintainer, 6 Sept: *"If a operator is assigned to higher hierarchy
+   * they should automatically become available to all lower hierarchy within
+   * that hierarchy ... That should be the default behaviour. For other
+   * operators in the plant we need to give an option to the supervisor to click
+   * through something so show remaining operators."*
+   *
+   * ⚠️ NOT THE COMPLEMENT OF `outsideAreaOperatorIds` BELOW, and the two are
+   * kept apart on purpose. Both are resolved by `lib/outsideArea.ts`, but the
+   * split is about being offered and the mark is about needing a reason — a
+   * person homed inside this cell's own subtree is a default offer AND marked.
+   */
+  hereOperatorIds: ReadonlySet<string>;
   windowStart: Date;
   dateFormat?: DateFormat;
+  /** DEF-0038 / R-426: required, not `zone?:`, so a mount that leaves it off
+   *  is a `tsc` error, not a silent fall-through to `formatClock`'s /
+   *  `formatFull`'s own `BOARD_ZONE = "UTC"` default (`lib/time.ts`) — the
+   *  plant's own zone, the same one the axis behind this pop-up reads. */
+  zone: string;
   /** D64/D65: this node's effective required skills (`skillsForNode`, an
    *  ancestor-inherited union — already resolved by `boardIndex.ts`). */
   requiredSkills: Skill[];
@@ -95,23 +229,153 @@ export function CreatePopover({
    * refused by the database with no way through, so it is filtered out; a
    * person outside theirs can be placed anyway by anyone who may schedule here,
    * with a reason. Filtering them would delete the feature.
+   *
+   * ⚠️⚠️ R-342 / R-345 PUT A FLOOR UNDER THAT, AND THE TWO STATEMENTS ARE NOT
+   * IN CONFLICT. What is offered-and-marked is ANOTHER AREA OF THIS PLANT.
+   * Another PLANT is not in `operators` at all (see that prop above) and cannot
+   * be placed here by any writer, so this set never has to speak for one. The
+   * mark is still what the maintainer asked for and the server still asks for
+   * the reason: it is decided from each person's own home PATH against this
+   * cell's, the comparison `app_owner_covers_in_org` makes.
+   *
+   * ⚠️ AND IT IS DECIDED WITHOUT THE BOARD'S NODE MAP NOW (R-346). The map
+   * starts at the reader's grant, so for a supervisor granted a line the plant
+   * above it was missing and everyone homed there was marked — a reason asked
+   * for a placement the server takes without one.
    */
   outsideAreaOperatorIds: ReadonlySet<string>;
+  /**
+   * ⭐ R-331 / migration 0051: THE POLICY FOR **THIS** NODE, resolved on the
+   * server and looked up by `BoardPage` through `policyForNode` — not
+   * `org.settings.eligibility_policy`, which is only what a node inherits when
+   * nothing nearer overrides it.
+   *
+   * Until 0051 the board handed every cell in the company the same value, so on
+   * a plant deliberately set to `block` this popover still drew an override tick
+   * and a reason box, and Create then failed with a message about an override
+   * the server would never take — a dead end, the same shape as F-087. Like
+   * `requiredSkills` and `outsideAreaOperatorIds` beside it, this is resolved
+   * before it gets here: the popover holds no rule, it only renders one.
+   */
   eligibilityPolicy: "warn" | "block";
+  /**
+   * R-357: every absence the board can see (RLS-scoped upstream to this board's
+   * own people). `absenceGaps` narrows it to the selected person and the window
+   * being written — the same predicate `create_assignment` runs — so a person on
+   * leave is named BEFORE Create, and Create is refused in place under `block`,
+   * exactly as the expired-certificate case is (R-338). There is no override:
+   * the server takes no absence override, so under `warn` this is a warning only
+   * and Create stays enabled (offering a reason box the server ignores would be
+   * the screen refusing what the server allows — CLAUDE.md §4).
+   *
+   * Optional with an empty default so a test or a caller that has no absences
+   * loaded renders exactly the pre-R-357 pop-up; `BoardPage` always passes the
+   * board's own list.
+   */
+  absences?: readonly AbsenceRow[];
   /** D65: set only when this popover was opened by a panel drop. */
   presetOperatorId?: string;
+  /**
+   * P1-7a: set when this popover was opened from the typed command bar
+   * resolving to a direct product target (R-378) — preselects `productChoice`
+   * the same way `presetOperatorId` preselects the operator. The existing
+   * `productId` derivation (falls back to the first offered product when the
+   * choice is not on the list) already copes with a preset that turns out not
+   * to be offered here — belt, not braces: the resolver has already refused
+   * that case (`not_offered`) before this popover ever opens.
+   */
+  presetProductId?: string;
+  /**
+   * P1-7a / R-383: set when the typed command's span landed inside a job
+   * already booked for that part on that cell and the person chose to join it.
+   * There is nothing to pick — the part is the run's — so the product select
+   * is replaced by one read-only "Joining <label>" line, and Create sends this
+   * run as the target instead of `productId`.
+   */
+  presetRun?: { id: string; label: string };
+  /**
+   * S41-a: set when this popover was opened by the typed "book a job"
+   * sentence resolving to a brand-new job (`openCreateRunFromCommand`) — the
+   * initial mode is "run" regardless of `defaultCreateMode`, and the
+   * run/direct segment below is rendered DISABLED (both buttons), mirroring
+   * the FORCING half of the `presetOperatorId` comment above it. Unlike
+   * that preset, this one also disables the segment: `presetOperatorId`
+   * does not (today's segment buttons carry no `disabled` at all), but a
+   * "book a job" sentence names no operator, so there is nothing behind a
+   * flip to direct mode for this popover to protect — see the brief's own
+   * instruction to check this before adding the attribute.
+   */
+  presetMode?: "run";
+  /**
+   * S41-a: "for 3 people" — preselects `plannedHeadcount` the same way
+   * `presetProductId` preselects the product choice.
+   */
+  presetHeadcount?: number;
+  /**
+   * S41-c: set when this popover was opened by the typed "move" sentence
+   * resolving to a `move_cell` target (`openMoveFromCommand`) — carries the
+   * block being moved. Direct mode is already forced by `presetOperatorId`
+   * (`openMoveFromCommand` sets both together); this preset additionally
+   * replaces the operator select with a read-only "Moving <person>'s block"
+   * line (there is nobody else the sentence could have meant) and routes
+   * `submitDirect()` to `onSubmitMove` instead of `onSubmitDirect`. Every
+   * box the pop-up otherwise shows (training, area, leave) is the SAME box,
+   * resolved for the TARGET node exactly as a create's is.
+   *
+   * D120: the run/direct segment is disabled under this preset too (the
+   * same `disabled` expression `presetMode: "run"` uses) — flipping to
+   * Product run mid-move would press Create and book a NEW run while the
+   * old block stayed exactly where it was, a two-writes state a move must
+   * never reach.
+   */
+  presetMove?: { assignmentId: string };
+  /**
+   * R-384: set only by `openCreateFromCommand`/`openCreateRunFromCommand` —
+   * the typed command bar's Enter path — never by a drag or a keyboard
+   * create. When true and the pop-up's own verdicts read clean (see `clean`
+   * below), Create is pressed once, on mount, with exactly the arguments a
+   * real click would send.
+   */
+  autoCreate?: boolean;
   onCancel: () => void;
+  /**
+   * F-167 (the other half of F-165's silence): set ONLY when the typed
+   * command bar opened this pop-up. The bar printed a readout the moment it
+   * handed the write over, and before this nothing ever came back — so a
+   * sentence whose write was still sitting in an unanswered pop-up read, in
+   * the trace and on screen, exactly like one that had landed.
+   *
+   * Called EXACTLY ONCE, on whichever of the three things happens first:
+   *   - Create (or R-384's auto-press) is accepted by the server → `written`;
+   *   - the server refuses it → `refused`, with the server's own sentence;
+   *   - Cancel is pressed, or the pop-up is closed → `cancelled`.
+   *
+   * It is deliberately NOT called on unmount: a successful Create unmounts
+   * this pop-up too, and a "cancelled" fired from there would be a lie about
+   * the commonest path. A pop-up that goes away some other way simply never
+   * reports, which the bar reads as "still waiting" and flushes on teardown.
+   */
+  onResult?: PopupReporter;
   onSubmitRun: (
     nodeId: string,
     range: { startMin: number; endMin: number },
     productId: string,
     plannedHeadcount: number | undefined,
-  ) => void;
+    // F-167: written once the row is in; a rejection carries the refusal.
+    // A caller that answers nothing (a test double, a drag's own wiring) is
+    // read as written, which is the pre-F-167 assumption.
+    // F-233, third pass (S194-G3): carries the row's own real id now --
+    // `submitRun` below relays it into `report({kind:"written", id})` so
+    // `CommandBar.tsx` can wait for that exact row, never a count.
+  ) => void | Promise<{ kind: "written"; id: string } | void>;
   onSubmitDirect: (
     nodeId: string,
     range: { startMin: number; endMin: number },
     operatorId: string,
-    productId: string,
+    /** P1-7a: was `productId: string` — now whichever target the person
+     *  actually chose (the product select, or the joined run's id under
+     *  `presetRun`), threaded straight through to `create_assignment`. */
+    target: AssignmentTarget,
     efficiencyPercent: number,
     targetQty: number | undefined,
     targetUnit: string | undefined,
@@ -120,7 +384,30 @@ export function CreatePopover({
     areaOverride: boolean,
     areaOverrideReason: string | undefined,
     anchor: { x: number; y: number },
-  ) => void;
+    // F-167: written once the row is in; `"handed-off"` when this Create
+    // opened ANOTHER pop-up (D61's split coverage) and nothing has been
+    // written yet, so nothing is reported and the sentence keeps waiting; a
+    // rejection carries the server's own refusal.
+    // F-233, third pass (S194-G3): carries the row's own real id now -- see
+    // `onSubmitRun`'s own identical comment above.
+  ) => void | Promise<{ kind: "written"; id: string } | "handed-off" | void>;
+  /**
+   * S41-c: called instead of `onSubmitDirect` when `presetMove` is set --
+   * `move_assignment`'s own argument shape (no operator, no target, no
+   * efficiency/target-quantity: the server carries those forward from the
+   * row itself). Returns a promise so the pop-up can await it and print a
+   * genuine server refusal in place (`reassignAssignment`'s own shape in
+   * `useDragGesture.ts` — no toast; the pop-up prints refusals).
+   */
+  onSubmitMove?: (
+    nodeId: string,
+    range: { startMin: number; endMin: number },
+    assignmentId: string,
+    eligibilityOverride: boolean,
+    overrideReason: string | undefined,
+    areaOverride: boolean,
+    areaOverrideReason: string | undefined,
+  ) => Promise<void>;
   /**
    * R-316: the TARGET a candidate part, time span and efficiency work out to
    * from this cell's standard cycle time — or null when the cell has no cycle
@@ -138,7 +425,7 @@ export function CreatePopover({
   ) => number | null;
 }) {
   const [mode, setMode] = useState<"run" | "direct">(
-    presetOperatorId ? "direct" : defaultCreateMode,
+    presetMode === "run" ? "run" : presetOperatorId ? "direct" : defaultCreateMode,
   );
   const [range, setRange] = useState(initialRange);
   // D108/0028: `products` is what is offered AT THIS CELL, so the selection
@@ -154,11 +441,50 @@ export function CreatePopover({
   // user's CHOICE, and the effective id is DERIVED from it every render,
   // falling back to the first thing actually on offer (`""` when there is
   // nothing). No effect, and no render in between showing a stale value.
-  const [productChoice, setProductChoice] = useState("");
+  const [productChoice, setProductChoice] = useState(presetProductId ?? "");
   const firstOffered = products[0]?.id ?? "";
   const productId = products.some((p) => p.id === productChoice) ? productChoice : firstOffered;
-  const [plannedHeadcount, setPlannedHeadcount] = useState("2");
-  const [operatorId, setOperatorId] = useState(presetOperatorId ?? operators[0]?.id ?? "");
+  const [plannedHeadcount, setPlannedHeadcount] = useState(
+    presetHeadcount !== undefined ? String(presetHeadcount) : "2",
+  );
+
+  /**
+   * ⭐⭐ R-346: THE SELECT OPENS ON `here` AND NOTHING ELSE. The rest of the
+   * plant is one press away, and the press is the supervisor's decision --
+   * "we need to give an option to the supervisor to click through something so
+   * show remaining operators so they can make that decision to assign someone
+   * outside of that area."
+   *
+   * ⚠️ A PRESET FROM OUTSIDE THE AREA OPENS THE LIST ALREADY REVEALED. `BoardPage`
+   * sets `presetOperatorId` when this pop-up was opened by dropping a panel chip,
+   * and the panel can drop somebody from the rest of the plant (that is the whole
+   * point of its own control). A `<select>` whose value matches no option shows
+   * the FIRST option instead, so a hidden preset would silently swap the person
+   * the user just dragged -- the same failure mode AP8 records in the assignment
+   * pop-up. The person picked is pinned into the list for the same reason.
+   */
+  // ACTIVE PEOPLE ONLY, the same filter the panel and the assignment pop-up
+  // apply before their own split. The first draft split the whole list here,
+  // so the panel showed no "other people" control while this pop-up counted
+  // one --- a person who had left --- and offered them (the reviewer, session
+  // 78). The three render one decision; they must filter the same way first.
+  const here = useMemo(
+    () => operators.filter((o) => o.active && hereOperatorIds.has(o.id)),
+    [operators, hereOperatorIds],
+  );
+  const elsewhere = useMemo(
+    () => operators.filter((o) => o.active && !hereOperatorIds.has(o.id)),
+    [operators, hereOperatorIds],
+  );
+  // Opens on `here` and nothing else: with nobody homed at or above this cell
+  // the select starts empty rather than on a person from behind the click.
+  const [operatorId, setOperatorId] = useState(presetOperatorId ?? here[0]?.id ?? "");
+  const [showOthers, setShowOthers] = useState(
+    presetOperatorId !== undefined && !hereOperatorIds.has(presetOperatorId),
+  );
+  const offeredPeople = showOthers
+    ? [...here, ...elsewhere]
+    : [...here, ...elsewhere.filter((o) => o.id === operatorId)];
   const [efficiencyPercent, setEfficiencyPercent] = useState("100");
   const [targetQty, setTargetQty] = useState("");
   const [targetUnit, setTargetUnit] = useState("");
@@ -169,8 +495,14 @@ export function CreatePopover({
   // are not cleared for. Two decisions, two reasons, two records.
   const [areaChecked, setAreaChecked] = useState(false);
   const [areaReason, setAreaReason] = useState("");
+  // S41-c: a move sends NO capacity probe (unlike submitCreateDirect) -- the
+  // trigger refuses over capacity and this is where that refusal, or any
+  // other the training/area/leave boxes below did not already predict,
+  // lands and is printed, exactly as a reassign's own refusal is (brief §4).
+  const [moveSending, setMoveSending] = useState(false);
+  const [moveRefusal, setMoveRefusal] = useState<SchedulerError | null>(null);
 
-  const timeLabel = `${formatFull(addMinutes(windowStart, range.startMin), dateFormat)} – ${formatClock(addMinutes(windowStart, range.endMin))}`;
+  const timeLabel = `${formatFull(addMinutes(windowStart, range.startMin), dateFormat, zone)} – ${formatClock(addMinutes(windowStart, range.endMin), zone)}`;
 
   // R-316: recomputed as the part, the span or the efficiency changes. Only
   // meaningful in direct mode — a run carries no target of its own.
@@ -184,41 +516,362 @@ export function CreatePopover({
           Number.isFinite(typedEfficiency) && typedEfficiency > 0 ? typedEfficiency : 100,
         ) ?? null);
 
-  const missingSkillsByOperator = useMemo(() => {
-    const m = new Map<string, Skill[]>();
+  /**
+   * F-087. This used to be `requiredSkills.filter((s) => !o.skillIds.includes(s.id))`
+   * — "does this person hold the training at all" — and EXPIRY WAS NEVER
+   * CONSIDERED. So somebody whose certificate lapsed a year ago drew as
+   * eligible, warned nobody, was offered no override tick, and Create then
+   * failed with "override required under warn policy" against a screen with no
+   * box to supply one. `certificateGaps` asks `check_eligibility`'s own
+   * question instead, and answers it per REASON rather than per person.
+   *
+   * ⚠️ IT DEPENDS ON `range.endMin`, WHICH MOVES WHILE THIS FORM IS OPEN. The
+   * server compares against the END of the window being written, so dragging a
+   * handle past a renewal date has to change the answer here too — exactly as
+   * it changes it on the server.
+   */
+  const windowEnd = addMinutes(windowStart, range.endMin);
+  const gapsByOperator = useMemo(() => {
+    const m = new Map<string, CertificateGap[]>();
     if (requiredSkills.length === 0) return m;
     for (const o of operators) {
-      const missing = requiredSkills.filter((s) => !o.skillIds.includes(s.id));
-      if (missing.length > 0) m.set(o.id, missing);
+      const gaps = certificateGaps(o, requiredSkills, windowEnd);
+      if (gaps.length > 0) m.set(o.id, gaps);
     }
     return m;
-  }, [operators, requiredSkills]);
+    // `windowEnd` is a fresh Date each render; its INSTANT is what the answer
+    // turns on, so the memo keys on that rather than on object identity.
+  }, [operators, requiredSkills, windowEnd.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // R-357: the leave check, the twin of `gapsByOperator` right above and keyed
+  // the same way. The window is the one being written — start AND end move while
+  // the form is open (the shift chips and drag handles change them), so both
+  // instants key the memo, exactly as the certificate check keys on the end.
+  const windowStartInstant = addMinutes(windowStart, range.startMin);
+  const absenceByOperator = useMemo(() => {
+    const m = new Map<string, AbsenceHit>();
+    for (const o of operators) {
+      const hit = absenceGaps(absences, o.id, { start: windowStartInstant, end: windowEnd });
+      if (hit !== null) m.set(o.id, hit);
+    }
+    return m;
+  }, [operators, absences, windowStartInstant.getTime(), windowEnd.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedOutsideArea = outsideAreaOperatorIds.has(operatorId);
-  const selectedMissing = missingSkillsByOperator.get(operatorId) ?? [];
-  const ineligible = selectedMissing.length > 0;
+  const selectedGaps = gapsByOperator.get(operatorId) ?? [];
+  const selectedAbsence = absenceByOperator.get(operatorId) ?? null;
+  // Under `block` the person cannot be placed (no absence override exists);
+  // under `warn` it is a warning only and Create is still offered.
+  const absenceBlocked = selectedAbsence !== null && eligibilityPolicy === "block";
+  const selectedUntrained = selectedGaps.filter((g) => g.state === "never-trained");
+  const selectedLapsed = selectedGaps.filter(
+    (g): g is Extract<CertificateGap, { state: "lapsed" }> => g.state === "lapsed",
+  );
+  const ineligible = selectedGaps.length > 0;
   const blocked = ineligible && eligibilityPolicy === "block";
   const needsOverride = ineligible && eligibilityPolicy === "warn";
-  // Both modes send a product — `create_run` requires one and `submitCreateDirect`
-  // always builds a `{ kind: "direct", productId }` target — so an empty offer
+  // Both modes need a product on offer here — `create_run` requires one, and a
+  // direct Create needs SOME product selected even under `presetRun` (the run's
+  // own product is on offer at this cell by construction) — so an empty offer
   // list disables Create in either mode rather than posting `""` for the server
-  // to refuse.
+  // to refuse. `presetRun` itself changes WHICH target `onSubmitDirect` is sent
+  // (P1-7a), not this gate.
   const createDisabled =
+    moveSending ||
     productId === "" ||
     (mode === "direct" &&
       (blocked ||
+        // R-357: a person on leave cannot be placed under `block` — no override.
+        absenceBlocked ||
         (needsOverride && (!overrideChecked || overrideReason.trim() === "")) ||
         // D113: the server refuses an override with no reason, so the button
         // must not offer to send one. Same shape as the line above it.
         (selectedOutsideArea && (!areaChecked || areaReason.trim() === ""))));
 
+  // R-384: THE ONE PLACE that builds `onSubmitDirect`'s 12 arguments, so
+  // the Create button's click and an R-384 auto-press below can never send
+  // two different shapes. Extracted verbatim from what the button used to
+  // build inline; nothing about the arguments themselves changed.
+  //
+  // S41-c: under `presetMove` this sends `moveAssignment` instead (brief
+  // §4) -- the SAME six verdicts above (`ineligible`/`blocked`/`needsOverride`/
+  // `selectedOutsideArea`/`selectedAbsence`/`clean`) are now about the TARGET
+  // cell, so the training/area/leave boxes are the create pop-up's own,
+  // unchanged; only the door out at the bottom differs. Async because a move
+  // sends no capacity probe (brief §4: "the trigger refuses over capacity
+  // and the pop-up prints it, as a reassign does") and awaits the server's
+  // own answer to print it, mirroring `reassignAssignment`'s own shape in
+  // `useDragGesture.ts`.
+  /** F-167: at most once -- a pop-up that submits and is then closed must not
+   *  report twice, and the second report would be the wrong one. */
+  const reportedRef = useRef(false);
+  function report(result: Parameters<PopupReporter>[0]): void {
+    if (reportedRef.current) return;
+    // S62-b reviewer fix (C): `handed_off` is a NOTE, not an answer -- the
+    // write went to ANOTHER pop-up, which owes the real one. It must not
+    // close this latch, or the split pop-up's own written/cancelled would be
+    // swallowed and the sentence would say "Waiting" for ever.
+    if (result.kind !== "handed_off") reportedRef.current = true;
+    // F-205: whatever the auto-press's own outcome was (written, refused,
+    // handed off), it has now ANSWERED -- see `autoPending`/`autoAnswered`
+    // below, the one thing that keeps this pop-up unpainted. A manual
+    // Cancel/Create also routes through here, but by then `autoPending` was
+    // already false (a live pop-up is never one this flag would have hidden
+    // in the first place), so this is a no-op for every other opener.
+    setAutoAnswered(true);
+    onResult?.(result);
+  }
+
+  /** F-167: Cancel, and the shell's own close (Escape, the backdrop) -- the
+   *  one place `onCancel` is reached from, so the bar hears it every time. */
+  function cancel(): void {
+    report({ kind: "cancelled" });
+    onCancel();
+  }
+
+  /** F-167: a thrown refusal, in the server's own words. A SchedulerError
+   *  gets the app's own sentence for it (the same one the toast would show);
+   *  anything else keeps its own message rather than being flattened to
+   *  `toSchedulerError`'s generic 'Something went wrong', which tells a person
+   *  reading the trace nothing at all. */
+  function refusalMessage(err: unknown): string {
+    if (isSchedulerError(err)) return describeSchedulerError(err);
+    if (err instanceof Error && err.message !== "") return err.message;
+    return describeSchedulerError(toSchedulerError(err));
+  }
+
+  async function submitDirect() {
+    if (presetMove) {
+      if (!onSubmitMove) return; // never true in practice: BoardPage always wires both together
+      setMoveRefusal(null);
+      setMoveSending(true);
+      try {
+        await onSubmitMove(
+          nodeId,
+          range,
+          presetMove.assignmentId,
+          needsOverride && overrideChecked,
+          needsOverride && overrideChecked ? overrideReason.trim() : undefined,
+          selectedOutsideArea && areaChecked,
+          selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
+        );
+        report({ kind: "written" });
+      } catch (err) {
+        setMoveRefusal(isSchedulerError(err) ? err : toSchedulerError(err));
+        report({ kind: "refused", message: refusalMessage(err) });
+      } finally {
+        setMoveSending(false);
+      }
+      return;
+    }
+    const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
+    // Shared with the edit popover so the two cannot drift again: no
+    // quantity means no unit (never the literal "units").
+    const target = normalizeTarget(targetQty, targetUnit);
+    // P1-7a / R-383: joining an existing run sends its id; every other
+    // Create sends the product select's own choice, exactly as before
+    // this stage.
+    const assignmentTarget: AssignmentTarget = presetRun
+      ? { kind: "run", runId: presetRun.id }
+      : { kind: "direct", productId };
+    // D64: "never send an override the user did not tick" —
+    // `needsOverride && overrideChecked` is the only path that sends
+    // `eligibilityOverride: true`; every other case (fully eligible, or
+    // blocked-and-disabled so unreachable) sends `false`/`undefined`.
+    // F-167: awaited, so the bar hears what the server said. A caller that
+    // answers nothing resolves to `undefined`, which is read as written --
+    // byte for byte the pre-F-167 behaviour for every other opener.
+    try {
+      const verdict = await onSubmitDirect(
+        nodeId,
+        range,
+        operatorId,
+        assignmentTarget,
+        eff,
+        target.qty ?? undefined,
+        target.unit ?? undefined,
+        needsOverride && overrideChecked,
+        needsOverride && overrideChecked ? overrideReason.trim() : undefined,
+        // D113: sent only when it actually overrode something. The server
+        // normalises the flag off anyway, so this is belt and braces — but
+        // a client that always sent `true` would make every screen reading
+        // the flag say "overridden" about rows nobody decided anything
+        // about.
+        selectedOutsideArea && areaChecked,
+        selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
+        anchor,
+      );
+      // A split-coverage hand-off has written nothing and is not over:
+      // saying either "written" or "cancelled" here would be a lie. The split
+      // pop-up itself tells the sentence what it is now waiting on
+      // (`openSplitPopover`, S195-D: in the person's own name) and finishes
+      // it through this same reporter with its own Confirm/Cancel -- this
+      // says nothing more, so it cannot overwrite that sentence.
+      if (verdict === "handed-off") return;
+      // F-233, third pass (S194-G3): `verdict` is `{kind:"written", id}` for
+      // a real caller, or `undefined` for a test double/drag wiring that
+      // answers nothing (F-167's own pre-existing "read as written"
+      // fallback) -- either way this relays whatever id there is, `undefined`
+      // included, straight through to the reporter.
+      report({ kind: "written", id: verdict?.id });
+    } catch (err) {
+      report({ kind: "refused", message: refusalMessage(err) });
+    }
+  }
+
+  // S41-a: the run-mode Create branch, extracted the same way `submitDirect`
+  // was (R-384) — so the button's click and the auto-press below can never
+  // send different arguments for a booked job either.
+  async function submitRun() {
+    const hc = Math.max(1, Math.round(Number(plannedHeadcount)) || 1);
+    // F-167: same shape as `submitDirect`'s own await -- see its note.
+    try {
+      const verdict = await onSubmitRun(nodeId, range, productId, hc);
+      // F-233, third pass (S194-G3): see `submitDirect`'s own identical
+      // comment just above.
+      report({ kind: "written", id: verdict?.id });
+    } catch (err) {
+      report({ kind: "refused", message: refusalMessage(err) });
+    }
+  }
+
+  // R-384: NOT a new copy of "is it clean" — the pop-up's OWN
+  // already-computed verdicts above, read once. Direct mode (a preset
+  // operator forces it), a part or job actually selected, trained, in
+  // area, and not on leave under EITHER policy (a `warn` absence is a
+  // warning box, so it is not clean; a `block` absence disables Create,
+  // also not clean). S41-a adds run mode's own arm: a "book a job" pop-up
+  // has no operator/eligibility/area/leave verdicts at all — a part
+  // actually selected is the only thing clean asks of it.
+  const clean =
+    (mode === "direct" &&
+      productId !== "" &&
+      operatorId !== "" &&
+      !ineligible &&
+      !selectedOutsideArea &&
+      selectedAbsence === null) ||
+    (mode === "run" && productId !== "");
+
+  const autoFiredRef = useRef(false);
+
+  /**
+   * F-205 (the maintainer, 23 Sept: "when the board asks me a question,
+   * there is a pop up which appears before vanishing" -- it happened on an
+   * answered Did-you-mean, so a sentence the bar wrote FOR the person
+   * flashes the same as one it typed itself). `autoFiredRef` above decides
+   * whether the effect below presses Create; this decides whether that
+   * press is ever PAINTED. Both read the SAME `clean`, at the SAME instant
+   * -- the render before the mount effect runs -- which is exactly why this
+   * is a lazy `useState` initializer and not a value re-read every render:
+   * `clean` can change afterwards (R-395's own "starts dirty, becomes clean"
+   * pop-up, `submitIfClean` below), and a LIVE recomputation here would hide
+   * a pop-up the person is already looking at the moment they fix a warning
+   * -- a worse bug than the flash this fixes. Frozen once, it can only ever
+   * describe the ONE press `autoFiredRef` may ever make.
+   *
+   * `autoPending` alone is not enough: it says whether this pop-up EVER
+   * qualified for the auto-press, not whether that press is still in
+   * flight. `autoAnswered` is that second half, flipped exactly once by
+   * `report` above -- the one place every outcome of `submitDirect`/
+   * `submitRun` (written, refused, handed off) already lands, so there is
+   * no second copy of that switch to keep in sync.
+   */
+  const [autoPending] = useState<boolean>(() => autoCreate === true && clean);
+  const [autoAnswered, setAutoAnswered] = useState(false);
+  // While this is true the pop-up is mounted -- its effect, its checks and
+  // its `onResult` all run exactly as they would visible -- but paints
+  // nothing: passed straight to the shared shell's own `concealed` prop
+  // (`BoardPopover`/`Popover.tsx`), which hides ITSELF (title bar included)
+  // via `visibility: hidden` rather than this file hiding only its own
+  // `.body` div and leaving an empty titled box painted around it. The
+  // bar's own readout already said what is being written, so a form that
+  // would only flash open and shut adds nothing for a clean sentence. A
+  // warning the person must decide, or the server's refusal once it lands,
+  // un-freezes this the same way it always has -- by never setting
+  // `autoPending` (a warning was never clean at that same mount instant) or
+  // by `report` flipping `autoAnswered`.
+  const hideForAutoPress = autoPending && !autoAnswered;
+
+  /**
+   * R-384: Enter on a typed sentence creates the block without a second
+   * press when this pop-up would show no warning. `autoCreate` is set only
+   * by `openCreateFromCommand`/`openCreateRunFromCommand` (a drag or a
+   * keyboard create never sets it), so this effect is a no-op for every
+   * other opener.
+   *
+   * F-128: the write is a side effect, so it runs in an EFFECT, never
+   * inside a `setState` updater — that shape is exactly how one Continue
+   * became two writes under StrictMode, which invokes an updater twice on
+   * purpose to catch a side effect hidden there. `autoFiredRef` is a ref,
+   * not state, so it survives StrictMode's simulated mount/unmount/remount
+   * of this effect: the second run sees the ref already true and does
+   * nothing, while a genuinely new mount of this component gets a fresh
+   * ref and may fire once more.
+   */
+  // S195-D (DEF-0054): a pop-up a typed sentence opened tells the bar the
+  // moment it is ON SCREEN -- the one plain sentence the thread says while it
+  // stands -- and never while it is hidden for an auto-press (F-205), which
+  // would say "finish it on the board" about a form nobody can see. A drag's
+  // pop-up carries no reporter, so this is a no-op for it.
+  // A ref latch, like `autoFiredRef`: StrictMode simulates a second mount, and
+  // "the pop-up stands" is said once.
+  const standingToldRef = useRef(false);
+  useEffect(() => {
+    if (!autoPending && !standingToldRef.current) {
+      standingToldRef.current = true;
+      onResult?.({ kind: "handed_off", what: CREATE_WAITING });
+    }
+    // Mount-only, like the auto-press effect below: `autoPending` is frozen at
+    // mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (autoCreate && clean && !autoFiredRef.current) {
+      autoFiredRef.current = true;
+      if (mode === "run") {
+        void submitRun();
+      } else {
+        void submitDirect();
+      }
+    }
+    // Mount-only, on purpose: `clean` is derived from the presets this
+    // popover opened with, which do not change before first paint, and
+    // `autoFiredRef` is what limits this effect to the one press it may
+    // ever make (see the F-128 note above) — re-running it on every
+    // dependency change would defeat that guard, not strengthen it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // S47 / R-395 item 4: the SAME guard the effect above reads (`autoCreate`,
+  // `clean`, `autoFiredRef`) exposed for a LATER press -- a spoken yes that
+  // arrives after mount, once the pop-up is already showing, rather than the
+  // one auto-press Enter itself may already have spent. No new deps array
+  // worth memoising over: `clean`/`mode`/`submitDirect`/`submitRun` are all
+  // read fresh, exactly as the mount effect reads them.
+  useImperativeHandle(ref, (): PopoverConfirmHandle => ({
+    submitIfClean() {
+      if (!autoCreate || autoFiredRef.current) return "none";
+      if (!clean) return "needs-decision";
+      autoFiredRef.current = true;
+      if (mode === "run") {
+        void submitRun();
+      } else {
+        void submitDirect();
+      }
+      return "created";
+    },
+    cancel,
+  }));
+
   return (
-    <BoardPopover anchor={anchor} onClose={onCancel} title="New">
+    <BoardPopover anchor={anchor} onClose={cancel} title="New" concealed={hideForAutoPress}>
       <div className={styles.body}>
         <div className={styles.seg}>
           <button
             type="button"
             className={mode === "run" ? styles.segOn : ""}
+            disabled={presetMode === "run" || presetMove !== undefined}
             onClick={() => setMode("run")}
           >
             Product run
@@ -226,6 +879,7 @@ export function CreatePopover({
           <button
             type="button"
             className={mode === "direct" ? styles.segOn : ""}
+            disabled={presetMode === "run" || presetMove !== undefined}
             onClick={() => setMode("direct")}
           >
             Direct assignment
@@ -241,8 +895,8 @@ export function CreatePopover({
                 className={styles.shiftChipBtn}
                 onClick={() => setRange({ startMin: c.startMin, endMin: c.endMin })}
               >
-                {c.name} {formatClock(addMinutes(windowStart, c.startMin))}–
-                {formatClock(addMinutes(windowStart, c.endMin))}
+                {c.name} {formatClock(addMinutes(windowStart, c.startMin), zone)}–
+                {formatClock(addMinutes(windowStart, c.endMin), zone)}
               </button>
             ))}
           </div>
@@ -280,17 +934,60 @@ export function CreatePopover({
           </>
         ) : (
           <>
-            <label htmlFor="cp-op">Operator</label>
-            <select id="cp-op" value={operatorId} onChange={(e) => setOperatorId(e.target.value)}>
-              {operators.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.displayName}
-                  {missingSkillsByOperator.has(o.id) ? " — not certified (override)" : ""}
-                  {outsideAreaOperatorIds.has(o.id) ? " — not from this area (override)" : ""}
-                </option>
-              ))}
-            </select>
-            {products.length === 0 ? (
+            {presetMove ? (
+              // S41-c: the sentence already named this person -- there is
+              // nobody else it could have meant, so this is a read-only
+              // line rather than a select (the operator select's whole job
+              // is picking one of several; there is nothing to pick here).
+              <p className={styles.time}>
+                Moving {operators.find((o) => o.id === operatorId)?.displayName ?? "this person"}
+                &rsquo;s block
+              </p>
+            ) : (
+              <>
+                <label htmlFor="cp-op">Operator</label>
+                <select
+                  id="cp-op"
+                  value={operatorId}
+                  onChange={(e) => setOperatorId(e.target.value)}
+                >
+                  {offeredPeople.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.displayName}
+                      {/* F-087: the list used to say "— not certified (override)"
+                          for a missing training and NOTHING AT ALL for a lapsed
+                          one. Two problems, two labels, so the difference is
+                          visible before anybody is selected. */}
+                      {operatorLabelSuffix(gapsByOperator.get(o.id) ?? [])}
+                      {/* R-357: the leave mark travels in the list too, so it is
+                          visible before anybody is picked — like the certificate
+                          suffix beside it. */}
+                      {absenceByOperator.has(o.id) ? " — on leave" : ""}
+                      {outsideAreaOperatorIds.has(o.id) ? " — not from this area (override)" : ""}
+                    </option>
+                  ))}
+                </select>
+                {/* ⚠️ ABSENT WHEN THERE IS NOBODY BEHIND IT -- on a board whose place
+                    covers every home in the plant (a plant admin's) the whole plant
+                    is already on offer, and a control reading "(0)" would be a door
+                    onto an empty room. The skin is the app's shared field button
+                    (R-318), not a copy. */}
+                {elsewhere.length > 0 && (
+                  <button
+                    type="button"
+                    className={`${fieldStyles.btn} ${styles.othersBtn}`}
+                    aria-expanded={showOthers}
+                    onClick={() => setShowOthers((v) => !v)}
+                  >
+                    {showOthers ? "Hide" : "Show"} other people in this plant ({elsewhere.length})
+                  </button>
+                )}
+              </>
+            )}
+            {presetRun ? (
+              // P1-7a / R-383: the part is the run's -- nothing to choose.
+              <p className={styles.time}>Joining {presetRun.label}</p>
+            ) : products.length === 0 ? (
               <p className={styles.time}>{NO_PRODUCTS_HERE}</p>
             ) : (
               <>
@@ -308,24 +1005,34 @@ export function CreatePopover({
                 </select>
               </>
             )}
-            <label htmlFor="cp-eff">Efficiency %</label>
-            <input
-              id="cp-eff"
-              type="number"
-              min={10}
-              max={150}
-              step={5}
-              value={efficiencyPercent}
-              onChange={(e) => setEfficiencyPercent(e.target.value)}
-            />
-            <TargetField
-              idPrefix="cp"
-              qty={targetQty}
-              unit={targetUnit}
-              onQtyChange={setTargetQty}
-              onUnitChange={setTargetUnit}
-              derivedQty={derivedQty}
-            />
+            {/* S41-c: `move_assignment` takes no efficiency or target
+                quantity at all -- the row keeps whichever it already had.
+                Showing editable controls the server would silently ignore
+                is exactly the trap CLAUDE.md §4 warns about ("a screen that
+                shows what the server will refuse"), so under `presetMove`
+                these are hidden rather than offered-and-ignored. */}
+            {!presetMove && (
+              <>
+                <label htmlFor="cp-eff">Efficiency %</label>
+                <input
+                  id="cp-eff"
+                  type="number"
+                  min={10}
+                  max={150}
+                  step={5}
+                  value={efficiencyPercent}
+                  onChange={(e) => setEfficiencyPercent(e.target.value)}
+                />
+                <TargetField
+                  idPrefix="cp"
+                  qty={targetQty}
+                  unit={targetUnit}
+                  onQtyChange={setTargetQty}
+                  onUnitChange={setTargetUnit}
+                  derivedQty={derivedQty}
+                />
+              </>
+            )}
 
             {selectedOutsideArea && (
               <div className={styles.eligWarn}>
@@ -357,14 +1064,40 @@ export function CreatePopover({
 
             {ineligible && (
               <div className={styles.eligWarn}>
-                {blocked ? (
+                {/* ⛔ F-087: TWO PARAGRAPHS, NEVER ONE. "Never trained" needs a
+                    course booked; "certificate expired" needs a renewal. The
+                    old screen printed one sentence for the first and nothing
+                    at all for the second. Each names the trainings it is about,
+                    and the expired one names the DATE — through the app's date
+                    seam, in the org's chosen format. */}
+                {selectedUntrained.length > 0 && (
                   <p>
-                    Missing {selectedMissing.map((s) => s.name).join(", ")} — this org requires
-                    certification for this cell (no override).
+                    <strong>Never trained:</strong>{" "}
+                    {selectedUntrained.map((g) => g.skill.name).join(", ")}. Booking the training is
+                    what fixes this.
                   </p>
+                )}
+                {selectedLapsed.length > 0 && (
+                  <p>
+                    <strong>Certificate expired:</strong>{" "}
+                    {selectedLapsed
+                      .map(
+                        (g) =>
+                          `${g.skill.name} (expired ${formatCalendarDay(g.expiresAt, dateFormat)})`,
+                      )
+                      .join(", ")}
+                    . They held this — it needs renewing before this shift ends.
+                  </p>
+                )}
+                {blocked ? (
+                  // R-331: "this org" was true when the policy was read once
+                  // from the company's bag. It is now resolved for THIS cell —
+                  // the plant it sits in may refuse while the plant next door
+                  // allows an override — so the sentence names the place the
+                  // rule was actually found for, which is here.
+                  <p>Certification is required at this place, so there is no override.</p>
                 ) : (
                   <>
-                    <p>Missing {selectedMissing.map((s) => s.name).join(", ")}.</p>
                     <label className={styles.overrideLbl}>
                       <input
                         type="checkbox"
@@ -389,13 +1122,41 @@ export function CreatePopover({
                 )}
               </div>
             )}
+
+            {selectedAbsence !== null && (
+              <div className={styles.eligWarn}>
+                {/* R-357: named and dated through the app's date seam, the way
+                    the expired-certificate line is (R-338). No override box:
+                    the server takes no absence override, so under `warn` this
+                    is a warning the planner reads and Create stays enabled;
+                    under `block` there is nothing to tick and Create is off. */}
+                <p>
+                  <strong>{leaveLine(selectedAbsence, dateFormat, zone)}</strong>
+                </p>
+                {absenceBlocked ? (
+                  <p>This person is on leave for this window, so there is no override.</p>
+                ) : (
+                  <p>Placing them anyway records the assignment over their leave.</p>
+                )}
+              </div>
+            )}
+
+            {/* S41-c: a genuine SERVER refusal the boxes above did not
+                already predict (chiefly capacity_exceeded -- a move sends
+                no probe, brief §4). No toast: this pop-up is where it is
+                printed, exactly as a reassign's own refusal is. */}
+            {moveRefusal && (
+              <div className={styles.eligWarn}>
+                <p>{describeSchedulerError(moveRefusal)}</p>
+              </div>
+            )}
           </>
         )}
 
         <div className={styles.time}>{timeLabel}</div>
 
         <div className={styles.row}>
-          <button type="button" onClick={onCancel}>
+          <button type="button" onClick={cancel}>
             Cancel
           </button>
           <button
@@ -404,37 +1165,9 @@ export function CreatePopover({
             disabled={createDisabled}
             onClick={() => {
               if (mode === "run") {
-                const hc = Math.max(1, Math.round(Number(plannedHeadcount)) || 1);
-                onSubmitRun(nodeId, range, productId, hc);
+                void submitRun();
               } else {
-                const eff = Math.max(10, Math.min(150, Number(efficiencyPercent) || 100));
-                // Shared with the edit popover so the two cannot drift again: no
-                // quantity means no unit (never the literal "units").
-                const target = normalizeTarget(targetQty, targetUnit);
-                // D64: "never send an override the user did not tick" —
-                // `needsOverride && overrideChecked` is the only path that
-                // sends `eligibilityOverride: true`; every other case
-                // (fully eligible, or blocked-and-disabled so unreachable)
-                // sends `false`/`undefined`.
-                onSubmitDirect(
-                  nodeId,
-                  range,
-                  operatorId,
-                  productId,
-                  eff,
-                  target.qty ?? undefined,
-                  target.unit ?? undefined,
-                  needsOverride && overrideChecked,
-                  needsOverride && overrideChecked ? overrideReason.trim() : undefined,
-                  // D113: sent only when it actually overrode something. The
-                  // server normalises the flag off anyway, so this is belt and
-                  // braces — but a client that always sent `true` would make
-                  // every screen reading the flag say "overridden" about rows
-                  // nobody decided anything about.
-                  selectedOutsideArea && areaChecked,
-                  selectedOutsideArea && areaChecked ? areaReason.trim() : undefined,
-                  anchor,
-                );
+                void submitDirect();
               }
             }}
           >

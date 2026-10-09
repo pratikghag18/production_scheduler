@@ -1,0 +1,244 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.plant {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* "All plants" (R-358: "For all plants, show all templates."): one section
+ * per readable plant, each holding its own .plant heading and .list. A top
+ * rule separates one plant's templates from the next --- an adjacent-sibling
+ * rule, so the FIRST section carries none, never a border every section
+ * carries that a `:first-of-type` guess could get wrong. */
+.plantSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.plantSection + .plantSection {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line-1, #e2e2e2);
+}
+
+.empty {
+  margin: 0.5rem 0;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+}
+
+.about {
+  margin: 0 0 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  max-width: 40rem;
+}
+
+.error {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: var(--crit);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--line-1, #e2e2e2);
+  border-radius: 0.375rem;
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 12rem;
+}
+
+.name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.nameInput {
+  font-size: 0.875rem;
+  padding: 0.125rem 0.25rem;
+}
+
+.meta {
+  font-size: 0.6875rem;
+  color: var(--ink-2);
+}
+
+.actions {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+/* R-447: this is the same button MORPHING BETWEEN STATES the standard names
+   for the toolbar's own "Show more"/"Show less" -- Save/Cancel while
+   renaming, Yes-delete/Keep while confirming, Rename/Delete otherwise. One
+   width sized to the longest of the six ("Yes, delete") so the row never
+   shifts as the state flips, the same `min-width` fix as
+   `BoardToolbar.module.css`'s `.moreButton`. A separate class from
+   `.actions` above (whose only button, "Show contents"/"Hide contents", is
+   already two equal-length words and does not need one) so the fix does not
+   force an unrelated group to share this row's width by coincidence. */
+.rowActions {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.rowActions button {
+  min-width: 5.5em;
+  text-align: center;
+}
+
+.confirmText {
+  font-size: 0.75rem;
+  color: var(--crit);
+}
+
+/* ----------------------------------------------------------------------
+ * "What's inside" (R-356 surface): the read-only toggle and its contents.
+ * Same type scale as the row above (.meta is 0.6875rem, .name is 0.875rem);
+ * nothing here introduces a new color, only --ink / --ink-2 / --muted.
+ * -------------------------------------------------------------------- */
+
+.toggle {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.contents {
+  flex-basis: 100%;
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line-1, #e2e2e2);
+}
+
+.days {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.dayLabel {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* One line/cell within a day (R-358, the maintainer 10 Sept: "show contents
+ * don't [show] what line or sub-hierarchy level the template is for ... it
+ * should adapt to the plant hierarchy"). Indented under .dayLabel so the
+ * reading order stays Day -> node -> runs -> crew. */
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  padding-left: 0.5rem;
+}
+
+.nodePath {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  /* Primary ink, not muted --- this is the whole fix: a line/cell is as
+   * important as the day it runs on, not the faintest text on the row. */
+  color: var(--ink);
+}
+
+.runList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.runItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.runHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.runProduct {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.runTime {
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.runHeadcount {
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+
+.crewList {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+}
+
+.crewItem {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.standaloneItem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.removed {
+  color: var(--muted);
+  font-style: italic;
+}

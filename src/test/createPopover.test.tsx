@@ -1,0 +1,937 @@
+/**
+ * R-026: a type selector in the creation popover chooses between a product run
+ * and a direct assignment. (The claim's other clause -- "drag-select can create
+ * ... at any time" -- is the gesture layer's job, dragGesture.test.ts's, and
+ * still has zero CREATE cases per R-025's own note; not provable from this
+ * component alone, so it stays off this row.)
+ *
+ * `CreatePopover` takes no hooks of its own -- every scope decision (which
+ * products, which operators, which policy) is resolved by `BoardPage` and
+ * handed down as props, so the popover itself holds no rule and needs no
+ * mocking to mount.
+ */
+import { StrictMode, type ComponentProps } from "react";
+import { describe, expect, it, vi, type Mock } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  CreatePopover,
+  type PopoverConfirmHandle,
+} from "@/features/board/components/CreatePopover";
+import type { PopupReporter } from "@/features/board/store/commandConversation";
+import { CREATE_WAITING } from "@/features/board/lib/popupWords";
+import type { ShiftChip } from "@/features/board/hooks/useDragGesture";
+import type { Product, BoardOperator, Skill } from "@/lib/api";
+import type { AbsenceRow } from "@/lib/absence";
+
+/** F-205: the exact shape `CreatePopover` itself declares for the prop --
+ *  extracted, not retyped (CLAUDE.md §4), so `Mock<OnSubmitDirect>` below can
+ *  never drift from the real signature the way a hand-copied one could. */
+type OnSubmitDirect = NonNullable<ComponentProps<typeof CreatePopover>["onSubmitDirect"]>;
+
+const WINDOW_START = new Date("2026-08-24T00:00:00.000Z");
+
+const product: Product = {
+  id: "prod-1",
+  name: "Widget A",
+  sku: "W-A",
+  active: true,
+  siteNodeIds: [],
+  offeredNodeIds: [],
+  colorToken: "product-1",
+};
+
+const operator: BoardOperator = {
+  id: "op-1",
+  displayName: "Ana Ortiz",
+  homeNodeId: null,
+  homeShiftId: null,
+  employeeRef: null,
+  active: true,
+  siteNodeId: "n-plant",
+  sitePath: "plant_a",
+  skillIds: [],
+  skillExpiries: [],
+};
+
+/** R-384 fixtures: one skill, an operator who holds it and one who does not. */
+const CNC: Skill = { id: "sk-cnc", name: "CNC" };
+const trainedOperator: BoardOperator = { ...operator, skillIds: ["sk-cnc"] };
+const untrainedOperator: BoardOperator = { ...operator, skillIds: [] };
+/** S47 fixtures: a SECOND, distinct id -- `submitIfClean()`'s "starts dirty,
+ *  becomes clean" case needs two operators actually offered together (the
+ *  operator `<select>` is never disabled by `presetOperatorId` alone, only
+ *  by `presetMode`/`presetMove` -- so switching it is a real interaction). */
+const trainedOperator2: BoardOperator = {
+  ...trainedOperator,
+  id: "op-2",
+  displayName: "Ben Cruz",
+};
+
+function renderPopover(
+  over: {
+    defaultCreateMode?: "run" | "direct";
+    operators?: BoardOperator[];
+    products?: Product[];
+    requiredSkills?: Skill[];
+    outsideAreaOperatorIds?: ReadonlySet<string>;
+    eligibilityPolicy?: "warn" | "block";
+    absences?: AbsenceRow[];
+    /** DEF-0038: `zone` is now required on the real component. This file's
+     *  fixtures (`WINDOW_START`, the chip minutes) were written in UTC, so
+     *  "UTC" here is honest, not a stand-in -- the R-450 behavioural cases
+     *  below pass their own zone through this same override. */
+    zone?: string;
+    presetOperatorId?: string;
+    presetProductId?: string;
+    presetRun?: { id: string; label: string };
+    presetMode?: "run";
+    presetHeadcount?: number;
+    presetMove?: { assignmentId: string };
+    autoCreate?: boolean;
+    /** R-384: renders under `<StrictMode>`, the way `src/main.tsx` mounts the
+     *  app — needed to prove the auto-press fires exactly once (F-128). */
+    strict?: boolean;
+    /**
+     * S47 / R-395 item 4: a plain mutable ref object (not necessarily one
+     * from `useRef` -- this file has no component of its own to hold one),
+     * read the way `BoardPage` reads it -- `ref.current?.submitIfClean()`.
+     */
+    ref?: { current: PopoverConfirmHandle | null };
+    /** F-167: the bar's own way back -- set only when a typed sentence
+     *  opened this pop-up. Omitted everywhere else in this file, which is
+     *  byte for byte the pre-F-167 behaviour. */
+    onResult?: PopupReporter;
+    /**
+     * F-205: a PRE-CONFIGURED mock, for the one case the rest of this file
+     * never needed -- a rejection that must already be in place before an
+     * `autoCreate` mount fires the ONE press it ever makes (CP-flash-3). A
+     * click-driven case (CP-R1) can still call `.mockRejectedValue` on the
+     * fresh mock this returns, same as always; the mount-only auto-press
+     * cannot, because its one call happens synchronously inside `render()`,
+     * before a caller could ever reach the mock this function would
+     * otherwise have created.
+     */
+    onSubmitDirect?: Mock<OnSubmitDirect>;
+    /** DEF-0038: overridable for the zone behavioural cases below, which need
+     *  an instant and a chip list of their own -- every other case in this
+     *  file is happy with the fixed `WINDOW_START` and no chips. */
+    windowStart?: Date;
+    initialRange?: { startMin: number; endMin: number };
+    shiftChips?: ShiftChip[];
+  } = {},
+) {
+  const onSubmitRun = vi.fn();
+  const onSubmitDirect = over.onSubmitDirect ?? vi.fn<OnSubmitDirect>();
+  const onSubmitMove = vi.fn().mockResolvedValue(undefined);
+  const onCancel = vi.fn();
+  const ops = over.operators ?? [operator];
+  const element = (
+    <CreatePopover
+      ref={over.ref}
+      nodeId="cell-1"
+      anchor={{ x: 0, y: 0 }}
+      initialRange={over.initialRange ?? { startMin: 360, endMin: 480 }}
+      shiftChips={over.shiftChips ?? []}
+      defaultCreateMode={over.defaultCreateMode ?? "run"}
+      products={over.products ?? [product]}
+      operators={ops}
+      hereOperatorIds={new Set(ops.map((o) => o.id))}
+      windowStart={over.windowStart ?? WINDOW_START}
+      zone={over.zone ?? "UTC"}
+      requiredSkills={over.requiredSkills ?? []}
+      outsideAreaOperatorIds={over.outsideAreaOperatorIds ?? new Set()}
+      eligibilityPolicy={over.eligibilityPolicy ?? "warn"}
+      absences={over.absences ?? []}
+      presetOperatorId={over.presetOperatorId}
+      presetProductId={over.presetProductId}
+      presetRun={over.presetRun}
+      presetMode={over.presetMode}
+      presetHeadcount={over.presetHeadcount}
+      presetMove={over.presetMove}
+      autoCreate={over.autoCreate}
+      onCancel={onCancel}
+      onResult={over.onResult}
+      onSubmitRun={onSubmitRun}
+      onSubmitDirect={onSubmitDirect}
+      onSubmitMove={onSubmitMove}
+    />
+  );
+  render(over.strict ? <StrictMode>{element}</StrictMode> : element);
+  return { onSubmitRun, onSubmitDirect, onSubmitMove, onCancel };
+}
+
+describe("CreatePopover — the type selector (R-026)", () => {
+  it("C1: opens on the caller's default mode, with that segment marked current", () => {
+    renderPopover({ defaultCreateMode: "direct" });
+    expect(screen.getByRole("button", { name: "Direct assignment" }).className).toMatch(/segOn/);
+    expect(screen.getByRole("button", { name: "Product run" }).className).not.toMatch(/segOn/);
+    // Direct mode's own field is on screen; the run-only headcount field is not.
+    expect(screen.getByLabelText("Operator")).toBeTruthy();
+    expect(screen.queryByLabelText("Planned headcount")).toBeNull();
+  });
+
+  it("C2: Product run mode shows the headcount field, not the operator picker", () => {
+    renderPopover({ defaultCreateMode: "run" });
+    expect(screen.getByLabelText("Planned headcount")).toBeTruthy();
+    expect(screen.queryByLabelText("Operator")).toBeNull();
+  });
+
+  it("C3: clicking the other segment switches the fields shown, without reloading the popover", () => {
+    renderPopover({ defaultCreateMode: "run" });
+    fireEvent.click(screen.getByRole("button", { name: "Direct assignment" }));
+    expect(screen.getByLabelText("Operator")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Product run" }));
+    expect(screen.getByLabelText("Planned headcount")).toBeTruthy();
+  });
+
+  it("C4: Create in run mode calls onSubmitRun, never onSubmitDirect", () => {
+    const { onSubmitRun, onSubmitDirect } = renderPopover({ defaultCreateMode: "run" });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(onSubmitRun).toHaveBeenCalledTimes(1);
+    expect(onSubmitRun.mock.calls[0][0]).toBe("cell-1");
+    expect(onSubmitRun.mock.calls[0][2]).toBe("prod-1");
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+  });
+
+  it("C5: Create in direct mode calls onSubmitDirect, never onSubmitRun", () => {
+    const { onSubmitRun, onSubmitDirect } = renderPopover({ defaultCreateMode: "direct" });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+    expect(onSubmitDirect.mock.calls[0][0]).toBe("cell-1");
+    expect(onSubmitDirect.mock.calls[0][2]).toBe("op-1");
+    // P1-7a: the contract changed here, not the case -- position 3 used to be
+    // the bare product id; it is now the target `create_assignment` already
+    // takes a discriminated union for (`AssignmentTarget`), so a run-attached
+    // create sent through the same popover can be told apart from this one.
+    expect(onSubmitDirect.mock.calls[0][3]).toEqual({ kind: "direct", productId: "prod-1" });
+    expect(onSubmitRun).not.toHaveBeenCalled();
+  });
+
+  it("C6: Cancel calls onCancel and submits nothing", () => {
+    const { onSubmitRun, onSubmitDirect, onCancel } = renderPopover();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onSubmitRun).not.toHaveBeenCalled();
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * R-384 — the maintainer, 11 Sept, after trying the typed command bar: "Enter
+ * creates when the pop-up is clean, otherwise it defeats the purpose of the
+ * voice option." `autoCreate` is set only by `openCreateFromCommand`
+ * (dragGesture.test.ts pins that a drag's popover never carries it); these
+ * cases are about what THIS component does with it once set — press Create
+ * itself, exactly once, only when its OWN already-computed verdicts (the
+ * training gap, the area mark, the leave line) would show nothing.
+ *
+ * F-128 is why AC1 renders under `<StrictMode>`: a side effect that fires
+ * from a state updater runs twice there, and the fix for that (a ref, not a
+ * second state flag) has to be proven under the mount the app actually uses.
+ */
+describe("CreatePopover — R-384: Enter auto-creates when the pop-up is clean", () => {
+  it("AC1: a fully clean fixture auto-creates exactly once under StrictMode, with the same arguments a click would send", () => {
+    const clickCase = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(clickCase.onSubmitDirect).toHaveBeenCalledTimes(1);
+
+    const autoCase = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      strict: true,
+    });
+    expect(autoCase.onSubmitDirect).toHaveBeenCalledTimes(1);
+    expect(autoCase.onSubmitDirect.mock.calls[0]).toEqual(clickCase.onSubmitDirect.mock.calls[0]);
+  });
+
+  it("AC2: an operator missing a required training under 'warn' does not auto-create; the Never trained box renders", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Never trained");
+  });
+
+  it("AC3: an operator outside this area does not auto-create; the area box renders", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      outsideAreaOperatorIds: new Set(["op-1"]),
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("doesn’t belong to this part of the structure");
+  });
+
+  it("AC4: an operator on leave under 'warn' does not auto-create; the leave line renders", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      absences: [{ operatorId: "op-1", from: "2026-08-24", to: "2026-08-24", reason: "sick" }],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Placing them anyway records the assignment");
+  });
+
+  it("AC5: an untrained operator under 'block' does not auto-create; Create is disabled", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "block",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("AC6: a clean presetRun auto-creates once with { kind: 'run', runId } as the 4th argument", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetRun: { id: "run-9", label: "Widget A 06:00-08:00" },
+      autoCreate: true,
+    });
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+    expect(onSubmitDirect.mock.calls[0][3]).toEqual({ kind: "run", runId: "run-9" });
+  });
+
+  it("AC7: the same clean fixture WITHOUT autoCreate never auto-creates (a drag's pop-up never does)", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+    });
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * S41-a — `presetMode`/`presetHeadcount`, brief s41-a-book-a-job-brief.md
+ * §3/§5 (AC8-AC11): the typed "book a job" sentence opens this SAME popover
+ * forced into Product run mode, with the run/direct segment disabled (there
+ * is no operator to protect a flip back to direct from), and Create/auto-
+ * press go through `submitRun()` — the SAME arguments a click sends.
+ */
+describe("CreatePopover — S41-a: presetMode 'run' (book a job)", () => {
+  it("AC8: presetMode 'run' + presetProductId + autoCreate -- onSubmitRun once, with the same arguments a click sends", () => {
+    // As AC1 does: a plain click's arguments are the reference, so the
+    // Create button and the auto-press cannot silently diverge (M39).
+    const clickCase = renderPopover({ presetMode: "run", presetProductId: "prod-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(clickCase.onSubmitRun).toHaveBeenCalledTimes(1);
+    expect(clickCase.onSubmitRun.mock.calls[0]).toEqual([
+      "cell-1",
+      { startMin: 360, endMin: 480 },
+      "prod-1",
+      2,
+    ]);
+    expect(clickCase.onSubmitDirect).not.toHaveBeenCalled();
+
+    const autoCase = renderPopover({
+      presetMode: "run",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      strict: true,
+    });
+    expect(autoCase.onSubmitRun).toHaveBeenCalledTimes(1);
+    expect(autoCase.onSubmitRun.mock.calls[0]).toEqual(clickCase.onSubmitRun.mock.calls[0]);
+    expect(autoCase.onSubmitDirect).not.toHaveBeenCalled();
+  });
+
+  it("AC9: presetHeadcount 3 -- the fourth argument is 3", () => {
+    const { onSubmitRun } = renderPopover({
+      presetMode: "run",
+      presetProductId: "prod-1",
+      presetHeadcount: 3,
+      autoCreate: true,
+    });
+    expect(onSubmitRun).toHaveBeenCalledTimes(1);
+    expect(onSubmitRun.mock.calls[0][3]).toBe(3);
+  });
+
+  it("AC10: presetMode 'run' with no product offered here -- nothing called", () => {
+    const { onSubmitRun, onSubmitDirect } = renderPopover({
+      presetMode: "run",
+      products: [],
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(onSubmitRun).not.toHaveBeenCalled();
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+  });
+
+  it("AC11: the segment's two buttons are disabled under presetMode, and a click does not flip the mode", () => {
+    renderPopover({ presetMode: "run", presetProductId: "prod-1" });
+    const runBtn = screen.getByRole("button", { name: "Product run" }) as HTMLButtonElement;
+    const directBtn = screen.getByRole("button", {
+      name: "Direct assignment",
+    }) as HTMLButtonElement;
+    expect(runBtn.disabled).toBe(true);
+    expect(directBtn.disabled).toBe(true);
+
+    fireEvent.click(directBtn);
+    // Still in run mode: the headcount field is present, the operator picker is not.
+    expect(screen.getByLabelText("Planned headcount")).toBeTruthy();
+    expect(screen.queryByLabelText("Operator")).toBeNull();
+  });
+});
+
+/**
+ * S41-c — `presetMove`, brief s41-c-move-brief.md §4/§5 (AC12-AC14): the
+ * typed "move" sentence opens this SAME popover on the TARGET cell, direct
+ * mode forced (via `presetOperatorId`, as it already was), the operator
+ * select replaced by a read-only line naming the person, and Create/auto-
+ * press routed to `onSubmitMove` instead of `onSubmitDirect` — the SAME
+ * training/area/leave boxes decide `clean` exactly as a create's do.
+ */
+describe("CreatePopover — S41-c: presetMove (move to another cell)", () => {
+  it("AC12: presetMove forces direct mode with the person fixed -- no operator select, a 'Moving <person>'s block' line instead", () => {
+    renderPopover({
+      operators: [operator],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      presetMove: { assignmentId: "asg-1" },
+    });
+    expect(screen.queryByLabelText("Operator")).toBeNull();
+    expect(document.body.textContent).toContain("Moving Ana Ortiz’s block");
+    // Efficiency/target fields are meaningless for a move (the server takes
+    // none of them) and are hidden rather than shown-and-ignored.
+    expect(screen.queryByLabelText("Efficiency %")).toBeNull();
+  });
+
+  it("AC13: Enter calls onSubmitMove once under StrictMode, with the same arguments a click sends", () => {
+    const clickCase = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      presetMove: { assignmentId: "asg-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(clickCase.onSubmitMove).toHaveBeenCalledTimes(1);
+    expect(clickCase.onSubmitMove.mock.calls[0]).toEqual([
+      "cell-1",
+      { startMin: 360, endMin: 480 },
+      "asg-1",
+      false,
+      undefined,
+      false,
+      undefined,
+    ]);
+    expect(clickCase.onSubmitDirect).not.toHaveBeenCalled();
+
+    const autoCase = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      presetMove: { assignmentId: "asg-1" },
+      autoCreate: true,
+      strict: true,
+    });
+    expect(autoCase.onSubmitMove).toHaveBeenCalledTimes(1);
+    expect(autoCase.onSubmitMove.mock.calls[0]).toEqual(clickCase.onSubmitMove.mock.calls[0]);
+    expect(autoCase.onSubmitDirect).not.toHaveBeenCalled();
+  });
+
+  it("AC14: an ineligible target opens the training box, does not auto-create, and calls nothing", () => {
+    const { onSubmitMove, onSubmitDirect } = renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      presetMove: { assignmentId: "asg-1" },
+      autoCreate: true,
+    });
+    expect(onSubmitMove).not.toHaveBeenCalled();
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Never trained");
+  });
+
+  it("AC15 (D120): the segment's two buttons are disabled under presetMove, and clicking 'Product run' does not flip the mode -- Create still calls onSubmitMove, never onSubmitRun", () => {
+    const { onSubmitRun, onSubmitMove } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      presetMove: { assignmentId: "asg-1" },
+    });
+    const runBtn = screen.getByRole("button", { name: "Product run" }) as HTMLButtonElement;
+    const directBtn = screen.getByRole("button", {
+      name: "Direct assignment",
+    }) as HTMLButtonElement;
+    expect(runBtn.disabled).toBe(true);
+    expect(directBtn.disabled).toBe(true);
+
+    fireEvent.click(runBtn);
+    // Still in direct mode: the "Moving <person>'s block" line is present,
+    // the run-only headcount field is not -- a click on the disabled
+    // button did not flip `mode`.
+    expect(document.body.textContent).toContain("Moving Ana Ortiz’s block");
+    expect(screen.queryByLabelText("Planned headcount")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(onSubmitMove).toHaveBeenCalledTimes(1);
+    expect(onSubmitRun).not.toHaveBeenCalled();
+  });
+
+  it("AC16 (the review lane's race): a fresh key re-arms the R-384 auto-press for a second, different move", () => {
+    // `BoardPage` keys `<CreatePopover>` on `popover.seq` precisely so a
+    // second typed command opening this popover while an earlier one is
+    // still in flight is a NEW MOUNT, not a prop update on the same
+    // instance (which would leave the mount-only auto-press effect
+    // permanently spent after its first firing). This drives that directly
+    // through `rerender`, changing both `key` and the moved block's id.
+    const onSubmitMove = vi.fn().mockResolvedValue(undefined);
+    const onSubmitRun = vi.fn();
+    const onSubmitDirect = vi.fn();
+    const onCancel = vi.fn();
+
+    function element(key: number, assignmentId: string) {
+      return (
+        <CreatePopover
+          key={key}
+          nodeId="cell-1"
+          anchor={{ x: 0, y: 0 }}
+          initialRange={{ startMin: 360, endMin: 480 }}
+          shiftChips={[]}
+          defaultCreateMode="direct"
+          products={[product]}
+          operators={[trainedOperator]}
+          hereOperatorIds={new Set(["op-1"])}
+          windowStart={WINDOW_START}
+          zone="UTC"
+          requiredSkills={[CNC]}
+          outsideAreaOperatorIds={new Set()}
+          eligibilityPolicy="warn"
+          absences={[]}
+          presetOperatorId="op-1"
+          presetProductId="prod-1"
+          presetMove={{ assignmentId }}
+          autoCreate={true}
+          onCancel={onCancel}
+          onSubmitRun={onSubmitRun}
+          onSubmitDirect={onSubmitDirect}
+          onSubmitMove={onSubmitMove}
+        />
+      );
+    }
+
+    const { rerender } = render(element(1, "asg-1"));
+    expect(onSubmitMove).toHaveBeenCalledTimes(1);
+    expect(onSubmitMove.mock.calls[0][2]).toBe("asg-1");
+
+    rerender(element(2, "asg-2"));
+    expect(onSubmitMove).toHaveBeenCalledTimes(2);
+    expect(onSubmitMove.mock.calls[1][2]).toBe("asg-2");
+    expect(onSubmitRun).not.toHaveBeenCalled();
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * S47 / R-395 item 4 -- `PopoverConfirmHandle.submitIfClean()`, what
+ * `CommandBar`'s `onConfirmWord` reaches through `BoardPage`'s ref for a
+ * spoken/typed yes that arrives AFTER mount (once R-384's own mount-only
+ * auto-press has already had its one chance). A pop-up that is clean AND
+ * `autoCreate` at MOUNT time is already spent by that auto-press before a
+ * ref call could ever reach it -- see AC1 -- so the "created" case here has
+ * to start dirty (autoCreate does not fire) and become clean through the
+ * SAME override tick a person would use, exactly as a real "yes" arriving
+ * after the pop-up already asked a question would.
+ */
+describe("CreatePopover — R-395: submitIfClean() through the ref", () => {
+  it("CP-H1: a pop-up that becomes clean returns 'created' once, submitting; a second call returns 'none' and submits nothing more", () => {
+    const ref: { current: PopoverConfirmHandle | null } = { current: null };
+    const { onSubmitDirect } = renderPopover({
+      operators: [untrainedOperator, trainedOperator2],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      ref,
+    });
+    // Dirty at mount (op-1 lacks CNC) -- the R-384 auto-press does not fire
+    // (AC2's own case), so `autoFiredRef` is still unspent here.
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+
+    // The pop-up becomes clean the way a person actually resolves one that
+    // is not — not by ticking the override box, which the `clean` verdict
+    // deliberately ignores (a `warn` box is still a decision, never clean;
+    // see the comment on `clean` itself), but by picking the OTHER, trained
+    // operator instead. `presetOperatorId` only pre-selects; it does not
+    // disable this select (that is `presetMode`/`presetMove`'s doing).
+    fireEvent.change(screen.getByLabelText("Operator"), { target: { value: "op-2" } });
+
+    expect(ref.current!.submitIfClean()).toBe("created");
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+    expect(onSubmitDirect.mock.calls[0][2]).toBe("op-2");
+
+    expect(ref.current!.submitIfClean()).toBe("none");
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+  });
+
+  it("CP-H2: a dirty sentence-opened pop-up returns 'needs-decision' and submits nothing; one with autoCreate false returns 'none'", () => {
+    const dirtyRef: { current: PopoverConfirmHandle | null } = { current: null };
+    const { onSubmitDirect: dirtySubmit } = renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      ref: dirtyRef,
+    });
+
+    expect(dirtyRef.current!.submitIfClean()).toBe("needs-decision");
+    expect(dirtySubmit).not.toHaveBeenCalled();
+
+    const noAutoRef: { current: PopoverConfirmHandle | null } = { current: null };
+    const { onSubmitDirect: cleanSubmit } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      // autoCreate omitted -- a drag or a keyboard create, never a sentence.
+      ref: noAutoRef,
+    });
+
+    expect(noAutoRef.current!.submitIfClean()).toBe("none");
+    expect(cleanSubmit).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-167 (the other half of F-165's silence): this pop-up is where a typed
+// sentence's write actually happens, and before this it never told the bar
+// what became of it. `onResult` is called exactly once, on whichever of the
+// three things happens first.
+// ---------------------------------------------------------------------------
+describe("CreatePopover — what it tells the command bar (F-167)", () => {
+  it("CP-R1: onResult fires `written` when Create is accepted, `refused` with the server's words when it is not, and `cancelled` when the pop-up is closed -- once each, never twice", async () => {
+    // 1. written.
+    const written: { kind: string; message?: string }[] = [];
+    const first = renderPopover({
+      defaultCreateMode: "direct",
+      presetProductId: product.id,
+      presetOperatorId: operator.id,
+      onResult: (r) => written.push(r),
+    });
+    // F-233, third pass (S194-G3): `onSubmitDirect` answers the row's own
+    // real id now, not the bare literal "written".
+    first.onSubmitDirect.mockResolvedValue({ kind: "written", id: "new-assignment-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await act(async () => {});
+    // S195-D (CONTRACT CHANGED, CLAUDE.md 4: not wrong when written): a pop-up
+    // a sentence opened that is ON SCREEN now says so first, in the one plain
+    // sentence (DEF-0054) -- a note, not an answer; the answer follows it.
+    expect(written).toEqual([
+      { kind: "handed_off", what: CREATE_WAITING },
+      { kind: "written", id: "new-assignment-1" },
+    ]);
+    // A close after a successful Create must not turn it into a cancel.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(written).toHaveLength(2);
+
+    cleanup();
+
+    // 2. refused -- the server's own sentence, not the bar's guess at one.
+    const refused: { kind: string; message?: string }[] = [];
+    const second = renderPopover({
+      defaultCreateMode: "direct",
+      presetProductId: product.id,
+      presetOperatorId: operator.id,
+      onResult: (r) => refused.push(r),
+    });
+    second.onSubmitDirect.mockRejectedValue(
+      new Error("That person does not belong to this part of the structure."),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await act(async () => {});
+    expect(refused).toHaveLength(2);
+    expect(refused[0].kind).toBe("handed_off");
+    expect(refused[1].kind).toBe("refused");
+    expect(refused[1].message).toContain(
+      "That person does not belong to this part of the structure.",
+    );
+
+    cleanup();
+
+    // 3. cancelled -- Cancel, and nothing written.
+    const cancelled: { kind: string }[] = [];
+    const third = renderPopover({
+      defaultCreateMode: "direct",
+      presetProductId: product.id,
+      presetOperatorId: operator.id,
+      onResult: (r) => cancelled.push(r),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(cancelled).toEqual([
+      { kind: "handed_off", what: CREATE_WAITING },
+      { kind: "cancelled" },
+    ]);
+    expect(third.onSubmitDirect).not.toHaveBeenCalled();
+    expect(third.onCancel).toHaveBeenCalledTimes(1);
+
+    cleanup();
+
+    // 4. a split-coverage hand-off has written NOTHING and is not over --
+    // saying written or cancelled would be a lie, so it is reported as what
+    // it IS (S62-b reviewer fix C). That is a NOTE, not an answer: the latch
+    // stays open so the split pop-up's own Confirm/Cancel can still finish
+    // the sentence through this same reporter.
+    const handed: { kind: string }[] = [];
+    const fourth = renderPopover({
+      defaultCreateMode: "direct",
+      presetProductId: product.id,
+      presetOperatorId: operator.id,
+      onResult: (r) => handed.push(r),
+    });
+    fourth.onSubmitDirect.mockResolvedValue("handed-off");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await act(async () => {});
+    // S195-D: the hand-off itself is said by the split pop-up, in the person's
+    // own name (`openSplitPopover`) -- this pop-up says nothing more, so it
+    // can never overwrite that sentence with its own.
+    expect(handed).toEqual([{ kind: "handed_off", what: CREATE_WAITING }]);
+    // Still open: a terminal result from the pop-up that took it over lands.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(handed).toEqual([{ kind: "handed_off", what: CREATE_WAITING }, { kind: "cancelled" }]);
+  });
+
+  it("CP-S195-1: a pop-up a sentence opened that is ON SCREEN (a warning to decide) says it stands -- once under StrictMode; a hidden auto-press says nothing", () => {
+    const shown: { kind: string; what?: string }[] = [];
+    renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      strict: true,
+      onResult: (r) => shown.push(r),
+    });
+    expect(shown).toEqual([{ kind: "handed_off", what: CREATE_WAITING }]);
+
+    cleanup();
+
+    // Concealed for a clean auto-press (F-205): nothing is on screen, so the
+    // bar is not told one stands -- it would say "finish it on the board"
+    // about a form nobody can see. Only the write's own answer follows.
+    const hidden: { kind: string; what?: string }[] = [];
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      onResult: (r) => hidden.push(r),
+    });
+    expect(hidden.filter((r) => r.kind === "handed_off")).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-205 (the maintainer, 23 Sept: "when the board asks me a question, there
+// is a pop up which appears before vanishing. It happened now with selecting
+// Housing A for #4"). The pop-up already computed a clean auto-press (R-384)
+// before this -- it just PAINTED the form for one frame and the write's
+// round trip first. The hiding itself lives in the shared shell now
+// (`concealed` on `Popover`/`BoardPopover`, `popoverDrag.test.tsx`'s own
+// PS-1); this file only proves it PASSES that prop at the right moments --
+// by reading it off the shell's own `role="dialog"` root, the one element
+// both files agree on, rather than a second, local hook.
+// ---------------------------------------------------------------------------
+describe("CreatePopover — F-205: no flash while a clean auto-press is pending", () => {
+  it("CP-flash-1: autoCreate + clean -- the shell is concealed at first render, and Create was pressed exactly once", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(screen.getByRole("dialog").className).toMatch(/concealed/);
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+  });
+
+  it("CP-flash-2: autoCreate + a warning (not clean) -- the shell is not concealed, exactly as AC2, and no auto-press is taken", () => {
+    const { onSubmitDirect } = renderPopover({
+      operators: [untrainedOperator],
+      requiredSkills: [CNC],
+      eligibilityPolicy: "warn",
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+    expect(screen.getByRole("dialog").className).not.toMatch(/concealed/);
+    expect(onSubmitDirect).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Never trained");
+  });
+
+  it("CP-flash-3: autoCreate + clean + the server refuses -- the refusal reaches the bar through onResult, exactly as CP-R1's own refusal case asserts", async () => {
+    const refused: { kind: string; message?: string }[] = [];
+    // F-205: the mock must reject BEFORE it is ever called -- the
+    // auto-press's one call happens synchronously inside `render()`, so
+    // this is configured through `over.onSubmitDirect` (see its own note)
+    // rather than on the mock `renderPopover` would otherwise hand back
+    // afterward, which would already be too late.
+    const onSubmitDirect = vi
+      .fn<OnSubmitDirect>()
+      .mockRejectedValue(new Error("That person does not belong to this part of the structure."));
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      onSubmitDirect,
+      onResult: (r) => refused.push(r),
+    });
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+    await act(async () => {});
+    expect(refused).toHaveLength(1);
+    expect(refused[0].kind).toBe("refused");
+    expect(refused[0].message).toContain(
+      "That person does not belong to this part of the structure.",
+    );
+  });
+
+  it("CP-flash-4: a drag-opened pop-up (no autoCreate) is not concealed, as before", () => {
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      // autoCreate omitted -- a drag or a keyboard create, never a sentence.
+    });
+    expect(screen.getByRole("dialog").className).not.toMatch(/concealed/);
+  });
+
+  it("CP-flash-5: autoCreate + clean -- mounting concealed does not steal focus from whatever the person already had focused", () => {
+    const outside = document.createElement("input");
+    document.body.appendChild(outside);
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+    });
+
+    expect(screen.getByRole("dialog").className).toMatch(/concealed/);
+    // The command bar's own input (stood in for here by `outside`) keeps
+    // focus through the mount -- see the shell's own PS-3 for the un-hidden
+    // counterpart (focus moves in once concealment lifts).
+    expect(document.activeElement).toBe(outside);
+
+    outside.remove();
+  });
+
+  it("CP-flash-6: autoCreate + clean, a click elsewhere on the page during the write's round trip does not cancel it -- onResult reports written exactly once, never cancelled", async () => {
+    // F-233, third pass (S194-G3): `onSubmitDirect` answers the row's own
+    // real id now, not the bare literal "written".
+    let resolveWrite!: (v: { kind: "written"; id: string }) => void;
+    const pending = new Promise<{ kind: "written"; id: string }>((resolve) => {
+      resolveWrite = resolve;
+    });
+    const onSubmitDirect = vi.fn<OnSubmitDirect>().mockReturnValue(pending);
+    const results: { kind: string }[] = [];
+    renderPopover({
+      operators: [trainedOperator],
+      requiredSkills: [CNC],
+      presetOperatorId: "op-1",
+      presetProductId: "prod-1",
+      autoCreate: true,
+      onSubmitDirect,
+      onResult: (r) => results.push(r),
+    });
+    expect(onSubmitDirect).toHaveBeenCalledTimes(1);
+
+    // A click anywhere on the page while the write is still in flight --
+    // the shell's own concealed guard (PS-4) must swallow this, not read it
+    // as "outside this pop-up, cancel it".
+    fireEvent.pointerDown(document.body);
+    expect(results).toEqual([]);
+
+    await act(async () => {
+      resolveWrite({ kind: "written", id: "new-assignment-1" });
+    });
+
+    expect(results).toEqual([{ kind: "written", id: "new-assignment-1" }]);
+  });
+});
+
+/* ===========================================================================
+ * DEF-0038 / R-426 — the chips and the time line read the plant's own zone,
+ * not UTC (BoardPage.tsx now mounts this component with `zone={zone}`; this
+ * checks the component's own rendering once it has one). R-426's own rule:
+ * a clock-dependent bug needs a pin in BOTH directions, west of UTC (Chicago,
+ * where the local day can trail UTC's) and east of UTC (Berlin, where the
+ * local day can lead it) -- so each case below both reads a shift chip's
+ * hour and crosses a UTC day boundary the wrong way for a client that fell
+ * back to UTC.
+ * ======================================================================== */
+describe("DEF-0038: chips and the time line read the plant's clock, not UTC", () => {
+  it("America/Chicago (west of UTC): Shift 1 reads 06:00 on its chip, and a block at 22:00 Monday reads Monday, not the UTC Tuesday it lands on", () => {
+    renderPopover({
+      zone: "America/Chicago",
+      // 06:00 Monday 28 Sep 2026 in Chicago (CDT, UTC-5) is 11:00Z.
+      windowStart: new Date("2026-09-28T11:00:00.000Z"),
+      shiftChips: [{ name: "Shift 1", startMin: 0, endMin: 480 }],
+      // 22:00 Monday Chicago is 03:00Z Tuesday -- the UTC day is already
+      // "Tuesday" while Chicago's own day is still "Monday" (DEF-0038's
+      // actual, measured screenshot: a Monday night block read "Tuesday").
+      initialRange: { startMin: 960, endMin: 1440 },
+    });
+    expect(document.body.textContent).toMatch(/Shift 1\s*06:00.14:00/);
+    expect(document.body.textContent).toContain("Mon Sep 28 22:00");
+    expect(document.body.textContent).not.toContain("Sep 29");
+  });
+
+  it("Europe/Berlin (east of UTC): Shift 1 reads 06:00 on its chip, and a block just past midnight Tuesday reads Tuesday, not the UTC Monday it lands on", () => {
+    renderPopover({
+      zone: "Europe/Berlin",
+      // 06:00 Monday 28 Sep 2026 in Berlin (CEST, UTC+2) is 04:00Z.
+      windowStart: new Date("2026-09-28T04:00:00.000Z"),
+      shiftChips: [{ name: "Shift 1", startMin: 0, endMin: 480 }],
+      // 01:00 Tuesday Berlin is 23:00Z Monday -- the mirror-image failure:
+      // the UTC day is still "Monday" while Berlin's own day is already
+      // "Tuesday".
+      initialRange: { startMin: 1140, endMin: 1620 },
+    });
+    expect(document.body.textContent).toMatch(/Shift 1\s*06:00.14:00/);
+    expect(document.body.textContent).toContain("Tue Sep 29 01:00");
+    expect(document.body.textContent).not.toContain("Mon Sep 28 23:00");
+  });
+});

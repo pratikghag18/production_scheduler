@@ -77,6 +77,71 @@ export function canQueryAsUser(userId: string | null, loading: boolean): boolean
   return !loading && userId !== null;
 }
 
+/**
+ * Whether the current session is a PASSWORD-RECOVERY session: one that came
+ * from a reset-email link and has not yet had its password set (F-106).
+ *
+ * A recovery link's tokens make a FULL session the moment supabase-js reads
+ * them from the URL, and GoTrue drops them wherever the redirect rules put
+ * them -- on `/reset-password` when the app's origin matches the project's
+ * site_url, on `/` when it does not (the local stack's `127.0.0.1` against the
+ * dev server's `localhost` is exactly that case). So the app must not rely on
+ * the LANDING PATH to know a password is owed; it must remember the EVENT.
+ *
+ *   PASSWORD_RECOVERY -> true      the link was just consumed
+ *   USER_UPDATED      -> false     `updateUser({ password })` succeeded
+ *   SIGNED_OUT        -> false     nothing owed by nobody
+ *   anything else     -> unchanged (TOKEN_REFRESHED, SIGNED_IN, INITIAL_SESSION)
+ *
+ * Takes the event name as a string so this module stays import-free of
+ * @supabase/supabase-js, like `decideSessionUpdate` above.
+ */
+export function nextRecoveryFlag(current: boolean, event: string): boolean {
+  if (event === "PASSWORD_RECOVERY") return true;
+  if (event === "USER_UPDATED" || event === "SIGNED_OUT") return false;
+  return current;
+}
+
+/**
+ * Where the recovery flag STARTS, before any event has fired (F-106, the
+ * reviewer's two holes in the first fix).
+ *
+ *   1. supabase-js emits PASSWORD_RECOVERY on a `setTimeout(0)` after its own
+ *      round trip, to whoever has subscribed BY THEN. The provider subscribes
+ *      from an effect after first render. On this machine the subscription
+ *      wins by hundreds of milliseconds; with the client instantiated ahead of
+ *      the tree it lost four times out of four and the person landed on the
+ *      board, silently. So the landing URL's own hash seeds the flag: the
+ *      `type=recovery` fragment is still there when the provider first
+ *      renders, and the event then only confirms.
+ *   2. A reload replays INITIAL_SESSION only, never PASSWORD_RECOVERY, so a
+ *      flag held in one render's memory is gone after F5 and the board opens
+ *      with a password nobody chose. The flag is therefore remembered for the
+ *      tab (`sessionStorage`, one key) and read back here.
+ *
+ * Pure over its two inputs, so the provider passes `window.location.hash` and
+ * the stored value and a test passes strings.
+ *
+ * ⭐ WIDENED FOR INVITES (P1-6c). GoTrue sends an invite link with
+ * `type=invite`, and supabase-js turns its tokens into a session and fires
+ * `SIGNED_IN`, not `PASSWORD_RECOVERY` — so `nextRecoveryFlag` never raises the
+ * flag from the event, and without seeding it here an invited person would land
+ * on the board (or the no-access dead-end) with a password nobody set. An
+ * invite owes a password exactly as a reset does, so a `type=invite` fragment
+ * seeds the same flag and the same gate then sends them to `/reset-password`.
+ * The two `type=` values are the only owed-password cases; anything else (a
+ * `signup` confirmation, a magic link) is not, and stays false.
+ */
+export const RECOVERY_STORAGE_KEY = "scheduler.passwordRecovery";
+
+export function initialRecoveryFlag(
+  hash: string | null | undefined,
+  stored: string | null,
+): boolean {
+  if (stored === "1") return true;
+  return typeof hash === "string" && /(^#|[&#])type=(recovery|invite)(&|$)/.test(hash);
+}
+
 /* ===========================================================================
  * D97 — who may open the admin screen (design plan §19.38).
  * ======================================================================== */
@@ -202,8 +267,11 @@ export function adminSectionsFor(
   if (role === "admin" || adminAnywhere === true) return "all";
   // The Matrix is a third view of the same operators-and-trainings data those
   // two screens show, scoped to what the reader can already see, so a supervisor
-  // gets it for the same reason they get Operators and Trainings.
-  return ["operators", "trainings", "matrix"];
+  // gets it for the same reason they get Operators and Trainings. Absences joins
+  // the list for the same reason (R-357): a supervisor records an absence for a
+  // person of their own place, and `set_absence` gates each write on exactly
+  // that, so the tab is worth offering wherever Operators is.
+  return ["operators", "absences", "trainings", "matrix"];
 }
 
 /**

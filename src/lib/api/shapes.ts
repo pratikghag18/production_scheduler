@@ -17,6 +17,9 @@
  * docs/api.md's worked examples — not guessed from the prose alone.
  */
 import type { Json } from "@/lib/database.types";
+import { DATE_FORMATS, type DateFormat } from "@/lib/format/dates";
+import { coerceTimezone } from "@/lib/format/timezones";
+import { COMMAND_BAR_MODES, type CommandBarMode } from "./access";
 
 type JsonRecord = { [key: string]: Json | undefined };
 
@@ -159,7 +162,12 @@ export interface Run {
   timerange: string;
   plannedHeadcount: number | null;
   notes: string | null;
-  status: string;
+  /**
+   * ⚠️ NO `status` ON A RUN EITHER (R-324, migration 0044). It was write-once
+   * 'planned' and its only reader was an exception inside the overlap rule that
+   * could never fire, since runs have always been hard-deleted. `board_window`
+   * builds a run with `to_jsonb(r)`, so the key simply stops arriving.
+   */
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -182,7 +190,6 @@ export function parseRun(v: Json): Run | null {
     timerange,
     planned_headcount,
     notes,
-    status,
     created_by,
     created_at,
     updated_at,
@@ -198,7 +205,6 @@ export function parseRun(v: Json): Run | null {
     !isStr(timerange) ||
     !isNumOrNull(planned_headcount) ||
     !isStrOrNull(notes) ||
-    !isStr(status) ||
     !isStrOrNull(created_by) ||
     !isStr(created_at) ||
     !isStr(updated_at)
@@ -216,7 +222,6 @@ export function parseRun(v: Json): Run | null {
     timerange,
     plannedHeadcount: planned_headcount,
     notes,
-    status,
     createdBy: created_by,
     createdAt: created_at,
     updatedAt: updated_at,
@@ -258,7 +263,13 @@ export interface Assignment {
   areaOverrideReason: string | null;
   targetQty: number | null;
   targetUnit: string | null;
-  status: string;
+  /**
+   * ⚠️ NO `status` HERE ANY MORE (R-323, migration 0043). An assignment that is
+   * deleted is deleted; the column is gone, so `board_window`'s `to_jsonb(a)`
+   * no longer carries the key and requiring it would reject every board read.
+   * `Run` above still has one — runs were not touched, and theirs has always
+   * been write-once 'planned'.
+   */
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -287,7 +298,6 @@ export function parseAssignment(v: Json): Assignment | null {
     area_override_reason,
     target_qty,
     target_unit,
-    status,
     created_by,
     created_at,
     updated_at,
@@ -311,7 +321,6 @@ export function parseAssignment(v: Json): Assignment | null {
     !isStrOrNull(area_override_reason) ||
     !isNumOrNull(target_qty) ||
     !isStrOrNull(target_unit) ||
-    !isStr(status) ||
     !isStrOrNull(created_by) ||
     !isStr(created_at) ||
     !isStr(updated_at)
@@ -341,7 +350,6 @@ export function parseAssignment(v: Json): Assignment | null {
     areaOverrideReason: area_override_reason,
     targetQty: target_qty,
     targetUnit: target_unit,
-    status,
     createdBy: created_by,
     createdAt: created_at,
     updatedAt: updated_at,
@@ -351,6 +359,15 @@ export function parseAssignment(v: Json): Assignment | null {
 export interface BoardOperator {
   id: string;
   homeNodeId: string | null;
+  /**
+   * R-441/R-443, migration 0082: the BAND this person normally works, by id
+   * -- a row in `shifts`, never its name (D137's correction: a rename or an
+   * hours change carries everyone along because the pointer is the id).
+   * `null` means no home band recorded, which `shift_fit` answers `no_shift`
+   * for. Sent straight off the payload, never resolved on the client
+   * (DEF-0016's lesson: the same reason `sitePath` beside it exists).
+   */
+  homeShiftId: string | null;
   displayName: string;
   employeeRef: string | null;
   active: boolean;
@@ -365,34 +382,129 @@ export interface BoardOperator {
    * on an owner it cannot resolve.
    */
   siteNodeId: string;
+  /**
+   * S39 / R-346 / migration 0058: the ltree path of the node named by
+   * `siteNodeId`, as text — `"plant_a.area_1"`. The person's HOME, spelled the
+   * way the server spells ancestry.
+   *
+   * ⭐⭐ IT IS HERE BECAUSE THE CLIENT CANNOT DERIVE IT AND WAS GUESSING.
+   * `board_window` sends only the nodes at or below the reader's root, so a
+   * supervisor granted a LINE gets a node map that starts at that line — and
+   * every person homed at the PLANT above it (five of the demo's six) resolved
+   * to no node at all. The panel, which filtered on membership in that map,
+   * showed her nothing; the "not from this area" mark, which resolved the owner
+   * through the same map, marked everyone. Both were reading the absence of a
+   * node ABOVE the grant as "somewhere else" when it means "above you".
+   *
+   * With the path on the row there is no lookup left: `isAtOrBelow` compares
+   * the home to the place directly, in either direction, and answers the same
+   * way `app_owner_covers_in_org` does on the server.
+   *
+   * ⚠️ `""` for a SYNTHESISED row only (a departed person drawn from D110's
+   * snapshot, `history.ts`), exactly as `siteNodeId` is. Such a row is never in
+   * the array the panel or a picker splits.
+   */
+  sitePath: string;
+  /**
+   * The trainings this person has EVER held, live or lapsed. It answers
+   * "were they ever trained", and that is all it answers — `skillExpiries`
+   * below is what says whether a certificate is still good.
+   */
   skillIds: string[];
+  /**
+   * F-087 / migration 0048: the expiry date of every certificate in
+   * `skillIds` that CARRIES one. Only the dated rows are listed — an undated
+   * certificate never expires, and its absence here says so once.
+   *
+   * ⛔ THE BOARD WAS BLIND WITHOUT THIS AND COULD NOT HAVE BEEN OTHERWISE.
+   * `check_eligibility` has refused an operator whose certification ran out
+   * since migration 0009, and `create_assignment` acts on that refusal — but
+   * `board_window` sent a bare array of skill ids with no date on it, so the
+   * popover drew a person whose ticket lapsed a year ago as fully eligible,
+   * warned nobody, offered no override tick, and let Create fail with a
+   * message about an override the screen had no box for. `certificateGaps`
+   * (`features/board/lib/boardIndex.ts`) is where this becomes the server's
+   * own verdict.
+   */
+  skillExpiries: SkillExpiry[];
+}
+
+/**
+ * One dated certificate: a Postgres `date`, so `expiresAt` is `"YYYY-MM-DD"`
+ * and TIMEZONE-LESS BY CONSTRUCTION. It is compared as text and displayed
+ * through `formatCalendarDay`; putting it through `new Date(...)` would
+ * reinterpret it as UTC midnight and print the day before for anyone west of
+ * Greenwich (the reasoning `src/lib/format/dates.ts` records).
+ */
+export interface SkillExpiry {
+  skillId: string;
+  expiresAt: string;
+}
+
+function parseSkillExpiry(v: Json): SkillExpiry | null {
+  if (!isJsonObject(v)) return null;
+  const { skill_id, expires_at } = v;
+  if (!isStr(skill_id) || !isStr(expires_at)) return null;
+  return { skillId: skill_id, expiresAt: expires_at };
 }
 
 function parseOperator(v: Json): BoardOperator | null {
   if (!isJsonObject(v)) return null;
-  const { id, home_node_id, display_name, employee_ref, active, site_node_id, skill_ids } = v;
+  const {
+    id,
+    home_node_id,
+    home_shift_id,
+    display_name,
+    employee_ref,
+    active,
+    site_node_id,
+    site_path,
+    skill_ids,
+    skill_expiries,
+  } = v;
   if (
     !isStr(id) ||
     !isStrOrNull(home_node_id) ||
+    // R-441 / 0082: nullable, like home_node_id beside it -- `undefined`
+    // (the key absent) is a payload from a database that hasn't run
+    // migration 0082 and is rejected, not coerced to null.
+    !isStrOrNull(home_shift_id) ||
     !isStr(display_name) ||
     !isStrOrNull(employee_ref) ||
     !isBool(active) ||
     // NOT NULL since 0028, so a row without it is a payload from a database
     // this client does not understand — rejected, not coerced.
-    !isStr(site_node_id)
+    !isStr(site_node_id) ||
+    // S39 / 0058. REQUIRED for the same reason `skill_expiries` is: a payload
+    // without it comes from a database that cannot say where a person's home
+    // sits relative to a place, and carrying on regardless would read "no path
+    // sent" as "homed nowhere" — which the split reads as "another area", so
+    // every person in the plant would land behind the click. Rejected, not
+    // coerced to `""`.
+    !isStr(site_path)
   ) {
     return null;
   }
   const skillIds = parseArrayOf(skill_ids, (item) => (isStr(item) ? item : null));
   if (skillIds === null) return null;
+  // ⚠️ REQUIRED, NOT OPTIONAL, and that is the whole point of the field. Since
+  // 0048 `board_window` emits `skill_expiries` on EVERY operator — `[]` where
+  // nothing is dated (71_board_expiry_test.sql, case E8). Tolerating its
+  // absence would mean "this database sends no dates" arrived as "nothing has
+  // expired", which is F-087 restored with a shrug.
+  const skillExpiries = parseArrayOf(skill_expiries, parseSkillExpiry);
+  if (skillExpiries === null) return null;
   return {
     id,
     homeNodeId: home_node_id,
+    homeShiftId: home_shift_id,
     displayName: display_name,
     employeeRef: employee_ref,
     active,
     siteNodeId: site_node_id,
+    sitePath: site_path,
     skillIds,
+    skillExpiries,
   };
 }
 
@@ -628,6 +740,36 @@ function parseShiftTemplate(v: Json): ShiftTemplate | null {
   return { id, name, shifts: parsedShifts };
 }
 
+/**
+ * R-331 / migration 0051: what the eligibility rule SAYS AT ONE NODE — the
+ * answer `app_resolve_node_setting` reached for it, not the company's bag.
+ *
+ * ⛔ RESOLVED ON THE SERVER, AND THAT IS THE WHOLE POINT. The cheap version of
+ * this key is the raw `node_settings` rows plus an ancestry walk here beside
+ * `templateForNode` — and it FAILS OPEN. `board_window` is SECURITY INVOKER and
+ * `node_settings_select` is gated on `app_can_read_node`, so a supervisor
+ * granted a LINE never receives the override sitting on the PLANT ROOT they
+ * cannot read; their board would fall through to the company default and offer
+ * an override tick on a plant deliberately set to refuse. The resolver is
+ * SECURITY DEFINER for exactly that reason (migration 0050 §3), so nothing here
+ * resolves anything — it reads an answer.
+ *
+ * ⚠️ `"warn"`/`"block"` is not typed as a union on purpose: an unknown string
+ * from a future migration must not fail the WHOLE board to parse, and
+ * `boardIndex.ts` narrows it once, defensively, where it builds its map.
+ */
+export interface NodePolicy {
+  nodeId: string;
+  eligibilityPolicy: string;
+}
+
+function parseNodePolicy(v: Json): NodePolicy | null {
+  if (!isJsonObject(v)) return null;
+  const { node_id, eligibility_policy } = v;
+  if (!isStr(node_id) || !isStr(eligibility_policy)) return null;
+  return { nodeId: node_id, eligibilityPolicy: eligibility_policy };
+}
+
 export interface NodeShiftMapEntry {
   nodeId: string;
   templateId: string | null;
@@ -638,6 +780,99 @@ function parseNodeShiftMapEntry(v: Json): NodeShiftMapEntry | null {
   const { node_id, template_id } = v;
   if (!isStr(node_id) || !isStrOrNull(template_id)) return null;
   return { nodeId: node_id, templateId: template_id };
+}
+
+/**
+ * R-333 / migration 0062 (DEF-0017): the calendar-date format RESOLVED for the
+ * board's own root -- `app_resolve_node_setting(root, 'date_format')`, walked on
+ * the server so a supervisor sees the plant's choice even though she cannot read
+ * the plant's own `node_settings` row. It is the date-format twin of
+ * `nodePolicies` above.
+ *
+ * STRICT, AND THAT IS THE POINT -- NOT `coerceDateFormat`. This narrows into
+ * the CLOSED `DateFormat` enum and rejects the row on anything else, exactly as
+ * `can_place` rejects a non-boolean. `board_window` COALESCEs the resolver's
+ * NULL to `'d_mon_yyyy'` at the call site, so a well-formed payload always
+ * carries one of the eight tokens; an ABSENT key is an un-migrated database and
+ * an UNKNOWN string is a payload this client does not understand -- both are the
+ * `silent-empty` trap `nodePolicies` warns of, where quietly defaulting would
+ * put the board back on the company-wide answer and look like it was working.
+ * `coerceDateFormat` (dates.ts) is right for the company bag, which may honestly
+ * never have had the key; it is the wrong tool at a boundary that must be loud.
+ */
+function parseDateFormat(v: Json | undefined): DateFormat | null {
+  return isStr(v) && (DATE_FORMATS as readonly string[]).includes(v) ? (v as DateFormat) : null;
+}
+
+/**
+ * D88a / migration 0063 (R-353): the IANA time zone RESOLVED for the board's own
+ * root on the server, the twin of `parseDateFormat` above.
+ *
+ * ⚠️ LENIENT, NOT STRICT — unlike `date_format`. `board_window` COALESCEs the
+ * resolver's NULL to 'UTC' at the call site, so the key is always a string; but
+ * the zone name is an OPEN vocabulary (the server validates against
+ * `pg_timezone_names`, which the client cannot carry). `coerceTimezone` accepts
+ * any name this runtime's `Intl` can format with and falls back to 'UTC' on a
+ * missing key or a zone the engine rejects — because an unusable zone would make
+ * every `Intl.DateTimeFormat({ timeZone })` on the board throw and blank it. A
+ * bad token here is a display fallback, not a shape mismatch: the axis stays in
+ * UTC rather than the board disappearing.
+ */
+function parseTimezone(v: Json | undefined): string {
+  return coerceTimezone(v);
+}
+
+/**
+ * R-403 / migration 0081 (D129): the command bar mode RESOLVED for the
+ * board's own root on the server, the twin of `parseDateFormat` /
+ * `parseTimezone` above.
+ *
+ * ⚠️ LENIENT LIKE `date_format` USED TO BE, BUT NOT STRICT -- and the reason
+ * is the requirement's own words: "An unrecognised value read from the
+ * server hides the button (fails safe)." A malformed or forward-versioned
+ * token must not blank the whole board the way a bad `date_format` does; it
+ * must fail SAFE by hiding the launcher, so the default here is `"off"`, not
+ * the key's own resolved default (`"voice"`, which `board_window` already
+ * COALESCEs to when nothing is set). A MISSING key (an older window payload,
+ * predating this migration) is different: that board had the launcher, in
+ * full, and command_bar did not exist to turn it off, so a missing key reads
+ * as `"voice"` -- the behaviour that board already had -- and only a
+ * PRESENT-but-unrecognised string reads as `"off"`.
+ */
+function parseCommandBarMode(v: Json | undefined): CommandBarMode {
+  if (v === undefined) return "voice";
+  return isStr(v) && (COMMAND_BAR_MODES as readonly string[]).includes(v)
+    ? (v as CommandBarMode)
+    : "off";
+}
+
+/**
+ * R-442, migration 0082: the acting caller's OWN effective planning
+ * restriction for this board's root -- the nearest-ancestor-or-self covering
+ * grant, resolved on the server the identical way `supervisor_shift_allows`
+ * resolves it (`app_planning_grant_for`), so the rail/pop-ups/bar read the
+ * SAME answer the server would enforce rather than re-deriving the covering
+ * rule (DEF-0016/DEF-0017, CLAUDE.md §7's "the server's rule, transcribed").
+ *
+ * `null` for BOTH an absent key (an older payload, predating 0082 -- read as
+ * "unrestricted", the behaviour every board had before this existed) AND a
+ * present-but-empty answer (the caller holds no covering grant at all --
+ * owner context, or a company admin with no node grant -- which
+ * `supervisor_shift_allows` also reads as unrestricted). Malformed shapes
+ * fail the same safe way rather than blanking the board: this is an
+ * ADVISORY the client uses to grey out an option before asking, never the
+ * permission itself, which the server re-checks on every write regardless.
+ */
+export interface MyShiftPlan {
+  plansShiftId: string | null;
+  outsideShift: boolean;
+}
+
+function parseMe(v: Json | undefined): MyShiftPlan | null {
+  if (v === undefined || v === null || !isJsonObject(v)) return null;
+  const { plans_shift_id, outside_shift } = v;
+  if (!isStrOrNull(plans_shift_id) || !isBool(outside_shift)) return null;
+  return { plansShiftId: plans_shift_id, outsideShift: outside_shift };
 }
 
 // ---------------------------------------------------------------------------
@@ -659,6 +894,45 @@ export interface BoardWindow {
   /** R-315: standard seconds-per-unit for the scoped nodes. Empty is normal —
    *  a cycle time is optional everywhere, and most orgs will set none. */
   cycleTimes: CycleTime[];
+  /** R-331: one resolved eligibility policy per node in the window. NEVER
+   *  empty against a database that has run migration 0051 — `board_window`
+   *  builds it off the same `scoped_nodes` CTE `nodes` comes from, so the two
+   *  lists cover exactly the same ids. */
+  nodePolicies: NodePolicy[];
+  /** R-346's viewer clause: may this person place people somewhere on this
+   *  board? The server decides (an edit grant covering the board's place or
+   *  inside it, or the company admin); the screen hides the Operators panel
+   *  and every "other people" control when it is false. Required: a payload
+   *  without it is an un-migrated database, and the board says so rather than
+   *  guessing. */
+  canPlace: boolean;
+  /** R-333 / migration 0062 (DEF-0017): the calendar-date format resolved for
+   *  the board's own root, walked on the server through
+   *  `app_resolve_node_setting`. The board reads THIS, not `useDateFormat(...,
+   *  root)`, which could only see the root's own override and fell through to the
+   *  company value for a board rooted at a line. Strict: a payload without it, or
+   *  with a token outside the closed `DateFormat` enum, is a shape mismatch. */
+  dateFormat: DateFormat;
+  /** D88a / migration 0063 (R-353): the IANA time zone the board's axis renders
+   *  in, resolved for the board's own root on the server (the twin of
+   *  `dateFormat`). Lenient: an absent key or an unusable name falls back to
+   *  'UTC' via `coerceTimezone`, because a zone `Intl` cannot format would blank
+   *  the board — a display fallback, not a shape mismatch. */
+  timezone: string;
+  /** R-403 / migration 0081 (D129): the command bar mode resolved for the
+   *  board's own root, the twin of `dateFormat`/`timezone`. `off` hides the
+   *  launcher entirely; `typed` shows it without the microphone; `voice`
+   *  shows everything (the default). A MISSING key (an older payload) reads
+   *  as `voice` — that board had the full bar before this setting existed.
+   *  A PRESENT but unrecognised token reads as `off` — the requirement's own
+   *  fail-safe rule, and the one field on this interface that is lenient in
+   *  BOTH directions rather than strict like `dateFormat`. */
+  commandBar: CommandBarMode;
+  /** R-442, migration 0082: the caller's own effective shift-planning
+   *  restriction for this board's root, or `null` when unrestricted (no
+   *  covering grant plans a shift, or the payload predates 0082). See
+   *  `parseMe`. */
+  me: MyShiftPlan | null;
 }
 
 export function parseBoardWindow(json: Json): BoardWindow | null {
@@ -676,6 +950,12 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     shift_templates,
     node_shift_map,
     cycle_times,
+    node_policies,
+    can_place,
+    date_format,
+    timezone,
+    command_bar,
+    me,
   } = json;
 
   const parsedOrg = parseOrg(org);
@@ -697,6 +977,30 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
   // 0040. Defaulting to [] there would leave every derived target silently
   // absent and the board otherwise working — the `silent-empty` defect class.
   const parsedCycleTimes = parseArrayOf(cycle_times, parseCycleTime);
+  // Strict for the same reason `cycle_times` is, with one more behind it:
+  // R-331's whole point is that this key, and not `org.settings`, decides
+  // whether the popover offers an override. A payload without it that parsed
+  // anyway would put the board straight back on the company-wide answer and
+  // look like it was working — the `silent-empty` defect class again.
+  const parsedNodePolicies = parseArrayOf(node_policies, parseNodePolicy);
+  if (typeof can_place !== "boolean") return null;
+  // R-333 / 0062: strict, the same reasoning as `can_place` above and
+  // `nodePolicies` behind it -- see `parseDateFormat`. A null here would blank
+  // the board rather than let it silently fall back to the company answer.
+  const parsedDateFormat = parseDateFormat(date_format);
+  if (parsedDateFormat === null) return null;
+  // Lenient (never null): an absent key or an unusable zone becomes 'UTC'. See
+  // `parseTimezone` — the zone is an open vocabulary and a bad token is a
+  // display fallback, not the shape mismatch a null `date_format` is.
+  const parsedTimezone = parseTimezone(timezone);
+  // R-403 / 0081: lenient in both directions -- see `parseCommandBarMode`.
+  // Missing (an older payload) reads as 'voice'; present-but-unrecognised
+  // reads as 'off', the requirement's own fail-safe rule.
+  const parsedCommandBar = parseCommandBarMode(command_bar);
+  // R-442 / 0082: lenient like commandBar's own missing-key case -- an
+  // absent or malformed `me` reads as unrestricted rather than a shape
+  // mismatch (see parseMe).
+  const parsedMe = parseMe(me);
 
   if (
     parsedOrg === null ||
@@ -710,7 +1014,8 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     parsedNodeSkillRequirements === null ||
     parsedShiftTemplates === null ||
     parsedNodeShiftMap === null ||
-    parsedCycleTimes === null
+    parsedCycleTimes === null ||
+    parsedNodePolicies === null
   ) {
     return null;
   }
@@ -728,38 +1033,76 @@ export function parseBoardWindow(json: Json): BoardWindow | null {
     shiftTemplates: parsedShiftTemplates,
     nodeShiftMap: parsedNodeShiftMap,
     cycleTimes: parsedCycleTimes,
+    nodePolicies: parsedNodePolicies,
+    canPlace: can_place,
+    dateFormat: parsedDateFormat,
+    timezone: parsedTimezone,
+    commandBar: parsedCommandBar,
+    me: parsedMe,
   };
 }
 
+/**
+ * R-465 (DEF-0053, migration 0085): the server counts every block of a person
+ * wherever it is, so a row here may sit on a place the caller cannot read.
+ * For such a row (`outside: true`) the server says the place and the hours and
+ * nothing else: `assignmentId`, `nodeId` and `productName` arrive null. A row
+ * on a place the caller reads (`outside: false`) always carries both ids --
+ * the parser refuses one that does not, so a consumer may narrow on `outside`.
+ */
 export interface CapacityProbeOverlap {
-  assignmentId: string;
-  nodeId: string;
+  assignmentId: string | null;
+  nodeId: string | null;
   nodeName: string;
+  /** The name of the node's parent ("Line 2" for Cell 4); null at a root. */
+  parentName: string | null;
   productName: string | null;
   timerange: string;
   efficiency: number;
+  outside: boolean;
+  /**
+   * R-431 / DEF-0065 (migration 0086): the caller may CHANGE this block -- the
+   * server's own `app_can_edit_node` on its place, the check the split call runs.
+   * Always false for an `outside` row. Absent from a server older than 0086 and
+   * then read as false: nothing is offered that the server may refuse.
+   */
+  editable: boolean;
 }
 
 function parseCapacityProbeOverlap(v: Json): CapacityProbeOverlap | null {
   if (!isJsonObject(v)) return null;
   const { assignment_id, node_id, node_name, product_name, timerange, efficiency } = v;
+  // `outside` and `parent_name` are absent from a server older than 0085;
+  // absent reads as a row the caller can read, with no parent named.
+  const outside = v.outside === undefined ? false : v.outside;
+  const parent_name = v.parent_name === undefined ? null : v.parent_name;
+  // `editable` is absent from a server older than 0086; absent reads as NOT
+  // editable (the safe answer: a split is offered only where it is known to go).
+  const editable = v.editable === undefined ? false : v.editable;
   if (
-    !isStr(assignment_id) ||
-    !isStr(node_id) ||
+    !isBool(outside) ||
+    !isBool(editable) ||
+    !isStrOrNull(assignment_id) ||
+    !isStrOrNull(node_id) ||
     !isStr(node_name) ||
+    !isStrOrNull(parent_name) ||
     !isStrOrNull(product_name) ||
     !isStr(timerange) ||
     !isNum(efficiency)
   ) {
     return null;
   }
+  if (!outside && (assignment_id === null || node_id === null)) return null;
   return {
     assignmentId: assignment_id,
     nodeId: node_id,
     nodeName: node_name,
+    parentName: parent_name,
     productName: product_name,
     timerange,
     efficiency,
+    outside,
+    editable: outside ? false : editable,
   };
 }
 
@@ -777,6 +1120,46 @@ export function parseCapacityProbe(json: Json): CapacityProbe | null {
   const parsedOverlapping = parseArrayOf(overlapping, parseCapacityProbeOverlap);
   if (parsedOverlapping === null) return null;
   return { fits, peak, cap, overlapping: parsedOverlapping };
+}
+
+/**
+ * R-465 (DEF-0053, migration 0085): one row of `operator_blocks_elsewhere` --
+ * a block of a person the caller can read, on a place the caller CANNOT read.
+ * The place (its name and its parent's), the hours and the share; never a
+ * product, a run or an id. `parentName` is null for a place at a root.
+ */
+export interface BlockElsewhere {
+  operatorId: string;
+  nodeName: string;
+  parentName: string | null;
+  timerange: string;
+  efficiency: number;
+}
+
+function parseBlockElsewhere(v: Json): BlockElsewhere | null {
+  if (!isJsonObject(v)) return null;
+  const { operator_id, node_name, parent_name, timerange, efficiency } = v;
+  if (
+    !isStr(operator_id) ||
+    !isStr(node_name) ||
+    !isStrOrNull(parent_name) ||
+    !isStr(timerange) ||
+    !isNum(efficiency)
+  ) {
+    return null;
+  }
+  return {
+    operatorId: operator_id,
+    nodeName: node_name,
+    parentName: parent_name,
+    timerange,
+    efficiency,
+  };
+}
+
+/** The whole answer, or null when any row is malformed (never half a set). */
+export function parseBlocksElsewhere(json: Json): BlockElsewhere[] | null {
+  return parseArrayOf(json, parseBlockElsewhere);
 }
 
 export interface EligibilityResult {
@@ -807,9 +1190,66 @@ export function parseCreateRunResult(json: Json): CreateRunResult | null {
   return { run };
 }
 
+/**
+ * R-357 / migration 0066: `absence_overlap`'s answer, as it rides back on the
+ * warn-path of `create_assignment` and `reassign_assignment` (the `absence`
+ * key) and inside each `move_run` `absence_warnings` entry. `from`/`to` are the
+ * inclusive `YYYY-MM-DD` bounds the server already stepped in for; both are null
+ * when `absent` is false. The board's own picture of the same thing is
+ * `absenceGaps` (`src/lib/absence.ts`) — this is only what the WRITE reports
+ * back, so a warn placement carries the leave it went ahead over instead of a
+ * bare key.
+ */
+export interface AbsenceInfo {
+  absent: boolean;
+  from: string | null;
+  to: string | null;
+  reason: string | null;
+  /**
+   * R-359 / migration 0069: present TOGETHER, ISO instants, exactly when the
+   * hit is a part-day absence — absent on a whole-day one and on any payload
+   * from a database that has not run 0069. Named `startsAt`/`endsAt` to match
+   * `AbsenceHit` (`src/lib/absence.ts`) exactly, so the two shapes cannot
+   * drift into two different names for the same server key.
+   */
+  startsAt?: string;
+  endsAt?: string;
+}
+
+/**
+ * LENIENT, and deliberately so: a database that has not run 0066 sends no
+ * `absence` key at all, and the placement still succeeded — its ABSENCE of an
+ * absence is `{absent:false}`, not a shape mismatch that would blank a write
+ * that really happened. A malformed object (present but not the expected shape)
+ * is the same "nobody is absent" answer rather than a throw. When it IS absent,
+ * all three of `from`/`to`/`reason` are read; a partial one falls back to false.
+ *
+ * R-359 / migration 0069: `starts_at`/`ends_at` are read ADDITIVELY, after the
+ * four fields above already decided the row is a valid whole-day hit. A
+ * malformed or partial pair (only one present, or not a string) is read as
+ * "no part-day keys" and falls back to the whole-day shape rather than
+ * rejecting the hit outright — an additive key must stay additive, or a shape
+ * guard that got stricter here would be a regression, not a fix.
+ */
+export function parseAbsenceInfo(v: Json | undefined): AbsenceInfo {
+  const none: AbsenceInfo = { absent: false, from: null, to: null, reason: null };
+  if (!isJsonObject(v)) return none;
+  if (v.absent !== true) return none;
+  const { from, to, reason, starts_at, ends_at } = v;
+  if (!isStr(from) || !isStr(to) || !isStr(reason)) return none;
+  const base: AbsenceInfo = { absent: true, from, to, reason };
+  if (isStr(starts_at) && isStr(ends_at)) {
+    return { ...base, startsAt: starts_at, endsAt: ends_at };
+  }
+  return base;
+}
+
 export interface CreateAssignmentResult {
   assignment: Assignment;
   eligibility: EligibilityResult;
+  /** R-357: the leave this placement went ahead over under `warn`, or
+   *  `{absent:false}`. Present on every 0066 payload; defaulted for older ones. */
+  absence: AbsenceInfo;
 }
 
 export function parseCreateAssignmentResult(json: Json): CreateAssignmentResult | null {
@@ -817,7 +1257,7 @@ export function parseCreateAssignmentResult(json: Json): CreateAssignmentResult 
   const assignment = parseAssignment(json.assignment as Json);
   const eligibility = parseEligibilityResult(json.eligibility as Json);
   if (assignment === null || eligibility === null) return null;
-  return { assignment, eligibility };
+  return { assignment, eligibility, absence: parseAbsenceInfo(json.absence) };
 }
 
 export interface MoveRunEligibilityWarning {
@@ -834,10 +1274,28 @@ function parseMoveRunEligibilityWarning(v: Json): MoveRunEligibilityWarning | nu
   return { operatorId: operator_id, missingSkills: parsedMissing };
 }
 
+/** R-357: one crew member `move_run` carried onto a window they are absent for,
+ *  under `warn`. The twin of `MoveRunEligibilityWarning` — informational, the
+ *  move already happened. */
+export interface MoveRunAbsenceWarning {
+  operatorId: string;
+  absence: AbsenceInfo;
+}
+
+function parseMoveRunAbsenceWarning(v: Json): MoveRunAbsenceWarning | null {
+  if (!isJsonObject(v)) return null;
+  const { operator_id } = v;
+  if (!isStr(operator_id)) return null;
+  return { operatorId: operator_id, absence: parseAbsenceInfo(v.absence) };
+}
+
 export interface MoveRunResult {
   run: Run;
   assignments: Assignment[];
   eligibilityWarnings: MoveRunEligibilityWarning[];
+  /** R-357: crew moved onto a window they are absent for, under `warn`. Empty on
+   *  older payloads (the key is absent), and empty when nobody is away. */
+  absenceWarnings: MoveRunAbsenceWarning[];
 }
 
 export function parseMoveRunResult(json: Json): MoveRunResult | null {
@@ -849,7 +1307,10 @@ export function parseMoveRunResult(json: Json): MoveRunResult | null {
     parseMoveRunEligibilityWarning,
   );
   if (run === null || assignments === null || eligibilityWarnings === null) return null;
-  return { run, assignments, eligibilityWarnings };
+  // Lenient like `AbsenceInfo`: an absent key (older DB) or a malformed entry
+  // becomes "nobody is away", never a mismatch that discards a move that ran.
+  const absenceWarnings = parseArrayOf(json.absence_warnings, parseMoveRunAbsenceWarning) ?? [];
+  return { run, assignments, eligibilityWarnings, absenceWarnings };
 }
 
 export interface SplitCoverageResult {

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { Product, BoardOperator, ShiftTemplate, Skill } from "@/lib/api";
 import type { BoardRow, IndexedRun, IndexedAssignment } from "../lib/boardIndex";
 import { ZOOMS, minutesToPx, intersects, type Density } from "../lib/geometry";
+import type { DayAxis } from "../lib/time";
 import { assignmentProductView, operatorViewFor, productViewFor } from "../lib/history";
 import type { ActiveDrag, BlockDragDescriptor } from "../hooks/useDragGesture";
 import { ShiftLayer } from "./ShiftLayer";
@@ -24,6 +25,7 @@ export interface TrackRowDragApi {
       windowMinutes: number;
       template: ShiftTemplate | null;
       dayCount: number;
+      dayAxis: DayAxis;
       zoomIndex: 0 | 1 | 2;
       trackLeftPx: number;
       offsetXPx: number;
@@ -78,6 +80,8 @@ export function TrackRow({
   windowStart,
   windowMinutes,
   dayCount,
+  dayAxis,
+  zone,
   zoomIndex,
   railWidth,
   trackWidth,
@@ -97,6 +101,8 @@ export function TrackRow({
   windowStart: Date;
   windowMinutes: number;
   dayCount: number;
+  dayAxis: DayAxis;
+  zone?: string;
   zoomIndex: 0 | 1 | 2;
   railWidth: number;
   trackWidth: number;
@@ -117,12 +123,16 @@ export function TrackRow({
   const runById = useMemo(() => new Map(runs.map((r) => [r.id, r] as const)), [runs]);
 
   const dayBoundaries = useMemo(() => {
+    // D88a: day boundaries sit at each local midnight's REAL-minute offset
+    // (dayAxis.dayOffsets), not day*1440 -- on a changeover day the offsets are
+    // not evenly spaced.
     const out: number[] = [];
-    for (let day = 1; day < dayCount; day++) {
-      if (day * 1440 >= visStart - 1 && day * 1440 <= visEnd + 1) out.push(day * 1440);
+    for (let day = 1; day < dayAxis.dayCount; day++) {
+      const m = dayAxis.dayOffsets[day];
+      if (m >= visStart - 1 && m <= visEnd + 1) out.push(m);
     }
     return out;
-  }, [dayCount, visStart, visEnd]);
+  }, [dayAxis, visStart, visEnd]);
 
   const { activeDrag } = dragApi;
   const nodeId = row.node.id;
@@ -199,6 +209,7 @@ export function TrackRow({
               windowMinutes,
               template,
               dayCount,
+              dayAxis,
               zoomIndex,
               trackLeftPx: rect.left,
               offsetXPx: e.clientX - rect.left,
@@ -216,8 +227,9 @@ export function TrackRow({
       >
         <ShiftLayer
           template={template}
-          dayCount={dayCount}
+          dayAxis={dayAxis}
           windowStart={windowStart}
+          zone={zone}
           pxPerHour={pxPerHour}
           visibleMinRange={visibleMinRange}
         />
@@ -237,10 +249,12 @@ export function TrackRow({
             product={productViewFor(r, productById)}
             productColorVar={productColorVar(productViewFor(r, productById))}
             windowStart={windowStart}
+            zone={zone}
             pxPerHour={pxPerHour}
             windowMinutes={windowMinutes}
             template={template}
             dayCount={dayCount}
+            dayAxis={dayAxis}
             zoomIndex={zoomIndex}
             runsOnNode={runs}
             activeDrag={activeDragForRun(r.id)}
@@ -262,11 +276,13 @@ export function TrackRow({
               product={assignmentProductView(a, runById, productById)}
               productColorVar={productColorVar(assignmentProductView(a, runById, productById))}
               windowStart={windowStart}
+              zone={zone}
               pxPerHour={pxPerHour}
               windowMinutes={windowMinutes}
               homeRun={runById.get(a.runId) ?? null}
               template={template}
               dayCount={dayCount}
+              dayAxis={dayAxis}
               zoomIndex={zoomIndex}
               activeDrag={activeDragForAssignment(a.id)}
               onPointerDown={dragApi.beginBlockDrag}
@@ -285,10 +301,12 @@ export function TrackRow({
               product={productViewFor(a, productById)}
               productColorVar={productColorVar(productViewFor(a, productById))}
               windowStart={windowStart}
+              zone={zone}
               pxPerHour={pxPerHour}
               windowMinutes={windowMinutes}
               template={template}
               dayCount={dayCount}
+              dayAxis={dayAxis}
               zoomIndex={zoomIndex}
               activeDrag={activeDragForAssignment(a.id)}
               onPointerDown={dragApi.beginBlockDrag}
@@ -305,6 +323,7 @@ export function TrackRow({
             candidate={activeDrag!.candidate}
             density={density}
             windowStart={windowStart}
+            zone={zone}
             pxPerHour={pxPerHour}
           />
         )}
