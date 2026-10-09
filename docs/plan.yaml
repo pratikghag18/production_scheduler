@@ -3,8 +3,8 @@ meta:
   sub: >-
     Where the build is, what comes next, every requirement and what proves it, and everything that turned
     up on the way. One file; the page is generated from it.
-  updated: '2026-10-02'
-  tip: '407aef8'
+  updated: '2026-10-09'
+  tip: 'c1a1c6c'
   baseline:
     app_tests: 2750
     app_test_files: 133
@@ -13555,6 +13555,61 @@ findings:
     product (0087) but the collision between files remains: a bare `npx playwright test` can still flake.
     The fix is a shared serial group or project for the specs that change demo grants, or --workers=1 written
     into the walk instructions as the standing rule; the lane and the tester both already run with one worker.
+- id: F-257
+  title: A drop on the board lands one row lower than the pointer unless the pointer is in the top few pixels of the row
+  tag: The board's drop resolver measures from the wrong top
+  status: open
+  found_by: agent
+  refs:
+  - R-431
+  story: >-
+    9 Oct 2026 (session 205), found while recording the demo video, with a Playwright mouse against the demo seed
+    at 1600x900 as the admin. A rail chip dropped with the pointer at the vertical centre of Cell 3's row (y 540,
+    the row runs 503 to 578) created the block on Cell 4; the same drop with the pointer 8 px below the row's top
+    created it on Cell 3; 12 px below the top went to Cell 4 again. The same happened to a run dragged to another
+    cell (the pointer on Cell 6's centre moved nothing: the resolver answered the row below Cell 6, which does not
+    exist) and to a chip dropped on Cell 2's centre (resolved to the Line 2 header: no track, so no pop-up, which
+    the first cut of the video read as "nothing can be dropped here"). The ghost is drawn 14 px under the pointer
+    (BoardPage, pointerClientY - 14), so what a person sees under the cursor is not where the drop goes, and the
+    row highlight that follows the resolver sits one row below the ghost.
+
+    The e2e panel-drop case (touch.spec.ts T3) drops at the row's centre and asserts only that the "New" pop-up
+    opens, never which cell it opened for, so it passed on the wrong row; roleWalk and the typed walk never drop
+    with a pointer; the unit tests of resolveDropRow are pure (an array of tops) and never see the header.
+  lead: >-
+    A suspicion, not a fact. BoardGrid's resolver converts the pointer with clientY - container.top + scrollTop and
+    looks that up in the row offsets, but the offsets start at 0 inside the spacer that sits BELOW the 64 px sticky
+    BoardHeader, which is the first child of the same canvas; the difference is the header's height, and 64 of a
+    75 px row is exactly "the top 11 px land right". Subtracting the header's rendered height (the constant
+    HEADER_HEIGHT_PX, or the header's own box) before the lookup is the probable fix; the pin should drop with the
+    pointer at a row's centre and assert the pop-up's cell, in e2e, and resolveDropRow's caller in a unit test
+    with a header in the DOM.
+- id: F-258
+  title: Typing a reason into the create pop-up's override field loses focus after the first character, and the next space bar press flips the form to a product run
+  tag: A text field that cannot be typed into
+  status: open
+  found_by: agent
+  refs:
+  - R-338
+  story: >-
+    9 Oct 2026 (session 205), found while recording the demo video. As the admin, drop Lena Novak (no welding
+    certificate) on Cell 1, tick "Override --- I'm certifying this placement anyway", click into "Reason
+    (required)" and type "Paired with Maria for the shift". After the first keystroke the field holds "P" and the
+    focused element is the "Product run" segment button; the space bar then presses that button, the form flips
+    to a product run with a planned headcount, and Create writes a RUN on the cell (the first takes of the video
+    created "Housing A 16:00-20:00 0/2" on Cell 1 and, on Cell 2, hit the run-overlap refusal "Cell 2 already runs
+    Housing A 14:00-22:00 --- reverted"). Measured with the active element read after each step (scout8): the
+    input after the click, the button after one character, the mode flipped after the space.
+
+    No test types keystrokes into this field: commandBar.test.tsx's override-reason case answers the bar's
+    question, and the pop-up's own cases set the value with one change event, which is also how the video
+    scene was made to work (fill, not type). A person typing any reason with a space in it meets it.
+  lead: >-
+    A suspicion, not a fact. Nothing in the pop-up calls focus(); the likeliest cause is the pop-up (or the
+    segmented control) being re-rendered in a way that moves focus to its first button on every state change,
+    for example a key on the form that changes with the reason, or the shared BoardPopover re-mounting its
+    children. The fix starts by finding who takes the focus; the pin types two words with userEvent and asserts
+    the mode is still "direct" and the field holds both words.
 - id: F-255
   title: The developer's own stack had been running without migration 0085 since 30 Sept --- `db:start` restores a backup taken before it, and nothing said the stack was behind the repository
   tag: A stack behind its migrations
@@ -19463,6 +19518,53 @@ findings:
     second click that now toggles it shut, so that step is gone — what it defends is unchanged. Both
     driven in the browser as the company admin.
 sessions:
+- id: '205'
+  date: 2026-10-09
+  title: "A recorded walk through the app for the README and a LinkedIn post, with the command bar hidden; two board bugs found by the recording (F-257 the drop lands a row low, F-258 the override reason cannot be typed) filed and queued first"
+  shipped: []
+  commits:
+  - 'c1a1c6c'
+  numbers:
+    app_tests: 4997
+    app_test_files: 192
+  confirmed: true
+  numbers_note: >-
+    No code changed. `npm run test` on this machine: `Test Files  1 failed | 191 passed (192)`, `Tests  1 failed |
+    4996 passed (4997)`; the one red was the live pin DEF-0020, because the edge runtime container had exited at the
+    first `db:reset` of the day (F-253's shape: `docker ps -a` showed it Exited (255) two hours earlier). Started
+    with `docker start supabase_edge_runtime_production_scheduler`, the file alone: `Tests  1 passed (1)`. So 4997
+    in 192, matching session 204. tsc, eslint, the SQL suite and e2e were not re-run (nothing they read changed);
+    the pre-commit hook changed, and the commit it gated went through it.
+  summary: >-
+    The maintainer asked for a LinkedIn post about the project without disclosing the chatbot. A hosted demo
+    behind an HTML page was weighed and declined (the app is 130 database and function calls against rules that
+    live in Postgres; a single file cannot run it, and a public Supabase project with resets and closed sign-up
+    is its own piece). A video instead: a Playwright script (scenes.mjs and record.mjs, kept beside the mp4 in
+    the untracked Claude outputs folder with a readme, not in the repo) drives the dev server against the demo
+    seed as the admin and then as Ana, with captions, a drawn cursor and title cards injected into the page, and
+    the bar's launcher and microphone hidden by a stylesheet for the whole take; recorded as WebM at 1600x900,
+    encoded to H.264 with a static ARM64 ffmpeg (this machine is Windows on ARM64; Playwright's bundled ffmpeg is
+    VP8-only and @ffmpeg-installer has no build for it). The maintainer reviewed the first cut and corrected it:
+    Priya was landing on Cell 4 while the caption said Cell 3, the "cells grey out" line (they are highlighted),
+    the false "nothing can be dropped here" (the pop-up names the missing training and takes a reason), and asked
+    to show a run of any length drawn on the track, a block dragged to a new time and a run to another cell,
+    different products for colour, and the templates. The second cut has all of it, two sign-ins, 4 min 4 s.
+    The database was reset before and after every take with the maintainer's "I'm not using the app, you can
+    create any data as needed".
+
+    The recording found two board bugs, both filed as findings with the measurements and queued at the top on the
+    maintainer's "Please add the bugs to be fixed": F-257, a drop lands one row below the pointer unless the
+    pointer is in the row's top 11 px (the resolver measures from the container's top, above the 64 px header;
+    the ghost sits under the pointer), and F-258, the override reason field loses focus after one character and
+    the space bar then presses "Product run". Why the tester did not catch them: touch T3 drops at a row's centre
+    and asserts only that a pop-up opens, not for which cell; the role walk and the typed walk never drop with a
+    pointer; the resolver's unit tests are pure arrays with no header; and no test types keystrokes into the
+    reason field (the bar's case answers a question, the pop-up's cases set the value in one event). The first
+    is as old as the panel drop itself (e9d4c75, 24 Aug); nobody walked a drop and read the cell it landed on.
+
+    The README now carries a 26-second GIF of the placement inline and links the mp4 under docs/media; the
+    pre-commit Prettier gate named both binaries as unformatted (an ignored path is echoed back in text mode) and
+    now skips a blob git's numstat marks binary. The branch is ahead of origin; the maintainer pushes.
 - id: '204'
   date: 2026-10-02
   title: "A placement over a block the supervisor can read but not change is refused before any pop-up opens, at every door, and the rail says booked for a readable block off the board: DEF-0068 and DEF-0069 fix-claimed as one piece with migration 0087, F-254 closed"
@@ -28639,6 +28741,19 @@ next:
 # voice plan's remaining stages --- the typed commands before the model. The
 # maintainer kept that order on 11 Sept (session 143): "Keep that order".
 # ---------------------------------------------------------------------------
+- kind: task
+  stage: S57
+  text: "F-257 first: the board's drop lands one row below the pointer (the resolver measures from above the 64 px header); fix the resolver, pin it in e2e with a drop at a row's centre that asserts the pop-up's cell, and re-read every caller of the resolver (panel drop, run move) with the same pin"
+  why: >-
+    Found 9 Oct while recording the demo video; every mouse or finger drop on the board is affected, and the
+    e2e case that covers the drop (touch T3) only asserts that a pop-up opens. The maintainer, 9 Oct: "Please
+    add the bugs to be fixed."
+- kind: task
+  stage: S57
+  text: "F-258 with it: the create pop-up's override reason loses focus after one character and a space flips the form to a product run; find who takes the focus, fix, and pin with typed keystrokes (two words, mode still direct)"
+  why: >-
+    Found the same day in the same recording; a supervisor making a certificate exception cannot type the
+    reason the server requires. Same maintainer instruction.
 - kind: task
   stage: S57
   text: "Push, then the tester verifies DEF-0068 and DEF-0069 by its own reproductions (DEF-0065 to DEF-0067 are verified); the tester should also drive a drag onto Cell 1 over a locked block (the toast's words) and a replace whose incoming is booked on a readable block, which only unit cases prove today"
