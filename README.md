@@ -1,9 +1,6 @@
 # Production Scheduler
 
-<img width="3787" height="1890" alt="image" src="https://github.com/user-attachments/assets/cd5b1616-8638-44b1-8eec-883ab5f00066" />
-
-**See it move.** A person dragged from the rail onto a cell, the pre-filled pop-up, and the block
-on the board:
+A person dragged from the rail onto a cell, the pre-filled pop-up, and the block on the board:
 
 ![Dragging Tom Baker from the operator rail onto Cell 3 opens the pre-filled create pop-up; one click places the block](docs/media/demo-drag.gif)
 
